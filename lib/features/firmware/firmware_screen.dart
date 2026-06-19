@@ -1,0 +1,212 @@
+import 'dart:typed_data';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../core/ble/ble_transport.dart';
+import '../../core/protocol/dfu.dart';
+import '../../core/providers/app_providers.dart';
+import '../../core/services/firmware_service.dart';
+
+/// Firmware management: fetch the latest image from the cloud (explicit, opt-in)
+/// and flash a locally-stored image over the air — offline-capable.
+class FirmwareScreen extends ConsumerStatefulWidget {
+  const FirmwareScreen({super.key});
+
+  @override
+  ConsumerState<FirmwareScreen> createState() => _FirmwareScreenState();
+}
+
+class _FirmwareScreenState extends ConsumerState<FirmwareScreen> {
+  List<LocalFirmware> _local = [];
+  String? _status;
+  double? _progress;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _reloadLocal();
+  }
+
+  Future<void> _reloadLocal() async {
+    final list = await ref.read(firmwareServiceProvider).listLocal();
+    if (mounted) setState(() => _local = list);
+  }
+
+  Future<void> _fetchLatest() async {
+    final cloud = ref.read(cloudApiProvider);
+    if (cloud == null) {
+      _toast('Enable cloud integration in Settings to fetch firmware.');
+      return;
+    }
+    final manager = ref.read(watchManagerProvider);
+    setState(() {
+      _busy = true;
+      _status = 'Checking for updates…';
+      _progress = null;
+    });
+    try {
+      final fw = await ref
+          .read(firmwareServiceProvider)
+          .fetchLatest(
+            cloud: cloud,
+            model: manager.hardwareRevision.isNotEmpty
+                ? manager.hardwareRevision
+                : 'QWatch',
+            currentVersion: manager.firmwareRevision,
+            onProgress: (r, t) =>
+                setState(() => _progress = t > 0 ? r / t : null),
+          );
+      _toast(fw == null ? 'Already up to date.' : 'Downloaded ${fw.name}');
+      await _reloadLocal();
+    } catch (e) {
+      _toast('Fetch failed: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _flash(LocalFirmware fw) async {
+    final ready = ref.read(linkStateProvider).value == LinkState.ready;
+    if (!ready) {
+      _toast('Connect to the watch first.');
+      return;
+    }
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Flash firmware?'),
+        content: Text(
+          'Install ${fw.name}? Keep the watch close and charged. '
+          'Interrupting an OTA can brick the device.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Flash'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    setState(() {
+      _busy = true;
+      _status = 'Preparing…';
+      _progress = 0;
+    });
+    try {
+      final bytes = Uint8List.fromList(
+        await ref.read(firmwareServiceProvider).readBytes(fw),
+      );
+      final flasher = DfuFlasher(ref.read(bleTransportProvider));
+      await for (final p in flasher.flash(bytes)) {
+        if (!mounted) return;
+        setState(() {
+          _status = p.phase;
+          _progress = p.percent;
+        });
+      }
+      _toast('Firmware flashed. The watch will reboot.');
+    } catch (e) {
+      _toast('OTA failed: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _toast(String msg) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cloudOn = ref.watch(settingsProvider).cloudSyncEnabled;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Firmware (OTA)')),
+      body: Column(
+        children: [
+          if (_busy)
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  Text(_status ?? 'Working…'),
+                  const SizedBox(height: 8),
+                  LinearProgressIndicator(value: _progress),
+                ],
+              ),
+            ),
+          Card(
+            margin: const EdgeInsets.all(12),
+            child: ListTile(
+              leading: Icon(cloudOn ? Icons.cloud_download : Icons.cloud_off),
+              title: const Text('Fetch latest firmware'),
+              subtitle: Text(
+                cloudOn
+                    ? 'Download newest image to this device'
+                    : 'Requires cloud integration (Settings)',
+              ),
+              trailing: FilledButton(
+                onPressed: _busy || !cloudOn ? null : _fetchLatest,
+                child: const Text('Fetch'),
+              ),
+            ),
+          ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 8, 16, 4),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text('Stored images (offline)'),
+            ),
+          ),
+          Expanded(
+            child: _local.isEmpty
+                ? const Center(child: Text('No firmware downloaded yet.'))
+                : ListView.builder(
+                    itemCount: _local.length,
+                    itemBuilder: (context, i) {
+                      final fw = _local[i];
+                      return ListTile(
+                        leading: const Icon(Icons.memory),
+                        title: Text(fw.name),
+                        subtitle: Text(
+                          '${(fw.sizeBytes / 1024).toStringAsFixed(0)} KB',
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline),
+                              onPressed: _busy
+                                  ? null
+                                  : () async {
+                                      await ref
+                                          .read(firmwareServiceProvider)
+                                          .delete(fw);
+                                      await _reloadLocal();
+                                    },
+                            ),
+                            FilledButton.tonal(
+                              onPressed: _busy ? null : () => _flash(fw),
+                              child: const Text('Flash'),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}

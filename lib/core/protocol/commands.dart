@@ -1,0 +1,155 @@
+import 'dart:typed_data';
+
+import 'codec.dart';
+import 'opcodes.dart';
+
+/// Builders for the Channel-A commands the device manager uses. Each returns a
+/// ready-to-send 16-byte frame. Layouts follow `PROTOCOL.md` §4 exactly.
+class Commands {
+  Commands._();
+
+  /// `SetTimeReq` (0x01): `[BCD y,mo,d,h,mi,s][lang][tz]` where
+  /// `tz = ((offsetHours + 24) % 24) * 2 + 1`. The reply is the capability
+  /// manifest, so this is also the first thing to send after `ready`.
+  static Uint8List setTime(DateTime t, {int lang = 0}) {
+    final tz = ((t.timeZoneOffset.inHours + 24) % 24) * 2 + 1;
+    return Codec.buildChannelA(OpA.setTime, [
+      Codec.toBcd(t.year % 100),
+      Codec.toBcd(t.month),
+      Codec.toBcd(t.day),
+      Codec.toBcd(t.hour),
+      Codec.toBcd(t.minute),
+      Codec.toBcd(t.second),
+      lang,
+      tz,
+    ]);
+  }
+
+  /// `DeviceSupportReq` (0x3c): empty subData; reply is the support bitmap.
+  static Uint8List deviceSupport() => Codec.buildChannelA(OpA.deviceSupport);
+
+  /// `FindDeviceReq` (0x50): ring/vibrate the watch (`[0x55, 0xAA]` magic).
+  static Uint8List findDevice() =>
+      Codec.buildChannelA(OpA.findDevice, const [0x55, 0xAA]);
+
+  /// `RestoreKeyReq`: factory reset / restore defaults (`[0x66, 0x66]`).
+  static Uint8List factoryReset() =>
+      Codec.buildChannelA(OpA.restoreKey, const [0x66]);
+
+  /// `BrightnessSettingsReq` (0x1b) write: `[0x02, level]`.
+  static Uint8List setBrightness(int level) =>
+      Codec.buildChannelA(OpA.brightness, [OpA.mixWrite, level & 0xFF]);
+
+  /// `ReadTotalSportDataReq` (0x07): `[dayOffset]` (0 = today).
+  static Uint8List readTotalSport({int dayOffset = 0}) =>
+      Codec.buildChannelA(OpA.readTotalSport, [dayOffset & 0xFF]);
+
+  /// `TodaySportData` (0x48): read today's running step total (bare opcode).
+  static Uint8List readTodaySport() => Codec.buildChannelA(OpA.todaySport);
+
+  /// `ReadHeartRateReq` (0x15): `[utcStart i32 LE]`.
+  static Uint8List readHeartRate(DateTime since) => Codec.buildChannelA(
+    OpA.readHeartRate,
+    Codec.u32le(since.toUtc().millisecondsSinceEpoch ~/ 1000),
+  );
+
+  /// `StartHeartRateReq` (0x69): start a live measurement of [type].
+  static Uint8List startMeasure(MeasureType type) =>
+      Codec.buildChannelA(OpA.startMeasure, [type.id, 0x01]);
+
+  /// `StopHeartRateReq` (0x6a): stop a measurement of [type].
+  static Uint8List stopMeasure(MeasureType type) =>
+      Codec.buildChannelA(OpA.stopMeasure, [type.id, 0x00, 0x00]);
+
+  /// `SetANCSReq` (0x60): subscribe to (near-)all ANCS categories.
+  static Uint8List enableAncs() =>
+      Codec.buildChannelA(OpA.setAncs, const [0xFF, 0x9F, 0xFF, 0xFF]);
+
+  /// `BindAncsReq` (0x04): register the phone identity for ANCS parsing.
+  /// [verBucket] encodes the Android SDK level bucket (see §4.5).
+  static Uint8List bindAncs(String model, {int verBucket = 0x0a}) {
+    final bytes = utf8Clamp(model, 13);
+    return Codec.buildChannelA(OpA.bindAncs, [
+      OpA.mixWrite,
+      verBucket,
+      ...bytes,
+    ]);
+  }
+
+  /// `ReadAlarmReq` (0x24): read clock-alarm slot [index] (0..4).
+  static Uint8List readAlarm(int index) =>
+      Codec.buildChannelA(OpA.readAlarm, [index & 0xFF]);
+
+  /// `SetAlarmReq` (0x23): `[idx, enabled, hourBCD, minBCD, day0..day6]`.
+  static Uint8List setAlarm({
+    required int index,
+    required bool enabled,
+    required int hour,
+    required int minute,
+    List<bool> weekdays = const [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+    ],
+  }) {
+    final days = List<int>.generate(7, (i) => (weekdays[i]) ? 1 : 0);
+    return Codec.buildChannelA(OpA.setAlarm, [
+      index & 0xFF,
+      enabled ? 1 : 0,
+      Codec.toBcd(hour),
+      Codec.toBcd(minute),
+      ...days,
+    ]);
+  }
+
+  /// `WeatherForecastReq` (0x1a): push one day of weather.
+  static Uint8List weather({
+    required int index,
+    required DateTime time,
+    required int weatherType,
+    required int minDeg,
+    required int maxDeg,
+    int humidity = 0,
+    bool umbrella = false,
+  }) => Codec.buildChannelA(OpA.weatherForecast, [
+    index & 0xFF,
+    ...Codec.u32le(time.toUtc().millisecondsSinceEpoch ~/ 1000),
+    weatherType & 0xFF,
+    minDeg & 0xFF,
+    maxDeg & 0xFF,
+    humidity & 0xFF,
+    umbrella ? 1 : 2,
+  ]);
+
+  /// `SwitchOTARsp` trigger (0x0f): ask the device to enter OTA mode before
+  /// the Channel-B DFU flow.
+  static Uint8List switchToOta() => Codec.buildChannelA(OpA.switchOta);
+
+  /// Clamp a string to [max] UTF-8 bytes without splitting a code unit.
+  static List<int> utf8Clamp(String s, int max) {
+    final bytes = s.codeUnits.where((c) => c < 0x80).take(max).toList();
+    return bytes;
+  }
+}
+
+/// Measurement session types for `StartHeartRateReq` (§4.3).
+enum MeasureType {
+  heartRate(1),
+  bloodPressure(2),
+  bloodOxygen(3),
+  fatigue(4),
+  healthCheck(5),
+  realtimeHeartRate(6),
+  ecg(7),
+  pressure(8),
+  bloodSugar(9),
+  hrv(0x0a),
+  bodyTemperature(0x0b);
+
+  const MeasureType(this.id);
+  final int id;
+}

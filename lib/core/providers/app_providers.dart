@@ -1,0 +1,113 @@
+import 'dart:async';
+
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
+
+import '../ble/ble_transport.dart';
+import '../services/cloud_api.dart';
+import '../services/firmware_service.dart';
+import '../services/settings_service.dart';
+import '../services/watch_manager.dart';
+
+// --- Settings (offline-first) -----------------------------------------------
+
+final settingsServiceProvider = FutureProvider<SettingsService>(
+  (ref) => SettingsService.create(),
+);
+
+/// Current app settings. Defaults to offline-first until prefs load.
+final settingsProvider = NotifierProvider<SettingsNotifier, AppSettings>(
+  SettingsNotifier.new,
+);
+
+class SettingsNotifier extends Notifier<AppSettings> {
+  SettingsService? _service;
+
+  @override
+  AppSettings build() {
+    // Hydrate asynchronously; start from safe offline-first defaults.
+    ref.listen(settingsServiceProvider, (_, next) {
+      final svc = next.value;
+      if (svc != null) {
+        _service = svc;
+        state = svc.load();
+      }
+    }, fireImmediately: true);
+    return const AppSettings();
+  }
+
+  Future<void> update(AppSettings settings) async {
+    state = settings;
+    await _service?.save(settings);
+  }
+
+  Future<void> setCloudSync(bool enabled) =>
+      update(state.copyWith(cloudSyncEnabled: enabled));
+
+  Future<void> setRegion(CloudRegion region) =>
+      update(state.copyWith(region: region));
+
+  Future<void> setAutoSyncTime(bool enabled) =>
+      update(state.copyWith(autoSyncTimeOnConnect: enabled));
+}
+
+// --- BLE transport + watch manager ------------------------------------------
+
+final bleTransportProvider = Provider<BleTransport>((ref) {
+  final t = BleTransport();
+  ref.onDispose(t.dispose);
+  return t;
+});
+
+final watchManagerProvider = ChangeNotifierProvider<WatchManager>((ref) {
+  final transport = ref.watch(bleTransportProvider);
+  final autoSync = ref.watch(settingsProvider).autoSyncTimeOnConnect;
+  return WatchManager(transport, autoSyncTime: autoSync);
+});
+
+final linkStateProvider = StreamProvider<LinkState>((ref) {
+  final t = ref.watch(bleTransportProvider);
+  final controller = StreamController<LinkState>();
+  controller.add(t.state.value);
+  void listener() => controller.add(t.state.value);
+  t.state.addListener(listener);
+  ref.onDispose(() {
+    t.state.removeListener(listener);
+    unawaited(controller.close());
+  });
+  return controller.stream;
+});
+
+final connectedDeviceProvider = Provider<BluetoothDevice?>((ref) {
+  ref.watch(linkStateProvider);
+  return ref.watch(bleTransportProvider).device;
+});
+
+// --- Scan --------------------------------------------------------------------
+
+final adapterStateProvider = StreamProvider<BluetoothAdapterState>(
+  (ref) => FlutterBluePlus.adapterState,
+);
+
+final scanResultsProvider = StreamProvider<List<ScanResult>>(
+  (ref) => FlutterBluePlus.scanResults,
+);
+
+final isScanningProvider = StreamProvider<bool>(
+  (ref) => FlutterBluePlus.isScanning,
+);
+
+// --- Cloud (constructed only when the user enabled cloud sync) ---------------
+
+/// Returns a [CloudApi] **only** when cloud sync is enabled; otherwise null.
+/// Every cloud call site must null-check this, keeping the app offline-first.
+final cloudApiProvider = Provider<CloudApi?>((ref) {
+  final settings = ref.watch(settingsProvider);
+  if (!settings.cloudSyncEnabled) return null;
+  return CloudApi(settings: settings);
+});
+
+final firmwareServiceProvider = Provider<FirmwareService>(
+  (ref) => FirmwareService(),
+);
