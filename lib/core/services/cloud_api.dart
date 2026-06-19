@@ -13,18 +13,21 @@ import 'settings_service.dart';
 /// auth/signature scheme mirrors the original app (`PROTOCOL.md` §6.2).
 class CloudApi {
   CloudApi({required AppSettings settings})
-    : _dio = Dio(_baseOptions(settings)) {
+    : _settings = settings,
+      _dio = Dio(_baseOptions(settings)) {
     if (settings.authToken == null) {
       AppLog.instance.warn(
         'cloud',
-        'CloudApi constructed without a token; calls will return 401 '
-            'until the user logs in.',
+        'CloudApi constructed without a user token; firmware lookup will use '
+            'the app token.',
       );
     }
     _dio.interceptors.add(_SignatureInterceptor());
   }
 
+  final AppSettings _settings;
   final Dio _dio;
+  String? _appToken;
 
   static BaseOptions _baseOptions(AppSettings settings) {
     final headers = <String, dynamic>{'User-Agent': 'OpenWatch/0.1.0'};
@@ -45,18 +48,25 @@ class CloudApi {
     required String currentVersion,
     String? mac,
   }) async {
+    await _ensureToken();
     final body = <String, dynamic>{
       'deviceName': model,
       'version': currentVersion,
+      // The vendor API validates this as 1..2. The Android app uses this
+      // endpoint and token key, so keep the Android value for firmware lookup.
+      'os': 1,
     };
     if (mac != null) body['mac'] = mac;
     final Response<dynamic> resp;
+    final path = _settings.region == CloudRegion.china
+        ? 'app-update/last-ota/china'
+        : 'app-update/last-ota';
     AppLog.instance.info(
       'cloud',
-      'POST ${_dio.options.baseUrl}app-update/last-ota body=$body',
+      'POST ${_dio.options.baseUrl}$path body=$body',
     );
     try {
-      resp = await _dio.post<dynamic>('app-update/last-ota', data: body);
+      resp = await _dio.post<dynamic>(path, data: body);
     } on DioException catch (e) {
       AppLog.instance.error(
         'cloud',
@@ -68,19 +78,24 @@ class CloudApi {
     }
     AppLog.instance.info('cloud', 'last-ota ${resp.statusCode}: ${resp.data}');
     final root = resp.data;
-    final data = root is Map ? root['data'] : null;
-    if (data is! Map) {
-      // Treat a "not logged in" response as a soft error so the caller can
-      // prompt the user to log in instead of pretending firmware is up-to-date.
-      if (root is Map && root['retCode'] == 401) {
+    if (root is Map) {
+      final retCode = root['retCode'];
+      if (retCode != null && retCode != 0) {
         throw CloudException(
-          'Cloud requires login. Enable cloud sync and sign in first.',
+          '${root['message'] ?? 'Firmware lookup failed'} (retCode $retCode)',
         );
       }
+    }
+    final data = root is Map ? root['data'] : null;
+    if (data is! Map) {
       return null;
     }
     final map = data.cast<dynamic, dynamic>();
-    final url = map['downloadUrl'] ?? map['url'] ?? map['fileUrl'];
+    final url =
+        map['downloadUrl'] ??
+        map['url'] ??
+        map['fileUrl'] ??
+        map['firmwareUrl'];
     if (url is! String || url.isEmpty) return null;
     return FirmwareInfo(
       version: '${map['version'] ?? map['versionName'] ?? '?'}',
@@ -88,6 +103,27 @@ class CloudApi {
       sizeBytes: (map['size'] as num?)?.toInt() ?? 0,
       notes: map['content']?.toString() ?? map['describe']?.toString() ?? '',
     );
+  }
+
+  Future<void> _ensureToken() async {
+    if (_settings.authToken != null || _appToken != null) return;
+    AppLog.instance.info('cloud', 'GET ${_dio.options.baseUrl}token/getToken');
+    final Response<dynamic> resp;
+    try {
+      resp = await _dio.get<dynamic>(
+        'token/getToken',
+        queryParameters: const {'key': 'qcwx_android'},
+      );
+    } on DioException catch (e) {
+      throw CloudException(_describe(e));
+    }
+    final root = resp.data;
+    if (root is! Map || root['retCode'] != 0 || root['data'] is! String) {
+      final message = root is Map ? root['message'] : null;
+      throw CloudException('${message ?? 'Could not get cloud token'}');
+    }
+    _appToken = root['data'] as String;
+    _dio.options.headers['token'] = _appToken;
   }
 
   /// Streams a firmware binary, reporting progress. Used by [FirmwareService].
@@ -149,8 +185,12 @@ class _SignatureInterceptor extends Interceptor {
   @override
   void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
     final ts = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    final body = options.data == null ? '' : jsonEncode(options.data);
-    final bodyHash = md5.convert(utf8.encode(body)).toString();
+    final payload = options.method.toUpperCase() == 'GET'
+        ? _canonicalQuery(options.queryParameters)
+        : options.data == null
+        ? ''
+        : jsonEncode(options.data);
+    final bodyHash = md5.convert(utf8.encode(payload)).toString();
     final sig = Hmac(
       sha256,
       utf8.encode(_secret),
@@ -158,5 +198,20 @@ class _SignatureInterceptor extends Interceptor {
     options.headers['X-Timestamp'] = ts;
     options.headers['X-Signature'] = sig;
     handler.next(options);
+  }
+
+  static String _canonicalQuery(Map<String, dynamic> query) {
+    final parts = <String>[];
+    for (final key in query.keys.map((k) => k.toString()).toList()..sort()) {
+      final value = query[key];
+      if (value is Iterable) {
+        for (final item in value) {
+          parts.add('$key=$item');
+        }
+      } else if (value != null) {
+        parts.add('$key=$value');
+      }
+    }
+    return parts.join('&');
   }
 }
