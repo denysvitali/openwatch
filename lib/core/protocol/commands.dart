@@ -28,6 +28,9 @@ class Commands {
   /// `DeviceSupportReq` (0x3c): empty subData; reply is the support bitmap.
   static Uint8List deviceSupport() => Codec.buildChannelA(OpA.deviceSupport);
 
+  /// Battery query (0x03): bare opcode; reply `BatteryRsp` = `[percent, charging]`.
+  static Uint8List readBattery() => Codec.buildChannelA(OpA.battery);
+
   /// `FindDeviceReq` (0x50): ring/vibrate the watch (`[0x55, 0xAA]` magic).
   static Uint8List findDevice() =>
       Codec.buildChannelA(OpA.findDevice, const [0x55, 0xAA]);

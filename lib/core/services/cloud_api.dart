@@ -43,33 +43,34 @@ class CloudApi {
       'version': currentVersion,
     };
     if (mac != null) body['mac'] = mac;
-    final Response<Map<String, dynamic>> resp;
+    final Response<dynamic> resp;
     AppLog.instance.info(
       'cloud',
       'POST ${_dio.options.baseUrl}app-update/last-ota body=$body',
     );
     try {
-      resp = await _dio.post<Map<String, dynamic>>(
-        'app-update/last-ota',
-        data: body,
-      );
+      resp = await _dio.post<dynamic>('app-update/last-ota', data: body);
     } on DioException catch (e) {
       AppLog.instance.error(
         'cloud',
-        'last-ota request failed (${e.type.name}): ${e.message}',
+        'last-ota failed type=${e.type.name} status=${e.response?.statusCode} '
+            'msg=${e.message} err=${e.error?.runtimeType}:${e.error} '
+            'body=${e.response?.data}',
       );
       throw CloudException(_describe(e));
     }
     AppLog.instance.info('cloud', 'last-ota ${resp.statusCode}: ${resp.data}');
-    final data = resp.data?['data'] as Map<String, dynamic>?;
-    if (data == null) return null;
-    final url = data['downloadUrl'] ?? data['url'] ?? data['fileUrl'];
+    final root = resp.data;
+    final data = root is Map ? root['data'] : null;
+    if (data is! Map) return null;
+    final map = data.cast<dynamic, dynamic>();
+    final url = map['downloadUrl'] ?? map['url'] ?? map['fileUrl'];
     if (url is! String || url.isEmpty) return null;
     return FirmwareInfo(
-      version: '${data['version'] ?? data['versionName'] ?? '?'}',
+      version: '${map['version'] ?? map['versionName'] ?? '?'}',
       url: url,
-      sizeBytes: (data['size'] as num?)?.toInt() ?? 0,
-      notes: data['content']?.toString() ?? data['describe']?.toString() ?? '',
+      sizeBytes: (map['size'] as num?)?.toInt() ?? 0,
+      notes: map['content']?.toString() ?? map['describe']?.toString() ?? '',
     );
   }
 

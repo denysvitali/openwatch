@@ -110,8 +110,20 @@ class SettingsScreen extends ConsumerWidget {
           ListTile(
             leading: const Icon(Icons.link_off),
             title: const Text('Disconnect'),
+            subtitle: const Text('Keeps the watch paired for auto-reconnect'),
             onTap: () async {
               await ref.read(bleTransportProvider).disconnect();
+              if (context.mounted) context.go('/scan');
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.delete_forever),
+            title: const Text('Forget device'),
+            subtitle: const Text('Disconnect and stop auto-reconnecting'),
+            onTap: () async {
+              await ref.read(bleTransportProvider).disconnect();
+              final svc = await ref.read(settingsServiceProvider.future);
+              await svc.clearLastDevice();
               if (context.mounted) context.go('/scan');
             },
           ),

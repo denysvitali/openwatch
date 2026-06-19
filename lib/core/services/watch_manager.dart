@@ -28,6 +28,7 @@ class WatchManager extends ChangeNotifier {
 
   DeviceCapabilities capabilities = const DeviceCapabilities();
   int? batteryPercent;
+  bool charging = false;
   int? todaySteps;
   int? todayCalories;
   int? todayDistanceMeters;
@@ -71,6 +72,7 @@ class WatchManager extends ChangeNotifier {
             'alarm=${capabilities.alarm} screen=${capabilities.screenWidth}x${capabilities.screenHeight}',
       );
       await refreshSteps();
+      await refreshBattery();
       initialized = true;
       notifyListeners();
       AppLog.instance.info('watch', 'Handshake complete');
@@ -96,27 +98,29 @@ class WatchManager extends ChangeNotifier {
           todayDistanceMeters = Codec.readU24be(pl, 9);
           notifyListeners();
         }
-      case OpA.deviceNotify:
-        // 0x73 carries dataType + loadData; battery is a likely dataType.
-        // Best-effort: a single-byte percentage payload. Verify on live capture.
-        if (pl.length >= 2 && pl[1] <= 100) {
-          batteryPercent = pl[1];
+      case OpA.battery:
+        // BatteryRsp: [0]=percent, [1]=charging flag.
+        if (pl.isNotEmpty && pl[0] <= 100) {
+          batteryPercent = pl[0];
+          charging = pl.length > 1 && pl[1] != 0;
           notifyListeners();
         }
       case OpA.realTimeHeartRate:
-        if (pl.isNotEmpty && pl[0] > 0) {
+        if (_plausibleHr(pl.isNotEmpty ? pl[0] : 0)) {
           lastHeartRate = pl[0];
           notifyListeners();
         }
       case OpA.startMeasure:
-        // [0]=type, [1]=errCode, [2]=value. A non-zero value for the HR types
-        // is a live bpm sample; value 0 means "still measuring".
-        if (pl.length >= 3 && pl[2] > 0) {
+        // [0]=type, [1]=errCode, [2]=value. Only accept a plausible bpm; the
+        // watch sends value 0/garbage until a real reading is available.
+        if (pl.length >= 3 && pl[1] == 0 && _plausibleHr(pl[2])) {
           lastHeartRate = pl[2];
           notifyListeners();
         }
     }
   }
+
+  static bool _plausibleHr(int v) => v >= 30 && v <= 240;
 
   // --- Actions ---
 
@@ -125,6 +129,8 @@ class WatchManager extends ChangeNotifier {
   Future<void> findDevice() => _transport.sendA(Commands.findDevice());
 
   Future<void> refreshSteps() => _transport.sendA(Commands.readTodaySport());
+
+  Future<void> refreshBattery() => _transport.sendA(Commands.readBattery());
 
   Future<void> setBrightness(int level) =>
       _transport.sendA(Commands.setBrightness(level));

@@ -4,6 +4,7 @@ class OpA {
   OpA._();
 
   static const int setTime = 0x01;
+  static const int battery = 0x03; // BatteryRsp: [0]=percent, [1]=charging
   static const int deviceSupport = 0x3c;
   static const int deviceTheme = 0x3d;
   static const int deviceWallpaper = 0x3f;

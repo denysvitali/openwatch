@@ -57,9 +57,26 @@ class SettingsService {
   static const _kRegion = 'cloud_region';
   static const _kToken = 'auth_token';
   static const _kAutoTime = 'auto_sync_time';
+  static const _kLastDeviceId = 'last_device_id';
+  static const _kLastDeviceName = 'last_device_name';
 
   static Future<SettingsService> create() async =>
       SettingsService(await SharedPreferences.getInstance());
+
+  // --- Paired device (for auto-reconnect on launch) ---
+
+  String? get lastDeviceId => _prefs.getString(_kLastDeviceId);
+  String? get lastDeviceName => _prefs.getString(_kLastDeviceName);
+
+  Future<void> saveLastDevice(String id, String name) async {
+    await _prefs.setString(_kLastDeviceId, id);
+    await _prefs.setString(_kLastDeviceName, name);
+  }
+
+  Future<void> clearLastDevice() async {
+    await _prefs.remove(_kLastDeviceId);
+    await _prefs.remove(_kLastDeviceName);
+  }
 
   AppSettings load() => AppSettings(
     cloudSyncEnabled: _prefs.getBool(_kCloud) ?? false,

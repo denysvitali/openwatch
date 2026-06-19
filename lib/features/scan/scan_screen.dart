@@ -6,6 +6,7 @@ import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/ble/ble_constants.dart';
 import '../../core/providers/app_providers.dart';
+import '../../core/services/app_log.dart';
 
 /// Scans for nearby Oudmon watches and connects to the chosen one.
 class ScanScreen extends ConsumerStatefulWidget {
@@ -18,6 +19,52 @@ class ScanScreen extends ConsumerStatefulWidget {
 class _ScanScreenState extends ConsumerState<ScanScreen> {
   String? _error;
   bool _connecting = false;
+  bool _reconnecting = false;
+  String? _reconnectName;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeAutoReconnect());
+  }
+
+  /// Tries to silently reconnect to the last paired watch on launch, so the
+  /// user doesn't have to scan & pair every time.
+  Future<void> _maybeAutoReconnect() async {
+    final svc = await ref.read(settingsServiceProvider.future);
+    final id = svc.lastDeviceId;
+    if (id == null || !mounted) return;
+    if (!await _ensurePermissions()) return;
+    if (!mounted) return;
+    setState(() {
+      _reconnecting = true;
+      _reconnectName = svc.lastDeviceName ?? id;
+    });
+    AppLog.instance.info('ble', 'Auto-reconnecting to saved device $id');
+    try {
+      final device = BluetoothDevice.fromId(id);
+      await ref.read(bleTransportProvider).connect(device);
+      await _rememberDevice(device);
+      if (mounted) context.go('/dashboard');
+    } catch (e) {
+      AppLog.instance.warn('ble', 'Auto-reconnect failed: $e');
+      if (mounted) {
+        setState(
+          () => _error = 'Could not reconnect automatically. Scan to retry.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _reconnecting = false);
+    }
+  }
+
+  Future<void> _rememberDevice(BluetoothDevice device) async {
+    final svc = await ref.read(settingsServiceProvider.future);
+    await svc.saveLastDevice(
+      device.remoteId.str,
+      device.platformName.isNotEmpty ? device.platformName : 'Watch',
+    );
+  }
 
   Future<void> _startScan() async {
     setState(() => _error = null);
@@ -74,6 +121,7 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
     try {
       await FlutterBluePlus.stopScan();
       await ref.read(bleTransportProvider).connect(device);
+      await _rememberDevice(device);
       if (mounted) context.go('/dashboard');
     } catch (e) {
       if (mounted) setState(() => _error = 'Connection failed: $e');
@@ -123,6 +171,23 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
       ),
       body: Column(
         children: [
+          if (_reconnecting)
+            MaterialBanner(
+              content: Text(
+                'Reconnecting to ${_reconnectName ?? "your watch"}…',
+              ),
+              leading: const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => setState(() => _reconnecting = false),
+                  child: const Text('Scan instead'),
+                ),
+              ],
+            ),
           if (adapter != null && adapter != BluetoothAdapterState.on)
             MaterialBanner(
               content: const Text(

@@ -25,7 +25,12 @@ class DashboardScreen extends ConsumerWidget {
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: 'Refresh',
-            onPressed: link == LinkState.ready ? manager.refreshSteps : null,
+            onPressed: link == LinkState.ready
+                ? () {
+                    manager.refreshSteps();
+                    manager.refreshBattery();
+                  }
+                : null,
           ),
           IconButton(
             icon: const Icon(Icons.link_off),
@@ -53,10 +58,12 @@ class DashboardScreen extends ConsumerWidget {
           ),
           const SizedBox(height: 8),
           _MetricCard(
-            icon: Icons.battery_full,
+            icon: manager.charging
+                ? Icons.battery_charging_full
+                : Icons.battery_full,
             title: 'Battery',
             value: manager.batteryPercent != null
-                ? '${manager.batteryPercent}%'
+                ? '${manager.batteryPercent}%${manager.charging ? " ⚡" : ""}'
                 : '—',
           ),
           _MetricCard(
