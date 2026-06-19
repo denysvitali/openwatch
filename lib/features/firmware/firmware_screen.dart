@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ble/ble_transport.dart';
 import '../../core/protocol/dfu.dart';
+import '../../core/protocol/firmware_version.dart';
 import '../../core/providers/app_providers.dart';
 import '../../core/services/app_log.dart';
 import '../../core/services/firmware_service.dart';
@@ -157,6 +158,8 @@ class _FirmwareScreenState extends ConsumerState<FirmwareScreen> {
   @override
   Widget build(BuildContext context) {
     final cloudOn = ref.watch(settingsProvider).cloudSyncEnabled;
+    final manager = ref.watch(watchManagerProvider);
+    final currentVer = FirmwareVersion.parse(manager.firmwareRevision);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Firmware (OTA)')),
@@ -171,6 +174,19 @@ class _FirmwareScreenState extends ConsumerState<FirmwareScreen> {
                   const SizedBox(height: 8),
                   LinearProgressIndicator(value: _progress),
                 ],
+              ),
+            ),
+          if (manager.firmwareRevision.isNotEmpty)
+            Card(
+              margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+              child: ListTile(
+                leading: const Icon(Icons.info_outline),
+                title: const Text('Current device firmware'),
+                subtitle: Text(
+                  currentVer.isStructured
+                      ? '${currentVer.hardwareId} v${currentVer.version}'
+                      : currentVer.raw,
+                ),
               ),
             ),
           Card(
@@ -203,11 +219,19 @@ class _FirmwareScreenState extends ConsumerState<FirmwareScreen> {
                     itemCount: _local.length,
                     itemBuilder: (context, i) {
                       final fw = _local[i];
+                      final ver = FirmwareVersion.parse(fw.name);
+                      final sizeKb = (fw.sizeBytes / 1024).toStringAsFixed(0);
                       return ListTile(
                         leading: const Icon(Icons.memory),
-                        title: Text(fw.name),
+                        title: Text(
+                          ver.isStructured
+                              ? '${ver.hardwareId} v${ver.version}'
+                              : fw.name,
+                        ),
                         subtitle: Text(
-                          '${(fw.sizeBytes / 1024).toStringAsFixed(0)} KB',
+                          ver.isStructured
+                              ? '${fw.name}  •  $sizeKb KB'
+                              : '$sizeKb KB',
                         ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,

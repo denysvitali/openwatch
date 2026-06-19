@@ -50,10 +50,7 @@ class DfuFlasher {
         ...Codec.u16le(crc),
         ...Codec.u16le(checksum),
       ]);
-      final initRsp = await _awaitRsp();
-      if (initRsp == OpB.rspLowBattery) {
-        throw const DfuException('Device refused OTA: battery too low');
-      }
+      await _awaitRsp();
 
       final total = (firmware.length / _pocketSize).ceil();
       for (var i = 0; i < total; i++) {
@@ -87,16 +84,17 @@ class DfuFlasher {
     final type = frame[1];
     final status = frame[6];
     final waiter = _rspWaiter;
-    if (waiter != null && !waiter.isCompleted) {
-      if (type == OpB.rspLowBattery) {
-        waiter.complete(OpB.rspLowBattery);
-      } else if (status == 0) {
-        waiter.complete(type);
-      } else {
-        waiter.completeError(
-          DfuException('Device error: type=$type status=$status'),
-        );
-      }
+    if (waiter == null || waiter.isCompleted) return;
+    if (type == OpB.rspLowBattery) {
+      waiter.completeError(
+        const DfuException('Device refused OTA: battery too low'),
+      );
+    } else if (status == 0) {
+      waiter.complete(type);
+    } else {
+      waiter.completeError(
+        DfuException('Device error: type=$type status=$status'),
+      );
     }
   }
 

@@ -732,3 +732,22 @@ Feedback, Customer-support chat.
 - **TotalSportDataRsp exact field-to-offset split** across pages — verify against live data.
 - **MenstruationDataRsp body** — SDK does not decode it; reverse from live frames if needed.
 - **`bind` (`0x10` CMD_BIND_SUCCESS)** request layout — not captured in this dataset; capture on pair.
+
+> **Resolved (post-FW-RE):**
+> - DFU init payload layout (`[0x01, size32LE, crc16LE, checksum16LE]`) — verified
+>   against `lib/core/protocol/dfu.dart`.
+> - `RSP_LOW_BATTERY` (type 6) — handled as a hard error on every awaited DFU step
+>   (not just init) in `DfuFlasher._onRx`.
+> - 12 MB size cap (`0xBB8000`) — pre-flight guard present in `DfuFlasher.flash`.
+> - Channel-A OTA switch opcode (`0x0f`) — emitted via `Commands.switchToOta()`
+>   before the Channel-B flow.
+> - Firmware version string parsing — `FirmwareVersion.parse` strips the
+>   hardware prefix (`H59MA_1.00.13` → `1.00.13`) and is used in the firmware
+>   screen + dashboard for display.
+> - Capability bit coverage — `DeviceCapabilities` now parses
+>   `pl[3] b7` (Avatar), `pl[3] b6` (WeChat inverted), `pl[8]` (NewSleepProtocol),
+>   `pl[0xa]` (Contact/GPS/JieLi/Album), `pl[0xb]` (ECard/Location/MusicSupport/
+>   Ebook/BloodSugar), `pl[0xd]` (Record/BpSetting/4G/NavPicture), `pl[7] b3`
+>   (RealTimeHr), `pl[8]` (ReduceFat/HideMessageNotification),
+>   `pl[3] b7` (AiAnalyze), `pl[4]` (MenuWallpaper/WechatPay), `pl[1] b4`
+>   (WatchTheme), and `pl[0xa] b1` (Temperature200 / high-precision temperature).
