@@ -21,9 +21,10 @@ class WatchManager extends ChangeNotifier {
   }
 
   final BleTransport _transport;
-  final bool autoSyncTime;
+  bool autoSyncTime;
   StreamSubscription<Uint8List>? _inboundSub;
   LinkState _last = LinkState.disconnected;
+  bool _handshaking = false;
 
   DeviceCapabilities capabilities = const DeviceCapabilities();
   int? batteryPercent;
@@ -44,12 +45,15 @@ class WatchManager extends ChangeNotifier {
     }
     if (s == LinkState.disconnected) {
       initialized = false;
+      _handshaking = false;
     }
     _last = s;
     notifyListeners();
   }
 
   Future<void> _runHandshake() async {
+    if (_handshaking || initialized) return;
+    _handshaking = true;
     AppLog.instance.info(
       'watch',
       'Handshake start (autoSyncTime=$autoSyncTime)',
@@ -72,6 +76,8 @@ class WatchManager extends ChangeNotifier {
       AppLog.instance.info('watch', 'Handshake complete');
     } catch (e) {
       AppLog.instance.error('watch', 'Handshake failed: $e');
+    } finally {
+      _handshaking = false;
     }
   }
 
@@ -100,6 +106,13 @@ class WatchManager extends ChangeNotifier {
       case OpA.realTimeHeartRate:
         if (pl.isNotEmpty && pl[0] > 0) {
           lastHeartRate = pl[0];
+          notifyListeners();
+        }
+      case OpA.startMeasure:
+        // [0]=type, [1]=errCode, [2]=value. A non-zero value for the HR types
+        // is a live bpm sample; value 0 means "still measuring".
+        if (pl.length >= 3 && pl[2] > 0) {
+          lastHeartRate = pl[2];
           notifyListeners();
         }
     }

@@ -47,8 +47,9 @@ class BleTransport {
   final Queue<_WriteOp> _queue = Queue<_WriteOp>();
   bool _draining = false;
 
-  // Opcode-correlated single-response waiters for Channel A.
-  final Map<int, Completer<Uint8List>> _pending = {};
+  // Opcode-correlated response waiters for Channel A (FIFO per opcode, so
+  // overlapping requests for the same opcode don't clobber each other).
+  final Map<int, List<Completer<Uint8List>>> _pending = {};
 
   int packageLength = BleUuids.defaultPackageLength;
   String hardwareRevision = '';
@@ -193,9 +194,11 @@ class BleTransport {
           : BleUuids.defaultPackageLength;
     }
 
-    final waiter = _pending.remove(opcode);
-    if (waiter != null && !waiter.isCompleted) {
-      waiter.complete(frame);
+    final waiters = _pending[opcode];
+    if (waiters != null && waiters.isNotEmpty) {
+      final waiter = waiters.removeAt(0);
+      if (waiters.isEmpty) _pending.remove(opcode);
+      if (!waiter.isCompleted) waiter.complete(frame);
     }
     _inboundA.add(frame);
   }
@@ -225,7 +228,7 @@ class BleTransport {
     _requireReady();
     final opcode = frame[0] & ~Codec.errorFlag;
     final completer = Completer<Uint8List>();
-    _pending[opcode] = completer;
+    (_pending[opcode] ??= []).add(completer);
     _log.frame(
       'tx',
       'TX-A op=0x${opcode.toRadixString(16)} (await resp)',
@@ -242,7 +245,8 @@ class BleTransport {
       );
       rethrow;
     } finally {
-      _pending.remove(opcode);
+      _pending[opcode]?.remove(completer);
+      if (_pending[opcode]?.isEmpty ?? false) _pending.remove(opcode);
     }
   }
 
@@ -312,9 +316,11 @@ class BleTransport {
   // ---------------------------------------------------------------------------
 
   void _onDisconnected() {
-    for (final c in _pending.values) {
-      if (!c.isCompleted) {
-        c.completeError(const BleTransportException('Disconnected'));
+    for (final waiters in _pending.values) {
+      for (final c in waiters) {
+        if (!c.isCompleted) {
+          c.completeError(const BleTransportException('Disconnected'));
+        }
       }
     }
     _pending.clear();

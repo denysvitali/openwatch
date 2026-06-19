@@ -61,9 +61,16 @@ final bleTransportProvider = Provider<BleTransport>((ref) {
 });
 
 final watchManagerProvider = ChangeNotifierProvider<WatchManager>((ref) {
+  // Built once against the stable transport. Crucially, do NOT `watch`
+  // settingsProvider here — it rebuilds when prefs hydrate asynchronously,
+  // which would spawn a second WatchManager and a duplicate handshake.
   final transport = ref.watch(bleTransportProvider);
-  final autoSync = ref.watch(settingsProvider).autoSyncTimeOnConnect;
-  return WatchManager(transport, autoSyncTime: autoSync);
+  final mgr = WatchManager(transport);
+  mgr.autoSyncTime = ref.read(settingsProvider).autoSyncTimeOnConnect;
+  ref.listen(settingsProvider, (_, next) {
+    mgr.autoSyncTime = next.autoSyncTimeOnConnect;
+  });
+  return mgr;
 });
 
 final linkStateProvider = StreamProvider<LinkState>((ref) {

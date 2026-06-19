@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 
+import 'app_log.dart';
 import 'settings_service.dart';
 
 /// Minimal client for the optional QC Wireless cloud backend.
@@ -43,14 +44,23 @@ class CloudApi {
     };
     if (mac != null) body['mac'] = mac;
     final Response<Map<String, dynamic>> resp;
+    AppLog.instance.info(
+      'cloud',
+      'POST ${_dio.options.baseUrl}app-update/last-ota body=$body',
+    );
     try {
       resp = await _dio.post<Map<String, dynamic>>(
         'app-update/last-ota',
         data: body,
       );
     } on DioException catch (e) {
+      AppLog.instance.error(
+        'cloud',
+        'last-ota request failed (${e.type.name}): ${e.message}',
+      );
       throw CloudException(_describe(e));
     }
+    AppLog.instance.info('cloud', 'last-ota ${resp.statusCode}: ${resp.data}');
     final data = resp.data?['data'] as Map<String, dynamic>?;
     if (data == null) return null;
     final url = data['downloadUrl'] ?? data['url'] ?? data['fileUrl'];

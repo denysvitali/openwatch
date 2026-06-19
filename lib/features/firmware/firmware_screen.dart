@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/ble/ble_transport.dart';
 import '../../core/protocol/dfu.dart';
 import '../../core/providers/app_providers.dart';
+import '../../core/services/app_log.dart';
 import '../../core/services/firmware_service.dart';
 
 /// Firmware management: fetch the latest image from the cloud (explicit, opt-in)
@@ -37,30 +38,47 @@ class _FirmwareScreenState extends ConsumerState<FirmwareScreen> {
   Future<void> _fetchLatest() async {
     final cloud = ref.read(cloudApiProvider);
     if (cloud == null) {
+      AppLog.instance.warn('fw', 'Fetch blocked: cloud integration disabled');
       _toast('Enable cloud integration in Settings to fetch firmware.');
       return;
     }
     final manager = ref.read(watchManagerProvider);
+    final model = manager.hardwareRevision.isNotEmpty
+        ? manager.hardwareRevision
+        : 'QWatch';
     setState(() {
       _busy = true;
       _status = 'Checking for updates…';
       _progress = null;
     });
+    AppLog.instance.info(
+      'fw',
+      'Fetch latest: model="$model" current="${manager.firmwareRevision}" '
+          'region=${ref.read(settingsProvider).region.name}',
+    );
     try {
       final fw = await ref
           .read(firmwareServiceProvider)
           .fetchLatest(
             cloud: cloud,
-            model: manager.hardwareRevision.isNotEmpty
-                ? manager.hardwareRevision
-                : 'QWatch',
+            model: model,
             currentVersion: manager.firmwareRevision,
             onProgress: (r, t) =>
                 setState(() => _progress = t > 0 ? r / t : null),
           );
-      _toast(fw == null ? 'Already up to date.' : 'Downloaded ${fw.name}');
+      if (fw == null) {
+        AppLog.instance.info('fw', 'Server reports no newer firmware');
+        _toast('Already up to date.');
+      } else {
+        AppLog.instance.info(
+          'fw',
+          'Downloaded ${fw.name} (${fw.sizeBytes} bytes)',
+        );
+        _toast('Downloaded ${fw.name}');
+      }
       await _reloadLocal();
     } catch (e) {
+      AppLog.instance.error('fw', 'Fetch failed: $e');
       _toast('Fetch failed: $e');
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -100,6 +118,10 @@ class _FirmwareScreenState extends ConsumerState<FirmwareScreen> {
       _status = 'Preparing…';
       _progress = 0;
     });
+    AppLog.instance.info(
+      'fw',
+      'OTA flash start: ${fw.name} (${fw.sizeBytes} B)',
+    );
     try {
       final bytes = Uint8List.fromList(
         await ref.read(firmwareServiceProvider).readBytes(fw),
@@ -107,13 +129,19 @@ class _FirmwareScreenState extends ConsumerState<FirmwareScreen> {
       final flasher = DfuFlasher(ref.read(bleTransportProvider));
       await for (final p in flasher.flash(bytes)) {
         if (!mounted) return;
+        AppLog.instance.debug(
+          'fw',
+          'OTA ${p.phase} ${(p.percent * 100).toStringAsFixed(0)}%',
+        );
         setState(() {
           _status = p.phase;
           _progress = p.percent;
         });
       }
+      AppLog.instance.info('fw', 'OTA flash complete');
       _toast('Firmware flashed. The watch will reboot.');
     } catch (e) {
+      AppLog.instance.error('fw', 'OTA failed: $e');
       _toast('OTA failed: $e');
     } finally {
       if (mounted) setState(() => _busy = false);
