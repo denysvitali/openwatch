@@ -24,8 +24,21 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
     final granted = await _ensurePermissions();
     if (!granted) {
       setState(
-        () => _error = 'Bluetooth & location permissions are required to scan.',
+        () => _error =
+            'Bluetooth permission is required to scan. Grant "Nearby devices" '
+            'in system settings, then try again.',
       );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Bluetooth permission denied'),
+            action: SnackBarAction(
+              label: 'Settings',
+              onPressed: openAppSettings,
+            ),
+          ),
+        );
+      }
       return;
     }
     try {
@@ -36,12 +49,21 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
   }
 
   Future<bool> _ensurePermissions() async {
-    final statuses = await [
-      Permission.bluetoothScan,
-      Permission.bluetoothConnect,
-      Permission.locationWhenInUse,
-    ].request();
-    return statuses.values.every((s) => s.isGranted || s.isLimited);
+    // Android 12+ (API 31+): the "Nearby devices" prompt covers BLUETOOTH_SCAN
+    // and BLUETOOTH_CONNECT. We declare BLUETOOTH_SCAN with `neverForLocation`,
+    // so location is NOT required (and ACCESS_FINE_LOCATION isn't even declared
+    // above SDK 30, so requesting it just returns denied).
+    final scan = await Permission.bluetoothScan.request();
+    final connect = await Permission.bluetoothConnect.request();
+    final bleGranted =
+        (scan.isGranted || scan.isLimited) &&
+        (connect.isGranted || connect.isLimited);
+    if (bleGranted) return true;
+
+    // Pre-Android-12: the Bluetooth permissions are normal-level (auto-granted)
+    // and a location grant is what actually gates BLE scanning.
+    final loc = await Permission.locationWhenInUse.request();
+    return loc.isGranted || loc.isLimited;
   }
 
   Future<void> _connect(BluetoothDevice device) async {
