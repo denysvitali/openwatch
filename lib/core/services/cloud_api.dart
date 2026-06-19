@@ -42,10 +42,15 @@ class CloudApi {
       'version': currentVersion,
     };
     if (mac != null) body['mac'] = mac;
-    final resp = await _dio.post<Map<String, dynamic>>(
-      'app-update/last-ota',
-      data: body,
-    );
+    final Response<Map<String, dynamic>> resp;
+    try {
+      resp = await _dio.post<Map<String, dynamic>>(
+        'app-update/last-ota',
+        data: body,
+      );
+    } on DioException catch (e) {
+      throw CloudException(_describe(e));
+    }
     final data = resp.data?['data'] as Map<String, dynamic>?;
     if (data == null) return null;
     final url = data['downloadUrl'] ?? data['url'] ?? data['fileUrl'];
@@ -63,13 +68,36 @@ class CloudApi {
     String url, {
     void Function(int received, int total)? onProgress,
   }) async {
-    final resp = await _dio.get<List<int>>(
-      url,
-      options: Options(responseType: ResponseType.bytes),
-      onReceiveProgress: onProgress,
-    );
-    return resp.data ?? const [];
+    try {
+      final resp = await _dio.get<List<int>>(
+        url,
+        options: Options(responseType: ResponseType.bytes),
+        onReceiveProgress: onProgress,
+      );
+      return resp.data ?? const [];
+    } on DioException catch (e) {
+      throw CloudException(_describe(e));
+    }
   }
+
+  static String _describe(DioException e) => switch (e.type) {
+    DioExceptionType.connectionError || DioExceptionType.connectionTimeout =>
+      'Cannot reach the server. Check your '
+          'internet connection (the device may be offline or the host is blocked).',
+    DioExceptionType.receiveTimeout ||
+    DioExceptionType.sendTimeout => 'The server took too long to respond.',
+    DioExceptionType.badResponse =>
+      'Server returned ${e.response?.statusCode ?? 'an error'}.',
+    _ => 'Network error: ${e.message ?? e.type.name}',
+  };
+}
+
+/// A user-facing cloud error with a clean message.
+class CloudException implements Exception {
+  const CloudException(this.message);
+  final String message;
+  @override
+  String toString() => message;
 }
 
 /// Firmware release metadata returned by the cloud.

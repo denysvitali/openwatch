@@ -12,6 +12,11 @@
         android:maxSdkVersion="30" />
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
 
+    <!-- Cloud is opt-in, but release builds still need this declared: Flutter
+         only injects INTERNET into the debug/profile manifests, so without it
+         release APKs fail every DNS lookup (errno 7). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application
         android:label="OpenWatch"
         android:name="${applicationName}"

@@ -7,6 +7,7 @@ import '../protocol/capabilities.dart';
 import '../protocol/codec.dart';
 import '../protocol/commands.dart';
 import '../protocol/opcodes.dart';
+import 'app_log.dart';
 
 /// High-level device manager: runs the post-connect handshake (time sync +
 /// capability probe), keeps live device state, and exposes management actions.
@@ -49,17 +50,28 @@ class WatchManager extends ChangeNotifier {
   }
 
   Future<void> _runHandshake() async {
+    AppLog.instance.info(
+      'watch',
+      'Handshake start (autoSyncTime=$autoSyncTime)',
+    );
     try {
       if (autoSyncTime) {
         await _transport.sendA(Commands.setTime(DateTime.now()));
       }
       final support = await _transport.requestA(Commands.deviceSupport());
       capabilities = capabilities.mergeSupport(Codec.rxPayload(support));
+      AppLog.instance.info(
+        'watch',
+        'Capabilities: hr=${capabilities.heart} spo2=${capabilities.bloodOxygen} '
+            'bp=${capabilities.bloodPressure} sleep=${capabilities.sleep} '
+            'alarm=${capabilities.alarm} screen=${capabilities.screenWidth}x${capabilities.screenHeight}',
+      );
       await refreshSteps();
       initialized = true;
       notifyListeners();
+      AppLog.instance.info('watch', 'Handshake complete');
     } catch (e) {
-      debugPrint('Handshake error: $e');
+      AppLog.instance.error('watch', 'Handshake failed: $e');
     }
   }
 

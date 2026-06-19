@@ -2,11 +2,14 @@ import 'dart:async';
 import 'dart:collection';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart' hide LogLevel;
 
 import '../protocol/codec.dart';
 import '../protocol/opcodes.dart';
+import '../services/app_log.dart';
 import 'ble_constants.dart';
+
+final _log = AppLog.instance;
 
 /// Connection lifecycle of the watch link.
 enum LinkState {
@@ -77,10 +80,20 @@ class BleTransport {
       }),
     );
 
+    _log.info(
+      'ble',
+      'Connecting to ${device.remoteId.str} '
+          '(${device.platformName.isEmpty ? "?" : device.platformName})',
+    );
     await device.connect(timeout: timeout, autoConnect: false);
+    _log.info('ble', 'Connected; discovering services');
 
     _state.value = LinkState.discovering;
     final services = await device.discoverServices();
+    _log.debug(
+      'ble',
+      'Services: ${services.map((s) => s.uuid.str).join(", ")}',
+    );
 
     for (final svc in services) {
       if (svc.uuid == BleUuids.serviceA) {
@@ -95,11 +108,22 @@ class BleTransport {
         }
       }
     }
+    _log.info(
+      'ble',
+      'Chars: writeA=${_writeA != null} notifyA=${_notifyA != null} '
+          'writeB=${_writeB != null} notifyB=${_notifyB != null}',
+    );
     if (_writeA == null || _notifyA == null) {
       throw const BleTransportException(
         'Channel-A command characteristics not found',
       );
     }
+    _log.debug(
+      'ble',
+      'writeA props: wr=${_writeA!.properties.write} '
+          'wrNoResp=${_writeA!.properties.writeWithoutResponse} '
+          'notify=${_notifyA!.properties.notify} indicate=${_notifyA!.properties.indicate}',
+    );
 
     await _notifyA!.setNotifyValue(true);
     _subs.add(_notifyA!.onValueReceived.listen(_onChannelA));
@@ -107,11 +131,16 @@ class BleTransport {
       await _notifyB!.setNotifyValue(true);
       _subs.add(_notifyB!.onValueReceived.listen(_onChannelB));
     }
+    _log.info('ble', 'Notifications enabled');
 
     // Handshake: read hardware then firmware revision; ready once both return.
     _state.value = LinkState.readingDeviceInfo;
     await _readDeviceInfo(services);
     _state.value = LinkState.ready;
+    _log.info(
+      'ble',
+      'Link READY (hw="$hardwareRevision" fw="$firmwareRevision")',
+    );
   }
 
   Future<void> _readDeviceInfo(List<BluetoothService> services) async {
@@ -124,16 +153,37 @@ class BleTransport {
         } else if (c.uuid == BleUuids.firmwareRevision) {
           firmwareRevision = String.fromCharCodes(await c.read()).trim();
         }
-      } catch (_) {
+      } catch (e) {
         // Device-info reads are best-effort; absence must not block readiness.
+        _log.warn('ble', 'Device-info read failed for ${c.uuid.str}: $e');
       }
     }
   }
 
   void _onChannelA(List<int> data) {
     final frame = Uint8List.fromList(data);
-    if (!Codec.isValidChannelA(frame)) return;
+    final valid = Codec.isValidChannelA(frame);
+    if (!valid) {
+      // Log the raw bytes so a checksum/length mismatch is diagnosable.
+      final expected = frame.length >= 16
+          ? (frame.sublist(0, 15).fold<int>(0, (a, b) => a + b) & 0xFF)
+          : -1;
+      _log.frame(
+        'rx',
+        'RX-A(DROPPED len=${frame.length}'
+            '${frame.length == 16 ? " cksum got=0x${frame[15].toRadixString(16)} want=0x${expected.toRadixString(16)}" : ""})',
+        data,
+        level: LogLevel.warn,
+      );
+      return;
+    }
     final opcode = Codec.rxOpcode(frame);
+    _log.frame(
+      'rx',
+      'RX-A op=0x${opcode.toRadixString(16)}'
+          '${Codec.rxIsError(frame) ? " ERR" : ""}',
+      data,
+    );
 
     // Persistent push: PackageLength negotiation for Channel B.
     if (opcode == OpA.packageLength) {
@@ -151,6 +201,7 @@ class BleTransport {
   }
 
   void _onChannelB(List<int> data) {
+    _log.frame('rx', 'RX-B', data);
     _inboundB.add(Uint8List.fromList(data));
   }
 
@@ -161,6 +212,7 @@ class BleTransport {
   /// Sends a Channel-A command frame (fire-and-forget). Rejected before ready.
   Future<void> sendA(Uint8List frame) {
     _requireReady();
+    _log.frame('tx', 'TX-A op=0x${frame[0].toRadixString(16)}', frame);
     return _enqueue(_WriteOp(_writeA!, frame, withoutResponse: false));
   }
 
@@ -174,9 +226,21 @@ class BleTransport {
     final opcode = frame[0] & ~Codec.errorFlag;
     final completer = Completer<Uint8List>();
     _pending[opcode] = completer;
+    _log.frame(
+      'tx',
+      'TX-A op=0x${opcode.toRadixString(16)} (await resp)',
+      frame,
+    );
     await _enqueue(_WriteOp(_writeA!, frame, withoutResponse: false));
     try {
       return await completer.future.timeout(timeout);
+    } on TimeoutException {
+      _log.error(
+        'tx',
+        'No response to op=0x${opcode.toRadixString(16)} '
+            'within ${timeout.inSeconds}s',
+      );
+      rethrow;
     } finally {
       _pending.remove(opcode);
     }
@@ -227,6 +291,7 @@ class BleTransport {
               .timeout(const Duration(seconds: 5));
           op.completer.complete();
         } catch (e) {
+          _log.error('tx', 'GATT write failed: $e');
           if (!op.completer.isCompleted) op.completer.completeError(e);
         }
         await Future<void>.delayed(const Duration(milliseconds: 25));

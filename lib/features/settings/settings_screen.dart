@@ -97,6 +97,15 @@ class SettingsScreen extends ConsumerWidget {
               ),
             ),
 
+          const _SectionHeader('Diagnostics'),
+          ListTile(
+            leading: const Icon(Icons.bug_report_outlined),
+            title: const Text('Logs'),
+            subtitle: const Text('BLE traffic & events — copy to share'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => context.push('/logs'),
+          ),
+
           const _SectionHeader('About'),
           ListTile(
             leading: const Icon(Icons.link_off),

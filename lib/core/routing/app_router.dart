@@ -6,6 +6,7 @@ import '../../features/dashboard/dashboard_screen.dart';
 import '../../features/firmware/firmware_screen.dart';
 import '../../features/health/health_screen.dart';
 import '../../features/home/home_shell.dart';
+import '../../features/logs/logs_screen.dart';
 import '../../features/notifications/notifications_screen.dart';
 import '../../features/scan/scan_screen.dart';
 import '../../features/settings/settings_screen.dart';
@@ -22,6 +23,11 @@ final appRouterProvider = Provider<GoRouter>(
         path: '/firmware',
         parentNavigatorKey: _rootNavigatorKey,
         builder: (context, state) => const FirmwareScreen(),
+      ),
+      GoRoute(
+        path: '/logs',
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) => const LogsScreen(),
       ),
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) =>
