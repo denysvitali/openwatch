@@ -146,21 +146,25 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -e
+          set -euo pipefail
+          echo "::group::Release inputs"
           TAG="${{ steps.build_meta.outputs.UNIQUE_TAG }}"
-          NAME="OpenWatch ${{ steps.build_meta.outputs.SEMVER }}+${{ steps.build_meta.outputs.BUILD_NUMBER }}"
           APK="build/app/outputs/flutter-apk/app-release.apk"
-          # Pick a unique tag on collision (e.g. the build_number was reused
+          ls -la "$APK"
+          gh auth status || true
+          echo "::endgroup::"
+          # Pick a unique tag on collision (e.g. build_number was reused
           # on a re-run). Use the short SHA as the disambiguator.
           if gh release view "$TAG" >/dev/null 2>&1; then
             TAG="${TAG}-${GITHUB_SHA::7}"
           fi
           IS_TAG=${{ startsWith(github.ref, 'refs/tags/v') && 'true' || 'false' }}
-          # Only explicit v* tags are marked as "latest"; rolling CI builds
-          # get a release but don't change the public "Latest" pointer.
           LATEST_FLAG=""
           if [ "$IS_TAG" = "true" ]; then LATEST_FLAG="--latest"; fi
+          echo "Creating release $TAG (latest=$IS_TAG)"
           gh release create "$TAG" "$APK" \
-            --title "$NAME" \
-            --notes "OpenWatch v${{ steps.build_meta.outputs.SEMVER }}+${{ steps.build_meta.outputs.BUILD_NUMBER }} ($GITHUB_SHA)" \
+            --title "OpenWatch $TAG" \
+            --notes "OpenWatch $TAG ($GITHUB_SHA)" \
             $LATEST_FLAG
+          echo "OK"
+          gh release view "$TAG" --json tagName,assets | head
