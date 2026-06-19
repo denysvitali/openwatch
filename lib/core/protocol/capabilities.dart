@@ -190,8 +190,7 @@ class DeviceCapabilities {
       hideMessageNotification:
           hideMessageNotification || (pl.length > 8 && _bit(pl[8], 4)),
       // pl[4] b0 MenuWallpaper, b2 WechatPay.
-      menuWallpaper:
-          menuWallpaper || (pl.length > 4 && _bit(pl[4], 0)),
+      menuWallpaper: menuWallpaper || (pl.length > 4 && _bit(pl[4], 0)),
       wechatPay: wechatPay || (pl.length > 4 && _bit(pl[4], 2)),
       // pl[1] b4 WatchTheme.
       watchTheme: watchTheme || _bit(pl[1], 4),

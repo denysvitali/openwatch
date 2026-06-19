@@ -43,11 +43,7 @@ class FirmwareVersion {
   static FirmwareVersion parse(String raw) {
     final trimmed = raw.trim();
     if (trimmed.isEmpty) {
-      return const FirmwareVersion(
-        raw: '',
-        hardwareId: '',
-        version: null,
-      );
+      return const FirmwareVersion(raw: '', hardwareId: '', version: null);
     }
 
     final parts = trimmed.split('_');
