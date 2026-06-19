@@ -50,13 +50,18 @@ class CloudApi {
   }) async {
     await _ensureToken();
     final body = <String, dynamic>{
-      'deviceName': model,
-      'version': currentVersion,
+      // Mirrors QWatch Pro's LastOtaRequest data class.
+      'appId': 1,
+      'uid': 0,
+      'country': '',
+      'hardwareVersion': model,
       // The vendor API validates this as 1..2. The Android app uses this
       // endpoint and token key, so keep the Android value for firmware lookup.
       'os': 1,
+      'mac': mac ?? '',
+      'romVersion': currentVersion,
+      'dev': 0,
     };
-    if (mac != null) body['mac'] = mac;
     final Response<dynamic> resp;
     final path = _settings.region == CloudRegion.china
         ? 'app-update/last-ota/china'
@@ -81,6 +86,7 @@ class CloudApi {
     if (root is Map) {
       final retCode = root['retCode'];
       if (retCode != null && retCode != 0) {
+        if (retCode == 60001) return null;
         throw CloudException(
           '${root['message'] ?? 'Firmware lookup failed'} (retCode $retCode)',
         );

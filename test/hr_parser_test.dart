@@ -19,18 +19,15 @@ void main() {
       expect(HrParser.isPlausibleBpm(255), isFalse);
     });
 
-    test('masks negative ints (the 0x80..0xFF dart-sign issue)', () {
-      // Dart reads Uint8List indices as signed ints. A real-world bpm byte
-      // in the 0x80..0xBF range would otherwise look like -128..-65 and be
-      // rejected. The parser masks before the range check — verify the
-      // end-to-end behavior on the actual Uint8List read path.
-      final pl = Uint8List.fromList([0xC8]); // bpm 200, read as int -56
-      expect(pl[0] < 0, isTrue, reason: 'sanity: signed read');
-      expect(
-        HrParser.parseRealtime(pl),
-        200,
-        reason: 'parser must mask before range check',
-      );
+    test('handles high-bit bytes (0x80..0xFF) via mask', () {
+      // The mask in the parser is defensive — it covers any code path that
+      // hands a signed int (or a List<int> with negative entries) to the
+      // parser. On the Dart VM, Uint8List reads are already unsigned, but
+      // we still want the parser to behave correctly on bytes where the
+      // high bit is set (legitimate bpm 128..240).
+      final pl = Uint8List.fromList([0xC8]); // bpm 200
+      expect(HrParser.parseRealtime(pl), 200);
+      expect(HrParser.parseRealtime(Uint8List.fromList([0xF0])), 240);
     });
   });
 
