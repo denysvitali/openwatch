@@ -61,8 +61,9 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
   }
 
   bool _looksLikeWatch(ScanResult r) {
-    if (r.advertisementData.serviceUuids.contains(BleUuids.serviceA))
+    if (r.advertisementData.serviceUuids.contains(BleUuids.serviceA)) {
       return true;
+    }
     final name = r.device.platformName.isNotEmpty
         ? r.device.platformName
         : r.advertisementData.advName;

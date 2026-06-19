@@ -248,8 +248,9 @@ class BleTransport {
 
   void _onDisconnected() {
     for (final c in _pending.values) {
-      if (!c.isCompleted)
+      if (!c.isCompleted) {
         c.completeError(const BleTransportException('Disconnected'));
+      }
     }
     _pending.clear();
     _queue.clear();

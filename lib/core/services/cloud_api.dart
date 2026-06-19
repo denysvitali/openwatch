@@ -12,21 +12,23 @@ import 'settings_service.dart';
 /// auth/signature scheme mirrors the original app (`PROTOCOL.md` §6.2).
 class CloudApi {
   CloudApi({required AppSettings settings})
-    : _dio = Dio(
-        BaseOptions(
-          baseUrl: settings.region.baseUrl,
-          connectTimeout: const Duration(seconds: 15),
-          receiveTimeout: const Duration(seconds: 30),
-          headers: {
-            'User-Agent': 'OpenWatch/0.1.0',
-            'token': ?settings.authToken,
-          },
-        ),
-      ) {
+    : _dio = Dio(_baseOptions(settings)) {
     _dio.interceptors.add(_SignatureInterceptor());
   }
 
   final Dio _dio;
+
+  static BaseOptions _baseOptions(AppSettings settings) {
+    final headers = <String, dynamic>{'User-Agent': 'OpenWatch/0.1.0'};
+    final token = settings.authToken;
+    if (token != null) headers['token'] = token;
+    return BaseOptions(
+      baseUrl: settings.region.baseUrl,
+      connectTimeout: const Duration(seconds: 15),
+      receiveTimeout: const Duration(seconds: 30),
+      headers: headers,
+    );
+  }
 
   /// `POST app-update/last-ota` — latest firmware metadata for a device.
   /// Returns the parsed [FirmwareInfo] or null if none is available.
@@ -35,9 +37,14 @@ class CloudApi {
     required String currentVersion,
     String? mac,
   }) async {
+    final body = <String, dynamic>{
+      'deviceName': model,
+      'version': currentVersion,
+    };
+    if (mac != null) body['mac'] = mac;
     final resp = await _dio.post<Map<String, dynamic>>(
       'app-update/last-ota',
-      data: {'deviceName': model, 'version': currentVersion, 'mac': ?mac},
+      data: body,
     );
     final data = resp.data?['data'] as Map<String, dynamic>?;
     if (data == null) return null;

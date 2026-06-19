@@ -50,6 +50,31 @@ the same connection (see §2). The cloud layer is a separate HTTPS/JSON + WebSoc
 | `00002A26-…` | READ Firmware Revision | — | `CHAR_FIRMWARE_REVISION`. Second read (+200 ms); completion → `setReady(true)`. |
 | `00002A28-…` | READ Software Revision | — | `CHAR_SOFTWARE_REVISION`. Defined but not in core handshake. |
 
+```mermaid
+graph LR
+  Phone["📱 OpenWatch app"]
+
+  subgraph A["Channel A — commands (6e40fff0)"]
+    WA["WRITE 6e400002<br/>16-byte frames"]
+    NA["NOTIFY 6e400003<br/>responses & pushes"]
+  end
+  subgraph B["Channel B — large data / OTA (de5bf728)"]
+    WB["WRITE 6e... de5bf72a<br/>chunked, no-response"]
+    NB["NOTIFY de5bf729<br/>LargeData / DFU"]
+  end
+  subgraph DI["Device Information (180A)"]
+    HW["2A27 hardware rev"]
+    FW["2A26 firmware rev"]
+  end
+
+  Phone -->|commands| WA
+  NA -->|responses| Phone
+  Phone -->|files / firmware| WB
+  NB -->|acks / status| Phone
+  HW --> Phone
+  FW --> Phone
+```
+
 ### 2.2 MTU
 
 - **Channel A** does **no** MTU negotiation. `onMtuChanged` is a bare super-call. Incoming notifies
@@ -60,22 +85,33 @@ the same connection (see §2). The cloud layer is a separate HTTPS/JSON + WebSoc
 
 ### 2.3 Connection & handshake sequence
 
+```mermaid
+sequenceDiagram
+    participant P as Phone
+    participant W as Watch
+
+    P->>W: GATT connect
+    W-->>P: connected
+    P->>W: discoverServices()
+    P->>W: write CCCD ENABLE on 6e400003 (Channel-A notify)
+    Note over P: 4s watchdog armed; FW-timeout at +500/1500/2500 ms
+    P->>W: ReadRequest(180A, 2A27)
+    W-->>P: hardware revision
+    P->>W: +200 ms ReadRequest(180A, 2A26)
+    W-->>P: firmware revision
+    Note over P,W: setReady(true) — Channel-A WRITES now allowed<br/>(reads were never gated)
+    rect rgb(235,245,255)
+    note right of P: App layer (after ready)
+    P->>W: bind (0x10)
+    P->>W: SetTime (0x01)
+    W-->>P: SetTimeRsp = capability manifest
+    P->>W: DeviceSupportReq (0x3c)
+    W-->>P: support bitmap
+    end
 ```
-1. GATT connect                          → bleGattConnected broadcast
-2. onServicesDiscovered → bleServiceDiscovered():
-   a. enableUUID(): write CCCD (00002902)=ENABLE_NOTIFICATION on 6e400003 (Channel-A notify)
-                    4s (0xfa0) watchdog; callback just cancels watchdog
-   b. schedule timeoutFirmwareRunnable at +500ms / +1500ms / +2500ms → runCommonCmd()
-3. runCommonCmd(): read Device Information service:
-   - ReadRequest(180A, 2A27)  → hardware revision
-   - +200ms: ReadRequest(180A, 2A26) → firmware revision
-4. On FW/HW read return, higher layer calls setReady(true):
-   - cancels firmware watchdog, posts $3 at +2000ms, sets ready=true
-   - until ready==true, Channel-A WRITES are REJECTED ("init not complete");
-     reads (Device Info) are NOT gated
-5. App-level (after ready): bind (CMD_BIND_SUCCESS 0x10), SetTime (0x01),
-   DeviceSupportReq (0x3c) typically first capability probe.
-```
+
+Until `ready == true`, Channel-A **writes** are rejected (`"init not complete"`);
+Device-Info **reads** are not gated.
 
 The SDK transport itself sends **no** automatic bind/SetTime; those are app-level commands issued once
 `ready`.
@@ -414,15 +450,28 @@ watch → respMap[0x3a] ack
 
 ### 5.4 Firmware OTA (DfuHandle)
 
+```mermaid
+sequenceDiagram
+    participant P as Phone
+    participant W as Watch
+
+    P->>W: Channel-A switch-to-OTA (0x0f)
+    W-->>P: SwitchOTARsp stateMask
+    P->>W: start (0x01)
+    W-->>P: RSP_OK
+    P->>W: init (0x02) [01, size32LE, crc16LE, checksum16LE]
+    W-->>P: RSP_DATA_SIZE (or RSP_LOW_BATTERY ⇒ abort)
+    loop each 1024-byte raw pocket
+        P->>W: data (0x03) [idx16LE] + RAW(1024B)
+        W-->>P: RSP_CMD_STATUS (status 0 ⇒ next)
+    end
+    P->>W: check (0x04)
+    W-->>P: RSP_CMD_FORMAT
+    P->>W: end (0x05)
+    Note over W: release callback, device reboots & applies
 ```
-0. Channel-A: app sends switch-to-OTA (TO_OTA=0x0f) → SwitchOTARsp stateMask
-1. start   (0x01)  empty
-2. init    (0x02)  [01, size32LE, crc16LE, checksum16LE]   (size ≤ 0xBB8000)
-3. data    (0x03)  [idx16LE]+RAW(1024B) ×N                 (RSP_CMD_STATUS 3 / status 0 → next)
-4. check   (0x04)  empty                                    (RSP_CMD_FORMAT 4)
-5. end     (0x05)  empty                                    (release callback, device reboots)
-   RSP_LOW_BATTERY(6) at any point ⇒ device refuses; abort.
-```
+
+`size ≤ 0xBB8000` (12 MB). `RSP_LOW_BATTERY (6)` at any point ⇒ device refuses; abort.
 
 ### 5.5 Health-data prefetch
 
