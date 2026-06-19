@@ -6,6 +6,7 @@ import '../ble/ble_transport.dart';
 import '../protocol/capabilities.dart';
 import '../protocol/codec.dart';
 import '../protocol/commands.dart';
+import '../protocol/hr_parser.dart';
 import '../protocol/opcodes.dart';
 import 'app_log.dart';
 
@@ -137,31 +138,47 @@ class WatchManager extends ChangeNotifier {
           notifyListeners();
         }
       case OpA.realTimeHeartRate:
-        if (_plausibleHr(pl.isNotEmpty ? pl[0] : 0)) {
-          lastHeartRate = pl[0];
+        // pl[0] = instantaneous bpm. Log every frame (even out-of-range) so
+        // a firmware that pushes 0x00/0xFF during sensor warm-up is
+        // diagnosable from the log alone.
+        AppLog.instance.debug(
+          'hr',
+          '0x1e raw=0x${(pl.isNotEmpty ? pl[0] : -1) & 0xFF} '
+              'parsed=${HrParser.parseRealtime(pl)}',
+        );
+        final bpm = HrParser.parseRealtime(pl);
+        if (bpm != null) {
+          lastHeartRate = bpm;
           notifyListeners();
         }
       case OpA.startMeasure:
-        // StartHeartRateRsp: [0]=type, [1]=errCode, [2]=value. Per the smali
-        // (StartHeartRateRsp.acceptData), value is the 8-bit unsigned read at
-        // pl[2] — but a value of 0/1 means "in progress" and isn't a real
-        // bpm. We log all values for diagnostics, but only update the UI
-        // when the value is plausible.
+        // StartHeartRateRsp: [0]=type, [1]=errCode, [2]=value. Log every
+        // reply (incl. err != 0) so a "session failed" doesn't look like
+        // silence — only update lastHeartRate on err==0 with a plausible bpm.
+        final r = HrParser.parseStartMeasureReply(pl);
         AppLog.instance.debug(
-          'watch',
-          'Measure reply type=${pl.isNotEmpty ? pl[0] : -1} '
-              'err=${pl.length > 1 ? pl[1] : -1} '
-              'val=${pl.length > 2 ? pl[2] : -1}',
+          'hr',
+          '0x69 reply type=${r?.type ?? -1} err=${r?.err ?? -1} '
+              'bpm=${r?.bpm ?? '-'}',
         );
-        if (pl.length >= 3 && pl[1] == 0 && _plausibleHr(pl[2])) {
-          lastHeartRate = pl[2];
+        if (r?.bpm != null) {
+          lastHeartRate = r!.bpm;
           notifyListeners();
         }
       case OpA.deviceNotify:
       case OpA.deviceSportNotify:
-        // 0x73/0x78 carry `dataType + loadData`. Many of them are periodic
-        // pushes (e.g. live HR on some firmwares) — log them so we can spot
-        // the right dataType on a live capture.
+        // 0x73/0x78 carry `dataType + loadData`. Some firmwares push live
+        // HR on these opcodes when the canonical 0x1e path is unsupported —
+        // try the parser, then log the raw bytes for diagnostics either way.
+        final notifyBpm = HrParser.parseDeviceNotify(pl);
+        if (notifyBpm != null) {
+          AppLog.instance.debug(
+            'hr',
+            '0x${op.toRadixString(16)} hr=$notifyBpm',
+          );
+          lastHeartRate = notifyBpm;
+          notifyListeners();
+        }
         AppLog.instance.debug(
           'rx',
           'Notify op=0x${op.toRadixString(16)} dataType=${pl.isNotEmpty ? pl[0] : -1} '
@@ -169,8 +186,6 @@ class WatchManager extends ChangeNotifier {
         );
     }
   }
-
-  static bool _plausibleHr(int v) => v >= 30 && v <= 240;
 
   // --- Actions ---
 
@@ -211,11 +226,27 @@ class WatchManager extends ChangeNotifier {
   Future<void> setBrightness(int level) =>
       _transport.sendA(Commands.setBrightness(level));
 
-  Future<void> startHeartRate() => _transport.sendA(
-    Commands.startContinuousHr(MeasureType.realtimeHeartRate),
-  );
+  /// Start a heart-rate measurement.
+  ///
+  /// Sends both the explicit session start (`0x69` type=heartRate=1) AND the
+  /// realtime toggle (`0x1e` type=realtimeHeartRate=6). Different firmware
+  /// variants honor one or the other — sending both means the device picks
+  /// whichever path it actually implements. Replies from either path feed
+  /// into `_onFrame` and update `lastHeartRate`.
+  Future<void> startHeartRate() async {
+    AppLog.instance.info('hr', 'Starting HR (0x69 session + 0x1e realtime)');
+    await _transport.sendA(Commands.startMeasure(MeasureType.heartRate));
+    await _transport.sendA(
+      Commands.startContinuousHr(MeasureType.realtimeHeartRate),
+    );
+  }
 
-  Future<void> stopHeartRate() => _transport.sendA(Commands.stopContinuousHr());
+  /// Stop every HR measurement path that [startHeartRate] may have started.
+  Future<void> stopHeartRate() async {
+    AppLog.instance.info('hr', 'Stopping HR (0x6a session + 0x1e stop)');
+    await _transport.sendA(Commands.stopMeasure(MeasureType.heartRate));
+    await _transport.sendA(Commands.stopContinuousHr());
+  }
 
   Future<void> enableNotifications(String phoneModel) async {
     await _transport.sendA(Commands.bindAncs(phoneModel));

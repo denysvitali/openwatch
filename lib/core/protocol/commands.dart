@@ -70,6 +70,11 @@ class Commands {
   static Uint8List readTodaySport() => Codec.buildChannelA(OpA.todaySport);
 
   /// `ReadHeartRateReq` (0x15): `[utcStart i32 LE]`.
+  ///
+  /// Identical wire format to [readHeartRateHistory] — kept for API stability
+  /// but new callers should use [readHeartRateHistory] (the name that matches
+  /// `PROTOCOL.md` §4.3).
+  @Deprecated('Use readHeartRateHistory; wire format is identical.')
   static Uint8List readHeartRate(DateTime since) => Codec.buildChannelA(
     OpA.readHeartRate,
     Codec.u32le(since.toUtc().millisecondsSinceEpoch ~/ 1000),

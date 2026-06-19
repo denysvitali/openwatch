@@ -14,6 +14,7 @@ class HealthScreen extends ConsumerWidget {
     final manager = ref.watch(watchManagerProvider);
     final ready = (ref.watch(linkStateProvider).value) == LinkState.ready;
     final caps = manager.capabilities;
+    final hrSupported = caps.heart;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Health')),
@@ -22,13 +23,15 @@ class HealthScreen extends ConsumerWidget {
           ListTile(
             leading: const Icon(Icons.favorite, color: Colors.redAccent),
             title: const Text('Heart rate'),
-            subtitle: const Text(
-              'Wear the watch on your wrist and stay still for ~15s',
+            subtitle: Text(
+              hrSupported
+                  ? 'Wear the watch on your wrist and stay still for ~15s'
+                  : 'Not supported on this device',
             ),
             trailing: Text(
               manager.lastHeartRate != null
                   ? '${manager.lastHeartRate} bpm'
-                  : 'Measuring…',
+                  : (hrSupported ? 'Measuring…' : '—'),
               style: Theme.of(context).textTheme.titleMedium,
             ),
           ),
@@ -37,13 +40,17 @@ class HealthScreen extends ConsumerWidget {
             child: Row(
               children: [
                 FilledButton.tonalIcon(
-                  onPressed: ready ? manager.startHeartRate : null,
+                  onPressed: (ready && hrSupported)
+                      ? manager.startHeartRate
+                      : null,
                   icon: const Icon(Icons.play_arrow),
                   label: const Text('Start'),
                 ),
                 const SizedBox(width: 12),
                 OutlinedButton.icon(
-                  onPressed: ready ? manager.stopHeartRate : null,
+                  onPressed: (ready && hrSupported)
+                      ? manager.stopHeartRate
+                      : null,
                   icon: const Icon(Icons.stop),
                   label: const Text('Stop'),
                 ),
