@@ -143,15 +143,24 @@ jobs:
           (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '+')) ||
           github.ref == 'refs/heads/master' ||
           github.ref == 'refs/heads/main'
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || steps.build_meta.outputs.UNIQUE_TAG }}
-          name: ${{ startsWith(github.ref, 'refs/tags/v') && format('OpenWatch {0}', github.ref_name) || format('OpenWatch {0}', steps.build_meta.outputs.UNIQUE_TAG) }}
-          draft: false
-          prerelease: false
-          generate_release_notes: true
-          # only explicit v* tags are "latest"; rolling CI releases are not
-          make_latest: ${{ startsWith(github.ref, 'refs/tags/v') }}
-          files: build/app/outputs/flutter-apk/app-release.apk
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          TAG="${{ steps.build_meta.outputs.UNIQUE_TAG }}"
+          NAME="OpenWatch ${{ steps.build_meta.outputs.SEMVER }}+${{ steps.build_meta.outputs.BUILD_NUMBER }}"
+          APK="build/app/outputs/flutter-apk/app-release.apk"
+          # Pick a unique tag on collision (e.g. the build_number was reused
+          # on a re-run). Use the short SHA as the disambiguator.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            TAG="${TAG}-${GITHUB_SHA::7}"
+          fi
+          IS_TAG=${{ startsWith(github.ref, 'refs/tags/v') && 'true' || 'false' }}
+          # Only explicit v* tags are marked as "latest"; rolling CI builds
+          # get a release but don't change the public "Latest" pointer.
+          LATEST_FLAG=""
+          if [ "$IS_TAG" = "true" ]; then LATEST_FLAG="--latest"; fi
+          gh release create "$TAG" "$APK" \
+            --title "$NAME" \
+            --notes "OpenWatch v${{ steps.build_meta.outputs.SEMVER }}+${{ steps.build_meta.outputs.BUILD_NUMBER }} ($GITHUB_SHA)" \
+            $LATEST_FLAG
