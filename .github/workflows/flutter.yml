@@ -56,9 +56,12 @@ jobs:
         run: |
           SEMVER=$(grep '^version:' pubspec.yaml | sed 's/version: *//' | cut -d'+' -f1 | tr -d ' ')
           BUILD_NUMBER=$(( ${{ github.run_number }} * 100 + ${{ github.run_attempt }} ))
+          # include the run id so each master push gets a fresh, unique tag
+          UNIQUE_TAG="v${SEMVER}+${BUILD_NUMBER}-${GITHUB_SHA::7}"
           echo "SEMVER=$SEMVER" >> $GITHUB_OUTPUT
           echo "BUILD_NUMBER=$BUILD_NUMBER" >> $GITHUB_OUTPUT
-          echo "Building version $SEMVER+$BUILD_NUMBER"
+          echo "UNIQUE_TAG=$UNIQUE_TAG" >> $GITHUB_OUTPUT
+          echo "Building version $SEMVER+$BUILD_NUMBER (tag $UNIQUE_TAG)"
 
       - name: Prepare signing keystore
         id: keystore
@@ -142,12 +145,13 @@ jobs:
           github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v{0}+{1}', steps.build_meta.outputs.SEMVER, steps.build_meta.outputs.BUILD_NUMBER) }}
-          name: ${{ startsWith(github.ref, 'refs/tags/v') && format('OpenWatch {0}', github.ref_name) || format('OpenWatch v{0}+{1}', steps.build_meta.outputs.SEMVER, steps.build_meta.outputs.BUILD_NUMBER) }}
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || steps.build_meta.outputs.UNIQUE_TAG }}
+          name: ${{ startsWith(github.ref, 'refs/tags/v') && format('OpenWatch {0}', github.ref_name) || format('OpenWatch {0}', steps.build_meta.outputs.UNIQUE_TAG) }}
           draft: false
           prerelease: false
           generate_release_notes: true
-          make_latest: true
+          # only explicit v* tags are "latest"; rolling CI releases are not
+          make_latest: ${{ startsWith(github.ref, 'refs/tags/v') }}
           files: build/app/outputs/flutter-apk/app-release.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
