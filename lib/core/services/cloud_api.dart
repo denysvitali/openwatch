@@ -14,6 +14,13 @@ import 'settings_service.dart';
 class CloudApi {
   CloudApi({required AppSettings settings})
     : _dio = Dio(_baseOptions(settings)) {
+    if (settings.authToken == null) {
+      AppLog.instance.warn(
+        'cloud',
+        'CloudApi constructed without a token; calls will return 401 '
+            'until the user logs in.',
+      );
+    }
     _dio.interceptors.add(_SignatureInterceptor());
   }
 
@@ -62,7 +69,16 @@ class CloudApi {
     AppLog.instance.info('cloud', 'last-ota ${resp.statusCode}: ${resp.data}');
     final root = resp.data;
     final data = root is Map ? root['data'] : null;
-    if (data is! Map) return null;
+    if (data is! Map) {
+      // Treat a "not logged in" response as a soft error so the caller can
+      // prompt the user to log in instead of pretending firmware is up-to-date.
+      if (root is Map && root['retCode'] == 401) {
+        throw CloudException(
+          'Cloud requires login. Enable cloud sync and sign in first.',
+        );
+      }
+      return null;
+    }
     final map = data.cast<dynamic, dynamic>();
     final url = map['downloadUrl'] ?? map['url'] ?? map['fileUrl'];
     if (url is! String || url.isEmpty) return null;

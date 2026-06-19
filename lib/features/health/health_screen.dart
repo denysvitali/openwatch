@@ -22,11 +22,13 @@ class HealthScreen extends ConsumerWidget {
           ListTile(
             leading: const Icon(Icons.favorite, color: Colors.redAccent),
             title: const Text('Heart rate'),
-            subtitle: const Text('Live measurement'),
+            subtitle: const Text(
+              'Wear the watch on your wrist and stay still for ~15s',
+            ),
             trailing: Text(
               manager.lastHeartRate != null
                   ? '${manager.lastHeartRate} bpm'
-                  : '—',
+                  : 'Measuring…',
               style: Theme.of(context).textTheme.titleMedium,
             ),
           ),

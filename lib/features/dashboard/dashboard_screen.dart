@@ -105,6 +105,13 @@ class DashboardScreen extends ConsumerWidget {
                 icon: const Icon(Icons.access_time),
                 label: const Text('Sync time'),
               ),
+              FilledButton.tonalIcon(
+                onPressed: link == LinkState.ready
+                    ? () => context.push('/history')
+                    : null,
+                icon: const Icon(Icons.timeline),
+                label: const Text('History'),
+              ),
             ],
           ),
         ],

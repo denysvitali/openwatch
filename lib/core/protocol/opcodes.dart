@@ -113,6 +113,10 @@ class OpB {
 
   static const int customWatchFace = 0x3a;
 
+  // LargeData actions (PROTOCOL.md §4.7)
+  static const int sleepNew = 0x27; // new sleep protocol (night) — Ch B
+  static const int sleepLunchNew = 0x3e; // new sleep (lunch/nap) — Ch B
+
   // OTA response types (byte[1] of RX status frame)
   static const int rspOk = 0;
   static const int rspDataSize = 1;

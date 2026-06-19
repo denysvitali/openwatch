@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../features/dashboard/dashboard_screen.dart';
 import '../../features/firmware/firmware_screen.dart';
 import '../../features/health/health_screen.dart';
+import '../../features/history/history_screen.dart';
 import '../../features/home/home_shell.dart';
 import '../../features/logs/logs_screen.dart';
 import '../../features/notifications/notifications_screen.dart';
@@ -28,6 +29,11 @@ final appRouterProvider = Provider<GoRouter>(
         path: '/logs',
         parentNavigatorKey: _rootNavigatorKey,
         builder: (context, state) => const LogsScreen(),
+      ),
+      GoRoute(
+        path: '/history',
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) => const HistoryScreen(),
       ),
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) =>

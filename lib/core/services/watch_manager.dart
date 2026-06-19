@@ -25,6 +25,8 @@ class WatchManager extends ChangeNotifier {
   StreamSubscription<Uint8List>? _inboundSub;
   LinkState _last = LinkState.disconnected;
   bool _handshaking = false;
+  Timer? _stepTimer;
+  Timer? _batteryTimer;
 
   DeviceCapabilities capabilities = const DeviceCapabilities();
   int? batteryPercent;
@@ -47,9 +49,26 @@ class WatchManager extends ChangeNotifier {
     if (s == LinkState.disconnected) {
       initialized = false;
       _handshaking = false;
+      _stepTimer?.cancel();
+      _batteryTimer?.cancel();
+      _stepTimer = null;
+      _batteryTimer = null;
     }
     _last = s;
     notifyListeners();
+  }
+
+  void _startTimers() {
+    _stepTimer?.cancel();
+    _batteryTimer?.cancel();
+    _stepTimer = Timer.periodic(
+      const Duration(minutes: 5),
+      (_) => refreshSteps(),
+    );
+    _batteryTimer = Timer.periodic(
+      const Duration(minutes: 15),
+      (_) => refreshBattery(),
+    );
   }
 
   Future<void> _runHandshake() async {
@@ -73,6 +92,7 @@ class WatchManager extends ChangeNotifier {
       );
       await refreshSteps();
       await refreshBattery();
+      _startTimers();
       initialized = true;
       notifyListeners();
       AppLog.instance.info('watch', 'Handshake complete');
@@ -111,12 +131,31 @@ class WatchManager extends ChangeNotifier {
           notifyListeners();
         }
       case OpA.startMeasure:
-        // [0]=type, [1]=errCode, [2]=value. Only accept a plausible bpm; the
-        // watch sends value 0/garbage until a real reading is available.
+        // StartHeartRateRsp: [0]=type, [1]=errCode, [2]=value. Per the smali
+        // (StartHeartRateRsp.acceptData), value is the 8-bit unsigned read at
+        // pl[2] — but a value of 0/1 means "in progress" and isn't a real
+        // bpm. We log all values for diagnostics, but only update the UI
+        // when the value is plausible.
+        AppLog.instance.debug(
+          'watch',
+          'Measure reply type=${pl.isNotEmpty ? pl[0] : -1} '
+              'err=${pl.length > 1 ? pl[1] : -1} '
+              'val=${pl.length > 2 ? pl[2] : -1}',
+        );
         if (pl.length >= 3 && pl[1] == 0 && _plausibleHr(pl[2])) {
           lastHeartRate = pl[2];
           notifyListeners();
         }
+      case OpA.deviceNotify:
+      case OpA.deviceSportNotify:
+        // 0x73/0x78 carry `dataType + loadData`. Many of them are periodic
+        // pushes (e.g. live HR on some firmwares) — log them so we can spot
+        // the right dataType on a live capture.
+        AppLog.instance.debug(
+          'rx',
+          'Notify op=0x${op.toRadixString(16)} dataType=${pl.isNotEmpty ? pl[0] : -1} '
+              'bytes=${AppLog.toHex(pl)}',
+        );
     }
   }
 
@@ -150,6 +189,8 @@ class WatchManager extends ChangeNotifier {
 
   @override
   void dispose() {
+    _stepTimer?.cancel();
+    _batteryTimer?.cancel();
     _transport.state.removeListener(_onLinkState);
     unawaited(_inboundSub?.cancel());
     super.dispose();

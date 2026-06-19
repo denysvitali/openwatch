@@ -47,6 +47,25 @@ class Commands {
   static Uint8List readTotalSport({int dayOffset = 0}) =>
       Codec.buildChannelA(OpA.readTotalSport, [dayOffset & 0xFF]);
 
+  /// `QueryDataDistribution` (0x46) — the watch pushes a 32-bit bitmask where
+  /// bit *d* = "day *d* has stored data". Trigger a re-emit by sending the bare
+  /// opcode; the response is a one-shot notify on 0x46.
+  static Uint8List queryDataDistribution() =>
+      Codec.buildChannelA(OpA.queryDataDistribution);
+
+  /// `ReadHeartRateReq` (0x15): `[utcStart i32 LE]`. Multi-packet response:
+  /// hdr `[0]=00`{size, range}, data `[0]=01`{ts i32 LE + samples}, `0xFF`=end.
+  /// Samples are 13-byte stride (per §4.3).
+  static Uint8List readHeartRateHistory(DateTime since) => Codec.buildChannelA(
+    OpA.readHeartRate,
+    Codec.u32le(since.toUtc().millisecondsSinceEpoch ~/ 1000),
+  );
+
+  /// New sleep protocol (Channel-B `0x27`) for a given day offset. Sent as
+  /// a framed BC/27/len/crc/payload frame; see PROTOCOL.md §4.4.
+  static Uint8List readSleepNewProtocol({int dayOffset = 0}) =>
+      Codec.buildChannelB(OpB.sleepNew, [dayOffset & 0xFF]);
+
   /// `TodaySportData` (0x48): read today's running step total (bare opcode).
   static Uint8List readTodaySport() => Codec.buildChannelA(OpA.todaySport);
 
