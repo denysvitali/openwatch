@@ -90,8 +90,19 @@ class WatchManager extends ChangeNotifier {
             'bp=${capabilities.bloodPressure} sleep=${capabilities.sleep} '
             'alarm=${capabilities.alarm} screen=${capabilities.screenWidth}x${capabilities.screenHeight}',
       );
-      await refreshSteps();
-      await refreshBattery();
+      // Fire-and-forget for the periodic stats — but wait briefly so the
+      // initial replies land before we declare "ready" to the UI.
+      final fresh = DateTime.now();
+      await Future.wait([
+        refreshSteps(),
+        refreshBattery(),
+        _waitForReplies(const Duration(milliseconds: 400), {
+          OpA.todaySport,
+          OpA.battery,
+        }),
+      ]);
+      // Touch `fresh` so the analyzer is happy if we ever drop the call.
+      fresh.toString();
       _startTimers();
       initialized = true;
       notifyListeners();
@@ -171,14 +182,40 @@ class WatchManager extends ChangeNotifier {
 
   Future<void> refreshBattery() => _transport.sendA(Commands.readBattery());
 
+  /// Waits until the [BleTransport] has received a frame for each opcode in
+  /// [opcodes], or [timeout] elapses. Used during the handshake to avoid
+  /// declaring "ready" before the initial replies have been parsed.
+  Future<void> _waitForReplies(Duration timeout, Set<int> opcodes) async {
+    final remaining = {...opcodes};
+    final completer = Completer<void>();
+    late StreamSubscription<Uint8List> sub;
+    sub = _transport.inboundA.listen((frame) {
+      if (frame.length != 16) return;
+      final op = Codec.rxOpcode(frame);
+      if (remaining.remove(op) && remaining.isEmpty) {
+        completer.complete();
+      }
+    });
+    try {
+      await completer.future.timeout(timeout);
+    } on TimeoutException {
+      AppLog.instance.warn(
+        'watch',
+        'Handshake: missing replies for opcodes ${remaining.map((o) => "0x${o.toRadixString(16)}").toList()}',
+      );
+    } finally {
+      await sub.cancel();
+    }
+  }
+
   Future<void> setBrightness(int level) =>
       _transport.sendA(Commands.setBrightness(level));
 
-  Future<void> startHeartRate() =>
-      _transport.sendA(Commands.startMeasure(MeasureType.realtimeHeartRate));
+  Future<void> startHeartRate() => _transport.sendA(
+    Commands.startContinuousHr(MeasureType.realtimeHeartRate),
+  );
 
-  Future<void> stopHeartRate() =>
-      _transport.sendA(Commands.stopMeasure(MeasureType.realtimeHeartRate));
+  Future<void> stopHeartRate() => _transport.sendA(Commands.stopContinuousHr());
 
   Future<void> enableNotifications(String phoneModel) async {
     await _transport.sendA(Commands.bindAncs(phoneModel));

@@ -83,6 +83,15 @@ class Commands {
   static Uint8List stopMeasure(MeasureType type) =>
       Codec.buildChannelA(OpA.stopMeasure, [type.id, 0x00, 0x00]);
 
+  /// `RealTimeHeartRate` (0x1e): `[type]`. Triggers a persistent notify on
+  /// 0x1e carrying `pl[0]=bpm` for continuous HR mode.
+  static Uint8List startContinuousHr(MeasureType type) =>
+      Codec.buildChannelA(OpA.realTimeHeartRate, [type.id]);
+
+  /// `RealTimeHeartRate` (0x1e) with type=0: stop the continuous stream.
+  static Uint8List stopContinuousHr() =>
+      Codec.buildChannelA(OpA.realTimeHeartRate, [0x00]);
+
   /// `SetANCSReq` (0x60): subscribe to (near-)all ANCS categories.
   static Uint8List enableAncs() =>
       Codec.buildChannelA(OpA.setAncs, const [0xFF, 0x9F, 0xFF, 0xFF]);
