@@ -134,7 +134,7 @@ Processes a circular queue of incoming 16-byte frames (`DAT_0082d440 + 0x14` rin
 | `0x1e` | `realTimeHeartRate` | `0x0082d20c` | Sub `0x01` starts 60s HR measurement, `0x02` stops, `0x03` resets timer. |
 | `0x25` | `setSitLong` | `0x0082d284` | Calls sedentary config routines, acks `0x25`. |
 | `0x26` | `readSitLong` | `0x0082d258` | Reads sedentary config, sends `0x26` response. |
-| `0x2b` | `menstruation` (mixture container) | `0x0082ba54` | Sub `0x01`/`0x02` read/write mixture data; builds `0x2b` response with additive checksum. |
+| `0x2b` | `menstruation` (mixture container) | `0x0082ba54` | Sub `0x01`/`0x02` read/write mixture data; cycle-phase detector + notification sender — see §3.1. |
 | `0x2c` | `bloodOxygenSetting` | `0x0082d1c2` | Sub `0x01` reads SpO2 setting, `0x02` writes it. |
 | `0x37` | `pressureSetting` | `0x0082caa6` | Reads/sets pressure config; uses `FUN_008344fe`. |
 | `0x38` | `pressure` | `0x0082ca54` | Sub `0x01` reads pressure value, else sets pressure unit. |
@@ -192,6 +192,88 @@ The helper functions `FUN_00830c7e`, `FUN_00830cb2`, `FUN_00830cd4` live in the 
 | `0x05` | Stop HR measurement |
 | `0x06` | Save current state and then power off |
 | other | Send `0xffa1` error response |
+
+### 3.1 Opcode `0x2b` menstruation / mixture container
+
+The `0x2b` handler (`FUN_0082ba54`) backs a 16-byte persistent record on the
+device. The record is anchored at a runtime pointer stored in the literal
+pool slot `DAT_0082b0b8` (value `0x00208c7c`). Functions that touch the
+record refer to it via negative or positive byte offsets relative to that
+pointer; in the layout below **byte 0** of the record lives at
+`DAT_0082b0b8 - 6` (= `0x00208c76`).
+
+#### Record layout (`mixture_state_t`, 16 bytes)
+
+| Off | Field | Size | Set by | Read by |
+|---:|---|---:|---|---|
+| 0 | `state_flag` | 1 | `FUN_0082aee4` writes `0xCA` on a successful write | `FUN_0082b078` clears 16 B if `!= 0xCA` |
+| 1..3 | `start_date_bcd[3]` | 3 | copied from `req[2..4]` | copied into `rsp[0..2]` |
+| 4..5 | `start_day_pair` (u16) | 2 | `= current_day - req[5]` (signed overflow wrap) | low byte returned as `rsp[3] = current_day - record[4]` |
+| 6..7 | `start_month_pair` (u16) | 2 | `= current_month - req[6]` | low byte returned as `rsp[4] = current_month - record[6]` |
+| 8..12 | `period_data[5]` | 5 | copied from `req[7..11]` | copied into `rsp[5..9]` |
+| 13..15 | (padding) | 3 | left zero | always zero |
+
+The `state_flag` doubles as a "record present" sentinel: any caller that
+sees `state_flag != 0xCA` must treat the record as uninitialised.
+
+#### Sub-opcode dispatch (`FUN_0082ba54`)
+
+`req[1]` selects the action:
+
+| Sub | Action |
+|---|---|
+| `0x01` | Read: calls `FUN_0082af28(rsp)`, which copies the record into `rsp[0..9]` and leaves `rsp[10..14]` zeroed. `rsp[0]` ends up holding `start_date_bcd[0]` (the opcode byte the caller pre-stamped is overwritten by the read — firmware quirk, see §3.1.1). |
+| `0x02` | Write: calls `FUN_0082aee4(req + 2)` with the 10-byte payload starting at the second byte after the sub-opcode. After copying, it sets `state_flag = 0xCA`. The write response reuses the cleared 16-byte buffer (only `rsp[0] = 0x2B` is set), so the host receives an empty `0x2B` ack. |
+| other | No-op: response is a 16-byte buffer with only `rsp[0] = 0x2B` set. |
+
+In all three cases the handler finishes by stamping `rsp[15] = FUN_0082b0c4(rsp, 0xf)` (additive byte checksum) and queues the frame via `FUN_0082ebdc`.
+
+#### 3.1.1 Read-path quirk
+
+The handler pre-fills the response with `local = {0x2B, 0, 0, 0, 0, …, 0}`
+(16 B on stack via `push {r0-r3, r4, lr}`). `FUN_0082af28` then calls
+`memcpy(rsp, record + 1, 3)`, which **clobbers `rsp[0]`** with
+`start_date_bcd[0]`. The remaining 14 bytes are populated correctly
+(`rsp[3..4]` are the truncated day/month deltas, `rsp[5..9]` are
+`period_data`, `rsp[10..14]` are zero). The byte-0 overwrite appears to
+be a long-standing firmware bug: a host that decodes `0x2b` strictly by
+"first byte == 0x2B" will reject every read response. Practical decoders
+should treat the *whole frame* (including the opaque `rsp[0]` value) as
+the record payload and re-stamp `rsp[0] = 0x2B` after copy.
+
+#### Cycle-phase detector (`FUN_0082af64`)
+
+A pure helper that classifies the current cycle phase for a given
+day-offset input. Return values:
+
+| Return | Meaning |
+|---:|---|
+| `3` | Unset (`start_date_bcd[0] == 0` or `start_date_bcd[2] == 0`) |
+| `2` | Early phase — `day_offset + 1 <= start_date_bcd[1]` |
+| `1` | Mid phase — `(start_date_bcd[2] - (day_offset + 1) - 9) ∈ [0, 9]` |
+| `0` | Late phase — otherwise |
+
+`day_offset` is computed as
+`(start_date_bcd[2] + current_month + arg) - start_day_pair`; the
+comparison `start_date_bcd[1]` therefore reads as the cycle length in
+days (typical: 28).
+
+#### Phase-transition notifier (`FUN_0082b01e`, `FUN_0082b090`)
+
+`FUN_0082b01e` is called from the main-loop tick `FUN_00827134` (after
+the daily `*pcVar2 == '\x03'` check). It compares the *current* phase
+(`thunk_FUN_0082af64(record[3])`) with the *previous* phase
+(`thunk_FUN_0082af64(record[3] - 1)` and `thunk_FUN_0082af64(record[4] - 1)`),
+and on a 0→1 or 1→2 transition invokes `FUN_0082b090(phase)` which
+fires a motor+UI alert (`FUN_0082a5b2(5)` + `FUN_0082994c(0x12, 1, 3, 10)`)
+provided the user is on the home screen (`FUN_0082a826() == 0`).
+
+#### Lazy initializer (`FUN_0082b078`)
+
+On the first reference after boot, `FUN_0082b078` checks
+`record[0] != 0xCA` and, if so, zeros the full 16-byte record. This
+guarantees the "unset → return 3" branch in `FUN_0082af64` works
+without needing an explicit factory-reset path.
 
 
 ---
@@ -349,6 +431,6 @@ The `0xFEE7` service carries a parallel 16-byte command channel that overlaps so
 
 ## 10. Open Questions / Next Steps
 
-1. Recover the exact meaning of opcode `0x2b` mixture container fields.
+1. ~~Recover the exact meaning of opcode `0x2b` mixture container fields.~~ **Resolved** — see §3.1. The 16-byte `mixture_state_t` is now fully decoded; remaining unknowns are semantic (BCD field interpretation, period-data byte meanings).
 2. Identify the 32-byte `image_digest` algorithm used for OTA and the container header digest at `0x1c4`. No SHA-256 constants were found in the body; it may be computed by the bootloader or host tool.
 3. ~~Determine whether the `0xFEE7` vendor service has any active protocol role in the firmware.~~ **Resolved** — see §8; it implements a second 16-byte command channel.
