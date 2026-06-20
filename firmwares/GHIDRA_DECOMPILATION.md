@@ -253,7 +253,7 @@ Processes a circular queue of incoming 16-byte frames (`DAT_0082d440 + 0x14` rin
 | `0x37` | `pressureSetting` | `0x0082caa6` | Reads/sets pressure config; uses `FUN_008344fe` — see §3.20. |
 | `0x38` | `pressure` | `0x0082ca54` | Sub `0x01` reads pressure value, else sets pressure unit — see §3.17. |
 | `0x39` | `hrvSetting` | `0x0082c9da` | Reads/sets HRV config; uses `FUN_0083468e` — see §3.21. |
-| `0x3a` | `sugarLipidsSetting` | `0x0082cc1e` | Sub `0x03`/`0x04` read/write sugar/lipids settings. |
+| `0x3a` | `sugarLipidsSetting` | `0x0082cc1e` | Sub `0x03`/`0x04` read/write sugar/lipids settings — see §3.22. |
 | `0x3b` | `uvSetting` / `touchControl` | `0x0082cbc8` | Read/write UV/touch config byte at `DAT_0082cfe8 + 8` — see §3.18. |
 | `0x43` | `readDetailSport` | `0x0082d034` | Reads detailed sport records by date range — see §3.6. |
 | `0x72` | `pushMsgUint` | `0x00829e92` | Buffers a notification/emoji Unicode string for display — see §3.3. |
@@ -897,6 +897,98 @@ groups**: "sensor metrics" (pressure + HRV, both under
 `0x1E`) and "user-content" (muslim, under `0x3C`). The host
 SDK can use the feature id to decide which body-shape parser
 to apply when it receives a fragmented long-config response.
+
+### 3.22 Opcode `0x3a` sugarLipidsSetting (`FUN_0082cc1e`)
+
+A **two-bit-per-feature config pair** — sugar and lipids
+monitoring are 1-bit on/off flags packed into the same shared
+config byte at `DAT_008277f0 + 0x2D` already used by
+`0x2c` SpO2 (§3.10) and `0x38` pressure (§3.17).
+
+#### Persistent state (1 bit each)
+
+| Field | Bit position in `*(DAT_008277f0 + 0x2D)` | Read helper | Write helper |
+|---|---:|---|---|
+| sugar setting | bit 5 | `FUN_00827790` (`(*(byte*) & 0x3F) >> 5`) | `FUN_0082779c` (`... & 0xDF | (v << 5)`) |
+| lipids setting | bit 7 | `FUN_008277ce` (`*(byte*) >> 7`) | `FUN_008277d8` (`... & 0x7F | (v << 7)`) |
+
+The masks (`0x3F`, `0xDF`, `0x7F`) and shifts (`>> 5`, `<< 5`,
+`>> 7`, `<< 7`) prove these are the only bits the handlers
+own; the other 6 bits of `*(DAT_008277f0 + 0x2D)` belong to
+the other 1-bit features. Combined with §3.10 / §3.17 the
+full bit map is:
+
+| Bit | Owner |
+|---:|---|
+| 1 | SpO2 (`0x2c`) |
+| 3 | Pressure (`0x38`) |
+| 5 | Sugar (`0x3a` sub 0x03) |
+| 7 | Lipids (`0x3a` sub 0x04) |
+
+#### Sub-opcode dispatch
+
+`req[1]` selects the feature; `req[2]` selects read vs write.
+
+| `req[1]` | `req[2]` | Action |
+|---:|---:|---|
+| `0x03` | `0x01` | **Read sugar**: response `[0x3A, 0x03, 0x01, sugar_value, 0, …, 0, cksum]` |
+| `0x03` | `0x02` | **Write sugar**: `FUN_0082779c(req[3] != 0)`; response = the **request frame echoed unchanged**; on first commit, also set `*(DAT_0082cfe8 - 0x92) = 0x1E` (mark "config block initialised") |
+| `0x03` | other | no-op, no response |
+| `0x04` | `0x01` | **Read lipids**: response `[0x3A, 0x04, 0x01, lipids_value, 0, …, 0, cksum]` |
+| `0x04` | `0x02` | **Write lipids**: `FUN_008277d8(req[3] != 0)`; response = `[0x3A, 0, 0, 0, 0, …, 0, cksum]` (1-byte-cmd ack — *not* an echo) |
+| `0x04` | other | no-op, no response |
+| other | any | no-op, no response |
+
+#### Asymmetric write responses
+
+The handler uses two *different* response shapes for the two
+write paths:
+
+* **Sugar (`0x03 0x02`)**: the request frame is **echoed
+  unchanged** via `FUN_0082ebdc(param_1)` — same pattern as
+  `0x06 DND` (§3.7) and `0x3b uvTouch` (§3.18). The host
+  treats the echo as a self-describing ack and can verify
+  the exact `(feature, sub, value)` triple the watch
+  committed.
+* **Lipids (`0x04 0x02`)**: the response is a minimal
+  `[0x3A, 0, …, 0, cksum]` — only the cmd byte is set. This
+  is the same shape as `0x1e realTimeHeartRate`'s 1-byte
+  ack (§3.13). The host must use a follow-up `0x04 0x01`
+  read to confirm the value actually changed.
+
+This asymmetry is the only place in the Channel-A table
+where two structurally identical "1-bit config write" pairs
+use different ack shapes. The host code that consumes
+these handlers should not assume a uniform "echo-on-write"
+behaviour across all 1-bit config opcodes.
+
+#### First-time-init side effect
+
+The sugar write path also has a one-shot side effect: if
+`*(DAT_0082cfe8 - 0x92) == 0`, set it to `0x1E`. This flag
+is the "config block initialised" sentinel — it likely
+tells the next `0x81` config-chunk flush (§3.5) that the
+sugar / lipids config is part of the persistent block that
+must be written to flash. The lipids write path does *not*
+have this side effect, which suggests the firmware
+considers the sugar bit a "primary" config and the lipids
+bit a "secondary" one (or vice-versa, depending on the
+producer's view of which one is the canonical setting).
+
+#### Response layout (read paths)
+
+```
+byte  0: 0x3A
+byte  1: req[1]              (0x03 sugar / 0x04 lipids)
+byte  2: 0x01                (read sub-cmd echo)
+byte  3: feature value       (0 or 1)
+byte  4..14: 0
+byte 15: additive checksum
+```
+
+The response is built on the stack from the saved-register
+slots used by the dispatcher (no `memcpy` from the request),
+so the only non-zero output bytes are 0..3 + 15.
 
 ### 3.2 Opcode `0xc7` vibration / motor pattern player (`FUN_00832ebc`)
 
