@@ -135,7 +135,7 @@ void main() {
     test('parses a single nap block identically to the night shape', () {
       // Lunch/nap is wire-compatible with night — same parser.
       final pl = Uint8List.fromList([
-        0x3C, 0x00, // endMin 60 (13:00)
+        0x0C, 0x03, // endMin 780 (13:00)
         0x01, 0x3C, // light 60 min
       ]);
       final segs = SleepParser.parseLunchSleepSegments(
