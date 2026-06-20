@@ -545,7 +545,134 @@ The 0xc = 12 slot size matches the §3.6 detail record layout
 — the same vendor library (`vc_SportMotion_Int`) generates
 both the sport and sleep records.
 
-## 3. Channel A — 16-Byte Command Channel
+#### 2.11 File list / file init-delete (`FUN_008311b8`)
+
+The Channel-B **file-management** pair. Two sub-codes share
+the same handler; both operate on the watch's internal
+*file table* (probably the *music / watch-face / OTA image*
+table — the OEM's per-record storage).
+
+```c
+void FUN_008311b8(int sub, void *req_payload) {
+    if (sub == 0x41) {
+        // 0x41 file list: dump up to 10 files
+        memcpy(state, req_payload, 4);              // copy request field
+        rsp[0] = 0;                                // count = 0
+        u16 out_offset = 1;                        // body starts at byte 1
+        for (int i = 0; i < 10; i++) {
+            if (FUN_008313ba(state, i, file_buf) == 0) break;
+            u16 n = FUN_0083105a(file_buf, rsp + out_offset);
+            out_offset += n;
+        }
+        FUN_0082ece0(0x42, rsp, out_offset & 0xffff);
+    } else if (sub == 0x43) {
+        // 0x43 file init/delete: no response, just call helper
+        FUN_008310c8(req_payload);
+    }
+    // 0x46 routes here too (same body as 0x43, see §2.6)
+}
+```
+
+Two sub-codes share the same handler:
+
+* **`0x41` file list** (`FUN_008311b8` with `sub == 0x41`):
+  reads up to **10 file records** via `FUN_008313ba` (returns
+  0 when no more files), converts each to a TLV via
+  `FUN_0083105a`, and ships the full list as a `0x42`
+  response (note: `0x42`, not `0x41` — same handler / different
+  response opcode). The body layout is `[count_byte] [TLV0]
+  [TLV1] ...`.
+
+* **`0x43` / `0x46` file init / delete**:
+  just calls `FUN_008310c8(req_payload)`. **No response** is
+  shipped — the dispatcher (§2.0) ack frame is the
+  implicit "operation accepted" signal.
+
+#### Request layout
+
+* **`0x41`** — `req[0..3]` is a 4-byte request field copied
+  verbatim into `state`. The docstring for `0x41` doesn't
+  tell us what this field encodes (probably an offset /
+  start-index for the file dump, or a path qualifier).
+* **`0x43` / `0x46`** — `req[0..15]` is the operation payload
+  (e.g. filename for delete, content for init). The full
+  16-byte payload is forwarded to `FUN_008310c8`.
+
+#### Response layout (`0x41` only)
+
+```
+byte  0:    file count (0..10)
+byte  1..N: TLV-encoded file records (TLV0 = bytes 1..N1,
+            TLV1 = bytes N1+1..N2, ...)
+```
+
+Each TLV record is the output of `FUN_0083105a` — likely a
+`(tag_byte)(len_byte)(data_bytes...)` triple where `tag`
+identifies the file type (e.g. `0x01` = music, `0x02` =
+watch-face), `len` gives the data length, and `data` carries
+the per-file metadata (filename, size, CRC, etc.).
+
+`0x42` and `0x46` ship **no response at all** — the dispatcher's
+implicit ack is the only feedback.
+
+#### Why cap at 10 files?
+
+The 512-byte stack buffer (`local_240`) holds the full
+list, capped at 10 entries. 10 is a firmware-internal limit
+on how many files the watch exposes at once — beyond that,
+the host must issue multiple `0x41` requests with different
+start indices (the `state[0..3]` field is presumably a
+paging cursor).
+
+#### `FUN_008313ba` — single-file reader
+
+The `FUN_008313ba(state, index, out_buf)` helper reads the
+`index`-th file record from the watch's internal file table
+into `out_buf`. Returns `0` when `index` is past the end of
+the table — the loop terminates and ships whatever was
+collected. Returns non-zero (the number of bytes copied)
+when a record was found.
+
+#### `FUN_0083105a` — TLV serialiser
+
+The `FUN_0083105a(in_buf, out_buf)` helper converts the raw
+48-byte file record from `FUN_008313ba` into a TLV triple
+on the wire. The tag + length + data layout is the standard
+"host SDK understands this" format; the raw 48-byte record
+is firmware-internal.
+
+#### Pair with `0x46` (§2.6)
+
+`0x46` is the *delete* sibling — same handler body as `0x43`,
+same no-response behaviour. The §2.6 dispatcher routes
+`0x46` to the *same* `FUN_008311b8` via the `else if (sub ==
+0x43)` branch, but the second sub-byte is checked against
+`0x46` *inside* `FUN_008310c8` (not visible from this
+handler). The decompiler's `else if (sub == 0x43)` clause is
+in fact a multi-target `0x43 / 0x46` handler — the disassembly
+would show a `cmp r3, #0x46; beq ...` branch in `FUN_008310c8`.
+
+#### Why no response on `0x43` / `0x46`
+
+`0x43` is the "create a new file" command and `0x46` is the
+"delete an existing file" command. Both are **mutating**
+operations — they either succeed or fail silently. A response
+frame would only tell the host "the firmware accepted the
+command", not "the operation succeeded" (the watch can
+still fail the actual create/delete if the file is invalid
+or the FS is full). The host SDK polls `0x41` after
+issuing `0x43` / `0x46` to verify the operation took effect.
+
+#### Why the response opcode is `0x42` (not `0x41`)
+
+The §2.0 dispatcher emits `0x42` for `0x41` responses
+because the two opcodes are **paired**: `0x41` is the
+*request* opcode, `0x42` is the *response* opcode. This
+mirrors the `0x41` / `0x42` Channel-B pair that the §3.0
+handler table at `FUN_0082fc0c` uses for similar request /
+response semantics — keeping the response-cmd one-higher
+than the request-cmd is the firmware's convention for
+"stream this list" operations.
 
 Channel A frames are fixed 16 bytes. The main command dispatcher is `FUN_0082d2dc` **in the firmware** — this routine processes a circular queue of incoming 16-byte frames, reads the opcode at offset `2`, and dispatches to a handler. Earlier notes in `R2_ANALYSIS.md`/`PROTOCOL.md` claimed Channel-A dispatch was APK-only; that claim is incorrect for v14.
 
