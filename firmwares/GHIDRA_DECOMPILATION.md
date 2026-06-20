@@ -252,7 +252,7 @@ Processes a circular queue of incoming 16-byte frames (`DAT_0082d440 + 0x14` rin
 | `0x2c` | `bloodOxygenSetting` | `0x0082d1c2` | Sub `0x01` reads SpO2 setting, `0x02` writes it — see §3.10. |
 | `0x37` | `pressureSetting` | `0x0082caa6` | Reads/sets pressure config; uses `FUN_008344fe` — see §3.20. |
 | `0x38` | `pressure` | `0x0082ca54` | Sub `0x01` reads pressure value, else sets pressure unit — see §3.17. |
-| `0x39` | `hrvSetting` | `0x0082c9da` | Reads/sets HRV config; uses `FUN_0083468e`. |
+| `0x39` | `hrvSetting` | `0x0082c9da` | Reads/sets HRV config; uses `FUN_0083468e` — see §3.21. |
 | `0x3a` | `sugarLipidsSetting` | `0x0082cc1e` | Sub `0x03`/`0x04` read/write sugar/lipids settings. |
 | `0x3b` | `uvSetting` / `touchControl` | `0x0082cbc8` | Read/write UV/touch config byte at `DAT_0082cfe8 + 8` — see §3.18. |
 | `0x43` | `readDetailSport` | `0x0082d034` | Reads detailed sport records by date range — see §3.6. |
@@ -780,6 +780,123 @@ feature a given header belongs to. The two-byte pattern
 `{opcode_byte, 0x00, 0x05, feature_id}` is the "long
 config" ack shape that all the §3.11 / §3.20 handlers
 use.
+
+### 3.21 Opcode `0x39` hrvSetting (`FUN_0082c9da`)
+
+The third and final member of the *shared-fragmenter
+trio* (after `0x37 pressureSetting` §3.20 and `0x7a muslim`
+§3.11). Structurally a near-clone of `0x37` — same
+two-phase response, same 4-byte header + 48-byte body
+shape, same 4-frame fragmented 49-byte payload via
+`FUN_0082c988` — with a different producer and header
+literal.
+
+#### Request layout
+
+| Byte | Field | Notes |
+|---:|---|---|
+| 0 | `0x39` | cmd (consumed by dispatcher) |
+| 1 | `slot_id` | day offset (current day = `slot_id == 0`) |
+| 2..14 | unused | — |
+
+Identical to `0x37 pressureSetting`. Only `slot_id == 0`
+(today) is on the happy path; the dispatcher routes every
+other sub-cmd to the default-slot ack.
+
+#### Behavior
+
+```c
+void FUN_0082c9da(int param_1) {
+    memset(stack, 0, 0x10);
+    memset(stack, 0, 0x34);
+    if (FUN_0083468e(param_1[1], &buf) == 0) {
+        rsp[0..1] = 0x39 | 0xFF;            // little-endian: byte 0 = 0x39, byte 1 = 0xFF
+        FUN_0082ebdc(rsp);                  // queue "no record" error
+    } else {
+        rsp[0..3] = 0x1E050039;             // little-endian: 0x39, 0x00, 0x05, 0x1E
+        FUN_0082ebdc(rsp);
+        buf[0] = param_1[1];                // slot id echo
+        FUN_0082c988(0x39, buf, 0x31);      // fragment 49 B into 4 frames
+    }
+}
+```
+
+Compare to §3.20's `0x37 pressureSetting`: the only byte that
+differs is the **cmd** in the header dword (`0x37` vs `0x39`);
+byte 3 (the feature id `0x1E`) is the *same* for both,
+suggesting that the watch's per-feature config table groups
+pressure and HRV together under feature id `0x1E` (30).
+
+#### `FUN_0083468e` — HRV record read
+
+```c
+uint FUN_0083468e(int slot_id, u32 *out) {
+    int month = FUN_0082840e();
+    hrv_rec *r = FUN_0082966e(        // look up by month offset
+        DAT_008347dc, *DAT_008347d8, month - slot_id
+    );
+    if (r == NULL) return 0;            // no record
+    *out = *r;                          // copy 4-byte header
+    for (int i = 0; i < 0x30; i++) {   // copy 48 B body
+        if (r->body[i] == -1 || r->body[i] == 0)
+            out->body[i] = 0;          // null-terminate
+        else
+            out->body[i] = r->body[i];
+    }
+    return 0x30;
+}
+```
+
+This is the **same body shape** as `FUN_008344fe` (§3.20) but
+with a different data-table pointer (`DAT_008347dc` /
+`*DAT_008347d8` instead of `DAT_00834648` / `*DAT_00834644`).
+Both producers look up records in a shared "per-day record
+table" indexed by month-offset from today, so the host can
+treat them uniformly: ask for "today" and get a 4-byte
+header + 48-byte body, or ask for a different day and get
+the same shape (or an error frame for an empty slot).
+
+#### Response layout (mirrors 0x37)
+
+Phase 1 — header:
+```
+byte  0: 0x39
+byte  1: 0x00
+byte  2: 0x05
+byte  3: 0x1E         (same feature id as 0x37!)
+byte  4..14: 0
+byte 15: additive checksum
+```
+
+Phase 2 — 4 frames via `FUN_0082c988(0x39, &buf, 0x31)`:
+```
+frame N (N=1..4):
+  byte  0: 0x39
+  byte  1: N
+  byte  2..14: 13 bytes of (1-byte slot id + 48-byte body)
+  byte 15: additive checksum
+```
+
+The slot id is at payload byte 0, and the 48-byte body starts
+at payload byte 1.
+
+#### Trio summary
+
+| | `0x37` pressureSetting | `0x39` hrvSetting | `0x7a` muslim |
+|---|---|---|---|
+| Header dword | `0x1E050037` | `0x1E050039` | `0x3C05007A` |
+| Feature id (byte 3) | `0x1E` (30) | `0x1E` (30) | `0x3C` (60) |
+| Producer | `FUN_008344fe` (real) | `FUN_0083468e` (real) | `FUN_00829c88` (stub) |
+| Body shape | 4 B header + 48 B body | same | same |
+| Fragmenter | `FUN_0082c988` | same | same |
+
+The fact that `0x37` and `0x39` share the same feature id
+(`0x1E`) while `0x7a` uses a different one (`0x3C`) implies
+the firmware has at least **two distinct long-config feature
+groups**: "sensor metrics" (pressure + HRV, both under
+`0x1E`) and "user-content" (muslim, under `0x3C`). The host
+SDK can use the feature id to decide which body-shape parser
+to apply when it receives a fragmented long-config response.
 
 ### 3.2 Opcode `0xc7` vibration / motor pattern player (`FUN_00832ebc`)
 
