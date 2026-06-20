@@ -246,8 +246,8 @@ Processes a circular queue of incoming 16-byte frames (`DAT_0082d440 + 0x14` rin
 | `0x15` | `readHeartRate` | `0x0082cf48` | Reads heart-rate record by index; returns `0x15` multi-frame data or `0xff15` error. |
 | `0x18` | `displayClock` | `0x0082ccb6` | Sets watch-face / clock display — see §3.5. |
 | `0x1e` | `realTimeHeartRate` | `0x0082d20c` | Sub `0x01` starts 60s HR measurement, `0x02` stops, `0x03` resets timer. |
-| `0x25` | `setSitLong` | `0x0082d284` | Calls sedentary config routines, acks `0x25`. |
-| `0x26` | `readSitLong` | `0x0082d258` | Reads sedentary config, sends `0x26` response. |
+| `0x25` | `setSitLong` | `0x0082d284` | Writes sedentary config — see §3.9. |
+| `0x26` | `readSitLong` | `0x0082d258` | Reads sedentary config — see §3.9. |
 | `0x2b` | `menstruation` (mixture container) | `0x0082ba54` | Sub `0x01`/`0x02` read/write mixture data; cycle-phase detector + notification sender — see §3.1. |
 | `0x2c` | `bloodOxygenSetting` | `0x0082d1c2` | Sub `0x01` reads SpO2 setting, `0x02` writes it. |
 | `0x37` | `pressureSetting` | `0x0082caa6` | Reads/sets pressure config; uses `FUN_008344fe`. |
@@ -857,6 +857,111 @@ A response frame queued just before the reset would be lost in the
 `FUN_0082ebdc` ring during the BLE re-init. The 16-byte request
 frame serves as the implicit ack — the host treats the absence of
 a follow-up as "reset accepted".
+
+### 3.9 Opcodes `0x25` setSitLong / `0x26` readSitLong — sedentary reminder config
+
+A read/write pair for the "long sit" (sedentary) reminder. The
+config is a 6-byte block at `DAT_0082aebc + 0x14`:
+
+| Off | Field | Notes |
+|---:|---|---|
+| 0 | `start_hour` (u8, 0..23) | hour-of-day the sedentary window begins |
+| 1 | `start_min` (u8, 0..59) | minute-of-hour the sedentary window begins |
+| 2 | `end_hour` (u8, 0..23) | hour-of-day the sedentary window ends |
+| 3 | `end_min` (u8, 0..59) | minute-of-hour the sedentary window ends |
+| 4 | `flags` (u8) | enabled / day-of-week bitmap (semantics carried over from the producer) |
+| 5 | `interval` (u8, ≤ 60) | nudge interval in minutes, clamped to 60 |
+
+#### `0x26` read — `FUN_0082d258` + `FUN_0082ae84`
+
+```c
+void FUN_0082d258() {
+    memset(&local_18, 0, 0x10);
+    FUN_0082ae84(&local_18);            // populate bytes 1..6
+    *(u8*)&local_18 = 0x26;             // byte 0 = cmd
+    local_18[15] = FUN_0082b0c4(&local_18, 0xf);
+    FUN_0082ebdc(&local_18);
+}
+```
+
+`FUN_0082ae84` reads the 6-byte block and BCD-encodes each of the
+first 4 fields via `FUN_0082ede2` (the same decimal-to-BCD used by
+the `0x43` per-hour dump). The response layout is therefore:
+
+```
+byte  0: 0x26                (cmd)
+byte  1: BCD(start_hour)
+byte  2: BCD(start_min)
+byte  3: BCD(end_hour)
+byte  4: BCD(end_min)
+byte  5: flags               (raw u8)
+byte  6: interval            (raw u8, ≤ 60)
+byte  7..14: 0
+byte 15: additive checksum
+```
+
+#### `0x25` write — `FUN_0082d284` + `FUN_0082adf4`
+
+```c
+void FUN_0082d284() {
+    FUN_0082adf4();               // validate + commit the 6-byte block
+    FUN_0082adca();               // mark "config dirty" + reset counter
+    FUN_0082b986(0x25, 0);        // 1-byte ack
+}
+```
+
+The 16-byte request frame carries the time fields at **non-standard
+positions** (4..9) and in **reverse order** from the read response:
+
+| Byte | Field | Notes |
+|---:|---|---|
+| 0 | `0x25` | cmd |
+| 1..3 | unused | (callers may leave 0) |
+| 4 | BCD end_min | (reverse order vs read response) |
+| 5 | BCD end_hour | |
+| 6 | BCD start_min | |
+| 7 | BCD start_hour | |
+| 8 | `interval` | clamped to `0x3c` (60) if `value - 10 > 0x50` (i.e. > 90) |
+| 9 | `flags` | raw u8 |
+| 10..14 | unused | |
+| 15 | checksum | additive (per §3) |
+
+`FUN_0082adf4` copies the 16-byte request to a stack frame, BCD-decodes
+the four time fields with `FUN_0082edc4`, and validates each:
+
+```c
+if (start_hour < 0x18 && start_min < 0x3c &&
+    end_hour   < 0x18 && end_min   < 0x3c) {
+    state[0] = start_hour;        // binary, not BCD
+    state[1] = start_min;
+    state[2] = end_hour;
+    state[3] = end_min;
+    state[4] = flags;             // raw from req[9]
+    state[5] = interval;          // clamped
+    if (memcmp(state, DAT_0082aebc + 0x14, 6) != 0) {
+        memcpy(DAT_0082aebc + 0x14, state, 6);
+        *(u16*)(DAT_0082aeb8 + 2) = 0;   // reset nudge counter
+    }
+}
+```
+
+If the time fields fail validation, the write is silently dropped
+(no ack, no NAK) — the host must ensure the BCD fields are valid.
+`FUN_0082adca` then sets `*DAT_0082aeb8 = 1` (a "sedentary-active"
+flag the main-loop tick reads) and resets the 16-bit nudge counter
+at `*(DAT_0082aeb8 + 2)`.
+
+#### Read/write order asymmetry
+
+The write request encodes the time fields at bytes 4..9 in
+*end-first* order, but the read response surfaces them at bytes
+1..4 in *start-first* order. This is the same "input is reverse of
+output" pattern that appears in the other "config" opcodes
+(`0x37` pressure, `0x39` hrv, `0x7a` muslim) and is most likely a
+quirk of how the wire format was originally specified for the
+H59MA SDK; the host code that ships in `lib/core/protocol/`
+should preserve the asymmetry rather than trying to "fix" it on
+either side.
 
 ### Opcode `0xa1` factory/test mode (`FUN_00827f5c`)
 
