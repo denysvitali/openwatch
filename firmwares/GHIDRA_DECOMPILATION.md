@@ -4108,6 +4108,134 @@ frame. Inlining `0xfe` lets the dispatcher pass the duration
 *directly* to `FUN_00844214` without an intermediate
 indirection through `FUN_0082be64`.
 
+### 8.14 0xc1 deferred long-fragmented response (inline in `FUN_0082c944`)
+
+The "I will eventually send a long fragmented response" ack.
+Like `0xfe` (§8.13), this opcode is **inline in the
+dispatcher** — but unlike `0xfe`, it does ship an immediate
+1-byte ack frame before the long payload arrives.
+
+#### Dispatcher body
+
+```c
+case 0xc1:
+    FUN_008337fa(DAT_0082caf0);          // start async HR read
+    FUN_0082b938(*param_1, DAT_0082caf0, 1);  // send 1-byte ack
+    return;
+```
+
+The two calls are interleaved: `FUN_008337fa(DAT_0082caf0)`
+kicks off an asynchronous HR measurement that will fill
+`DAT_0082caf0` later via the deferred ring worker; the
+`FUN_0082b938` call sends a 1-byte fragmented frame right
+now, carrying `*param_1` (the cmd byte) at byte 0 and a
+checksum at byte 15 — the rest of the frame is
+zero-padded.
+
+#### `FUN_008337fa` — async-read initiator
+
+```c
+void FUN_008337fa(undefined1 *out_ptr, ..., undefined4 param_4) {
+    state = DAT_00833858;
+    flag  = state + 0x1c;
+    if (!(*flag & 1)) {                     // not already pending
+        *flag = 0;  *(state + 0x20) = 0;  *(state + 0x24) = 0;
+        if (*DAT_0083389c != 1 && !FUN_00828af4()) {  // ring idle, HR not running
+            FUN_0083371e(2);                       // start HR measurement mode 2
+            FUN_00829c24(DAT_00833a1c, DAT_00833a18,
+                         DAT_00833a14, 1, param_4); // queue work item
+            *flag |= 1;
+            *(state + 0x20) = out_ptr;             // store callback pointer
+            return;
+        }
+        // ring busy OR HR running: mark "needs retry"
+        *(DAT_00833858 + 0xf) = 1;
+        if (out_ptr) *out_ptr = 0;
+    } else {
+        // already pending — update callback pointer
+        *(state + 0x24) = out_ptr;
+    }
+}
+```
+
+The helper is a **debounced HR read initiator**:
+1. If no read is already pending (`!(*flag & 1)`):
+   * Clear the state struct.
+   * If the deferred ring is idle *and* the HR step counter
+     is not busy (`FUN_00828af4()` — same gate used by
+     `0x08 findDevice` and `0x77 phoneSport`), start the HR
+     measurement (`FUN_0083371e(2)` — mode 2 = one-shot
+     single-record read) and queue a worker item via
+     `FUN_00829c24`.
+   * Otherwise mark a "needs-retry" flag at `+0xF` and
+     return a zero byte via the out-pointer (if non-null).
+2. If a read is already pending, just update the
+   out-pointer so the *next* read uses the latest caller.
+
+The 0x1C pending flag and the 0x24 secondary out-pointer
+let the host call `0xc1` multiple times in quick succession;
+only the first call actually starts an HR read, and the
+later calls latch their out-pointer until the worker fires.
+
+#### Deferred-ring worker output
+
+When the worker eventually fires, it pushes a fragmented
+response onto the 0xFEE7 notify ring:
+
+```
+byte  0: 0xC1                (cmd echo)
+byte  1..N: fragmented HR data (13 B per chunk, N+1 frames)
+```
+
+The fragment count depends on how long the HR read takes —
+typically 2..4 frames for a normal one-shot read. The
+`FUN_0082c988` 13-byte-chunk streamer (§3.11) handles the
+fragmentation.
+
+#### Why inline in the dispatcher
+
+Like `0xfe` (§8.13), `0xc1` is inline because the deferred
+ring can't carry the "you need to also call `FUN_0082b938`"
+second-call requirement. The dispatcher needs to issue two
+distinct worker calls (`FUN_008337fa` to start the read,
+`FUN_0082b938` to send the ack), and putting them inline
+keeps them in the right order without the deferred-ring
+worker needing to know about the second call.
+
+#### Pair with `0x15 readHeartRate` (Channel-A)
+
+`0xc1` is the 0xFEE7 vendor variant of `0x15` (§3.12). Both
+start an async HR measurement and emit a fragmented payload
+on completion. The differences:
+
+| | `0x15` (Channel-A) | `0xc1` (0xFEE7) |
+|---|---|---|
+| Trigger | dispatcher calls `FUN_0082cf48` directly | dispatcher calls `FUN_008337fa` + `FUN_0082b938` |
+| Read mode | `FUN_008279c4(idx)` — month-index | `FUN_0083371e(2)` — one-shot |
+| Ack | none — payload frames only | 1-byte ack frame sent immediately |
+| State machine | per-call fresh state | debounced via `flag` + secondary out-pointer |
+
+A host that wants to poll HR records should use `0x15` (which
+returns the full 292-byte record); a host that wants
+notification-only push (no ack, just data) should use
+`0xc1`.
+
+#### Why the dispatcher's `FUN_0082b938(*param_1, ...)` uses `length = 1`
+
+The second call sends a **1-byte fragmented response** — the
+host sees just `[*param_1, 0, 0, ..., 0, cksum]`. The `1`
+argument is the length, not a byte value. The 13-byte-chunk
+streamer fills the frame with `[cmd, 0, ..., 0, cksum]` and
+the fragmented HR data comes in *subsequent* frames
+(emitted by the deferred-ring worker via `FUN_0082c988`).
+
+The host SDK should:
+1. Read the immediate 1-byte ack (`cmd = 0xc1`).
+2. Wait for the fragmented HR data to arrive on the
+   notify ring.
+3. Reassemble the chunks using the standard
+   `[cmd, seq, 13 data bytes, cksum]` shape.
+
 ---
 
 ## 10. Open Questions / Next Steps
