@@ -2543,7 +2543,7 @@ polling the link does not bump the timer.
 | `0x2b, 0x37, 0x38, 0x3a, 0x3b, 0x43 'C', 0x48 'H', 0x72, 0x7a, 0x7d, 0x81, 0xa1, 0xc6, 0xc7 'D', 0xff` | Defer to the deferred-command ring | `FUN_0082be64` |
 | `0x36` | Heart-rate related read/set | `FUN_0082c112` | see §8.8 |
 | `0x39` | HRV setting | `FUN_0082c9da` |
-| `0x3c` | Fixed capability block `[0x3c,0,0x40,0xa0,0x20,…]` | `FUN_0082c50e` |
+| `0x3c` | Fixed capability block `[0x3c,0,0x40,0xa0,0x20,…]` | `FUN_0082c50e` | see §8.12 |
 | `0x3e` | SpO2 / blood-oxygen related read/set | `FUN_0082c550` |
 | `0x48 'H'` | Handshake — 15-byte device-info block | `FUN_0082bf40` | see §8.2 |
 | `0x50 'P'` | **Inline** alert: `FUN_0082994c(0x14, 0x10, 1, 0x19)` + `FUN_0082a5c8(8)` (motor + UI) | inline |
@@ -2667,7 +2667,7 @@ Immediate / explicitly routed opcodes:
 | Opcode | Handler | Notes |
 |---|---|---|
 | `0x36` | `FUN_0082c112` | Heart-rate related read/set — see §8.8 |
-| `0x3c` | `FUN_0082c50e` | Returns fixed capability block `[0x3c,0,0x40,0xa0,0x20,...]` |
+| `0x3c` | `FUN_0082c50e` | Returns fixed capability block `[0x3c,0,0x40,0xa0,0x20,...]` — see §8.12 |
 | `0x3e` | `FUN_0082c550` | SpO2 / blood-oxygen related read/set |
 | `0x48` `'H'` | `FUN_0082bf40` | Handshake response — sends 15-byte device-info block — see §8.2 |
 | `0x50` `'P'` | inline | Calls `FUN_0082994c(0x14,0x10,1,0x19)` + `FUN_0082a5c8(8)` (alert/motor) |
@@ -3793,6 +3793,112 @@ can write `0` to `DAT_0082caec[3]` via `0xC5 0x00` and the
 `0x50` / `0x51` opcodes will silently no-op (the
 sub-cmd-byte guard will still pass but the vendor alert
 helper will be a no-op via the dispatcher gate).
+
+### 8.12 0x3c capability block (`FUN_0082c50e`)
+
+The "what features does this watch support" answer. Sends
+a **fully static 16-byte response** that contains four
+feature IDs scattered across the frame body. The handler
+ignores the request entirely — `0x3c` is fire-and-forget.
+
+#### Behavior
+
+```c
+void FUN_0082c50e() {
+    rsp[0]  = 0x3c;        // cmd
+    rsp[1]  = 0x00;
+    rsp[2]  = 0x40;        // feature ID 1
+    rsp[3]  = 0x00;
+    rsp[4..6]  = 0;
+    rsp[7]  = 0xa0;        // feature ID 2 (split across bytes 7..8?)
+    rsp[8..10] = 0;
+    rsp[11] = 0x20;        // feature ID 3
+    rsp[12..14] = 0;
+    rsp[15] = FUN_0082b0c4(rsp, 0xf);
+    FUN_0082ebdc(rsp);
+}
+```
+
+The handler does *not* read `param_1` at all — there is no
+request payload for `0x3c`. The four non-zero bytes
+(`0x3c`, `0x40`, `0xa0`, `0x20`) are the static "feature
+flags" returned on every call.
+
+#### Response layout (16-byte static block)
+
+```
+byte  0: 0x3C                (cmd)
+byte  1: 0x00
+byte  2: 0x40                (feature ID 1)
+byte  3: 0x00
+byte  4: 0x00
+byte  5: 0x00
+byte  6: 0x00
+byte  7: 0xA0                (feature ID 2 — high byte)
+byte  8: 0x00                (feature ID 2 — low byte = 0?)
+byte  9: 0x00
+byte 10: 0x00
+byte 11: 0x20                (feature ID 3)
+byte 12: 0x00
+byte 13: 0x00
+byte 14: 0x00
+byte 15: additive checksum
+```
+
+Note: the bytes between the non-zero entries are **all
+zero** — the firmware does not populate any "feature
+metadata" beyond the four flags. The host SDK is expected
+to recognise `0x40` / `0xA0` / `0x20` as opaque feature
+identifiers (they are likely vendor-specific feature codes
+that match the H59MA SDK's `enableXxx` flags).
+
+#### Why a static block (not a runtime read)
+
+`0x3c` is the only 0xFEE7 opcode whose response is **hard-
+coded** in the firmware binary. All other opcode handlers
+either compute the response at runtime (`0x48`, `0x61`),
+look up state from RAM (`0xc5`, `0xc8`, `0xc9`), or call
+into a vendor function table (`0xce`). The static nature
+suggests:
+
+* The capability block is *product-line wide*: every H59MA
+  v14 firmware ships with the same capabilities, so the
+  block can be baked into the ROM.
+* The vendor doesn't expect the watch model or feature set
+  to change between firmware revisions — when it does, the
+  firmware is rebuilt and the static block is regenerated.
+
+#### `param_1` ignored
+
+The handler signature is `void FUN_0082c50e()` (no params),
+even though the dispatcher passes `param_1` (the request
+frame). The decompiler optimises the unused param out
+entirely. A host that sends a *non-empty* request still
+gets back the same static block — the `0x40`, `0xa0`,
+`0x20` flags are unconditionally emitted.
+
+#### Pair with `0x61 'a' status` (§8.3)
+
+`0x3c` and `0x61 'a'` are the two "what does this watch
+do" answers. `0x3c` answers once per connection with the
+**static feature set**; `0x61 'a'` answers continuously
+with the **live status** (battery %, daily counters). A
+host that wants both can:
+
+1. Send `0x3c` after `0x48` (handshake) to learn the
+   supported features once.
+2. Poll `0x61 'a'` at low rate for live battery / counter
+   updates.
+
+#### Relation to the §3 "0x3c capability block"
+
+`0x3c` is also a *Channel-A* opcode (the §3 dispatcher
+at `FUN_0082d2dc` does not route `0x3c`; the byte 0x3c
+falls into the `0x39 < uVar2 < 0x43` chain and reaches
+`FUN_0082c50e`). So `0x3c` is in fact a *shared* opcode
+between Channel-A and 0xFEE7 — the dispatcher for both
+tables lands on the same handler. The host SDK can call it
+from either transport.
 
 ---
 
