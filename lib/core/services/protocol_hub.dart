@@ -41,11 +41,7 @@ class ProtocolHub {
     // bridge. We forward it as a synthetic firmware event 1 (notification).
     _pushSub = _dispatcher.onPushMsg.listen((push) {
       final id = _ancsClientId ?? _ensureAncsClient();
-      _ancs.onFirmwareEvent(
-        1,
-        id,
-        _encodePushForAncs(push),
-      );
+      _ancs.onFirmwareEvent(1, id, _encodePushForAncs(push));
     });
 
     // Channel-B OTA replies (`0x01..0x05`) are surfaced via the parser; a

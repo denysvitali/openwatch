@@ -266,10 +266,7 @@ class WatchManager extends ChangeNotifier {
   ProtocolHub get hub => _hub;
 
   void _onAncsEvent(Object e) {
-    AppLog.instance.debug(
-      'watch',
-      'ancs event: ${e.runtimeType}',
-    );
+    AppLog.instance.debug('watch', 'ancs event: ${e.runtimeType}');
   }
 
   @override
