@@ -2553,7 +2553,7 @@ polling the link does not bump the timer.
 | `0x69 'i'` | Multi-step mode control (start/stop/cancel) | `FUN_0082c2f4` | see §8.5 |
 | `0x6a 'j'` | Continuation of `0x69` mode control | `FUN_0082c1e2` |
 | `0x7b, 0xb0, 0xc2, 0xcc, 0xf0, 0xf1` | No-op (early return) | — |
-| `0x90` | Echo `[0x90]` | `FUN_00827ad2` |
+| `0x90` | Echo `[0x90]` (self-marker) | `FUN_00827ad2` | see §8.6 |
 | `0x91` | Echo `[0x91]` | `FUN_00827aee` |
 | `0x92` | (handler) | `FUN_00827b14` |
 | `0x93` | (handler) | `FUN_00827c4a` |
@@ -3133,6 +3133,87 @@ multi-frame transaction: `0x69` *starts* the mode,
 0xFEE7 16-byte frame cannot carry the full per-mode state;
 `0x6a` re-reads `DAT_0082c578` and pushes the next-step
 data on the notify ring.
+
+### 8.6 0x90 `'.'` self-marker echo (`FUN_00827ad2`)
+
+The smallest 0xFEE7 echo handler (27 bytes). Sends a
+16-byte notify frame with `0x90` at both byte 0 AND byte
+15 — a **self-marker pattern** identical in shape to the
+`0x96` reset-state response (§8.4). The handler does *not*
+compute an additive checksum; the byte-15 slot is reserved
+for the second `0x90` marker.
+
+#### Behavior
+
+```c
+void FUN_00827ad2() {
+    rsp[0]  = 0x90;            // cmd
+    rsp[12] = 0x90;            // byte 12 (high byte of u32 at offset 12)
+    rsp[15] = 0;               // (byte 15 of u32 at offset 12 → 0x90 from
+                               //  the high byte; see note below)
+    FUN_0082ebdc(rsp);
+}
+```
+
+The handler writes:
+- `local_18 = 0x90` → bytes 0..3 of the frame are `[0x90, 0, 0, 0]`.
+- `local_c = 0x90000000` → bytes 12..15 of the frame are
+  `[0x00, 0x00, 0x00, 0x90]` (little-endian high-byte at offset 15).
+- Bytes 4..11 are 0 (from the `local_14 = local_10 = 0`
+  initialisations).
+
+So the wire frame is:
+
+```
+byte  0: 0x90        (cmd)
+byte  1..11: 0
+byte 12..14: 0
+byte 15: 0x90        (intentional marker — NOT a checksum)
+```
+
+The host verifies by `byte 0 == 0x90 && byte 15 == 0x90`,
+**not** by additive checksum. This is the second handler
+in the table (after `0x96` §8.4) to use the byte-15 slot
+as a marker rather than a hash.
+
+#### Why no additive checksum
+
+Same reason as `0x96 reset-state` (§8.4): the byte-15 slot
+is *already used* as the second `0x90` marker. The host SDK
+that consumes `0x90` should special-case this opcode to
+read bytes 0 and 15 as marker bits rather than the usual
+`cmd + checksum` pair.
+
+#### Pair with `0x91` (proper echo)
+
+The adjacent `0x91` handler (`FUN_00827aee`) is the
+"normal" version of the same idea — a simple echo of the
+opcode with a *real* additive checksum:
+
+```c
+void FUN_00827aee() {
+    rsp[0]  = 0x91;
+    rsp[15] = FUN_0082b0c4(rsp, 0xf);   // additive sum of bytes 0..14
+    FUN_0082ebdc(rsp);
+}
+```
+
+So `0x90` (self-marker) and `0x91` (checksum-echo) are
+*deliberately different*: `0x90` lets the host cheaply
+detect "watch is alive" without paying for a checksum
+computation, while `0x91` is the host SDK's primary
+echo command that round-trips through the standard
+§3 "Common response path" checksum.
+
+#### Adjacent `0x92` is a no-op
+
+For completeness, `0x92` (`FUN_00827b14`) is an empty
+function (decompiles to `return;`). The handler is wired
+into the `0xFEE7` dispatcher but does nothing — the
+opcode is reserved for a future vendor-specific feature
+that v14 does not implement. A host sending `0x92` will
+*not* receive any response (the dispatcher routes it but
+the handler is empty).
 
 ---
 
