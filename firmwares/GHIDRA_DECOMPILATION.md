@@ -250,7 +250,7 @@ Processes a circular queue of incoming 16-byte frames (`DAT_0082d440 + 0x14` rin
 | `0x26` | `readSitLong` | `0x0082d258` | Reads sedentary config — see §3.9. |
 | `0x2b` | `menstruation` (mixture container) | `0x0082ba54` | Sub `0x01`/`0x02` read/write mixture data; cycle-phase detector + notification sender — see §3.1. |
 | `0x2c` | `bloodOxygenSetting` | `0x0082d1c2` | Sub `0x01` reads SpO2 setting, `0x02` writes it — see §3.10. |
-| `0x37` | `pressureSetting` | `0x0082caa6` | Reads/sets pressure config; uses `FUN_008344fe`. |
+| `0x37` | `pressureSetting` | `0x0082caa6` | Reads/sets pressure config; uses `FUN_008344fe` — see §3.20. |
 | `0x38` | `pressure` | `0x0082ca54` | Sub `0x01` reads pressure value, else sets pressure unit — see §3.17. |
 | `0x39` | `hrvSetting` | `0x0082c9da` | Reads/sets HRV config; uses `FUN_0083468e`. |
 | `0x3a` | `sugarLipidsSetting` | `0x0082cc1e` | Sub `0x03`/`0x04` read/write sugar/lipids settings. |
@@ -650,6 +650,136 @@ The 0x0E handler never emits a 0x0E response — the response
 empty). A host that sends `0x0E 0x00` and receives nothing
 within the BLE link timeout should treat the queue as
 exhausted.
+
+### 3.20 Opcode `0x37` pressureSetting (`FUN_0082caa6`)
+
+Structurally a *clone* of the `0x7a muslim` handler (§3.11) —
+same two-phase response (header frame + 4-frame fragmented
+49-byte payload), same 13-byte-chunk fragmenter
+`FUN_0082c988`. The two differences are:
+
+* The producer `FUN_008344fe` is a **real implementation** (not
+  a stub like `FUN_00829c88`).
+* The header literal dword is `0x1E050037` (LE), not
+  `0x3C05007A`; byte 3 is `0x1E` (30) rather than `0x3C` (60).
+  The host can use this byte to disambiguate the two
+  long-response opcodes if the cmd byte is lost in a
+  fragmentation boundary.
+
+#### Request layout
+
+| Byte | Field | Notes |
+|---:|---|---|
+| 0 | `0x37` | cmd (consumed by dispatcher) |
+| 1 | `slot_id` | day offset (current day = `slot_id == 0`) |
+| 2..14 | unused | — |
+
+Only `slot_id == 0` (today) is supported by the "happy path"
+in v14 — the dispatcher in §3 routes every non-zero sub-cmd
+to the default-slot (`FUN_0082cede` in 0x7a's case, the same
+here). Sub-`0x01` etc. are not implemented; the only valid
+host request is `0x37 0x00` (read today's pressure setting).
+
+#### Behavior
+
+```c
+void FUN_0082caa6(int param_1) {
+    memset(stack, 0, 0x10);          // clear 16 B response
+    memset(stack, 0, 0x34);          // clear 52 B pressure data buffer
+    if (FUN_008344fe(param_1[1], &buf) == 0) {
+        // No record for this slot: send error
+        rsp[0..1] = 0x37 | 0xFF;     // little-endian: byte 0 = 0x37, byte 1 = 0xFF
+        FUN_0082ebdc(rsp);           // queue the error frame
+    } else {
+        // Record found: send header + 4-frame fragmented payload
+        rsp[0..3] = 0x1E050037;      // little-endian: 0x37, 0x00, 0x05, 0x1E
+        FUN_0082ebdc(rsp);
+        buf[0] = param_1[1];         // slot id echo
+        FUN_0082c988(0x37, buf, 0x31);   // fragment 49 B into 4 frames
+    }
+}
+```
+
+#### `FUN_008344fe` — pressure record read
+
+```c
+uint FUN_008344fe(int slot_id, u32 *out) {
+    int month = FUN_0082840e();           // current month
+    pressure_rec *r = FUN_0082966e(       // look up by month offset
+        DAT_00834648, *DAT_00834644, month - slot_id
+    );
+    if (r == NULL) return 0;              // no record: 0 means "empty"
+    *out = *r;                            // copy 4-byte header
+    for (int i = 0; i < 0x30; i++) {     // copy 48 B body
+        if (r->body[i] == -1 || r->body[i] == 0)
+            out->body[i] = 0;            // null-terminate
+        else
+            out->body[i] = r->body[i];
+    }
+    return 0x30;                          // body length
+}
+```
+
+So the pressure record is 4 bytes of header + 48 bytes of
+string-like body, stored in a record table indexed by
+`month_offset` from today. The body is *null-terminated in
+the response* even when the source record is `-1`-padded
+(presumably to keep the body length consistent across
+uninitialised records).
+
+#### Response layout (mirrors 0x7a)
+
+Phase 1 — header:
+```
+byte  0: 0x37
+byte  1: 0x00
+byte  2: 0x05         (5-dword payload size? see §3.11)
+byte  3: 0x1E         (the "feature id" — 30 instead of muslim's 60)
+byte  4..14: 0
+byte 15: additive checksum
+```
+
+Phase 2 — 4 frames via `FUN_0082c988(0x37, &buf, 0x31)`:
+```
+frame N (N=1..4):
+  byte  0: 0x37
+  byte  1: N
+  byte  2..14: 13 bytes of (1-byte slot id + 48-byte body)
+  byte 15: additive checksum
+```
+
+The slot id is at payload byte 0 (echo of `req[1]`), and the
+48-byte body starts at payload byte 1.
+
+#### Comparison with `0x7a muslim`
+
+| | `0x37` pressureSetting | `0x7a` muslim |
+|---|---|---|
+| Producer | `FUN_008344fe` (real) | `FUN_00829c88` (stub) |
+| Header dword | `0x1E050037` | `0x3C05007A` |
+| Body shape | 4 B header + 48 B body | (same) |
+| Fragment count | 4 | 4 |
+| Slot-id echo at payload byte 0 | yes | yes |
+
+Both opcodes are routed through `FUN_0082be64` (the deferred
+ring) by the Channel-A dispatcher, so a host that issues
+`0x37` and `0x7a` in quick succession will see both
+fragments come back interleaved on the notify ring — the
+host should re-sync on each `byte 0 == 0x37` or `0x7A`
+header to separate the two streams.
+
+#### Why 30 (0x1E) and not 60 (0x3C) for the feature id
+
+The `0x3C` in `0x7a muslim`'s header and the `0x1E` in
+`0x37 pressureSetting`'s header are likely **indexes into
+the same per-feature config table**. The dispatcher (and
+the long-config shared fragmenter from §3.11) does not
+*interpret* these bytes — they are producer-specific
+identifiers that the host-side SDK uses to know which
+feature a given header belongs to. The two-byte pattern
+`{opcode_byte, 0x00, 0x05, feature_id}` is the "long
+config" ack shape that all the §3.11 / §3.20 handlers
+use.
 
 ### 3.2 Opcode `0xc7` vibration / motor pattern player (`FUN_00832ebc`)
 
