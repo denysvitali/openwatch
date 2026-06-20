@@ -201,6 +201,114 @@ The 6 version string slots are the *only* string literals referenced
 in this dispatcher; the response bytes for cmd `0x03` are exactly the
 constants visible in `firmwares/_re/strings-mining/`.
 
+#### 2.8 Activity summary (`FUN_00833bbc`)
+
+The Channel-B analog of the Channel-A `0x43 readDetailSport`
+(§3.6) — same "dump per-day records for last N days"
+shape, but for the **activity tracker** (`vc_SportMotion`
+library) instead of the per-hour sport detail.
+
+```c
+void FUN_00833bbc(int n_days) {
+    if (n_days > 2) n_days = 2;            // cap at "today + yesterday"
+    if (n_days < 0) return;               // negative -> no response
+    int month = FUN_0082840e();
+    int out_offset = 0;
+    for (int d = n_days; d >= 0; d--) {
+        uint8_t *entry = FUN_00833b42(month - d, &buf);  // read day d
+        if (entry != NULL) {
+            rsp[out_offset] = (char)d;
+            memcpy(rsp + out_offset + 1, entry, 0x30);
+            out_offset += 0x31;
+        }
+    }
+    FUN_0082ebdc(0x2A, rsp, out_offset);  // send via §2.0 frame builder
+}
+```
+
+The handler:
+* Clamps `n_days` to `[0, 2]` (only "today" and "yesterday"
+  are reported; older days return nothing).
+* Calls `FUN_00833b42(month - d, &buf)` for each day — this
+  helper looks up the day in the **activity tracker state
+  buffer** at `DAT_00833c44` (the activity tracker is
+  separate from the sport-detail buffer at `DAT_0082d440`).
+* Builds a **49-byte record per day** (1 byte day-offset +
+  48 bytes body = `0x31` bytes).
+* Sends via `FUN_0082ebdc(0x2A, rsp, n)` — the standard
+  §2.0 frame builder.
+
+#### `FUN_00833b42` — per-day activity reader
+
+```c
+uint FUN_00833b42(uint day, u16 *out) {
+    activity_rec *r = FUN_0082966e(DAT_00833c50,
+                                    *(DAT_00833c44 + 8),
+                                    day, ...);
+    memset(out, 0, 0x34);                  // 52 B cleared
+    if (r == NULL) {
+        if (*(u16*)(DAT_00833c44 + 0xE) != day) return 0;
+        // no record, but cache matches: return zeroed
+    } else {
+        // copy record (with FF→0 padding for uncompressed bytes)
+        for (int i = 0; i < 0x18; i++) {
+            if (r->body[2*i + 4] == -1) out->body[2*i + 4] = 0;
+            else                              out->body[2*i + 4] = r->body[2*i + 4];
+        }
+        if (*(u16*)(DAT_00833c44 + 0xE) != day) return 1;  // warning
+    }
+    // copy the 2 "step type" bytes from the activity state
+    out[0] = *(u16*)(DAT_00833c44 + 0x10);
+    out[1] = *(u16*)(DAT_00833c44 + 0x12);
+    return 1;
+}
+```
+
+Notable details:
+* The activity tracker uses a **`0x34` byte** record (52 B) —
+  different from the 12-B per-hour sport record. The extra
+  bytes are presumably the per-day step count, distance, and
+  calorie totals.
+* The `0xFF → 0x00` padding on uncompressed bytes is the
+  same compression-trick used by the sleep record parser
+  (§2.4 / §2.5) — a byte of `0xFF` means "no data, treat as
+  zero" so the host can read the body as a fixed 48-byte
+  array.
+* The function falls back to the cache (`DAT_00833c44 +
+  0xE` = last-day-read index) if no fresh record exists, so
+  the host still gets a (zeroed) response for "yesterday"
+  even when the day's data hasn't been written yet.
+
+#### Why cap at 2 days
+
+The §2.5 sleep record parser returns up to 10 days; the
+§2.8 activity summary is **capped at 2 days** (today +
+yesterday). The likely reason: the activity record is
+**52 B per day** (vs the sleep record's 30 B), so 10 days
+would be 520 B — too long for a single 16-byte fragmented
+Channel-B frame. The 2-day cap keeps the total payload under
+100 B, which fits in 7 Channel-B frames.
+
+The host SDK that consumes `0x2a` should:
+* Parse the response as `[day_offset_0][48 B body 0][day_offset_1][48 B body 1]` (variable length).
+* Stop reading at the first byte of value `0x00` (no more days).
+* Treat `0xFF` bytes in the body as `0x00` (same compression-trick).
+
+#### Pair with Channel-A `0x43 readDetailSport` (§3.6)
+
+`0x43` and `0x2a` are the per-day dump pair for two different
+data sources:
+* `0x43` (Channel-A) — per-hour sport detail (24 slots × 12 B
+  = 288 B) from the `vc_SportMotion_Int` library.
+* `0x2a` (Channel-B) — per-day activity summary (2 slots ×
+  52 B = 104 B) from the same library but a different record
+  type.
+
+A host that wants both should poll `0x43` *after* receiving an
+`0x2a` ack (the `0x2a` response is *shorter* than `0x43` —
+2 days vs 24 hours — so it's the cheaper "what days have
+data?" probe).
+
 ### CRC-16/MODBUS (`FUN_0082f114`)
 
 Disassembly confirms standard MODBUS CRC:
