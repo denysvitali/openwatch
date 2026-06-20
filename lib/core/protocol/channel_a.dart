@@ -225,16 +225,41 @@ class ChannelADispatcher {
     _time.add(t);
   }
 
-  /// `dnd` (0x06): sub `0x01` reads state (`pl[1]`), sub `0x02` writes state.
+  /// `dnd` (0x06): sub `0x01` reads state, sub `0x02` writes state.
+  ///
+  /// The read response (per `FUN_0082a7e4`, see
+  /// `GHIDRA_DECOMPILATION.md` §3.7) is:
+  ///   `pl[0] = 0x01` (sub-opcode echo)
+  ///   `pl[1] = 0x01` (on) or `0x02` (off); `0x00` is reserved ("always-on")
+  ///   `pl[2..5] = startHour, startMinute, endHour, endMinute`
+  ///
+  /// The write ack (`0x06 0x02`) echoes the request — enabled flag is at
+  /// `pl[2]` per the write-path packing, with `pl[3..6]` holding the
+  /// time window fields.
   void _decodeDnd(Uint8List pl) {
     if (pl.isEmpty) return;
     final sub = pl[0];
-    if (sub == 0x01 && pl.length >= 2) {
-      _dnd.add(DndState(enabled: pl[1] == 1));
-    } else if (sub == 0x02) {
-      // Ack: just confirms the write; report enabled based on pl[1] if present.
-      final enabled = pl.length >= 2 ? pl[1] == 1 : true;
-      _dnd.add(DndState(enabled: enabled));
+    if (sub == 0x01 && pl.length >= 6) {
+      _dnd.add(
+        DndState(
+          enabled: pl[1] == 0x01,
+          startHour: pl[2],
+          startMinute: pl[3],
+          endHour: pl[4],
+          endMinute: pl[5],
+        ),
+      );
+    } else if (sub == 0x02 && pl.length >= 6) {
+      // Write ack mirrors the request layout (enable at pl[2]).
+      _dnd.add(
+        DndState(
+          enabled: pl[2] == 0x01,
+          startHour: pl[3],
+          startMinute: pl[4],
+          endHour: pl[5],
+          endMinute: pl.length > 6 ? pl[6] : 0,
+        ),
+      );
     }
   }
 
@@ -593,8 +618,27 @@ class ChannelAFrame {
 // ---------------------------------------------------------------------------
 
 class DndState {
-  const DndState({required this.enabled});
+  const DndState({
+    required this.enabled,
+    this.startHour = 0,
+    this.startMinute = 0,
+    this.endHour = 0,
+    this.endMinute = 0,
+  });
   final bool enabled;
+
+  /// Do-Not-Disturb window start (hour-of-day, 0..23).
+  final int startHour;
+
+  /// Do-Not-Disturb window start minute (0..59).
+  final int startMinute;
+
+  /// Do-Not-Disturb window end (hour-of-day, 0..23). May be < [startHour]
+  /// when the window crosses midnight.
+  final int endHour;
+
+  /// Do-Not-Disturb window end minute (0..59).
+  final int endMinute;
 }
 
 class HeartRateRecord {

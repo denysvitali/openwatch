@@ -93,6 +93,33 @@ void main() {
       expect(s.enabled, isTrue);
     });
 
+    test('DND read decodes enable byte + 4-byte time window', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final got = d.onDnd.first;
+      // pl[0]=sub(0x01) pl[1]=enable(0x01 on) pl[2..5]=window (22:00..07:30).
+      final f = Codec.buildChannelA(OpA.dnd, [0x01, 0x01, 22, 0, 7, 30]);
+      t.inA.add(f);
+      final s = await got.timeout(const Duration(seconds: 1));
+      expect(s.enabled, isTrue);
+      expect(s.startHour, 22);
+      expect(s.startMinute, 0);
+      expect(s.endHour, 7);
+      expect(s.endMinute, 30);
+    });
+
+    test('DND read decodes enable byte 0x02 as disabled', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final got = d.onDnd.first;
+      final f = Codec.buildChannelA(OpA.dnd, [0x01, 0x02, 0, 0, 0, 0]);
+      t.inA.add(f);
+      final s = await got.timeout(const Duration(seconds: 1));
+      expect(s.enabled, isFalse);
+    });
+
     test('phoneSport start/finish (sub 0x01) decodes to startFinish', () async {
       final t = _StubTransport();
       final d = ChannelADispatcher(t);
