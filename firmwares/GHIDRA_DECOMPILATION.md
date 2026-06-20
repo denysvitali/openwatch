@@ -438,7 +438,112 @@ so the host gets the freshest data. Without this branch, a
 mid-day poll would return zeroed summary data even when the
 watch has full sleep data in RAM.
 
----
+#### 2.10 Detailed sleep (`FUN_0082f50c`)
+
+The "full per-segment sleep curve" command. Returns a
+**289-byte record** (1 state byte + 288 B body) — the same
+size as the §3.6 `0x43 readDetailSport` per-day record.
+Like `0x11` (§2.9), this is a per-day dump but with **24
+× 12 B hourly slots** instead of the 100 B summary.
+
+```c
+void FUN_0082f50c() {
+    int today = FUN_0082840e();
+    sleep_ctx = DAT_0082f894;
+    FUN_008318b0(today - *(byte*)(DAT_0082f894 + 4));   // read detail
+    body_offset = DAT_0082f8a0;
+    body_ptr = stack_buf + body_offset;
+    if (FUN_008318b0 result == 0)
+        memset(body_ptr, 0, DAT_0082f89c);
+    else
+        memcpy(body_ptr, FUN_008318b0 result, ...);
+
+    // If no day offset in request, also write today's live record
+    if (**(char**)(sleep_ctx + 4) == '\0') {
+        current_minute = FUN_0083dfba(FUN_0082841e(), 0x3c);
+        FUN_008315ba(body_ptr + current_minute * 0xc + 4);
+    }
+
+    state = **(u8**)(sleep_ctx + 4);
+    if (current_month == 0) {
+        FUN_0082ee00(0x12, *state);                   // error path
+    } else {
+        stack_buf[0] = *state;
+        memcpy(stack_buf + 1, stack_528 + body_offset, 0x120);
+        FUN_0082ece0(0x12, stack_buf, 0x121);          // 1 + 288 = 289 B
+    }
+}
+```
+
+Notable details:
+
+* `FUN_008318b0(day)` — the per-day detail reader. Uses
+  `DAT_00831990` (same table base as `0x11`) but with
+  `*(DAT_0083198c + -0x4C)` (offset `-0x4C`, *another*
+  negative offset — the sleep-detail table starts 0x4C bytes
+  *before* `DAT_0083198c`). This is a *different* table
+  index than `0x11` (which used `DAT_0083198c - 0x48`),
+  suggesting the firmware keeps separate indices for the
+  summary and the detail records even though they live in
+  the same day-table.
+* `body_offset = DAT_0082f8a0` — the offset into the
+  per-day record where the per-hour slots start. Like
+  `0x43 readDetailSport` (§3.6) which uses an offset of
+  `+4` (the state byte lives at byte 0..3), the sleep
+  detail offsets the slots past a 4-byte header.
+* `body_ptr + current_minute * 0xc + 4` — the helper writes
+  the **current live minute** into the appropriate slot
+  before sending. `0xc = 12` is the slot size; `current_minute`
+  picks the right slot for the current minute-of-day (0..1439).
+  This means **a `0x12` poll always returns up-to-the-minute
+  data** for today, while older days return the committed
+  table record.
+* `current_month == 0` — the "today" check. If `FUN_0082840e()`
+  returns 0 (i.e., the RTC has no valid month — likely a
+  *factory-fresh* watch), the handler sends an error
+  response instead of the data. Same defensive guard as
+  `0x43 readDetailSport` §3.6.
+
+#### Response layout (289 bytes)
+
+```
+byte  0:        state byte (sleep-context state)
+byte  1..288:   288-byte per-hour sleep detail
+                (24 hours × 12 B per hour)
+```
+
+#### Pair with `0x11 sleep summary` (§2.9)
+
+The §2.10 / §2.9 split mirrors the §3.6 / §3.x summary-detail
+pair — the summary is a *small fixed-size preview* (100 B),
+the detail is a *full variable-size dump* (~289 B). The two
+read from the **same persistent table** (`DAT_00831990`) via
+*different helper functions* (`FUN_008318c2` vs
+`FUN_008318b0`) and the host SDK uses the same record-format
+parser regardless of which opcode it uses.
+
+#### Why `body_offset = DAT_0082f8a0` (vs the §3.6 `+4`)
+
+Both the sleep-detail handler and the §3.6 `0x43
+readDetailSport` handler use a 4-byte state prefix + variable-
+length body. The `DAT_0082f8a0` global is the **size of the
+state-prefix** for sleep records (likely 4 bytes, matching
+`0x43`'s 4-byte offset). The decompiler doesn't know this is a
+constant; it reads the global at runtime. A future firmware
+revision could change `DAT_0082f8a0` to expand the state
+prefix without breaking the helper.
+
+#### Why the live-minute write
+
+The `FUN_008315ba(body_ptr + minute * 0xc + 4)` call is the
+"up-to-the-minute" trick: it overwrites the appropriate slot
+in the body buffer with the live sleep data for the current
+minute. Without this, a `0x12` poll for today would return
+the last-committed minute (typically the previous day's
+midnight finalisation), which can be up to 24 hours stale.
+The 0xc = 12 slot size matches the §3.6 detail record layout
+— the same vendor library (`vc_SportMotion_Int`) generates
+both the sport and sleep records.
 
 ## 3. Channel A — 16-Byte Command Channel
 
