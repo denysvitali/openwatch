@@ -24,6 +24,11 @@ class OpA {
   static const int touchControl = 0x3b;
 
   static const int findDevice = 0x50;
+  static const int deviceFind =
+      0x08; // v14 inline-dispatched find/long-press/camera branch — see
+  // GHIDRA_DECOMPILATION.md §3.15 (FUN_0082d2dc inline). Sub-cmd
+  // `0x00` = cancel, `0x01` = start, `0xAB 0xDC` = long-press power-off,
+  // others = set motor mode.
   static const int camera = 0x02;
   static const int restoreKey =
       0x66; // RestoreKeyReq uses caller opcode; reset magic

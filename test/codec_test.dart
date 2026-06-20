@@ -92,6 +92,25 @@ void main() {
       expect(f[2], 0xAA);
     });
 
+    test('deviceFind defaults to 0x08 with sub 0x01 (start find)', () {
+      final f = Commands.deviceFind();
+      expect(f[0], OpA.deviceFind);
+      expect(f[1], 0x01);
+    });
+
+    test('deviceFind cancel uses sub 0x00', () {
+      final f = Commands.deviceFind(sub: 0x00);
+      expect(f[0], OpA.deviceFind);
+      expect(f[1], 0x00);
+    });
+
+    test('deviceFind long-press magic encodes 0xAB 0xDC', () {
+      final f = Commands.deviceFind(sub: 0xab);
+      expect(f[0], OpA.deviceFind);
+      expect(f[1], 0xab);
+      expect(f[2], 0xdc);
+    });
+
     test('setTime encodes BCD date fields', () {
       final f = Commands.setTime(DateTime(2026, 6, 19, 8, 30, 5));
       expect(f[0], OpA.setTime);

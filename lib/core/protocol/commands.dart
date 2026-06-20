@@ -38,8 +38,33 @@ class Commands {
   static Uint8List readBattery() => Codec.buildChannelA(OpA.battery);
 
   /// `FindDeviceReq` (0x50): ring/vibrate the watch (`[0x55, 0xAA]` magic).
+  /// This is the legacy Channel-A path — preserved for compatibility
+  /// with the original APK-derived `PROTOCOL.md`. The H59MA v14
+  /// firmware uses `0x08` (see [deviceFind] and
+  /// `GHIDRA_DECOMPILATION.md` §3.15) instead.
   static Uint8List findDevice() =>
       Codec.buildChannelA(OpA.findDevice, const [0x55, 0xAA]);
+
+  /// `DeviceFindReq` (`0x08`): inline-dispatched find / cancel /
+  /// long-press trigger (see `GHIDRA_DECOMPILATION.md` §3.15,
+  /// `FUN_0082d2dc`). Sub-cmd layout:
+  ///   `0x00`        — cancel find + reset BLE + stop motor.
+  ///   `0x01`        — start find (1 s ceiling; bails if HR step
+  ///                   counter is running).
+  ///   `0xAB 0xDC`   — long-press magic (power-off).
+  ///   any other     — set motor mode (no-op when screen-state
+  ///                   byte at `DAT_0082810c - 0x3c == 2`).
+  ///
+  /// The handler is fire-and-forget — no response frame. Defaults
+  /// to [sub = 0x01] (start find).
+  static Uint8List deviceFind({int sub = 0x01, int modifier = 0x00}) {
+    if (sub == 0xab) {
+      // Long-press magic requires both magic bytes; caller passes
+      // [sub = 0xAB, modifier = 0xDC].
+      return Codec.buildChannelA(OpA.deviceFind, const [0xab, 0xdc]);
+    }
+    return Codec.buildChannelA(OpA.deviceFind, [sub & 0xFF, modifier & 0xFF]);
+  }
 
   /// `FactoryResetReq` (`0xff`): triggers `FUN_0082cde8` — wipes the
   /// 164-byte user-config block at `0x00208c8c`, re-initialises the BLE
