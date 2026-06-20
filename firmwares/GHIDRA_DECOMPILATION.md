@@ -64,28 +64,142 @@ byte 6..    payload bytes
 
 Consumes the state saved by `FUN_0082f4fa` (`cmd` at offset `+1`, payload ptr at `+4`, length at `+0xc`).
 
+The dispatch is a hybrid: low cmds `0x00..0x10` go through a switch8
+table at `0x82fc2f` (base, `0x12` entries: `0x2e, 0x5f, 0x63, 0x69, 0x6d,
+0x71, 0x2e, 0x75, 0x2e..0x2e`); cmds `0x11..0x5a` use a cascade of
+`cmp/beq` branches. On exit the handler clears `state[+1]` so the slot
+is reusable.
+
 | Cmd | Handler | Notes |
 |---|---|---|
-| `0x01` | `FUN_0082f1a4` | OTA start ack — calls state callback `(1, 0)` |
-| `0x02` | `FUN_0082f1b6` | OTA init — expects 9-byte payload, sub-cmd `0x01`/`0x04`; stores image size and metadata; sets OTA state to `2` |
-| `0x03` | `FUN_0082f240` | OTA data packet — reassembles image, validates first 0x50 bytes, copies a 32-byte digest, writes to flash |
-| `0x04` | `FUN_0082f378` | OTA check — validates state `3` and accumulated size matches expected |
-| `0x05` | `FUN_0082f3b4` | OTA end — finalizes, resets sensors/BLE, reboots after delays |
-| `0x07` | `FUN_0082f410` | OTA sub-ack — calls state callback `(7, 0)` |
-| `0x11` | `FUN_0082f5a2` | Read sleep summary for a day offset |
-| `0x12` | `FUN_0082f50c` | Read detailed sleep data |
-| `0x21`, `0x22`, `0x23`, `0x24` | — | ACK with code `2` |
-| `0x27` | `FUN_0082fada` | Read sleep records (sends both `0x27` night and `0x3e` nap records) |
-| `0x29`, `0x3b`, `0x13` | — | no-op |
-| `0x2a` | `FUN_00833bbc` | Read activity/sport summary for last N days |
-| `0x2c` | `FUN_0082f8ec` | Alarm read/write (sub `0x01` read, `0x02` write) |
-| `0x41` | `FUN_008311b8` | File list (cmd `0x41`) |
-| `0x43`, `0x46` | `FUN_008311b8` | File delete / file init (routed to same handler) |
-| `0x47` | `FUN_008347fa` | no-op |
-| `0x4b` | `FUN_00830460` | no-op |
-| `0x5a` | `FUN_0082f6ec` | Device info/config (sub `0x01` read info, `0x02` write config, `0x03` read version strings, `0x04` reset) |
+| `0x01` | `FUN_0082f1a4` (table offset 0x5f) | OTA start ack — calls state callback `(1, 0)` |
+| `0x02` | `FUN_0082f1b6` (table offset 0x63) | OTA init — expects 9-byte payload, sub-cmd `0x01`/`0x04`; stores image size and metadata; sets OTA state to `2` |
+| `0x03` | `FUN_0082f240` (table offset 0x69) | OTA data packet — reassembles image, validates first 0x50 bytes, copies a 32-byte digest, writes to flash |
+| `0x04` | `FUN_0082f378` (table offset 0x6d) | OTA check — validates state `3` and accumulated size matches expected |
+| `0x05` | `FUN_0082f3b4` (table offset 0x71) | OTA end — finalizes, resets sensors/BLE, reboots after delays |
+| `0x06` | — | falls into the table's default `0x2e` slot — NAK with code 0 |
+| `0x07` | `FUN_0082f410` (table offset 0x75) | OTA sub-ack — calls state callback `(7, 0)` |
+| `0x08..0x10` | — | default slot — NAK with code 0 |
+| `0x11` | `FUN_0082f5a2(payload[0])` | Read sleep summary — see §2.1 |
+| `0x12` | `FUN_0082f50c()` | Read detailed sleep data — see §2.2 |
+| `0x13` | — | no-op (skipped) |
+| `0x21`, `0x22`, `0x23`, `0x24` | `FUN_0082ee00(cmd, 2)` | ACK with code `2` (intentionally rejected at this layer) |
+| `0x27` | `FUN_0082fada(payload[0], payload[1])` | Read sleep records — see §2.3 |
+| `0x29`, `0x3b` | — | no-op (skipped) |
+| `0x2a` | `FUN_00833bbc(payload[0])` | Read activity/sport summary — see §2.4 |
+| `0x2c` | `FUN_0082f8ec()` | Alarm read/write — see §2.5 |
+| `0x41` | `FUN_008311b8(0x41, payload, length)` | File list — see §2.6 |
+| `0x43`, `0x46` | `FUN_008311b8(cmd, payload)` | File init / file delete (same handler) — see §2.6 |
+| `0x47` | `FUN_008347fa(payload[0])` | no-op |
+| `0x4b` | `FUN_00830460(payload[0])` | no-op |
+| `0x5a` | `FUN_0082f6ec(payload)` | Device info/config — see §2.7 |
 
 Unrecognized commands fall through to `FUN_0082ee00(cmd, 0)` (NAK code `0`).
+
+#### 2.1 Sleep summary (`FUN_0082f5a2`)
+
+Input: `payload[0]` is the day offset (0 = today, 1 = yesterday, …).
+Effective day is `current_day - payload[0]`. The handler reads 100 B
+from the sleep-summary store via `FUN_008318c2(day, buf)` and emits a
+0x65-byte (101 B) Channel-B frame:
+
+```
+byte 0     presence_byte (the byte pointed at by *(DAT_0082f894 + 4))
+byte 1..100 100-byte summary (e.g. totals, deep/light/REM minutes,
+              avg HR, breath rate — exact layout recovered only after
+              linking with the producer side)
+```
+
+#### 2.2 Detailed sleep (`FUN_0082f50c`)
+
+Uses the day-index byte at `*(DAT_0082f894 + 4)` and an aux size at
+`DAT_0082f89c` (typically `0x130`). Two-phase build:
+
+1. If `FUN_008318b0(day) == 0` (no record): `memset(target, 0, DAT_0082f89c)` (zero-fill).
+   Otherwise call the delayed init helper `func_0x000002a8` (probably a flash-read wrapper).
+2. If the day-index byte is `0` (record not ready), send a NAK via
+   `FUN_0082ee00(0x12, day_index_byte)` instead of a payload.
+3. Otherwise the response is 0x121 B: byte 0 = day_index_byte, bytes
+   1..0x120 = a 0x120-byte slice from `auStack_52c + DAT_0082f8a0`
+   (i.e. a 0x120-byte "detailed" window whose offset is the
+   sleep-context base).
+
+#### 2.3 Sleep records (`FUN_0082fada`)
+
+Inputs: `param_1` (clamped to 6) = day offset; `param_2` = record-type
+filter. Two parallel passes always run, regardless of `param_2`:
+
+- Nap pass (`param_2 == 1`): reads records via `FUN_00831908(day, buf)`.
+  Emits one Channel-B `0x3E` frame (header + nap records).
+- Night-sleep pass (always): reads via `FUN_008318c2(day, buf)`.
+  Emits one Channel-B `0x27` frame (header + night records).
+
+Each emitted record (6-byte header + score bytes + label bytes) is
+laid out as:
+
+```
+byte 0       day_delta   (current_day - source_day, capped)
+byte 1       header      (record_count * 2 + 4)
+byte 2..3    start_time  (hour, minute) — u16 min-of-day split
+byte 4..5    end_time    (hour, minute)
+byte 6..N    per-record score bytes (count = record_count)
+```
+
+The very first byte of the response is the number of records actually
+written (`cVar8` accumulator).
+
+#### 2.4 Activity / sport summary (`FUN_00833bbc`)
+
+Input: `payload[0]` is the day offset (clamped to 2, max 3 days
+back). Iterates from `current_day` down to `current_day - offset`,
+calling `FUN_00833b42(day, buf)` (returns 0 if no data). For every
+day with data, emits a 0x31-byte entry:
+
+```
+byte 0       day_offset
+byte 1..0x30 48 bytes activity summary (steps, distance, calories,
+                per-sport mode stats; the field meaning is owned by
+                the producer in `FUN_00833b42`)
+```
+
+The total Channel-B frame uses cmd `0x2A` and a length up to
+`0x31 * 3 = 0x93` bytes.
+
+#### 2.5 Alarm read/write (`FUN_0082f8ec`)
+
+Sub-cmd at `payload[0]`:
+
+| Sub | Action |
+|---|---|
+| `0x01` | Read: pulls `FUN_0082a9c2(count, ...)` and re-emits up to 10 alarms. Each alarm is a 0x29-byte record: `[len, id, hour, minute, day_bitmap(7 B), label(N)]` with `(len & 0x7F) ∈ [4, 0x22]`. Response is `1 + count * 0x29` bytes, cmd `0x2C`. |
+| `0x02` | Write: pulls count from `payload[1]`, clamps to 10, validates per-alarm `(len & 0x7F) ∈ [4, 0x24]`, calls `FUN_0082a9b0(record)`. Response is 1 byte (`0x02`) ack, cmd `0x2C`. |
+| other | no-op (response = 1 byte) |
+
+#### 2.6 File commands (`FUN_008311b8`)
+
+Sub-handler selected by `cmd`:
+
+| Cmd | Action |
+|---|---|
+| `0x41` | List: copies 4 B of context from `payload`, walks `FUN_008313ba` (up to 10 entries) and formats each via `FUN_0083105a`. Response uses cmd **`0x42`** (note: not `0x41`) — first byte is the file count. |
+| `0x43` | Init: `FUN_008310c8(payload)` — no response payload. |
+| `0x46` | Same body as `0x43` (file delete) — gated by caller's length check. |
+
+#### 2.7 Device info / config (`FUN_0082f6ec`)
+
+Sub-cmd at `payload[0]`:
+
+| Sub | Action |
+|---|---|
+| `0x01` | Read info: builds a TLV list from a capability bitmap at `DAT_0082f8a4+0x15/0x16`. Each present feature calls `FUN_0082f5e6(slot_id, src, src_len, dst)` and accumulates length into `uVar7`. Six slots, with strings at fixed offsets: `H59MAX`, `H59MA_V1_0`, `H59MA__`, `1_00_14_`, `260508`. Response is cmd `0x5A`, payload = `[0x01, 0x01, 0x06, ...tlv...]`. |
+| `0x02` | Write: iterates payload TLVs, calling `FUN_0082f5fa(slot_id, src)` per entry, then `FUN_008294cc` and `func_0x0000029c(1, 0xd0)` (a one-shot timer). |
+| `0x03` | Read version strings: emits 6 slots — `s_H59MAX__0082f8a8` (7 B), `s_H59MAX__0082f8a8` (7 B), `s_H59MA_V1_0_0082f8b0` (10 B), `s_H59MA__0082f8bc` (6 B), `s_1_00_14__0082f8c4` (8 B), `s_260508_0082fcb4` (6 B). |
+| `0x04` | Reset: `memset(DAT_0082f8a4 - 0x46, 0, 100)` and `FUN_008294cc()`. |
+| other | Response = `[0x5A, 0x00, 0x00]` (3 B, status 0). |
+
+The 6 version string slots are the *only* string literals referenced
+in this dispatcher; the response bytes for cmd `0x03` are exactly the
+constants visible in `firmwares/_re/strings-mining/`.
 
 ### CRC-16/MODBUS (`FUN_0082f114`)
 
