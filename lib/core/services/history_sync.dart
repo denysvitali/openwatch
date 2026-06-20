@@ -7,6 +7,7 @@ import '../ble/ble_transport.dart';
 import '../protocol/channel_a.dart';
 import '../protocol/codec.dart';
 import '../protocol/commands.dart';
+import '../protocol/fragment_reassembler.dart';
 import '../protocol/opcodes.dart';
 import 'app_log.dart';
 
@@ -16,6 +17,59 @@ class HrSample {
   const HrSample(this.timestamp, this.bpm);
   final DateTime timestamp;
   final int bpm;
+}
+
+/// An assembled `0x37 pressureSetting` record (GHIDRA §3.20).
+///
+/// The firmware fragments each `FUN_008344fe` read into a single
+/// header frame + four 13-byte payload chunks via `FUN_0082c988`.
+/// [FragmentReassembler] collects the chunks and we surface the
+/// raw 4-byte producer header + up-to-48-byte body. The exact
+/// 4-byte header shape is not documented in the RE — structured
+/// decode is a follow-up; for now callers should treat [header]
+/// as opaque.
+@immutable
+class PressureRecord {
+  const PressureRecord({
+    required this.slotId,
+    required this.header,
+    required this.body,
+  });
+
+  /// Echo of `req[1]` from the pressureSetting request (today = 0,
+  /// yesterday = 1, ...). See GHIDRA §3.20.
+  final int slotId;
+
+  /// First 4 bytes of the assembled payload — the producer header
+  /// (`FUN_008344fe` writes `*r` into `out[0..3]`).
+  final Uint8List header;
+
+  /// Remaining bytes (up to 48) — the null-terminated body.
+  final Uint8List body;
+}
+
+/// An assembled `0x39 hrvSetting` record (GHIDRA §3.21).
+///
+/// Structurally identical to [PressureRecord] but sourced from
+/// `FUN_0083468e` and the HRV record table
+/// (`DAT_008347dc` / `*DAT_008347d8`).
+@immutable
+class HrvRecord {
+  const HrvRecord({
+    required this.slotId,
+    required this.header,
+    required this.body,
+  });
+
+  /// Echo of `req[1]` from the hrvSetting request (today = 0,
+  /// yesterday = 1, ...). See GHIDRA §3.21.
+  final int slotId;
+
+  /// First 4 bytes of the assembled payload — the producer header.
+  final Uint8List header;
+
+  /// Remaining bytes (up to 48) — the null-terminated body.
+  final Uint8List body;
 }
 
 /// A single sleep segment (deep / light / awake / nap).
@@ -59,6 +113,103 @@ class HistorySync extends ChangeNotifier {
   final List<HrSample> _hr = [];
   final List<SleepSegment> _sleep = [];
   final Set<int> _availableDays = {};
+
+  // Lazily-allocated FragmentReassemblers for the two-phase
+  // `0x37 pressureSetting` (§3.20) and `0x39 hrvSetting` (§3.21)
+  // streams. Constructing one wires two broadcast subscriptions on
+  // the dispatcher — defer until the first listener so a host that
+  // never reads pressure/HRV records pays zero cost.
+  FragmentReassembler<
+    PressureSettingHeader,
+    PressureSettingChunk,
+    PressureRecord
+  >?
+  _pressureReassembler;
+  FragmentReassembler<HrvSettingHeader, HrvSettingChunk, HrvRecord>?
+  _hrvReassembler;
+  StreamSubscription<PressureRecord>? _pressureRecordsSub;
+  StreamSubscription<HrvRecord>? _hrvRecordsSub;
+
+  /// Lazily-built single-subscription stream of assembled
+  /// `0x37 pressureSetting` records. Wires [FragmentReassembler]
+  /// against `dispatcher.onPressureSettingHeader` /
+  /// `dispatcher.onPressureSettingChunk` on first listen. The
+  /// quiet window is 250 ms (matches the helper default) —
+  /// short enough for responsive UI, long enough to coalesce
+  /// the 4-chunk sequence the firmware emits. Requires the
+  /// HistorySync to have been constructed with a non-null
+  /// [dispatcher].
+  Stream<PressureRecord> get pressureRecords {
+    final r = _pressureReassembler;
+    if (r != null) return r.assembled;
+    final dispatcher = _dispatcher;
+    if (dispatcher == null) {
+      throw StateError(
+        'HistorySync.pressureRecords requires a ChannelADispatcher',
+      );
+    }
+    final reassembler =
+        FragmentReassembler<
+          PressureSettingHeader,
+          PressureSettingChunk,
+          PressureRecord
+        >(
+          headers: dispatcher.onPressureSettingHeader,
+          chunks: dispatcher.onPressureSettingChunk,
+          build: (header, payload) => PressureRecord(
+            slotId: header.slotId,
+            header: Uint8List.sublistView(
+              payload,
+              0,
+              payload.length < 4 ? payload.length : 4,
+            ),
+            body: Uint8List.sublistView(
+              payload,
+              payload.length < 4 ? payload.length : 4,
+              payload.length,
+            ),
+          ),
+          // 250 ms quiet window — same as the helper default; long
+          // enough to coalesce the 4-chunk sequence the firmware
+          // emits via FUN_0082c988, short enough for responsive UI.
+          quietWindow: const Duration(milliseconds: 250),
+        );
+    _pressureReassembler = reassembler;
+    return reassembler.assembled;
+  }
+
+  /// Lazily-built single-subscription stream of assembled
+  /// `0x39 hrvSetting` records. Same lazy-wire semantics as
+  /// [pressureRecords]; see GHIDRA §3.21.
+  Stream<HrvRecord> get hrvRecords {
+    final r = _hrvReassembler;
+    if (r != null) return r.assembled;
+    final dispatcher = _dispatcher;
+    if (dispatcher == null) {
+      throw StateError('HistorySync.hrvRecords requires a ChannelADispatcher');
+    }
+    final reassembler =
+        FragmentReassembler<HrvSettingHeader, HrvSettingChunk, HrvRecord>(
+          headers: dispatcher.onHrvHeader,
+          chunks: dispatcher.onHrvChunk,
+          build: (header, payload) => HrvRecord(
+            slotId: header.slotId,
+            header: Uint8List.sublistView(
+              payload,
+              0,
+              payload.length < 4 ? payload.length : 4,
+            ),
+            body: Uint8List.sublistView(
+              payload,
+              payload.length < 4 ? payload.length : 4,
+              payload.length,
+            ),
+          ),
+          quietWindow: const Duration(milliseconds: 250),
+        );
+    _hrvReassembler = reassembler;
+    return reassembler.assembled;
+  }
 
   List<HrSample> get hr => List.unmodifiable(_hr);
   List<SleepSegment> get sleep => List.unmodifiable(_sleep);
@@ -205,6 +356,10 @@ class HistorySync extends ChangeNotifier {
   @override
   void dispose() {
     _inbound?.cancel();
+    _pressureRecordsSub?.cancel();
+    _hrvRecordsSub?.cancel();
+    _pressureReassembler?.dispose();
+    _hrvReassembler?.dispose();
     super.dispose();
   }
 }

@@ -194,5 +194,292 @@ void main() {
         d.dispose();
       },
     );
+
+    // ------------------------------------------------------------------
+    // 0x37 pressureSetting + 0x39 hrvSetting two-phase reassembly.
+    // Wired via FragmentReassembler — GHIDRA §3.20 / §3.21.
+    // ------------------------------------------------------------------
+
+    test(
+      'pressureSetting 0x37 header + 4 chunks assembles into one '
+      'PressureRecord (regression for §3.20 two-phase wire format)',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final sync = HistorySync(t, (_) {}, dispatcher: d);
+        final records = <PressureRecord>[];
+        final sub = sync.pressureRecords.listen(records.add);
+
+        // Header: pl[2] == 0x1E discriminator, pl[0] = slotId = 0
+        t.inA.add(
+          Codec.buildChannelA(OpA.pressureSetting, [
+            0x00, // slotId
+            0x05, // padding for header literal
+            0x1e, // discriminator
+          ]),
+        );
+        // 4 chunks — each carries up to 13 payload bytes; total
+        // payload = 4 (producer header) + 45 (body) = 49 bytes per
+        // §3.20 (`FUN_0082c988(0x37, buf, 0x31)`). Distributed
+        // across 4 frames: 13, 12, 12, 12 bytes (last frame is
+        // short). The wire helper `buildChannelA` zero-pads the
+        // trailing byte when subData < 14 bytes, so we always send
+        // 14-byte subData frames — anything shorter would inject
+        // a stray 0 into the assembled body and skew assertions.
+        // The dispatcher only emits the first 14 bytes regardless,
+        // so over-padding is harmless.
+        final producerHeader = [0xAA, 0xBB, 0xCC, 0xDD];
+        final body = List<int>.generate(45, (i) => 0x10 + i);
+        final all = [...producerHeader, ...body];
+        // Pad the 49-byte payload up to 56 = 4 frames × 14 bytes so
+        // the test assertions don't depend on trailing-zero behaviour.
+        final padded = [...all, ...List<int>.filled(56 - all.length, 0xEE)];
+        const chunkSize = 14;
+        for (var i = 0; i < 4; i++) {
+          t.inA.add(
+            Codec.buildChannelA(
+              OpA.pressureSetting,
+              padded.sublist(i * chunkSize, (i + 1) * chunkSize),
+            ),
+          );
+        }
+        // 250 ms quiet window + a little slack.
+        await Future<void>.delayed(const Duration(milliseconds: 350));
+
+        expect(records, hasLength(1));
+        final r = records.single;
+        expect(r.slotId, 0x00);
+        expect(r.header, producerHeader);
+        // The assembled payload is 4 × 14 = 56 bytes; body is
+        // payload[4..56] = 52 bytes (45 real + 7 sentinels).
+        expect(
+          r.body,
+          [...body, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE],
+          reason:
+              'producer header is 4 B, body is the remaining 52 B '
+              'from 4 × 14-byte frames',
+        );
+        await sub.cancel();
+        sync.dispose();
+        d.dispose();
+      },
+    );
+
+    test('hrvSetting 0x39 header + 4 chunks assembles into one '
+        'HrvRecord (regression for §3.21 two-phase wire format)', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final sync = HistorySync(t, (_) {}, dispatcher: d);
+      final records = <HrvRecord>[];
+      final sub = sync.hrvRecords.listen(records.add);
+
+      // Header: pl[2] == 0x1E discriminator, pl[0] = slotId = 0
+      t.inA.add(Codec.buildChannelA(OpA.hrv, [0x00, 0x05, 0x1e]));
+      final producerHeader = [0x11, 0x22, 0x33, 0x44];
+      final body = List<int>.generate(45, (i) => 0x40 + i);
+      final all = [...producerHeader, ...body];
+      final padded = [...all, ...List<int>.filled(56 - all.length, 0xEE)];
+      const chunkSize = 14;
+      for (var i = 0; i < 4; i++) {
+        t.inA.add(
+          Codec.buildChannelA(
+            OpA.hrv,
+            padded.sublist(i * chunkSize, (i + 1) * chunkSize),
+          ),
+        );
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 350));
+
+      expect(records, hasLength(1));
+      final r = records.single;
+      expect(r.slotId, 0x00);
+      expect(r.header, producerHeader);
+      // Same shape as the pressure test — see comments above.
+      expect(r.body, [...body, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE]);
+      await sub.cancel();
+      sync.dispose();
+      d.dispose();
+    });
+
+    test('pressureSetting 0x37 two back-to-back records emit two '
+        'PressureRecords (regression for reassembler over multiple '
+        'phases)', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final sync = HistorySync(t, (_) {}, dispatcher: d);
+      final records = <PressureRecord>[];
+      final sub = sync.pressureRecords.listen(records.add);
+
+      // Record #1
+      t.inA.add(Codec.buildChannelA(OpA.pressureSetting, [0x00, 0x05, 0x1e]));
+      // 49-byte payload split across 4 frames of 14 subData bytes
+      // (we send 56 total bytes — the test only asserts on the
+      // header slot + first 45 body bytes, so over-padding with
+      // a sentinel is harmless).
+      const rec1 = [
+        0xA1, 0xA2, 0xA3, 0xA4, // producer header
+        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A,
+        0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25,
+        0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F,
+        0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39,
+        0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F, 0x40, 0x41, 0x42,
+        // pad 7 sentinel bytes so 4 × 14 = 56 fits exactly.
+        0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE,
+      ];
+      const chunkSize = 14;
+      for (var i = 0; i < 4; i++) {
+        t.inA.add(
+          Codec.buildChannelA(
+            OpA.pressureSetting,
+            rec1.sublist(i * chunkSize, (i + 1) * chunkSize),
+          ),
+        );
+      }
+      // Wait past the quiet window so #1 fires.
+      await Future<void>.delayed(const Duration(milliseconds: 350));
+      expect(records, hasLength(1));
+
+      // Record #2 — different slotId so we can verify it carried.
+      t.inA.add(Codec.buildChannelA(OpA.pressureSetting, [0x01, 0x05, 0x1e]));
+      const rec2 = [
+        0xB1,
+        0xB2,
+        0xB3,
+        0xB4,
+        0x50,
+        0x51,
+        0x52,
+        0x53,
+        0x54,
+        0x55,
+        0x56,
+        0x57,
+        0x58,
+        0x59,
+        0x5A,
+        0x5B,
+        0x5C,
+        0x5D,
+        0x5E,
+        0x5F,
+        0x60,
+        0x61,
+        0x62,
+        0x63,
+        0x64,
+        0x65,
+        0x66,
+        0x67,
+        0x68,
+        0x69,
+        0x6A,
+        0x6B,
+        0x6C,
+        0x6D,
+        0x6E,
+        0x6F,
+        0x70,
+        0x71,
+        0x72,
+        0x73,
+        0x74,
+        0x75,
+        0x76,
+        0x77,
+        0x78,
+        0x79,
+        0x7A,
+        0x7B,
+        0x7C,
+        0x7D,
+        0x7E,
+        0x7F,
+        0x80,
+        0x81,
+        0x82,
+        0xEE,
+        0xEE,
+        0xEE,
+        0xEE,
+        0xEE,
+        0xEE,
+        0xEE,
+      ];
+      for (var i = 0; i < 4; i++) {
+        t.inA.add(
+          Codec.buildChannelA(
+            OpA.pressureSetting,
+            rec2.sublist(i * chunkSize, (i + 1) * chunkSize),
+          ),
+        );
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 350));
+
+      expect(records, hasLength(2));
+      expect(records[0].slotId, 0x00);
+      expect(records[0].header, [0xA1, 0xA2, 0xA3, 0xA4]);
+      expect(records[1].slotId, 0x01);
+      expect(records[1].header, [0xB1, 0xB2, 0xB3, 0xB4]);
+      await sub.cancel();
+      sync.dispose();
+      d.dispose();
+    });
+
+    test('pressureSetting 0x37 quiet-period flush emits in-flight record '
+        'after 250 ms with no further header (regression for reassembler '
+        'quiet-window timer)', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final sync = HistorySync(t, (_) {}, dispatcher: d);
+      final records = <PressureRecord>[];
+      final sub = sync.pressureRecords.listen(records.add);
+
+      // Header + 1 chunk only — no second header follows.
+      t.inA.add(Codec.buildChannelA(OpA.pressureSetting, [0x00, 0x05, 0x1e]));
+      // Single chunk with 14 bytes of payload (fills the whole
+      // subData slot to avoid trailing-zero injection from
+      // `buildChannelA`).
+      t.inA.add(
+        Codec.buildChannelA(OpA.pressureSetting, [
+          0x01,
+          0x02,
+          0x03,
+          0x04,
+          0x05,
+          0x06,
+          0x07,
+          0x08,
+          0x09,
+          0x0A,
+          0x0B,
+          0x0C,
+          0x0D,
+          0x0E,
+        ]),
+      );
+      // Nothing else. The reassembler's 250 ms quiet timer should
+      // fire and surface the partial record.
+      await Future<void>.delayed(const Duration(milliseconds: 350));
+
+      expect(records, hasLength(1));
+      expect(records.single.slotId, 0x00);
+      expect(
+        records.single.header,
+        [0x01, 0x02, 0x03, 0x04],
+        reason: 'first 4 bytes of assembled payload = producer header',
+      );
+      expect(
+        records.single.body,
+        [0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E],
+        reason: 'remaining 10 bytes of the 14-byte chunk = body',
+      );
+      await sub.cancel();
+      sync.dispose();
+      d.dispose();
+    });
   });
 }
