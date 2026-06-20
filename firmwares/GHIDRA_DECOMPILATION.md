@@ -2541,7 +2541,7 @@ polling the link does not bump the timer.
 |---|---|---|
 | `0x00..0x2a` | switch8 table at `0x82c61d` (43 entries) | per-entry thunk |
 | `0x2b, 0x37, 0x38, 0x3a, 0x3b, 0x43 'C', 0x48 'H', 0x72, 0x7a, 0x7d, 0x81, 0xa1, 0xc6, 0xc7 'D', 0xff` | Defer to the deferred-command ring | `FUN_0082be64` |
-| `0x36` | Heart-rate related read/set | `FUN_0082c112` |
+| `0x36` | Heart-rate related read/set | `FUN_0082c112` | see §8.8 |
 | `0x39` | HRV setting | `FUN_0082c9da` |
 | `0x3c` | Fixed capability block `[0x3c,0,0x40,0xa0,0x20,…]` | `FUN_0082c50e` |
 | `0x3e` | SpO2 / blood-oxygen related read/set | `FUN_0082c550` |
@@ -2666,7 +2666,7 @@ Immediate / explicitly routed opcodes:
 
 | Opcode | Handler | Notes |
 |---|---|---|
-| `0x36` | `FUN_0082c112` | Heart-rate related read/set |
+| `0x36` | `FUN_0082c112` | Heart-rate related read/set — see §8.8 |
 | `0x3c` | `FUN_0082c50e` | Returns fixed capability block `[0x3c,0,0x40,0xa0,0x20,...]` |
 | `0x3e` | `FUN_0082c550` | SpO2 / blood-oxygen related read/set |
 | `0x48` `'H'` | `FUN_0082bf40` | Handshake response — sends 15-byte device-info block — see §8.2 |
@@ -3351,6 +3351,82 @@ host's echo of `req[1]` is the *first* byte the worker
 sees). This is a vestige of the deferred-ring layout; the
 non-deferred `0x90` self-marker (§8.6) and `0x91` echo
 both follow the §3 convention.
+
+### 8.8 0x36 heart-rate related read/set (`FUN_0082c112`)
+
+The 0xFEE7-side HR-related flag — structurally a *clone*
+of the Channel-A `0x38 pressure` (§3.17) and `0x2c SpO2`
+(§3.10) handlers. Stores a 1-bit on/off value as **bit 2**
+of the same shared `DAT_008277f0 + 0x2D` config byte that
+the other 1-bit features live in.
+
+#### Sub-opcode dispatch
+
+| `req[1]` | Action | Helper |
+|---:|---|---|
+| `0x01` (read) | `local_20[2] = FUN_0082768e()` — read bit 2 of `*(DAT_008277f0 + 0x2D)`, masked `& 7 >> 2` yields `0` or `1` | `FUN_0082768e` |
+| other (write) | `FUN_0082769a(req[2] == 1)` — if `req[2] == 1`, set bit 2; else clear it. Response **echoes** `req[2]` | `FUN_0082769a` |
+
+The mask `& 7` and the `>> 2` shift confirm that only
+bits 2..3 of the byte are owned by this handler; the other
+6 bits belong to other features.
+
+#### Persistent state (1 bit)
+
+| Bit | Field | Owner |
+|---:|---|---|
+| 0 | (other) | — |
+| 1 | `spo2_enabled` | `0x2c SpO2` (§3.10) |
+| 2 | `hr_related` | **`0x36` (this handler)** |
+| 3 | `pressure_enabled` | `0x38 pressure` (§3.17) |
+| 4 | (other) | — |
+| 5 | `sugar` | `0x3a sub 0x03` (§3.22) |
+| 6 | (other) | — |
+| 7 | `lipids` | `0x3a sub 0x04` (§3.22) |
+
+This completes the 4-bit feature map at `DAT_008277f0 +
+0x2D`. The 0x36 bit at position 2 is the "HR-related" flag
+that pairs with the larger HR opcodes `0x15 readHeartRate`
+(§3.12) and `0x1e realTimeHeartRate` (§3.13) on the
+Channel-A side.
+
+#### Response layout
+
+```
+byte  0: 0x36                (cmd)
+byte  1: req[1]              (sub-opcode echo: 0x01 read / 0x02+ write)
+byte  2: feature value      (0/1 for read; echoed req[2] for write)
+byte  3..14: 0
+byte 15: additive checksum
+```
+
+Identical to `0x38 pressure` (§3.17) and `0x2c SpO2`
+(§3.10). The shared `DAT_008277f0 + 0x2D` byte is the
+"per-feature enable bitmap" that the watch reads whenever
+it consults which sensors are active.
+
+#### Why a separate 0xFEE7 opcode
+
+`0x36` is the **0xFEE7 vendor variant** of `0x15
+readHeartRate` (§3.12). The two are functionally equivalent
+(turn the HR sensor on or off) but the host SDK that
+consumes the 0xFEE7 service uses `0x36` for the lightweight
+1-bit on/off control, while the Channel-A `0x15` is the
+"full read" command that returns a 292-byte multi-frame
+record (§3.12). A host that wants *fast* HR toggling can
+use `0x36`; a host that wants *full HR data* must use the
+Channel-A `0x15` / `0x1e` opcodes.
+
+#### Pair with `0xC5/0xC8/0xC9` config-byte writes
+
+§8.1 documents that `0xC5` writes `DAT_0082caec[3]`,
+`0xC8` writes `DAT_0082caec[4]`, and `0xC9` writes
+`DAT_0082caec[5] = req[1]`. None of these touch the
+`DAT_008277f0 + 0x2D` byte directly — the 0xFEE7
+"service-suspended" gate is *orthogonal* to the
+per-feature enable bitmap. The host can toggle `0x36` to
+disable the HR sensor without affecting the `0xC5/0xC8/0xC9`
+flags, and vice-versa.
 
 ---
 
