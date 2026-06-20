@@ -802,3 +802,147 @@ Feedback, Customer-support chat.
 >   (RealTimeHr), `pl[8]` (ReduceFat/HideMessageNotification),
 >   `pl[3] b7` (AiAnalyze), `pl[4]` (MenuWallpaper/WechatPay), `pl[1] b4`
 >   (WatchTheme), and `pl[0xa] b1` (Temperature200 / high-precision temperature).
+> - Watch-side opcode → bucket dispatch table located and documented (see §9).
+> - Channel-B frame parser / CRC-16/MODBUS functions located in the H59MA
+>   firmware and cross-checked against `Codec.crc16` (see §9).
+
+---
+
+## 9. Firmware-side protocol implementation (H59MA)
+
+This section maps the abstract protocol above to the actual code/data found in
+the H59MA OTA images (`firmwares/H59MA_1.00.13_251230.bin` and
+`firmwares/H59MA_1.00.14_260508.bin`). Offsets below are **body offsets**
+(add `0x450` for the container file offset, add `0x826400` for the Realtek
+flash load address).
+
+### 9.1 Channel-A framing & dispatch
+
+The H59MA firmware **does not implement a 16-byte frame parser or an
+opcode-driven dispatch routine** for Channel A. It exposes the Nordic-UART-style
+GATT service (`6e40fff0`) and delegates all command interpretation to the
+phone-side Oudmon SDK (`BeanFactory`, `SparseArray`, `parserAndDispatchReqData`,
+etc.). This matches the observation that:
+
+- No routine strips the `0x80` error flag and indexes a handler table.
+- No 14-byte payload accumulator keyed by opcode exists in the body.
+- The `0x10` frame-length constant appears in connection-parameter tables but
+  is not annotated as a command-frame size.
+
+The **phone-side dispatch** (already described in §3.1) is therefore the live
+dispatch path. The watch only has to deliver the 16-byte notify bytes
+verbatim.
+
+### 9.2 Watch-side opcode → bucket table (v13 only, unused)
+
+A 256-byte table at **v13 body `0x22490`** (container `0x228E0`) maps every
+possible opcode byte `0x00..0xFF` to a one-byte bucket id. It is a dead data
+structure: `radare2 /r` finds **no code references** to it, and the only
+function that computes an address inside it (`fcn.00020750`) is a string
+helper that never reads the table bytes as dispatch indices. v14 has **no
+equivalent table** (the byte pattern is absent and `0x22800`/`0x228E0` are
+ordinary code in both builds).
+
+Despite being unused, the table's shape is a useful cross-check of the
+phone-side opcode families in §4:
+
+| Bucket id | v13 opcodes | Inferred family |
+|---|---|---|
+| `0x00` | `0x00`, `0x81..0xFF` | reserved / unhandled |
+| `0x02` | `0x22..0x30`, `0x3B..0x41`, `0x5C..0x61`, `0x7C..0x7F` | notify / push |
+| `0x05` | `0x21` | target setting |
+| `0x08` | `0x68..0x7B` | sub-opcode family (start/stop measure) |
+| `0x10` | `0x48..0x5B` | large-data sub / today sport |
+| `0x20` | `0x31..0x3A` | notify class (display, camera, avatar, etc.) |
+| `0x40` | `0x01..0x09`, `0x0F..0x20`, `0x80` | standard request |
+| `0x41` | `0x0A..0x0E` | MixtureReq (read/write/delete) |
+| `0x88` | `0x62..0x67` | sub-opcode family (health settings) |
+| `0x90` | `0x42..0x47` | sub-opcode family (detail sport / sleep) |
+
+The bucket ids line up with the families used by the Android SDK, confirming
+that the H59MA was built from the same Oudmon command model even though the
+watch itself does not dispatch by opcode.
+
+### 9.3 Channel-B parser & dispatcher
+
+The Channel-B reassembly and command routing code is the richest protocol
+surface in the firmware. Both builds implement the same state machine.
+
+| Function | v13 body | v14 body | Role |
+|---|---|---|---|
+| First-fragment parser | `0x8c32..0x8cae` | `0x8bea..0x8c66` | Checks `len >= 6`, magic `0xBC`, copies `cmd`, reads `len16LE` from bytes 2/3, reads `crc16LE` from bytes 4/5, copies payload from byte 6. |
+| Continuation-fragment path | `0x8cb4..0x8cde` | `0x8c6c..0x8c96` | Appends later notify fragments until accumulated length reaches header length. |
+| Packet timer | `0x8d44` (label) | `0x8cfc` (label) | `m_ble_packet_timer_id`; timeout hardcoded `0x7d0` (2000 ms). |
+| CRC helper | `0x8d5c..0x8d9a` | `0x8d14..0x8d52` | CRC-16/MODBUS over a caller-supplied buffer. |
+| CRC table | `0x2100c` | `0x1f3c0` | 512-byte reflected-`0xA001` lookup table. |
+| Command dispatcher | `0x8b2e..0x8b96` | `0x8ae6..0x8b4e` | Compares `cmd` byte and routes to file/OTA handlers. |
+
+The dispatcher confirms that commands `0x01`, `0x02`, `0x31`, `0x35`, `0x36`,
+`0x61` are handled as a special group (likely OTA / file-init / avatar),
+`0x10` and `0x46` take a separate path (likely plate / navigation), and all
+other recognised commands fall through to a generic handler at
+`fcn.00009142` (v13) / `fcn.000090fa` (v14).
+
+### 9.4 CRC-16/MODBUS verification
+
+The firmware CRC helper at v13 `0x8d5c` (v14 `0x8d14`) is a textbook
+CRC-16/MODBUS implementation:
+
+```text
+init = 0xFFFF
+for each byte b:
+    idx = ((crc ^ b) & 0xFF) << 1
+    crc = (crc >> 8) ^ table[idx]
+```
+
+The table pointer resolves to flash address `0x84740c` = body `0x2100c`
+(v13), and its first 16 bytes are:
+
+```text
+00 00 c1 c0 81 c1 40 01 01 c3 c0 03 80 02 41 c2
+```
+
+This is the canonical reflected-`0xA001` CRC-16/MODBUS table. `Codec.crc16`
+in `lib/core/protocol/codec.dart` is therefore bit-exact with the watch.
+
+### 9.5 Literal-pool opcode coverage
+
+The ARM-Thumb literal pool at v13 `0x21b58` (v14 `0x1ff0c`) contains the
+small integer constants used by a health-metric range-clamp routine; it is
+**not** a command table. Within that pool, however, the values
+`0x50..0x53, 0x55, 0x56, 0x58, 0x5A` appear contiguously, and
+`0x60..0x63` appear nearby. These are the only opcodes in the `0x50..0x95`
+range that the H59MA materialises as compile-time constants, which means the
+watch implements a **subset** of the full Oudmon opcode space:
+
+```text
+0x50 0x51 0x52 0x53 0x55 0x56 0x58 0x5A 0x60 0x61 0x62 0x63
+```
+
+All other `0x54..0x95` opcodes the Android SDK may emit are either handled
+by generic paths or are reserved on H59MA hardware. `0x60` and `0x61` are
+already known (`SetANCSReq`, `SetMessagePushReq`); `0x62` and `0x63` are
+watch-pushed events with no known Android decoder yet.
+
+### 9.6 ANCS client
+
+Strings at v13 `0x2184a..0x21891` (`ancs_send_msg_to_app`,
+`ancs_handle_msg`, `app_parse_notification_source_data`) prove the watch runs
+an Apple Notification Center Service client. The GATT attribute table does not
+expose a separate ANCS service; the code probably consumes iPhone notifications
+through the same Oudmon notify path used for Android pushes.
+
+### 9.7 Header / container
+
+See `firmwares/R2_ANALYSIS.md` §3 for the corrected 0x450-byte container
+layout. Key take-aways relevant to protocol work:
+
+| Offset | Field | Meaning |
+|---|---|---|
+| `0x00` | `magic` | `e5c3bd81` |
+| `0x04` / `0x08` | `load_size` / `firmware_size` | `body_size + 0x400` |
+| `0x0c` | `image_hash_a` | 24-bit additive checksum (not CRC32) |
+| `0x10` | `version_string` | e.g. `H59MA_1.00.13_251230` |
+| `0x58` | `body_size` | exact body length |
+| `0x6c` | `flash_app_start` | `0x00826400` (both builds) |
+| `0x1c4` | `image_digest` | 32-byte per-build signature (SHA-256-like) |

@@ -73,6 +73,7 @@ The clearest protocol code path is the Channel-B reassembly parser:
 | CRC helper A | `0x8d5c..0x8d7c` | `0x8d14..0x8d34` | Init `0xffff`, table-driven update: `(crc ^ byte) & 0xff`, table index `* 2`, `crc = (crc >> 8) ^ table[index]`. |
 | CRC helper B | `0x8d7e..0x8d9a` | `0x8d36..0x8d52` | Same reflected CRC loop with alternate argument order. |
 | CRC table pointer | `0x8da0 -> 0x2100c` | `0x8d58 -> 0x1f3c0` | Points at the CRC-16/MODBUS lookup table. |
+| Command dispatcher | `0x8b2e..0x8b96` | `0x8ae6..0x8b4e` | Compares `cmd` byte and routes `0x01/0x02/0x31/0x35/0x36/0x61`, `0x10/0x46`, and all others to separate handlers. |
 
 The parser proves the Channel-B frame header:
 
@@ -93,8 +94,12 @@ The firmware confirms the Channel-A service/characteristic UUIDs, but the fixed
 16-byte command packet format remains better evidenced by the Android SDK code
 than by a single obvious firmware routine.
 
-The v13 body does contain a useful one-byte opcode bucket table at `0x22490`.
-The first entries are:
+The v13 body does contain a 256-byte opcode → bucket table at `0x22490`.
+However, radare2 cross-reference analysis shows **the table is never referenced
+by code**; the only function that computes an address inside it is a string
+helper (`fcn.00020750`) that does not use the bytes as dispatch indices. The
+bucket values are therefore dead data, not a live dispatch map. The first
+entries are:
 
 ```text
 opcode 0x00 -> 0x00
@@ -115,11 +120,16 @@ opcode 0x80 -> 0x40
 opcode 0x81..0xff -> 0x00
 ```
 
-This bucket shape lines up with the APK-derived categories in `PROTOCOL.md`:
-plain request, mixture read/write/delete, sub-opcode families, and notify/push
-families. The exact v14 table did not appear as the same contiguous byte table;
-v14 does keep the same `0x21b58`-style command literal table relocated to
-`0x1ff0c`.
+This bucket shape lines up with the APK-derived categories in `PROTOCOL.md` §4
+and §9, but the table itself is not executed. The exact v14 table did not
+appear in the same form; v14 relocated and repacked the code, and the `0x22490`
+pattern is absent.
+
+The literal pool at v13 `0x21b58` / v14 `0x1ff0c` was previously described as
+a "command literal table". It is actually referenced only by a health-metric
+range-clamp routine; the `0x50..0x5a` and `0x60..0x63` values are reused as
+small integer constants, not live BLE opcodes. See `R2_ANALYSIS.md` §2 for the
+full correction.
 
 ## Address Conversion
 

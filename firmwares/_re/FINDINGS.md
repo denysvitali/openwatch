@@ -108,51 +108,53 @@ poly is used; the binary resolves it.
 **Source:** `ble-hunt/key_regions.txt` row `CRC16_ARC_table_start`,
 `protocol-validate/15_summarize.txt` §3.
 
-### 1.5 Oudmon dispatch tables
+### 1.5 Oudmon opcode → bucket table (v13 only, unused)
 
-Two adjacent data structures live in the body at:
+A 256-byte opcode → bucket table exists in v13, but radare2 cross-reference
+analysis shows it is **not referenced by code**.
 
 | Table | v13 offset (in bin) | Size | Meaning |
 |---|---:|---:|---|
-| Jump table (function pointers) | **0x22800** | ≥ 256 B (u32 each) | `b4 0c 00 00 74 0c 00 00 32 0c 00 00 ef 0b …` |
-| Opcode → bucket index | **0x228E0** | 256 B (u8 each) | One byte per opcode 0x00..0xFF (see below) |
+| Opcode → bucket index | **0x22490** | 256 B (u8 each) | One byte per opcode 0x00..0xFF (see below). Dead data — no code reads it as a dispatch map. |
 
-**v14 has no single canonical "0x22800" location** — the dispatch
-tables are repacked (v14 binary is 7 748 B smaller and code was
-relocated). The `0x22800` constant in v14 is inside code, not a table.
+**v14 has no equivalent table.** The `0x22490` byte pattern is absent from
+v14, and the addresses previously labelled as `0x22800` / `0x228E0` "jump
+/bucket tables" are ordinary Thumb code in both builds, not data tables.
 
-#### Opcode → bucket index (v13 @ 0x228E0, 256 B)
+#### Opcode → bucket index (v13 @ 0x22490, 256 B)
 
-The table maps each possible opcode byte to a 1-byte bucket id. The
-bucket id is what the dispatch jump table indexes into. Inferred
-semantics:
+The table maps each possible opcode byte to a 1-byte bucket id. Inferred
+semantics (cross-check against `PROTOCOL.md` §4 + §9):
 
-| Bucket id | Opcodes | Semantics (per PROTOCOL.md §3 + §4) |
+| Bucket id | Opcodes | Semantics |
 |---:|---|---|
 | `0x00` | 0x00, 0x81..0xFF | reserved / unhandled (128 + 1 = 129 entries) |
 | `0x02` | 0x22..0x30, 0x3B..0x41, 0x5C..0x61, 0x7C..0x7F | notify / push (32) |
-| `0x05` | 0x21 | single (1) |
+| `0x05` | 0x21 | target setting |
 | `0x08` | 0x68..0x7B | `subData[0]` = sub-opcode set (20) |
-| `0x10` | 0x48..0x5B | large-data sub (20) |
+| `0x10` | 0x48..0x5B | large-data sub / today sport (20) |
 | `0x20` | 0x31..0x3A | notify class (10) |
 | `0x40` | 0x01..0x09, 0x0F..0x20, 0x80 | standard request (28) |
 | `0x41` | 0x0A..0x0E | MixtureReq (5) |
 | `0x88` | 0x62..0x67 | subData[0] = sub-opcode set (6) |
 | `0x90` | 0x42..0x47 | subData[0] = sub-opcode set (6) |
 
-This bucket table is **the watch-side analog** of the Android
-`parserAndDispatchReqData` map in PROTOCOL.md §3.1 — same opcode
-partitioning, same sub-cmd families. **match**.
+Because the table is unreferenced, it is **not** the watch-side analog of the
+Android `parserAndDispatchReqData` map. It is best interpreted as leftover
+metadata or an earlier partitioning that the compiler/linker did not strip.
+The actual live dispatch lives in the phone-side Oudmon SDK.
 
-#### Literal-pool opcode coverage (v13 @ 0x21B58 + 0x22348)
+#### Literal-pool opcode coverage (v13 @ 0x21B58 + nearby pools)
 
-The ARM-Thumb literal pool (per `protocol-validate/15_summarize.txt`
-§8) contains the bytes `0x50 0x51 0x52 0x53 0x55 0x56 0x58 0x5A`
-contiguously and `0x60 0x61 0x62 0x63` separately. **Gaps**: `0x54,
-0x57, 0x59, 0x5B..0x5F, 0x64..0x95` — these opcodes are reserved /
-unimplemented in the H59MA firmware even though the Android app's
-generic SDK may send them. This means **the H59MA is a subset of the
-full Oudmon opcode space**.
+The ARM-Thumb literal pool at v13 `0x21B58` (v14 `0x1ff0c`) is used by a
+health-metric range-clamp routine, **not** as a command table. Within it,
+however, the values `0x50 0x51 0x52 0x53 0x55 0x56 0x58 0x5A` appear
+contiguously and `0x60 0x61 0x62 0x63` appear nearby. These are the only
+opcodes in the `0x50..0x95` range that the H59MA materialises as compile-time
+constants. **Gaps**: `0x54, 0x57, 0x59, 0x5B..0x5F, 0x64..0x95` — these
+opcodes are reserved / unimplemented in the H59MA firmware even though the
+Android app's generic SDK may send them. This means **the H59MA is a subset
+of the full Oudmon opcode space**.
 
 ### 1.6 SetTime capability bitmap (PROTOCOL.md §4.2.1)
 
@@ -311,13 +313,14 @@ The H59MA firmware **corroborates** the BLE protocol in
 us over the Android-derived spec are:
 
 1. **CRC-16 poly is proven to be 0xA001 (CRC-16/MODBUS)** — the spec
-   left this open. Found in the 512-byte lookup table at v13:0x21450
-   / v14:0x1F3C0.
-2. **The 256-byte opcode→bucket dispatch table** at v13:0x228E0
-   mirrors the Android `parserAndDispatchReqData` partitioning
-   exactly. Bucket ids `0x00, 0x02, 0x05, 0x08, 0x10, 0x20, 0x40,
-   0x41, 0x88, 0x90` correspond to 1-for-1 with the spec's opcode
-   families.
+   left this open. Found in the 512-byte lookup table at v13:0x2100c
+   / v14:0x1F3C0 (the earlier "0x21450" offset was the record start,
+   not the table-byte start).
+2. **A 256-byte opcode→bucket table** exists at v13:0x22490. Its
+   bucket ids (`0x00, 0x02, 0x05, 0x08, 0x10, 0x20, 0x40, 0x41,
+   0x88, 0x90`) mirror the Android `parserAndDispatchReqData`
+   partitioning, but the table is **not referenced by code** and is
+   absent from v14. Live dispatch is performed by the phone-side SDK.
 3. **H59MA implements a *subset* of Oudmon opcode space** — the
    literal pool at v13:0x21B58 only materialises opcodes
    `{0x50..0x53, 0x55, 0x56, 0x58, 0x5A, 0x60..0x63}`. The rest of
