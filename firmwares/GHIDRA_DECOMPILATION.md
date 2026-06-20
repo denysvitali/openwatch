@@ -146,7 +146,7 @@ Processes a circular queue of incoming 16-byte frames (`DAT_0082d440 + 0x14` rin
 | `0x77` | `phoneSport` | `0x0082ce0c` | Jump-table dispatch on sub-byte. |
 | `0x7a` | `muslim` | `0x0082cb3a` | Sub `0x01` reads Muslim prayer config, `0x02 0x01` resets it. |
 | `0x81` | — | `0x0082cdac` | Stores 6-byte config chunk and calls `FUN_00840568` (flash/config write). |
-| `0xa1` | — | `0x0082f5c` | Factory/test mode commands (`0x01`–`0x06`): reset, read logs, power off, etc. |
+| `0xa1` | — | `0x00827f5c` | Factory/test mode commands (`0x01`–`0x06`): reset, read logs, power off, etc. |
 | `0xc6` | `restoreKey` | special | Reboot sequence: clears state, resets BLE, restarts main task. |
 | `0xc7` | — | `0x00832ebc` | Vibration/motor pattern player (`#`/`D` branches). |
 | `0xff` | — | `0x0082cde8` | Factory reset: if payload is `"fff"`, wipes `0xa4` bytes of config. |
@@ -163,6 +163,36 @@ Most handlers build a 16-byte response buffer, compute an additive checksum with
 | `0x0082c988` | `FUN_0082c988` | Stream large data for opcodes `0x37`, `0x39`, `0x7a` |
 
 `FUN_0082b986(opcode, isNotify)` sends a simple 1-byte opcode response (with `0x80` flag for notify-only opcodes).
+
+### Opcode `0x77` `phoneSport` sub-command dispatch (`FUN_0082ce0c`)
+
+`FUN_0082ce0c` reads `subData[0]` (frame byte `3`) and dispatches via `__ARM_common_switch8` with max index `6`:
+
+| Sub-byte | Handler | Notes |
+|---|---|---|
+| `0x00`, `0x06` | `FUN_0082cede` | Default ack — builds `0x77` response with checksum |
+| `0x01` | `FUN_0082ce2a` | Start/finish sport session; zeros `DAT_0082cff4`; calls `FUN_00828af4`, `FUN_00830c7e`; arms a 1000 ms timer |
+| `0x02` | `FUN_0082ce64` | Calls `FUN_00830cb2`; sets `DAT_0082cff4+1` flag |
+| `0x03` | `FUN_0082ce72` | Calls `FUN_00830cd4`; sets `DAT_0082cff4+1` flag |
+| `0x04` | `FUN_0082ce80` | Cancels timer (`_DAT_0082cffc`); calls `FUN_00830c7e` |
+| `0x05` | `FUN_0082ce96` | GPS/position delta: reads two 3-byte little-endian values from `subData[2..6]` and `subData[6..10]`, updates cumulative distance/step counters |
+
+The helper functions `FUN_00830c7e`, `FUN_00830cb2`, `FUN_00830cd4` live in the step-counter / sport-motion library (`vc_SportMotion_Int`).
+
+### Opcode `0xa1` factory/test mode (`FUN_00827f5c`)
+
+`subData[0]` selects the test action:
+
+| Sub-byte | Action |
+|---|---|
+| `0x01` | Full reset: stop sensors/motor, save current state to RAM context, clear step data, start 1000 ms timer, power off / enter DLPS |
+| `0x02` | Restore saved state from RAM context to sensor modules |
+| `0x03` | Power off / enter DLPS immediately |
+| `0x04` | Start HR measurement with `0x800` mode |
+| `0x05` | Stop HR measurement |
+| `0x06` | Save current state and then power off |
+| other | Send `0xffa1` error response |
+
 
 ---
 
@@ -259,4 +289,3 @@ No code references to the `0xFEE7` service endpoints were located during this de
 1. Recover the exact meaning of opcode `0x2b` mixture container fields.
 2. Identify the 32-byte `image_digest` algorithm used for OTA and the container header digest at `0x1c4`. No SHA-256 constants were found in the body; it may be computed by the bootloader or host tool.
 3. Determine whether the `0xFEE7` vendor service has any active protocol role in the firmware.
-4. Decompile the remaining sub-handlers for opcodes `0x77` (phoneSport jump table) and `0xa1` (factory/test) if more detail is needed.
