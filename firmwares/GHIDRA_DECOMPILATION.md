@@ -261,7 +261,7 @@ Processes a circular queue of incoming 16-byte frames (`DAT_0082d440 + 0x14` rin
 | `0x7a` | `muslim` | `0x0082cb3a` | Sub `0x01` reads Muslim prayer config, `0x02 0x01` resets it — see §3.11. |
 | `0x81` | — | `0x0082cdac` | Stores 6-byte config chunk and calls `FUN_00840568` (flash/config write). |
 | `0xa1` | — | `0x00827f5c` | Factory/test mode commands (`0x01`–`0x06`): reset, read logs, power off, etc. |
-| `0xc6` | `restoreKey` | special | Reboot sequence: clears state, resets BLE, restarts main task. |
+| `0xc6` | `restoreKey` | special | Reboot sequence — see §3.14. |
 | `0xc7` | — | `0x00832ebc` | Vibration/motor pattern player — see §3.2. |
 | `0xff` | — | `0x0082cde8` | Factory reset — see §3.8. |
 
@@ -1340,6 +1340,80 @@ related push paths, not through this opcode).
 | `0x05` | Stop HR measurement |
 | `0x06` | Save current state and then power off |
 | other | Send `0xffa1` error response |
+
+### 3.14 Opcode `0xc6` restoreKey (device reboot)
+
+Unlike the other Channel-A opcodes that route to dedicated
+handler functions, `0xc6` is a *special* case handled inline in
+the main dispatcher `FUN_0082d2dc`. The handler takes a one-byte
+sub-command at `req[1]` and either runs a full reboot sequence
+or sends a one-byte ack, depending on the sub-command.
+
+#### Sub-command dispatch (inline in `FUN_0082d2dc`)
+
+```c
+if (opcode == 0xc6) {
+    if (req[1] == 'l') {                          // 0x6C — full reboot
+        FUN_008275d8();                            // §6 system reset
+        FUN_00829504();                            // clear 224 B main state
+        FUN_00829560();                            // clear 164 B user config
+        FUN_0082f160(2000);                        // 2 s wakeup timer
+        FUN_0082a460(1000);                        // 1 s UI delay
+    } else {
+        FUN_0082b986(0xc6, 1);                     // 1-byte ack (|0x80 high-bit)
+    }
+}
+```
+
+The 0x6C magic byte is the *only* byte in the request that
+matters; the rest of the 16-byte frame is ignored. Any other
+value of `req[1]` returns a one-byte ack `[0xC6, 0, 0, …, 0, cksum]`
+via `FUN_0082b986(cmd, isNotify=1)` — the high bit of `0xC6` is
+already set so the `| 0x80` is a no-op.
+
+#### The `0x6C` reboot sequence
+
+| Step | Function | Effect |
+|---:|---|---|
+| 1 | `FUN_008275d8()` | System reset (the same routine used by `0xff` factory reset): stops sensors and motor, tears down the BLE stack via `FUN_00827404` + `FUN_0082dfde`, zeroes per-task state, sets `*DAT_00827804 = 5`, and arms a 1000 ms one-shot timer via `FUN_0082f160(1000)`. |
+| 2 | `FUN_00829504()` | Clear 224 B of main-app state. The body is `memset(stack, 0, 0x1FC)`, load the 4-byte u32 at `*(DAT_008297dc + 4)`, then call `func_0x00007b32(&u32, 0, 0xE0)` (likely a state-store clear for the *first* state block). |
+| 3 | `FUN_00829560()` | Clear 164 B of user-config. The body is `memset(stack, 0, 0x200)`, then `func_0x00007b32(stack, 0x200, 0xA4)` (the *same* 0xA4-byte config block that `0xff` factory reset wipes via `DAT_0082cff0`; the 0x6C reboot path *additionally* wipes it). |
+| 4 | `FUN_0082f160(2000)` | Start a 2000 ms one-shot timer. |
+| 5 | `FUN_0082a460(1000)` | Start a 1000 ms UI delay. The body checks `FUN_00828b1e()` (no pending activity) and `FUN_0082a826()` (on home screen) before running, cancels any active timer at `DAT_0082a69c + 4`, starts a new 1000 ms timer, calls `FUN_0082a382(0x4B)` (probably a "shutting down" UI event), and sets `*(DAT_0082a69c + 0xc) = 1` (the "delaying" flag). |
+
+#### `0x6C` vs `0xff 'fff'` — what's the difference?
+
+Both opcodes trigger a system reset (`FUN_008275d8`) and end up
+zeroing the 0xA4-byte user-config block, but:
+
+| | `0x6C` reboot | `0xff 'fff'` factory reset |
+|---|---|---|
+| System reset (`FUN_008275d8`) | yes | yes |
+| Main-app 224 B state wipe | **yes** (`FUN_00829504`) | no |
+| 164 B user-config wipe | **yes** (`FUN_00829560`) | yes |
+| 2000 ms wakeup timer | **yes** | no |
+| 1000 ms UI delay | **yes** | no |
+| "shutdown" UI event (`0x4B`) | **yes** | no |
+| Response | none (BLE torn down) | none (BLE torn down) |
+| Trigger | single byte `0x6C` | three-byte magic `"fff"` |
+
+In other words, `0x6C` is the "**reboot and start clean**" command
+the host sends when it wants the watch to come back up with no
+in-RAM state at all, while `0xff 'fff'` is the "**reset user
+preferences but keep the running app state**" command. A normal
+host-initiated "reboot the watch" session uses `0x6C`; a
+"factory-reset to clear my customisations" session uses
+`0xff 'fff'`.
+
+#### Why no response
+
+The reboot path tears down the BLE stack at step 1 (`FUN_0082dfde`
+inside `FUN_008275d8`), so any response frame queued by the
+dispatcher would be lost in the `FUN_0082ebdc` ring during the
+re-init. The 16-byte request is the implicit ack. The host treats
+the loss of the link as the success indicator and waits for the
+watch to re-advertise before sending a fresh `0x01`/`0x48`
+handshake.
 
 ### 3.1 Opcode `0x2b` menstruation / mixture container
 
