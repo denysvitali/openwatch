@@ -1814,6 +1814,141 @@ The `0xFEE7` vendor service is **not** table decoration. It is registered during
 
 The write handler is the protocol entry point.
 
+### 8.1 0xFEE7 dispatcher (`FUN_0082c944`)
+
+The actual opcode table for the 0xFEE7 service. The function is
+called from `FUN_0082e87a` (the GATT write handler) with
+`(frame_ptr, frame_length)`.
+
+#### Top-level guards
+
+```c
+void FUN_0082c944(byte *param_1, int param_2) {
+    if (*DAT_0082caec == 0x01) return;   // §8.1 service-suspended flag
+    if (param_2 != 0x10) return;         // 16-byte frame only
+    if (*param_1 != 0x43 && *param_1 != 0x48)
+        FUN_0082eebe();                  // keep-alive timer reset
+    // ... opcode dispatch ...
+}
+```
+
+The `*DAT_0082caec == 0x01` check is the watch's *service-suspended*
+flag (set by `0xC5/0xC8/0xC9` config writes — see §8.1 below).
+The keep-alive reset skips the "read-only" opcodes `0x43 'C'` and
+`0x48 'H'` (the host handshake/keep-alive pair) so an idle host
+polling the link does not bump the timer.
+
+#### Opcode → handler map (reverse-engineered from `FUN_0082c944`)
+
+| Opcode(s) | Action | Helper |
+|---|---|---|
+| `0x00..0x2a` | switch8 table at `0x82c61d` (43 entries) | per-entry thunk |
+| `0x2b, 0x37, 0x38, 0x3a, 0x3b, 0x43 'C', 0x48 'H', 0x72, 0x7a, 0x7d, 0x81, 0xa1, 0xc6, 0xc7 'D', 0xff` | Defer to the deferred-command ring | `FUN_0082be64` |
+| `0x36` | Heart-rate related read/set | `FUN_0082c112` |
+| `0x39` | HRV setting | `FUN_0082c9da` |
+| `0x3c` | Fixed capability block `[0x3c,0,0x40,0xa0,0x20,…]` | `FUN_0082c50e` |
+| `0x3e` | SpO2 / blood-oxygen related read/set | `FUN_0082c550` |
+| `0x48 'H'` | Handshake — 15-byte device-info block | `FUN_0082bf40` |
+| `0x50 'P'` | **Inline** alert: `FUN_0082994c(0x14, 0x10, 1, 0x19)` + `FUN_0082a5c8(8)` (motor + UI) | inline |
+| `0x51 'Q'` | "Find phone" / alert trigger | `FUN_0082c5b8` |
+| `0x60` | (handler) | `FUN_0082be90` |
+| `0x61 'a'` | Status response (battery / daily counters) | `FUN_0082bee6` |
+| `0x69 'i'` | Multi-step mode control (start/stop/cancel) | `FUN_0082c2f4` |
+| `0x6a 'j'` | Continuation of `0x69` mode control | `FUN_0082c1e2` |
+| `0x7b, 0xb0, 0xc2, 0xcc, 0xf0, 0xf1` | No-op (early return) | — |
+| `0x90` | Echo `[0x90]` | `FUN_00827ad2` |
+| `0x91` | Echo `[0x91]` | `FUN_00827aee` |
+| `0x92` | (handler) | `FUN_00827b14` |
+| `0x93` | (handler) | `FUN_00827c4a` |
+| `0x94` | (handler) | `FUN_00827b2e` |
+| `0x95` | (handler) | `FUN_00827b54` |
+| `0x96` | Sends `[0x96,0,0,0x96,…]` and resets state | `FUN_00827b7c` |
+| `0x97..0x9f` | switch8 table at `0x82c6e1` (9 entries) | per-entry thunk |
+| `0xa0` | (handler — see also the `0x97..0x9f` switch8) | `FUN_00827b16` |
+| `0xbf` | (handler) | `FUN_0082ba94` |
+| `0xc0` | (handler) | `FUN_0082bb0c` |
+| `0xc1` | Sends a long/fragmented response: `FUN_008337fa(DAT_0082caf0)` + `FUN_0082b938(*param_1, DAT_0082caf0, 1)` | inline |
+| `0xc3` | If `param_1[2] == 1` → `FUN_0082dfde()`; then drive OTA state machine via `FUN_0082fe52(4 or 0, 0)` based on `param_1[1]` (1=push 4, 2=push 0, other=return) | inline |
+| `0xc4` | No-op | `FUN_00830462` |
+| `0xc5` | If `param_1[1] == 1` → `DAT_0082caec[3] = 1`; else `DAT_0082caec[3] = 0` | inline |
+| `0xc8` | Same as `0xc5` but writes `DAT_0082caec[4]` | inline |
+| `0xc9` | `DAT_0082caec[5] = param_1[1]` | inline |
+| `0xcd` | (handler — alarm-like 16-bit setter) | `FUN_0082be12` |
+| `0xce` | Factory/test sub-commands (`0x01`, `0x02`, `' '`, `'!'`, `'"'`) | `FUN_0082bcde` |
+| `0xfe` | `FUN_00844214(*(u16*)(param_1 + 1))` — vibration pattern from a duration arg | inline |
+| other | Vendor NAK: `FUN_0082bcba(opcode)` | `FUN_0082bcba` |
+
+#### Deferred-command ring (`FUN_0082be64`)
+
+The 15 opcodes routed to `FUN_0082be64` (including all the
+Channel-A opcodes the watch knows about plus the
+0xFEE7-specific `0xC7 'D'` and `0xFF`) are **not** handled
+synchronously. Instead the dispatcher copies the 16-byte
+request into a 10-slot ring at `DAT_0082bfcc + 4`, increments
+the slot index, and calls `FUN_00827124(0, DAT_0082bfd0)` to
+schedule a worker that drains the ring at a later tick. This
+is how the watch avoids a single long 0xFEE7 frame from
+blocking the BLE link while a CPU-heavy handler (e.g.
+`0x77 phoneSport` or `0x43 readDetailSport`) runs.
+
+The decompiler text has the ring copied as
+
+```c
+memcpy(ring + 4 + (*(u16*)(ring + 2)) * 0x10, param_1, 0x10);
+*(u16*)(ring + 2) = (*(u16*)(ring + 2) + 1) % 10;
+FUN_00827124(0, ring_worker);
+```
+
+— i.e. a circular buffer of 10 frames with a single writer
+(the dispatcher) and a single reader (the worker). The 10-slot
+size is the same as the Channel-A dispatcher at
+`FUN_0082d2dc`.
+
+#### Vendor NAK shape (`FUN_0082bcba`)
+
+For an unknown opcode the dispatcher emits a 2-byte *vendor NAK*
+frame:
+
+```
+byte 0: opcode | 0x80                (the high bit marks "error")
+byte 1: 0xEE                        (vendor-NAK marker)
+byte 2..14: 0
+byte 15: additive checksum
+```
+
+The 0xEE marker is the same byte the 0xFEE7 GATT service
+UUID uses (0x0000FEE7) — so a host that sees `[opcode|0x80, 0xEE]`
+knows the response came from the vendor service (and not the
+Channel-A 0xFF / 0xFE / 0x9F error variants).
+
+#### Switch8 tables
+
+The two `0x82c61d` and `0x82c6e1` switch8 tables route the
+"long tail" of opcodes that don't have explicit branches:
+
+* `0x82c61d` (43 entries, base `0x82c61d`): covers opcodes
+  `0x00..0x2a`. Most entries are `0x99` (a single "no-op"
+  thunk); non-default entries route to small per-feature
+  thunks (e.g. `0x01`/`0x06`/`0x08`/`0x0e`/`0x10` all share
+  the same `0x23` slot → likely an "echo ack" path).
+* `0x82c6e1` (9 entries, base `0x82c6e1`): covers opcodes
+  `0x97..0x9f`. The default slot is `0x37` (→ default no-op),
+  so most of the 0x97..0x9f range is also a no-op; the
+  visible non-default entries handle vendor-only sub-cmds.
+
+A host should treat both ranges as *reserved* unless it can
+match a specific response shape from the watch.
+
+#### Relationship to §8 opcode map
+
+The opcode → handler map **above** supersedes the original §8
+table (which only listed the *immediately-routed* opcodes).
+The §8 table is now strictly a subset: the "deferred"
+opcodes (`0x43`/`0x48`/`0x7a`/etc.) are still in the
+opcodes-routed-to-`FUN_0082be64` bucket, and the
+*handler-shorthand* in §8 is the per-deferred-frame handler
+that `FUN_0082be64`'s worker eventually invokes.
+
 ### Wire format
 
 `FUN_0082c944` expects 16-byte writes and uses the same framing as Channel A:
