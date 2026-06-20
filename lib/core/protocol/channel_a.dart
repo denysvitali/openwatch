@@ -313,6 +313,19 @@ class ChannelADispatcher {
   }
 
   /// `realTimeHeartRate` (0x1e): continuous HR push (`pl[0]` = bpm).
+  ///
+  /// **v14 firmware status**: `0x1e` is host→watch only on H59MA v14 —
+  /// the handler is a 3-sub-opcode controller (start/stop/reset) that
+  /// never queues a response frame (see `FUN_0082d20c` +
+  /// `GHIDRA_DECOMPILATION.md` §3.13). HR bpm pushes on v14 travel
+  /// through the `0x73` / `0x78` `deviceNotify` paths instead — use
+  /// `HrParser.parseDeviceNotify` in `lib/core/services/watch_manager.dart`
+  /// for the live values.
+  ///
+  /// The decoder below is kept as a defensive fallback for older
+  /// firmware variants that may have pushed `pl[0]=bpm` directly on
+  /// `0x1e` (the original pre-RE assumption). It is harmless on v14
+  /// because no frames ever reach it.
   void _decodeRealtimeHr(Uint8List pl) {
     if (pl.isEmpty) return;
     final bpm = pl[0] & 0xFF;

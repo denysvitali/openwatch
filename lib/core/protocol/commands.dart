@@ -106,8 +106,12 @@ class Commands {
   static Uint8List stopMeasure(MeasureType type) =>
       Codec.buildChannelA(OpA.stopMeasure, [type.id, 0x00, 0x00]);
 
-  /// `RealTimeHeartRate` (0x1e): `[type]`. Triggers a persistent notify on
-  /// 0x1e carrying `pl[0]=bpm` for continuous HR mode.
+  /// `RealTimeHeartRate` (0x1e): sub `[type]` (1 = start, 2 = stop,
+  /// 3 = reset — see `GHIDRA_DECOMPILATION.md` §3.13 / `FUN_0082d20c`).
+  /// On H59MA v14 this is **fire-and-forget** — the handler never
+  /// sends a response. The continuous bpm stream travels on
+  /// `0x73 deviceNotify` / `0x78 deviceSportNotify`, NOT on `0x1e`
+  /// (the pre-RE APK-derived assumption was wrong for v14).
   static Uint8List startContinuousHr(MeasureType type) =>
       Codec.buildChannelA(OpA.realTimeHeartRate, [type.id]);
 
