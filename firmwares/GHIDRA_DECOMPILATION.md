@@ -2550,7 +2550,7 @@ polling the link does not bump the timer.
 | `0x51 'Q'` | "Find phone" / alert trigger | `FUN_0082c5b8` |
 | `0x60` | (handler) | `FUN_0082be90` |
 | `0x61 'a'` | Status response (battery / daily counters) | `FUN_0082bee6` | see §8.3 |
-| `0x69 'i'` | Multi-step mode control (start/stop/cancel) | `FUN_0082c2f4` |
+| `0x69 'i'` | Multi-step mode control (start/stop/cancel) | `FUN_0082c2f4` | see §8.5 |
 | `0x6a 'j'` | Continuation of `0x69` mode control | `FUN_0082c1e2` |
 | `0x7b, 0xb0, 0xc2, 0xcc, 0xf0, 0xf1` | No-op (early return) | — |
 | `0x90` | Echo `[0x90]` | `FUN_00827ad2` |
@@ -2674,7 +2674,7 @@ Immediate / explicitly routed opcodes:
 | `0x51` `'Q'` | `FUN_0082c5b8` | "Find phone" / alert trigger; arms pattern when `payload[1]==1` |
 | `0x60` | `FUN_0082be90` | |
 | `0x61` `'a'` | `FUN_0082bee6` | Status response (battery / daily counters) — see §8.3 |
-| `0x69` `'i'` | `FUN_0082c2f4` | Multi-step mode control (start/stop/cancel of a remote feature) |
+| `0x69` `'i'` | `FUN_0082c2f4` | Multi-step mode control (start/stop/cancel of a remote feature) — see §8.5 |
 | `0x6a` `'j'` | `FUN_0082c1e2` | Continuation of `0x69` mode control |
 | `0x90` | `FUN_00827ad2` | Echo `[0x90]` |
 | `0x91` | `FUN_00827aee` | Echo `[0x91]` |
@@ -2992,6 +2992,147 @@ mirrors into the feature state. The combination `0x96`
 reset followed by `0xC9` set is the documented host pattern
 for switching between "feature on" and "feature off"
 modes without a full BLE reboot.
+
+### 8.5 0x69 `'i'` mode control (`FUN_0082c2f4`)
+
+The most stateful handler in the 0xFEE7 dispatcher. Drives
+a multi-step "start / stop / cancel / refresh" sequence
+over a per-feature state struct at `DAT_0082c578`. The
+handler implements both a **HR-busy gate** (refuse to act
+if the HR step counter is running) and a **500 ms tick**
+that the mode-control state machine relies on.
+
+#### Request layout
+
+| Byte | Field | Notes |
+|---:|---|---|
+| 0 | `0x69` | cmd (consumed by dispatcher) |
+| 1 | `mode` | see dispatch table below |
+| 2..3 | `param` (u16 LE) | per-mode parameter (interval, duration, etc.); clamped to `>= 10` |
+| 4..14 | unused | — |
+
+#### HR-busy gate
+
+The very first thing the handler does is call
+`FUN_00828af4()` (the same HR step-counter check used by
+`0x08 0x01` start-find in §3.15). If the counter is
+*running*, the handler short-circuits:
+
+```c
+if (FUN_00828af4() != 0) {
+    rsp[0..1] = (0x69, req[1]);
+    rsp[2]    = 1;                    // "busy" flag
+    rsp[15]   = additive checksum;
+    send rsp;
+    return;
+}
+```
+
+The host treats `rsp[2] == 1` as "request was ignored because
+HR is currently recording a sport session — retry after
+`0x77 0x02` finishes". This is the same gating strategy used
+by `0x77 0x01` (§3.16).
+
+#### Mode dispatch (when HR not busy)
+
+The handler writes `req[1]` to `state[7]` (mode) and
+`req[2]` to `state[8]` (sub), then dispatches on `(mode,
+sub)`:
+
+| Mode | Sub | Action |
+|---:|---:|---|
+| `0x06` | `0x01` | **Start**: zero `state[0xC..0xD]`, call `FUN_0083371e(1)` (HR continuous start), cancel timer at `state[0x10]`, arm 500 ms timer |
+| `0x06` | `0x02` | **Cancel**: cancel timer |
+| `0x06` | `0x03` | **Refresh**: cancel + re-arm 500 ms timer |
+| `0x06` | `0x04` | **Stop HR**: call `FUN_00833704(1)` (HR stop), zero `state[0xC..0xD]` |
+| `0x06` | other | (no action — go to send) |
+| other | any | **Generic mode start**: zero `state[0xC..0xD]` and `state[2]`, cancel + re-arm 500 ms timer, then dispatch on `state[7]` (just-stored mode) for the per-mode start action (see "Per-mode start dispatch" below) |
+
+#### Per-mode start dispatch (mode ≠ 0x06)
+
+When the mode is not `0x06`, the handler reads back
+`state[7]` (the mode it just stored) and dispatches:
+
+| `state[7]` | Action |
+|---:|---|
+| `0x03` | `FUN_0083371e(0x20)` (HR mode `0x20`) |
+| `0x09` | `FUN_00834862()` + `FUN_0083371e(0x400)` |
+| `0x0B` (11) | `FUN_0083371e(0x1000)` + `FUN_0082ad02()` (some calibration / step-counter init) |
+| `0x0C` (12) | `FUN_0083475a()` + `FUN_0082ad02()` + `FUN_0083454c()` + `FUN_0083371e(DAT_0082c57c)` (data-driven mode param) |
+| `0x0D` (13) | `FUN_0083371e(1)` |
+| `0x0E` (14) | `FUN_0083371e(0x20)` |
+| other | (fallback — `FUN_0083371e(1)`) |
+
+For all non-fallback modes the handler then:
+1. Reads `req[2..3]` as a u16 `param`
+2. Stores `param` into `state[0xA]` (inter-mode duration or
+   interval)
+3. Clamps `param` to `>= 10` (the doc-table explains this
+   matches the watch's 10 ms timer granularity)
+
+#### Persistent state (`DAT_0082c578`)
+
+| Off | Field | Notes |
+|---:|---|---|
+| 2 | `step_counter_flag` | zeroed at every start path |
+| 7 | `current_mode` | the mode byte just stored from `req[1]` |
+| 8 | `current_sub` | the sub byte from `req[2]` |
+| 0xA..0xB | `param_u16` | the clamped u16 parameter (only set in the generic-mode start) |
+| 0xC..0xD | `param_zero` | zeroed on `0x06` start and `0x06 0x04` stop |
+| 0x10+ | `timer_state` | the 500 ms tick used by both branches |
+
+`DAT_0082c57c` (the +4 sibling) holds the "data-driven"
+mode param consumed by the `0x0C` mode. Likely a config
+table the producer populates via `0xC5` / `0xC8` / `0xC9`.
+
+#### Why a 500 ms tick
+
+The 500 ms timer at `state[0x10]` is the *mode-control tick*
+— it advances the state machine for long-running modes
+(those that take more than the single 16-byte frame to
+complete). The host does not need to poll the timer; the
+watch fires any follow-up data on the 0xFEE7 ring when the
+tick expires. This is the same pattern as `0x77 phoneSport`
+(§3.16) and `0x08 findDevice` (§3.15) — both use a
+~1-second or ~500 ms timer to advance their state machines.
+
+#### Response layout
+
+For the HR-busy path:
+```
+byte  0: 0x69                (cmd)
+byte  1: req[1]              (echo of mode)
+byte  2: 0x01                ("busy" flag — request was ignored)
+byte  3..14: 0
+byte 15: additive checksum
+```
+
+For the "not busy" path:
+```
+byte  0: 0x69                (cmd)
+byte  1: state[7]             (echo of the mode just stored)
+byte  2: 0x00                (always 0 in the not-busy path)
+byte  3..14: 0
+byte 15: additive checksum
+```
+
+The host decodes `byte 2` as a "request status" flag:
+`0` = accepted, `1` = refused (HR busy). The mode echo in
+`byte 1` confirms which mode the request landed on
+(useful when the host's `req[1]` was outside the table —
+the handler clamps to `0x06` and the echo reflects that).
+
+#### Pair with `0x6a 'j'`
+
+`0x6a 'j'` (handled by `FUN_0082c1e2`) is the *continuation*
+of `0x69 'i'` — when the 500 ms timer fires, it pops the
+mode's continuation state and dispatches the next step.
+The host should treat `0x69` + `0x6a` as a single
+multi-frame transaction: `0x69` *starts* the mode,
+`0x6a` *advances* it. The split is necessary because the
+0xFEE7 16-byte frame cannot carry the full per-mode state;
+`0x6a` re-reads `DAT_0082c578` and pushes the next-step
+data on the notify ring.
 
 ---
 
