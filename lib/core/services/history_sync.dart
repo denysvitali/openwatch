@@ -5,11 +5,17 @@ import 'package:flutter/foundation.dart';
 
 import '../ble/ble_transport.dart';
 import '../protocol/channel_a.dart';
+import '../protocol/channel_b.dart';
 import '../protocol/codec.dart';
 import '../protocol/commands.dart';
 import '../protocol/fragment_reassembler.dart';
 import '../protocol/opcodes.dart';
+import '../protocol/sleep_parser.dart';
 import 'app_log.dart';
+
+// Re-export sleep model types so existing consumers can keep importing
+// them from `history_sync.dart` after the move to `sleep_parser.dart`.
+export '../protocol/sleep_parser.dart' show SleepSegment, SleepStage;
 
 /// A 5-minute HR sample.
 @immutable
@@ -72,17 +78,6 @@ class HrvRecord {
   final Uint8List body;
 }
 
-/// A single sleep segment (deep / light / awake / nap).
-enum SleepStage { awake, light, deep, rem }
-
-@immutable
-class SleepSegment {
-  const SleepSegment(this.start, this.duration, this.stage);
-  final DateTime start;
-  final Duration duration;
-  final SleepStage stage;
-}
-
 /// Day-aligned totals for the activity ring on the dashboard.
 @immutable
 class DailyTotals {
@@ -102,13 +97,28 @@ class DailyTotals {
 /// Multi-packet responses are reassembled here (the SDK does this in Java;
 /// the original payload layout is 13 bytes per sample at 5-min slots).
 class HistorySync extends ChangeNotifier {
-  HistorySync(this.transport, this.onTotals, {ChannelADispatcher? dispatcher})
-    : _dispatcher = dispatcher {
+  HistorySync(
+    this.transport,
+    this.onTotals, {
+    ChannelADispatcher? dispatcher,
+    ChannelBParser? bParser,
+  }) : _dispatcher = dispatcher,
+       _bParser = bParser {
     _inbound = transport.inboundA.listen(_collectRx);
+    // Channel-B sleep responses (`0x27` night + `0x3e` lunch per
+    // PROTOCOL.md §4.4) only flow through the BC-fragmented
+    // transport — the inboundA listener can't see them. Subscribe
+    // to the parser's reassembled stream when one is provided.
+    final p = _bParser;
+    if (p != null) {
+      _bCmdSub = p.commands.listen(_onChannelBCommand);
+    }
   }
   final BleTransport transport;
   final ChannelADispatcher? _dispatcher;
+  final ChannelBParser? _bParser;
   final void Function(DailyTotals) onTotals;
+  StreamSubscription<ChannelBCommand>? _bCmdSub;
 
   final List<HrSample> _hr = [];
   final List<SleepSegment> _sleep = [];
@@ -257,8 +267,16 @@ class HistorySync extends ChangeNotifier {
         await transport.sendA(Commands.readHeartRateHistory(dayStart));
         await _drainRx(Duration(milliseconds: 600));
       }
-      // Sleep (new protocol, Channel-B) for last night
+      // Sleep (new protocol, Channel-B) — night for last night
+      // (`0x27`) and lunch/nap (`0x3e`). The replies travel as
+      // fragment-reassembled Channel-B commands handled by
+      // [_onChannelBCommand] — the `_drainRx` settle window is
+      // enough for the parser to emit at least one assembled
+      // command; anything still in-flight when the window closes
+      // surfaces on the next `notifyListeners()` triggered by
+      // [_onChannelBCommand].
       await transport.sendB(Commands.readSleepNewProtocol(dayOffset: 0));
+      await transport.sendB(Commands.readSleepLunchProtocol(dayOffset: 0));
       await _drainRx(Duration(milliseconds: 600));
       AppLog.instance.info(
         'history',
@@ -356,10 +374,56 @@ class HistorySync extends ChangeNotifier {
   @override
   void dispose() {
     _inbound?.cancel();
+    _bCmdSub?.cancel();
     _pressureRecordsSub?.cancel();
     _hrvRecordsSub?.cancel();
     _pressureReassembler?.dispose();
     _hrvReassembler?.dispose();
     super.dispose();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Channel-B command ingest — handles `0x27` night sleep + `0x3e`
+  // lunch/nap responses (PROTOCOL.md §4.4, GHIDRA §2.3). The
+  // `ChannelBParser` already validated CRC and emitted a fully
+  // reassembled payload; we just decode the segments.
+  // ---------------------------------------------------------------------------
+
+  void _onChannelBCommand(ChannelBCommand cmd) {
+    final added = switch (cmd.cmd) {
+      OpB.sleepNew => _decodeSleepNew(cmd.payload),
+      OpB.sleepLunchNew => _decodeSleepLunch(cmd.payload),
+      _ => 0,
+    };
+    if (added > 0) {
+      AppLog.instance.debug(
+        'history',
+        'Channel-B cmd=0x${cmd.cmd.toRadixString(16)} +$added sleep segments '
+            '(total=${_sleep.length})',
+      );
+      notifyListeners();
+    }
+  }
+
+  int _decodeSleepNew(Uint8List payload) {
+    final anchor = DateTime.now();
+    final added = SleepParser.parseNightSleepSegments(
+      payload,
+      anchor: DateTime(anchor.year, anchor.month, anchor.day),
+    );
+    if (added.isEmpty) return 0;
+    _sleep.addAll(added);
+    return added.length;
+  }
+
+  int _decodeSleepLunch(Uint8List payload) {
+    final anchor = DateTime.now();
+    final added = SleepParser.parseLunchSleepSegments(
+      payload,
+      anchor: DateTime(anchor.year, anchor.month, anchor.day),
+    );
+    if (added.isEmpty) return 0;
+    _sleep.addAll(added);
+    return added.length;
   }
 }

@@ -129,9 +129,37 @@ void main() {
       );
     });
 
+    test('finds HR at pl[3] on the wider v14 layout (regression: HR bpm '
+        'offset was missed on earlier firmware variants)', () {
+      expect(
+        HrParser.parseDeviceNotify(
+          Uint8List.fromList([0x05, 0x00, 0x00, 102]),
+        ),
+        102,
+      );
+    });
+
+    test('finds HR at pl[4] when two byte dataType + two byte padding '
+        'precede the bpm', () {
+      expect(
+        HrParser.parseDeviceNotify(
+          Uint8List.fromList([0x05, 0x00, 0x00, 0x00, 88]),
+        ),
+        88,
+      );
+    });
+
     test('returns null for payloads shorter than 2 bytes', () {
       expect(HrParser.parseDeviceNotify(Uint8List(0)), isNull);
       expect(HrParser.parseDeviceNotify(Uint8List.fromList([0x05])), isNull);
+    });
+
+    test('returns null when every probed offset is non-plausible', () {
+      // 5-byte payload where offsets 1..4 are all zero — no HR.
+      expect(
+        HrParser.parseDeviceNotify(Uint8List.fromList([0x05, 0, 0, 0, 0])),
+        isNull,
+      );
     });
   });
 }

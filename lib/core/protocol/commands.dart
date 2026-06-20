@@ -125,6 +125,12 @@ class Commands {
   static Uint8List readSleepNewProtocol({int dayOffset = 0}) =>
       Codec.buildChannelB(OpB.sleepNew, [dayOffset & 0xFF]);
 
+  /// New sleep protocol lunch/nap variant (Channel-B `0x3e`) for a given
+  /// day offset. Same wire shape as [readSleepNewProtocol] but the firmware
+  /// reads from the lunch-sleep store via `FUN_0082fada` (GHIDRA §2.3).
+  static Uint8List readSleepLunchProtocol({int dayOffset = 0}) =>
+      Codec.buildChannelB(OpB.sleepLunchNew, [dayOffset & 0xFF]);
+
   /// `TodaySportData` (0x48): read today's running step total (bare opcode).
   static Uint8List readTodaySport() => Codec.buildChannelA(OpA.todaySport);
 

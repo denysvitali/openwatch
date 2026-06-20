@@ -25,6 +25,11 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
       ref.read(bleTransportProvider),
       (_) {}, // totals already shown on dashboard
       dispatcher: ref.read(watchManagerProvider).hub.channelA,
+      // The Channel-B parser surfaces reassembled `0x27` night
+      // sleep + `0x3e` lunch/nap commands — without this, the
+      // HistorySync would send `readSleepNewProtocol` /
+      // `readSleepLunchProtocol` but never see the replies.
+      bParser: ref.read(watchManagerProvider).hub.channelB,
     )..addListener(_onChange);
   }
 

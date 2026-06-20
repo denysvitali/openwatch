@@ -40,12 +40,19 @@ class HrParser {
 
   /// `deviceNotify` (0x73) / `deviceSportNotify` (0x78) carry
   /// `dataType + loadData`. Some firmwares push live HR on these opcodes
-  /// when the canonical 0x1e path is unsupported — try the two byte
-  /// offsets where HR has been observed on H59MA-class firmwares and return
-  /// the first plausible value.
+  /// when the canonical 0x1e path is unsupported — try the byte offsets
+  /// where HR has been observed on H59MA-class firmwares (pl[1], pl[2])
+  /// plus two extra probes (pl[3], pl[4]) that cover the wider v14
+  /// layout where the dataType occupies two bytes, and return the first
+  /// plausible value.
+  ///
+  /// The dataType discriminator at [pl[0]] is **not** filtered on —
+  /// keeping the parser permissive makes it forward-compatible with
+  /// future OEM dataType ids; the [isPlausibleBpm] range gate keeps the
+  /// false-positive rate low.
   static int? parseDeviceNotify(Uint8List pl) {
     if (pl.length < 2) return null;
-    for (final off in const [1, 2]) {
+    for (final off in const [1, 2, 3, 4]) {
       if (pl.length <= off) continue;
       final bpm = pl[off] & 0xFF;
       if (isPlausibleBpm(bpm)) return bpm;
