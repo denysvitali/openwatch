@@ -249,7 +249,7 @@ Processes a circular queue of incoming 16-byte frames (`DAT_0082d440 + 0x14` rin
 | `0x25` | `setSitLong` | `0x0082d284` | Writes sedentary config — see §3.9. |
 | `0x26` | `readSitLong` | `0x0082d258` | Reads sedentary config — see §3.9. |
 | `0x2b` | `menstruation` (mixture container) | `0x0082ba54` | Sub `0x01`/`0x02` read/write mixture data; cycle-phase detector + notification sender — see §3.1. |
-| `0x2c` | `bloodOxygenSetting` | `0x0082d1c2` | Sub `0x01` reads SpO2 setting, `0x02` writes it. |
+| `0x2c` | `bloodOxygenSetting` | `0x0082d1c2` | Sub `0x01` reads SpO2 setting, `0x02` writes it — see §3.10. |
 | `0x37` | `pressureSetting` | `0x0082caa6` | Reads/sets pressure config; uses `FUN_008344fe`. |
 | `0x38` | `pressure` | `0x0082ca54` | Sub `0x01` reads pressure value, else sets pressure unit. |
 | `0x39` | `hrvSetting` | `0x0082c9da` | Reads/sets HRV config; uses `FUN_0083468e`. |
@@ -962,6 +962,64 @@ quirk of how the wire format was originally specified for the
 H59MA SDK; the host code that ships in `lib/core/protocol/`
 should preserve the asymmetry rather than trying to "fix" it on
 either side.
+
+### 3.10 Opcode `0x2c` bloodOxygenSetting (`FUN_0082d1c2`)
+
+The simplest "config" handler in the table: a single-bit on/off
+flag for the SpO2 (blood-oxygen) sensor, stored as bit 1 of a
+shared config byte at `DAT_008277f0 + 0x2D`.
+
+#### Sub-opcode dispatch
+
+| `req[1]` | Action | Helper |
+|---:|---|---|
+| `0x01` (read) | `local_16 = FUN_00827682()` — read bit 1 of `*(DAT_008277f0 + 0x2D)`, mask `& 3 >> 1` yields `0` or `1` | `FUN_00827682` |
+| `0x02` (write) | `FUN_00827660(req[2])` — if the new value differs from the current bit, update the bit in the config byte and call `FUN_0082946e()` (config-changed event broadcast). `local_16 = req[2]` echoes the committed value. | `FUN_00827660` |
+| other | `local_16` left at zero; the sub-opcode echo in `local_17` still identifies the request type | — |
+
+#### Persistent state
+
+The SpO2 setting shares one bit of a single config byte at
+`DAT_008277f0 + 0x2D`:
+
+| Bit | Field | Notes |
+|---:|---|---|
+| 0 | (other config — not SpO2) | reserved |
+| 1 | `spo2_enabled` | `0` = off, `1` = on |
+| 2..7 | (other config) | reserved |
+
+The `& 3` mask in the read path and the `(param_1 & 1) << 1` in the
+write path both confirm that only bit 1 is owned by the SpO2
+setting; the other 7 bits of that config byte belong to other
+features (likely UV-touch or DND; see §3.7 for the DND state
+which lives in a different block).
+
+#### Response layout (always 16-byte fragment)
+
+```
+byte  0: 0x2C                (cmd)
+byte  1: req[1]              (sub-opcode echo: 0x01 read / 0x02 write)
+byte  2: current SpO2 value  (0/1 for read; echoed req[2] for write)
+byte  3..14: 0
+byte 15: additive checksum
+```
+
+The whole 16-byte response is built on the stack from the four
+register arguments (`r0..r3`) so that no `memcpy` from the request
+is needed — only the three output bytes are touched. The
+checksum is computed by `FUN_0082b0c4` over the first 15 bytes
+(per the §3 "Common response path") and stamped into `byte 15`
+via `CONCAT13`.
+
+#### Why this handler is so short
+
+SpO2 on this watch is a *battery-hungry* sensor: enabling it adds a
+continuous PPG read every few minutes. The 1-bit storage means the
+state survives the `0xff` factory reset (the parent config byte is
+zeroed there) and is fast to toggle from the watch face — the
+host's only requirement is that `req[2]` for sub `0x02` be `0` or
+`1` (the handler doesn't reject other values, but the bit-mask
+write will silently coerce them to `0`/`1`).
 
 ### Opcode `0xa1` factory/test mode (`FUN_00827f5c`)
 
