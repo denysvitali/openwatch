@@ -2038,6 +2038,135 @@ related push paths, not through this opcode).
 | `0x06` | Save current state and then power off |
 | other | Send `0xffa1` error response |
 
+#### Deeper behaviour (decompiled)
+
+The handler uses **two global state buffers** to coordinate
+the factory-test sequence:
+
+* `DAT_00828108` — a "scratch" buffer (about 40 bytes) used
+  for transient context (counts, sub-byte echo, current
+  HR mode parameter).
+* `DAT_0082810c` — a "live" buffer holding the saved sensor
+  state (step count, HR mode, body position, etc.). The
+  handler reads/writes the `DAT_0082810c + 4..0xC` range to
+  push or pull the state.
+
+The four "interesting" paths:
+
+* **`sub 0x01` — full reset**:
+  1. `FUN_00827ba6(2)` — stop sensors / motor.
+  2. `FUN_0082949c()` — save the *current* state from
+     `DAT_0082810c + 4..0xC` into the scratch buffer
+     `DAT_00828108 + 0x1C..0x24`.
+  3. `FUN_00833e86()` + `FUN_00831b90()` +
+     `thunk_FUN_00831230()` + `FUN_00827940()` — generic
+     "clear step data + reset BLE + reset task" cleanup
+     sequence (the same routine as `0xff factory reset`).
+  4. Re-stage the scratch buffer back into the live buffer
+     (so the saved state survives the reset).
+  5. Zero out the deferred ring (`FUN_00833948`).
+  6. Stop HR with `DAT_00828110` (mode = `0x40`).
+  7. Re-arm HR with `0x40`.
+  8. Echo `req[2]` into `DAT_00828108[0]` and queue a
+     1000 ms worker via `FUN_00829c24`.
+  9. Tail-call `FUN_00827dba(0)` — the state-update worker
+     that pushes the live state to the notify ring (see
+     §8.16).
+
+* **`sub 0x02` — restore**:
+  1. If `DAT_0082810c[8]` (the "save state present" flag)
+     is non-zero, copy the scratch state back into the live
+     buffer.
+  2. If `DAT_0082810c[1]` (the "save count present" flag)
+     is non-zero, copy the scratch step count back.
+  3. Stop HR, re-arm with `0x40`.
+  4. Tail-call `FUN_00829c50` to cancel any pending workers.
+
+* **`sub 0x04` — start HR mode `0x800`**:
+  Just calls `FUN_0083371e(0x800)` and stores `req[2]` in
+  `DAT_00828108[0]` for the worker.
+
+* **`sub 0x06` — save + reset**:
+  Similar to `0x01` but **without** calling `FUN_00827ba6(2)`
+  first — leaves the sensors running while saving the
+  state, then triggers a state-update worker that pushes
+  the live state and resets the deferred ring.
+
+#### `FUN_00827dba` — state-update worker
+
+The worker called by all four "interesting" paths above:
+
+```c
+void FUN_00827dba() {
+    rsp[0] = 0xA1;  // cmd
+    rsp[1] = 1;     // sub-cmd echo (= the sub-byte from the request)
+    rsp[2..3] = FUN_00833968();          // 2-byte u16 "state version" id
+    rsp[4..7] = *(u32*)(DAT_00827e8c + 0x4C);  // 4-byte live state field
+    rsp[8..11] = *(u32*)(DAT_00827e8c + 0x48); // 4-byte live state field
+    rsp[12..14] = uVar11;                // low 12 bits of *(DAT_00827e8c + 0x50)
+    rsp[15] = checksum;
+    FUN_0082ebdc(rsp);  // push 16-byte state-update frame
+    rsp[0] = 0xA1;
+    rsp[1] = 2;     // sub 2 = "step count"
+    rsp[2..3] = FUN_00833960();          // 2-byte step count u16
+    rsp[4..5] = *(u16*)(DAT_00827e8c + 0x40); // step count u16
+    rsp[6..7] = *(u16*)(DAT_00827e8c + 0x3E); // last-step u16
+    rsp[8..9] = uVar9;                    // 2-byte "last update" timestamp
+    rsp[15] = checksum;
+    FUN_0082ebdc(rsp);  // push step-count frame
+    rsp[0] = 0xA1;
+    rsp[1] = 3;     // sub 3 = "body position / motion"
+    rsp[2..3] = local_1c[0];  // 2-byte motion u16 (from FUN_00832f1e)
+    rsp[4..5] = local_18[0];  // 2-byte body position u16
+    rsp[6..7] = local_20[0];  // 2-byte fall-detect u16
+    rsp[15] = checksum;
+    FUN_0082ebdc(rsp);  // push motion frame
+    if (*DAT_00828108 == '\x04') {
+        FUN_0082a460(2000);  // 2-second delay
+    } else {
+        // ... increment retry counter, reschedule worker ...
+    }
+}
+```
+
+The worker pushes **three frames** back-to-back:
+* `sub 1`: live sensor state (2 B version + 4 B + 4 B + 3 B
+  partial state)
+* `sub 2`: step count (2 B + 2 B + 2 B)
+* `sub 3`: motion / body position (3 × 2 B)
+
+These are the three "live" snapshots the host needs to render
+the factory-test UI. The `sub 0x04` path (`*DAT_00828108 ==
+4`) inserts a 2-second delay between frames so the host has
+time to render each before the next one arrives; the
+default path re-schedules the worker until `sub == 4` or the
+retry counter exceeds 120 iterations.
+
+#### Why `sub 0x01` saves + clears + restores
+
+The full-reset sequence in `sub 0x01` is **idempotent**:
+it saves the current state *before* the reset, then clears the
+step counter, then restores the saved state. This means the
+factory operator can send `sub 0x01` repeatedly during a
+test session to "re-zero" the counter without losing the
+configuration. The `DAT_00828108 + 0x1C..0x24` scratch
+buffer holds the saved state across the reset; the live
+buffer (`DAT_0082810c + 4..0xC`) is re-staged after the clear.
+
+#### Pair with `0xce` vendor/test (0xFEE7)
+
+`0xa1` (Channel-A) and `0xce` (0xFEE7) are *both* factory-test
+entry points but on **different transports**. `0xa1` is the
+public Channel-A path used by host SDKs; `0xce` is the OEM
+vendor path used by factory-floor equipment (§8.10). They
+share *some* helpers (`FUN_0083371e`, `FUN_00833704`,
+`FUN_0082a460`) but call different state-update paths
+(`FUN_00827dba` vs `FUN_00838bc0`/`FUN_00833400`).
+
+A factory operator with the OEM tools would use `0xce`; an
+OpenWatch host SDK would use `0xa1`. The two paths do not
+interfere with each other.
+
 ### 3.14 Opcode `0xc6` restoreKey (device reboot)
 
 Unlike the other Channel-A opcodes that route to dedicated
