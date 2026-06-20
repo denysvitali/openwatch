@@ -9,6 +9,7 @@ import '../protocol/commands.dart';
 import '../protocol/hr_parser.dart';
 import '../protocol/opcodes.dart';
 import 'app_log.dart';
+import 'protocol_hub.dart';
 
 /// High-level device manager: runs the post-connect handshake (time sync +
 /// capability probe), keeps live device state, and exposes management actions.
@@ -18,12 +19,15 @@ class WatchManager extends ChangeNotifier {
   WatchManager(this._transport, {this.autoSyncTime = true}) {
     _transport.state.addListener(_onLinkState);
     _inboundSub = _transport.inboundA.listen(_onFrame);
+    _hub = ProtocolHub(_transport);
+    _hub.ancs.events.listen(_onAncsEvent);
     _onLinkState();
   }
 
   final BleTransport _transport;
   bool autoSyncTime;
   StreamSubscription<Uint8List>? _inboundSub;
+  late final ProtocolHub _hub;
   LinkState _last = LinkState.disconnected;
   bool _handshaking = false;
   Timer? _stepTimer;
@@ -251,9 +255,22 @@ class WatchManager extends ChangeNotifier {
   Future<void> enableNotifications(String phoneModel) async {
     await _transport.sendA(Commands.bindAncs(phoneModel));
     await _transport.sendA(Commands.enableAncs());
+    _hub.enableAncs(name: 'phone:$phoneModel');
   }
 
   Future<void> factoryReset() => _transport.sendA(Commands.factoryReset());
+
+  /// Direct accessor for the underlying typed-streams hub. Exposed so a
+  /// diagnostic UI can observe everything the firmware emits without having
+  /// to re-subscribe to the transport.
+  ProtocolHub get hub => _hub;
+
+  void _onAncsEvent(Object e) {
+    AppLog.instance.debug(
+      'watch',
+      'ancs event: ${e.runtimeType}',
+    );
+  }
 
   @override
   void dispose() {
@@ -261,6 +278,7 @@ class WatchManager extends ChangeNotifier {
     _batteryTimer?.cancel();
     _transport.state.removeListener(_onLinkState);
     unawaited(_inboundSub?.cancel());
+    _hub.dispose();
     super.dispose();
   }
 }
