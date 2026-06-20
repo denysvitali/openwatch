@@ -2,9 +2,11 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import '../ble/ble_transport.dart';
+import '../ble/fee7_service.dart';
 import '../protocol/ancs_client.dart';
 import '../protocol/channel_a.dart';
 import '../protocol/channel_b.dart';
+import '../protocol/fee7_dispatcher.dart';
 import '../protocol/ota_state.dart';
 import 'app_log.dart';
 
@@ -20,6 +22,9 @@ final _log = AppLog.instance;
 ///   * [AncsClient] — mirrors `ancs_add_client` / `ancs_client_cb` /
 ///     `app_parse_notification_source_data` so the host tracks the firmware's
 ///     internal ANCS state.
+///   * [Fee7Service] + [Fee7Dispatcher] — vendor `0xFEE7` parallel channel
+///     (SpO2, status, find-phone, vibration, OTA triggers; see
+///     `GHIDRA_DECOMPILATION.md` §8).
 ///
 /// Streams surface every typed event; consumers pick the ones they care
 /// about. The hub itself only logs at info level — keep heavy work in the
@@ -29,6 +34,15 @@ class ProtocolHub {
     _dispatcher = ChannelADispatcher(_transport);
     _parser = ChannelBParser(_transport);
     _ancs = AncsClient();
+
+    // The vendor 0xFEE7 service is optional — only attach a dispatcher when
+    // the transport actually discovered the write characteristic. Otherwise
+    // every inbound frame would error-log and the dispatcher would never see
+    // traffic on watches that omit the service.
+    if (_transport.hasFee7Write) {
+      _fee7 = Fee7Service.attach(_transport);
+      _fee7Dispatcher = Fee7Dispatcher(_fee7!)..bind();
+    }
 
     // The dispatcher already listens to inboundA inside bind(); the parser
     // binds its own inboundB subscription too. The hub just composes the
@@ -59,6 +73,8 @@ class ProtocolHub {
   late final ChannelADispatcher _dispatcher;
   late final ChannelBParser _parser;
   late final AncsClient _ancs;
+  Fee7Service? _fee7;
+  Fee7Dispatcher? _fee7Dispatcher;
 
   StreamSubscription<Uint8List>? _aSub;
   StreamSubscription<Uint8List>? _bSub;
@@ -73,6 +89,18 @@ class ProtocolHub {
   ChannelADispatcher get channelA => _dispatcher;
   ChannelBParser get channelB => _parser;
   AncsClient get ancs => _ancs;
+
+  /// Vendor `0xFEE7` dispatcher; `null` if the connected watch did not
+  /// advertise the service. Always check before subscribing.
+  Fee7Dispatcher? get fee7 => _fee7Dispatcher;
+
+  /// Underlying vendor service handle, also nullable for the same reason as
+  /// [fee7]. Useful for raw-frame observability when the typed stream is
+  /// too narrow.
+  Fee7Service? get fee7Service => _fee7;
+
+  /// Whether the vendor `0xFEE7` channel is active for this hub.
+  bool get hasFee7 => _fee7 != null;
 
   /// Pushes a single Channel-A frame into the hub. Useful for tests; in
   /// production the transport's notify stream drives this directly via
@@ -136,5 +164,6 @@ class ProtocolHub {
     _dispatcher.dispose();
     _parser.dispose();
     _ancs.dispose();
+    _fee7?.dispose();
   }
 }

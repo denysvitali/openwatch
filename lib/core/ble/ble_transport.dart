@@ -8,6 +8,7 @@ import '../protocol/codec.dart';
 import '../protocol/opcodes.dart';
 import '../services/app_log.dart';
 import 'ble_constants.dart';
+import 'fee7_service.dart';
 
 final _log = AppLog.instance;
 
@@ -29,7 +30,7 @@ enum LinkState {
 ///
 /// All writes funnel through a single serialized queue: at most one GATT
 /// operation is in flight at a time (mirroring the firmware's `notifyLock`).
-class BleTransport {
+class BleTransport implements Fee7Host {
   BleTransport();
 
   BluetoothDevice? _device;
@@ -71,6 +72,7 @@ class BleTransport {
   /// characteristic. Emits only after the characteristic has been discovered
   /// and notifications enabled (i.e. once `_fee7Notify` is non-null); no-op
   /// for watches that do not expose the service.
+  @override
   Stream<Uint8List> get fee7Inbound => _inboundFee7.stream;
 
   BluetoothDevice? get device => _device;
@@ -329,12 +331,14 @@ class BleTransport {
   // ---------------------------------------------------------------------------
 
   /// Whether the vendor `0xFEE7` write characteristic was discovered.
+  @override
   bool get hasFee7Write => _fee7Write != null;
 
   /// Sends a 16-byte frame on the vendor `0xFEE7` service. The frame is
   /// expected to be already checksummed (use [Codec.buildChannelA]).
   ///
   /// Throws if the device did not advertise the `0xFEE7` write characteristic.
+  @override
   Future<void> sendFee7(Uint8List frame) {
     final char = _fee7Write;
     if (char == null) {

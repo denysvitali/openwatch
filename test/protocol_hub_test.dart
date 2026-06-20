@@ -24,6 +24,16 @@ class _StubTransport implements BleTransport {
   @override
   Future<void> sendB(Uint8List framed) async {}
 
+  // fee7 is optional — keep it disabled so the hub skips fee7 wiring.
+  @override
+  bool get hasFee7Write => false;
+
+  @override
+  Stream<Uint8List> get fee7Inbound => const Stream.empty();
+
+  @override
+  Future<void> sendFee7(Uint8List frame) async {}
+
   @override
   dynamic noSuchMethod(Invocation invocation) => null;
 }
@@ -63,6 +73,17 @@ void main() {
       expect(sm.session.phase, OtaPhase.idle);
       expect(sm.transition(OtaPhase.started), isTrue);
       expect(sm.session.phase, OtaPhase.started);
+      hub.dispose();
+    });
+
+    test('hub exposes hasFee7 accessor and tolerates absence', () async {
+      final t = _StubTransport();
+      final hub = ProtocolHub(t);
+      // _StubTransport.noSuchMethod returns null for every getter; that
+      // collapses `hasFee7Write` to null/false so the hub must skip fee7
+      // wiring rather than crash.
+      expect(hub.hasFee7, isFalse);
+      expect(hub.fee7, isNull);
       hub.dispose();
     });
   });
