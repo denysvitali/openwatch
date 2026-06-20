@@ -333,6 +333,111 @@ blt  loop
 pop  {r4,r5,r6,pc}
 ```
 
+#### 2.9 Sleep summary (`FUN_0082f5a2`)
+
+The "read a *summary* of one day's sleep" command. Like
+`0x12 detailed sleep` (§2.10 below) but returns a smaller
+**100-byte summary record** instead of the full per-segment
+detail. Used by the host SDK for the "sleep score" card on
+the dashboard.
+
+```c
+void FUN_0082f5a2(short day_offset) {
+    int today = FUN_0082840e();
+    FUN_008318c2(today - day_offset, stack_buf);
+    rsp[0] = **(undefined1 **)(DAT_0082f894 + 4);   // state byte
+    memcpy(rsp + 1, stack_buf, 100);
+    FUN_0082ece0(0x11, rsp, 0x65);                   // 1 + 100 = 101 B
+}
+```
+
+The handler:
+1. Reads the sleep summary for `(today - day_offset)` via
+   `FUN_008318c2` — a 100-byte summary record into a stack
+   buffer.
+2. Sets `rsp[0]` to the current sleep state byte
+   (`**(DAT_0082f894 + 4)` — the sleep-context's
+   "current-state" pointer dereference).
+3. Copies the 100-byte summary into `rsp[1..100]`.
+4. Sends via `FUN_0082ece0(0x11, rsp, 0x65)` — total
+   payload 101 bytes (1 state + 100 summary).
+
+#### Response layout (101 bytes)
+
+```
+byte  0:    state byte (sleep-context state)
+byte  1..100: 100-byte sleep summary
+```
+
+The 100-byte summary format is shared with `0x12 detailed
+sleep` (§2.10) — the first portion is the summary, the
+remaining is the per-segment detail. A host that only
+wants the summary can stop reading after the first ~20
+bytes; a host that wants full detail uses `0x12` instead.
+
+#### `FUN_008318c2` — sleep summary reader
+
+```c
+void FUN_008318c2(int day, u8 *out) {
+    int today = FUN_0082840e();
+    if (day == today && FUN_00844c34() != 0) {
+        FUN_00844328(out);              // "live today" path
+        return;
+    }
+    u8 *r = FUN_0082966e(DAT_00831990 + 0xc,
+                          *(u32*)(DAT_0083198c - 0x48),
+                          day);
+    if (r != NULL) {
+        func_0x000002a8(out, r, 100);   // memcpy 100 B
+    } else {
+        memset(out, 0, 100);            // day has no data
+    }
+}
+```
+
+Three branches:
+
+* **Live-today path**: if the requested day is *today* AND
+  `FUN_00844c34()` returns non-zero (i.e., the firmware has
+  finalised today's sleep in the live buffer), use
+  `FUN_00844328(out)` — the **fresh live data** path that
+  bypasses the day-record table.
+* **Day-record path**: look up the day in the persistent
+  sleep-state table at `DAT_00831990 + 0xC` (note the `0xC`
+  offset — same pattern as `0x43 readDetailSport` §3.6 which
+  uses `DAT_0082d440 + 0x14`). Copy 100 bytes.
+* **Empty-day path**: zero-fill 100 bytes.
+
+The **`DAT_0083198c - 0x48`** offset is unusual — it's a
+*negative* offset, which means the table-base pointer lives
+*before* `DAT_0083198c` in memory. This is likely a
+`table_header_t` layout where `DAT_0083198c` is a field
+*inside* the header (e.g. a state byte at offset `+0x48`)
+and the table base is reached by subtracting the header
+size. The host SDK does not need to know this — the helper
+hides the offset arithmetic.
+
+#### Pair with `0x12 detailed sleep` (§2.10)
+
+`0x11` returns **100 bytes** (summary); `0x12` returns
+**~1000+ bytes** (per-segment detail). The two are *the
+same record type* — `0x11` is the "small" variant that
+ships only the summary header, `0x12` is the "full"
+variant that ships the per-segment detail. A host that wants
+the full sleep curve uses `0x12`; a host that just wants the
+sleep score / duration uses `0x11`.
+
+#### Why the live-today branch?
+
+If the user has *just woken up* and the host polls `0x11
+day=0`, the day's sleep record may not have been written to
+the persistent table yet (the firmware commits daily at
+midnight). The live-today branch (`FUN_00844328`) bypasses
+the table read and reads directly from the live sleep buffer,
+so the host gets the freshest data. Without this branch, a
+mid-day poll would return zeroed summary data even when the
+watch has full sleep data in RAM.
+
 ---
 
 ## 3. Channel A — 16-Byte Command Channel
