@@ -158,4 +158,7 @@ class Codec {
 
   static int readU24be(List<int> b, int off) =>
       (b[off] << 16) | (b[off + 1] << 8) | b[off + 2];
+
+  static int readU32be(List<int> b, int off) =>
+      (b[off] << 24) | (b[off + 1] << 16) | (b[off + 2] << 8) | b[off + 3];
 }

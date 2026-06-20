@@ -24,6 +24,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     _sync = HistorySync(
       ref.read(bleTransportProvider),
       (_) {}, // totals already shown on dashboard
+      dispatcher: ref.read(watchManagerProvider).hub.channelA,
     )..addListener(_onChange);
   }
 
