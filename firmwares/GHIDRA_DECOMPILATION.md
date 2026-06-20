@@ -2547,7 +2547,7 @@ polling the link does not bump the timer.
 | `0x3e` | SpO2 / blood-oxygen related read/set | `FUN_0082c550` |
 | `0x48 'H'` | Handshake — 15-byte device-info block | `FUN_0082bf40` | see §8.2 |
 | `0x50 'P'` | **Inline** alert: `FUN_0082994c(0x14, 0x10, 1, 0x19)` + `FUN_0082a5c8(8)` (motor + UI) | inline |
-| `0x51 'Q'` | "Find phone" / alert trigger | `FUN_0082c5b8` |
+| `0x51 'Q'` | "Find phone" / alert trigger | `FUN_0082c5b8` | see §8.11 |
 | `0x60` | (handler) | `FUN_0082be90` |
 | `0x61 'a'` | Status response (battery / daily counters) | `FUN_0082bee6` | see §8.3 |
 | `0x69 'i'` | Multi-step mode control (start/stop/cancel) | `FUN_0082c2f4` | see §8.5 |
@@ -2671,7 +2671,7 @@ Immediate / explicitly routed opcodes:
 | `0x3e` | `FUN_0082c550` | SpO2 / blood-oxygen related read/set |
 | `0x48` `'H'` | `FUN_0082bf40` | Handshake response — sends 15-byte device-info block — see §8.2 |
 | `0x50` `'P'` | inline | Calls `FUN_0082994c(0x14,0x10,1,0x19)` + `FUN_0082a5c8(8)` (alert/motor) |
-| `0x51` `'Q'` | `FUN_0082c5b8` | "Find phone" / alert trigger; arms pattern when `payload[1]==1` |
+| `0x51` `'Q'` | `FUN_0082c5b8` | "Find phone" / alert trigger; arms pattern when `payload[1]==1` — see §8.11 |
 | `0x60` | `FUN_0082be90` | |
 | `0x61` `'a'` | `FUN_0082bee6` | Status response (battery / daily counters) — see §8.3 |
 | `0x69` `'i'` | `FUN_0082c2f4` | Multi-step mode control (start/stop/cancel of a remote feature) — see §8.5 |
@@ -3708,6 +3708,91 @@ test tables (`DAT_0082bfc0`/`bfc4`/`bfc8`). They are
 *orthogonal* features: `0xa1` is reachable by any host;
 `0xce` is reachable only when the OEM has populated the
 vendor tables.
+
+### 8.11 0x51 `'Q'` find-phone / long alert (`FUN_0082c5b8`)
+
+The "find phone" / longer alert trigger. Mirrors `0x50 'P'`
+(§8.1) with different vendor-alert parameters — together
+they are the two fire-alert commands on the 0xFEE7 service.
+
+#### Behavior
+
+```c
+void FUN_0082c5b8(int param_1) {
+    rsp[0] = 0x51;
+    if (req[1] == 0x01) {
+        FUN_0082994c(100, 0x10, 2, 8);   // vendor alert: mode 100, count 2, repeat 8
+        FUN_0082a5c8(9);                  // motor pattern #9
+    }
+    rsp[15] = FUN_0082b0c4(rsp, 0xf);
+    FUN_0082ebdc(rsp);
+}
+```
+
+The handler fires a vendor alert pattern when `req[1] == 1`
+and always sends the ack frame. Non-`0x01` sub-cmd values
+are silently ignored — the ack ships with an empty body
+(`[0x51, 0, 0, ..., 0, cksum]`).
+
+#### Request layout
+
+| Byte | Field | Notes |
+|---:|---|---|
+| 0 | `0x51` | cmd (consumed by dispatcher) |
+| 1 | `sub` | must be `0x01` to trigger; other values are no-ops |
+
+Bytes 2..14 are ignored.
+
+#### Response layout
+
+```
+byte  0: 0x51                (cmd)
+byte  1..14: 0
+byte 15: additive checksum
+```
+
+The body is always empty — the handler does not return any
+"trigger accepted" detail, just the cmd-and-checksum ack.
+This is identical to `0x50 'P'` (§8.1).
+
+#### `0x50 'P'` vs `0x51 'Q'` comparison
+
+| Param | `0x50 'P'` (inline) | `0x51 'Q'` (§8.11) |
+|---|---|---|
+| `FUN_0082994c` mode | `0x14` | `100` (`0x64`) |
+| `FUN_0082994c` param | `0x10` | `0x10` |
+| `FUN_0082994c` count | `1` | `2` |
+| `FUN_0082994c` repeat | `0x19` (25) | `8` |
+| `FUN_0082a5c8` pattern | `8` | `9` |
+
+The two opcodes are the *short* alert (`0x50`: single
+rep, 25 repeats) and the *long* alert (`0x51`: two reps,
+8 repeats). A host that wants to beep the watch briefly
+should send `0x50`; a host that wants to play a longer
+"find my watch" sequence should send `0x51`. The motor
+pattern numbers (8 vs 9) are presumably the vendor's
+naming for the corresponding alert tunes.
+
+#### Why two opcodes for the same logical operation
+
+The H59MA vendor splits the "fire alert" operation into two
+opcodes so the host can choose between *beep* and *find-me*
+without negotiating parameters on the wire. This matches the
+§3 Channel-A convention where `0x08` (camera/find-device)
+has sub-cmd `0x00` (cancel) vs `0x01` (start) — but the
+0xFEE7 service puts the *duration* into the opcode rather
+than into a sub-cmd, which is simpler for the short
+single-frame alerts.
+
+#### Pair with `0xC5/0xC8/0xC9` config-byte writes
+
+The two alert opcodes share the same config-byte state at
+`DAT_0082caec` (set via `0xC5`/`0xC8`/`0xC9` — see §8.1).
+A host that wants to *disable* alerts without firmware reboot
+can write `0` to `DAT_0082caec[3]` via `0xC5 0x00` and the
+`0x50` / `0x51` opcodes will silently no-op (the
+sub-cmd-byte guard will still pass but the vendor alert
+helper will be a no-op via the dispatcher gate).
 
 ---
 
