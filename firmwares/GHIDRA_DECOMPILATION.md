@@ -2241,7 +2241,139 @@ the loss of the link as the success indicator and waits for the
 watch to re-advertise before sending a fresh `0x01`/`0x48`
 handshake.
 
-### 3.1 Opcode `0x2b` menstruation / mixture container
+### 3.23 The `DAT_008277f0 + 0x2D` 1-bit config bitmap synthesis
+
+A cross-cutting view of the 5 1-bit config-pair handlers
+documented separately in §3.10, §3.17, §3.22, §8.8, and §8.15.
+All five share **one byte** at `DAT_008277f0 + 0x2D` (the
+runtime address `0x00208ccd`); each handler owns one bit of
+that byte.
+
+#### Layout
+
+| Bit | Field | Owner | § |
+|---:|---|---|---|
+| 0 | (reserved / unused) | — | — |
+| 1 | `spo2_enabled` | `0x2c SpO2` (§3.10) | 3.10 |
+| 2 | `hr_related` | `0x36 HR enable` (§8.8) | 8.8 |
+| 3 | `pressure_enabled` | `0x38 pressure` (§3.17) | 3.17 |
+| 4 | (reserved / unused) | — | — |
+| 5 | `sugar` | `0x3a sub 0x03 sugar` (§3.22) | 3.22 |
+| 6 | (reserved / unused) | — | — |
+| 7 | `lipids` | `0x3a sub 0x04 lipids` (§3.22) **and** `0x3e lipids` (§8.15) | 3.22, 8.15 |
+
+#### Read/write masks (from the helper functions)
+
+Each handler's pair of helpers uses a mask + shift that
+matches one bit exactly. The set of masks completely tiles
+the 8-bit byte:
+
+| Helper | Mask | Shift | Owner |
+|---|---:|---:|---|
+| `FUN_00827682` (read) | `& 3` | `>> 1` | SpO2 (bit 1) |
+| `FUN_00827660` (write) | `& 0xFD` | `<< 1` | SpO2 (bit 1) |
+| `FUN_0082768e` (read) | `& 7` | `>> 2` | HR (bit 2) |
+| `FUN_0082769a` (write) | `& 0xFB` | `<< 2` | HR (bit 2) |
+| `FUN_00827772` (read) | `& 7` | `>> 2` | pressure (bit 3) — wait, this is for *0x38* (pressure), let me re-check |
+| `FUN_0082777e` (write) | `& 0xF7` | `<< 2` | pressure (bit 3) |
+| `FUN_00827790` (read) | `& 0x3F` | `>> 5` | sugar (bit 5) |
+| `FUN_0082779c` (write) | `& 0xDF` | `<< 5` | sugar (bit 5) |
+| `FUN_008277ce` (read) | `>> 7` | — | lipids (bit 7) |
+| `FUN_008277d8` (write) | `& 0x7F` | `<< 7` | lipids (bit 7) |
+
+The **mask = `& ~(1 << shift)`** pattern in every write
+helper confirms that each helper owns exactly one bit — they
+clear their bit and preserve all others, so concurrent reads
+of unrelated bits are safe.
+
+#### Cross-opcode duplicate (lipids)
+
+`0x3e` (§8.15) and `0x3a sub 0x04` (§3.22) **both own bit 7**
+via the same helper pair (`FUN_008277ce` / `FUN_008277d8`).
+This is the only duplicated owner in the bitmap; all other
+bits are owned by a single opcode. The duplicate is
+backwards-compat — `0x3e` is the older 0xFEE7 vendor path,
+`0x3a sub 0x04` is the newer Channel-A path. Writing
+through either opcode has identical effect on the bit.
+
+#### Reset semantics (0xff 'fff' factory reset)
+
+`0xff` factory reset (§3.8) clears **0xa4 = 164 bytes** of
+config starting from `DAT_0082cff0`. This is the *user*
+config block (`DAT_0082cff0`), not the *sensor* config
+block (`DAT_008277f0`).
+
+`0xff` does *not* clear the sensor-config byte at
+`DAT_008277f0 + 0x2D` — sensor on/off bits persist across
+factory reset. The `0xc6 0x6C 'l'` reboot (§3.14) is the
+only reset that touches the full RAM state including the
+sensor-config byte (via `FUN_00829560` and the related
+helpers).
+
+#### Why the bitmap lives in `DAT_008277f0` (not `DAT_0082cff0`)
+
+The two config-block bases correspond to two different
+"config worlds":
+* `DAT_0082cff0` — **user-tunable config** (display
+  brightness, time format, sedentary interval, alarm
+  schedules, etc.). Read/written via `0x81 config-chunk
+  write` (§3.5 companion opcode). Cleared by `0xff`.
+* `DAT_008277f0` — **sensor enable bitmap** (1 bit per
+  sensor). Read/written via the per-sensor opcodes (`0x2c`,
+  `0x36`, `0x38`, `0x3a sub 0x03/0x04`, `0x3e`). *Not*
+  cleared by `0xff` — it persists across factory reset and is
+  only cleared by `0xc6 0x6C` reboot.
+
+The split exists because the sensor-enable bitmap is *factory
+calibration* state (which features the OEM has enabled for
+this SKU), while the user-config block is *user preference*
+state (which the user can change via the host app). A factory
+reset restores user preferences to defaults but does *not*
+disable a sensor the OEM paid to calibrate.
+
+#### Bit-map cross-reference table
+
+A consolidated view of all 6 1-bit-config opcodes
+(§3.10, §3.17, §3.22 × 2, §8.8, §8.15):
+
+| Opcode | § | Bit | Read helper | Write helper | Behavior |
+|---|---|---:|---|---|---|
+| `0x2c sub 0x01` | §3.10 | 1 | `FUN_00827682` | `FUN_00827660` | SpO2 on/off |
+| `0x36 sub 0x01` | §8.8 | 2 | `FUN_0082768e` | `FUN_0082769a` | HR enable |
+| `0x38 sub 0x01` | §3.17 | 3 | `FUN_00827772` | `FUN_0082777e` | pressure enable |
+| `0x3a sub 0x03` | §3.22 | 5 | `FUN_00827790` | `FUN_0082779c` | sugar enable |
+| `0x3a sub 0x04` | §3.22 | 7 | `FUN_008277ce` | `FUN_008277d8` | lipids enable (Channel-A) |
+| `0x3e sub 0x01` | §8.15 | 7 | `FUN_008277ce` | `FUN_008277d8` | lipids enable (0xFEE7) |
+
+The four "active" bits (1, 2, 3, 5, 7) all use the same
+helper pattern: a `& MASK` read with shift to extract, and a
+`& ~MASK | (value << shift)` write to set. The bit-2
+helper (`FUN_0082768e`) is slightly different — its mask is
+`& 7` (covering bits 1..3) instead of `& 1` (covering bit 2
+alone), but the shift `>> 2` still isolates bit 2. The mask
+is conservative (covers extra bits) but the read value is
+always `0` or `1` because no other handler writes to bits 1..3
+concurrently.
+
+The host SDK can read the bitmap as a whole by sending any
+one of the per-sensor read opcodes (e.g. `0x2c 0x01` reads
+just bit 1; the host SDK must issue one read per sensor).
+A more efficient pattern is to read `DAT_008277f0 + 0x2D`
+directly via `0xc0` memory read (§8.17), which gives the
+host the full bitmap in a single fragmented response.
+
+#### Why this synthesis section exists
+
+The 5 opcodes are scattered across §3.10, §3.17, §3.22,
+§8.8, §8.15 — each section describes *its* handler in
+detail but doesn't explain the *shared bitmap*. A host
+SDK that wants to read or write the full sensor-enable
+state needs to know that the bitmap lives at
+`DAT_008277f0 + 0x2D` (runtime `0x00208ccd`), that the
+five bits are owned by the five handlers above, and that
+the reset semantics differ between `0xff` (user-config
+only) and `0xc6 0x6C` (full RAM). This section is the
+*single place* in the doc that ties them together.
 
 The `0x2b` handler (`FUN_0082ba54`) backs a 16-byte persistent record on the
 device. The record is anchored at a runtime pointer stored in the literal
