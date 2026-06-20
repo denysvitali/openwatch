@@ -1952,7 +1952,7 @@ polling the link does not bump the timer.
 | `0x39` | HRV setting | `FUN_0082c9da` |
 | `0x3c` | Fixed capability block `[0x3c,0,0x40,0xa0,0x20,…]` | `FUN_0082c50e` |
 | `0x3e` | SpO2 / blood-oxygen related read/set | `FUN_0082c550` |
-| `0x48 'H'` | Handshake — 15-byte device-info block | `FUN_0082bf40` |
+| `0x48 'H'` | Handshake — 15-byte device-info block | `FUN_0082bf40` | see §8.2 |
 | `0x50 'P'` | **Inline** alert: `FUN_0082994c(0x14, 0x10, 1, 0x19)` + `FUN_0082a5c8(8)` (motor + UI) | inline |
 | `0x51 'Q'` | "Find phone" / alert trigger | `FUN_0082c5b8` |
 | `0x60` | (handler) | `FUN_0082be90` |
@@ -2076,7 +2076,7 @@ Immediate / explicitly routed opcodes:
 | `0x36` | `FUN_0082c112` | Heart-rate related read/set |
 | `0x3c` | `FUN_0082c50e` | Returns fixed capability block `[0x3c,0,0x40,0xa0,0x20,...]` |
 | `0x3e` | `FUN_0082c550` | SpO2 / blood-oxygen related read/set |
-| `0x48` `'H'` | `FUN_0082bf40` | Handshake response — sends 15-byte device-info block |
+| `0x48` `'H'` | `FUN_0082bf40` | Handshake response — sends 15-byte device-info block — see §8.2 |
 | `0x50` `'P'` | inline | Calls `FUN_0082994c(0x14,0x10,1,0x19)` + `FUN_0082a5c8(8)` (alert/motor) |
 | `0x51` `'Q'` | `FUN_0082c5b8` | "Find phone" / alert trigger; arms pattern when `payload[1]==1` |
 | `0x60` | `FUN_0082be90` | |
@@ -2116,6 +2116,90 @@ Opcodes `0x2b`, `0x37`, `0x38`, `0x3a`, `0x3b`, `0x43`, `0x72`, `0x77`, `0x7a`, 
 ### Take-away
 
 The `0xFEE7` service carries a parallel 16-byte command channel that overlaps some Channel-A opcodes (e.g. `0x48`, `0x50`, `0x51`, `0x69`, `0x6a`, `0x3c`, `0x3e`) and adds vendor-specific commands (`0x90`–`0x9f`, `0xce`, `0xfe`). The OpenWatch host code should treat it as a second command path rather than a passive discovery UUID.
+
+### 8.2 0x48 `'H'` handshake response (`FUN_0082bf40`)
+
+The first frame the host sees on the `0xFEE7` service. Reads
+the per-device info struct at `DAT_00831d94` and ships a
+15-byte "device info" block. The struct base is the literal
+`DAT_00831d94` — four sub-fields are read at offsets `+0x04`,
+`+0x14`, `+0x1c`, and `+0x30`.
+
+```c
+void FUN_0082bf40() {
+    u32 hw_ver   = FUN_00831b12();   // = *(u32*)(DAT_00831d94 + 0x04)
+    u32 fw_ver   = FUN_00831cdc();   // = *(u32*)(DAT_00831d94 + 0x14)
+    u32 batt_raw = FUN_00831ce2();   // returns FUN_0083dfba(*(u32*)(DAT_00831d94 + 0x1c), 100)
+    u16 tail     = FUN_00831b1e();   // = *(u16*)(DAT_00831d94 + 0x30) — called twice
+    ...
+}
+```
+
+The 4 byte-fields read by the handlers are:
+
+| Field | Struct offset | Likely meaning |
+|---|---:|---|
+| `hw_ver` (u32) | `DAT_00831d94 + 0x04` | hardware revision (e.g. `H59MA_V1.0`) |
+| `fw_ver` (u32) | `DAT_00831d94 + 0x14` | firmware version (e.g. `1.00.14`) |
+| `batt_raw` (u32) | `DAT_00831d94 + 0x1c` | raw battery counter, mod-100 → percent |
+| `tail` (u16) | `DAT_00831d94 + 0x30` | charge / status bits |
+
+#### Response layout (15 bytes + additive checksum)
+
+The body is laid out as a 4 + 4 + 4 + 2 + 1 byte pattern that
+packs the four getters in a specific interleaving:
+
+```
+byte  0: 0x48                         (cmd echo)
+byte  1: hw_ver >> 16                (HW version byte C)
+byte  2: hw_ver >>  8                (HW version byte B)
+byte  3: hw_ver & 0xff               (HW version byte A)
+byte  4: 0                           (pad)
+byte  5: 0                           (pad)
+byte  6: fw_ver >> 16                (FW version byte C)
+byte  7: 0                           (pad)
+byte  8: fw_ver & 0xff               (FW version byte A)
+byte  9: fw_ver >>  8                (FW version byte B)
+byte 10: batt_raw >> 16              (battery byte C — divmod 100 result)
+byte 11: batt_raw >>  8              (battery byte B)
+byte 12: batt_raw & 0xff             (battery byte A)
+byte 13: tail & 0xff                 (low byte of status)
+byte 14: tail >> 8                   (high byte of status)
+byte 15: additive checksum           (per §3)
+```
+
+The interleaving of `hw_ver` (LE) and `fw_ver` (BE) is the same
+quirk already documented in the `0x01 setTime` ack and the
+`0x43 readDetailSport` headers — the firmware uses a
+non-uniform byte order for the version fields, presumably
+because the underlying C struct was packed in a vendor-
+specific layout that the host SDK knows to read back with
+the right shifts. The host should *not* try to read any of
+the 4-byte version fields as plain little-endian; instead it
+should read each as a 3-byte BCD-like value and ignore the
+zero-pad byte.
+
+#### Why the host's first call
+
+* The `0x48` handler is one of the two opcodes (`0x43 'C'`,
+  `0x48 'H'`) that the dispatcher *does not* reset the
+  keep-alive timer for (see §8.1), so an idle host can poll
+  the link with a continuous stream of `0x48` writes
+  without ever bumping the watch's connection-timeout.
+* The response always includes the live battery percent (via
+  `FUN_0083dfba(_, 100)` mod 100), so a host that wants
+  live battery data without subscribing to the `0x61 'a'`
+  status push can simply poll `0x48`.
+
+#### Pair with the 0x43 'C' read-byte
+
+The two keep-alive-exempt opcodes are typically used as a
+pair: `0x48` returns the 15-byte device-info block, `0x43`
+returns a single byte (the `rxOpcode` — see the `Channel A`
+read helper `FUN_0082b986`). A host that connects to the
+`0xFEE7` service can issue `0x48` once to learn the device
+info and then poll `0x43` at a low rate to verify the link
+is still up.
 
 ---
 
