@@ -2559,7 +2559,7 @@ polling the link does not bump the timer.
 | `0x93` | (handler) | `FUN_00827c4a` |
 | `0x94` | (handler) | `FUN_00827b2e` |
 | `0x95` | (handler) | `FUN_00827b54` |
-| `0x96` | Sends `[0x96,0,0,0x96,…]` and resets state | `FUN_00827b7c` |
+| `0x96` | Sends `[0x96,0,0,0x96,…]` and resets state | `FUN_00827b7c` | see §8.4 |
 | `0x97..0x9f` | switch8 table at `0x82c6e1` (9 entries) | per-entry thunk |
 | `0xa0` | (handler — see also the `0x97..0x9f` switch8) | `FUN_00827b16` |
 | `0xbf` | (handler) | `FUN_0082ba94` |
@@ -2682,7 +2682,7 @@ Immediate / explicitly routed opcodes:
 | `0x93` | `FUN_00827c4a` | |
 | `0x94` | `FUN_00827b2e` | |
 | `0x95` | `FUN_00827b54` | |
-| `0x96` | `FUN_00827b7c` | Sends `[0x96,0,0,0x96,...]` and resets state |
+| `0x96` | `FUN_00827b7c` | Sends `[0x96,0,0,0x96,...]` and resets state — see §8.4 |
 | `0x97` | `FUN_00827ba4` | |
 | `0x98` | `FUN_00827be6` | |
 | `0x99` | `FUN_00827bea` | |
@@ -2888,6 +2888,110 @@ producer side (`DAT_0082bfd4 + 0x2C`) has been populated.
 A host that wants *fast* battery updates can poll `0x61`
 instead of `0x48` and skip the 11-byte header overhead, but
 has to handle the idle-path "all zeros" response.
+
+### 8.4 0x96 reset-state (`FUN_00827b7c`)
+
+The vendor "reset to a clean state" command. Sends a
+16-byte notify frame with **`0x96` at both byte 0 and byte
+15** (no checksum — the byte-15 `0x96` is an *intentional
+marker*, not a hash) and resets the per-feature state at
+`DAT_00827e88`.
+
+#### Behavior
+
+```c
+void FUN_00827b7c() {
+    rsp[0] = 0x96;
+    rsp[12] = 0x96;                          // bytes 1..11 + 13..14 = 0
+    FUN_0082ebdc(&rsp);
+    state = DAT_00827e88;
+    state[1] = 0;                            // clear flag byte
+    *state = 4;                              // set state byte = 4
+    FUN_00827b1a();                          // drain/reset helper
+}
+```
+
+The handler is one of the few Channel-A / 0xFEE7 opcodes
+that **does not call `FUN_0082b0c4`** to compute an
+additive checksum. Instead, it sets byte 15 to a literal
+`0x96`. The host can detect a `0x96` reset by:
+1. Looking for byte 0 = byte 15 = `0x96`.
+2. Treating the frame as a "reset happened" signal rather
+   than a normal response.
+
+#### Persistent state (`DAT_00827e88`, 2 bytes)
+
+| Off | Field | Notes |
+|---:|---|---|
+| 0 | `state_machine_state` | set to `4` on reset |
+| 1 | `feature_flag` | cleared on reset |
+
+These two bytes form the **head** of the larger state
+struct at `DAT_00827e88` — the helper `FUN_00827b1a` then
+drains 1000 bytes starting at `DAT_00827e88 + 10` (the rest
+of the struct).
+
+#### `FUN_00827b1a` — reset helper
+
+```c
+void FUN_00827b1a() {
+    FUN_00829c24(DAT_00827e88 + 10, DAT_00827e90, 1000, 1);
+}
+```
+
+A single call to `FUN_00829c24` with a 1000-byte copy /
+queue-drain parameter and a `1` flag (likely "drain"
+vs "fill"). `DAT_00827e90` is presumably the destination
+buffer for the cleared state (or a queue head for the
+drained work items).
+
+#### Response layout
+
+```
+byte  0: 0x96                (cmd)
+byte  1..11: 0
+byte 12..14: 0
+byte 15: 0x96                (intentional marker — NOT a checksum)
+```
+
+The `0x96` at byte 15 is the host's "I just reset" signal.
+The lack of a checksum means a host that tries to verify
+the additive sum of bytes 1..14 will compute `0x00` (all
+zeros) and *not* match the byte-15 `0x96`. The proper
+verification is `byte 0 == 0x96 && byte 15 == 0x96` (a
+self-describing marker pair), not the additive checksum
+that the §3 "Common response path" usually stamps in.
+
+#### Why no additive checksum
+
+The handler bypasses `FUN_0082b0c4` because the byte-15
+slot is **already used as the second `0x96` marker**. This
+is the only handler in the table that does so. The host
+SDK that consumes `0x96` should special-case this opcode
+to read bytes 0 and 15 as marker bits rather than the
+usual `cmd + checksum` pair.
+
+#### When a host sends `0x96`
+
+A host typically sends `0x96` to recover from a desync —
+the watch state has drifted (the producer side at
+`DAT_00827e88` is in an unexpected mode) and the host
+wants the firmware to reinitialise the feature from
+scratch. The `0x96` ack tells the host "I have reset,
+the next request will be against a fresh state". This is
+analogous to the `0xff 'fff'` Channel-A factory reset
+(§3.8) and the `0xc6 0x6C 'l'` 0xFEE7 reboot (§3.14), but
+narrower in scope — only the `DAT_00827e88` feature is
+reset, not the whole system.
+
+#### Pair with `0xC9` config-byte write
+
+`DAT_00827e88[5]` is writable via `0xC9` (§8.1) — `0xC9`
+sets `DAT_0082caec[5] = req[1]`, which the dispatcher then
+mirrors into the feature state. The combination `0x96`
+reset followed by `0xC9` set is the documented host pattern
+for switching between "feature on" and "feature off"
+modes without a full BLE reboot.
 
 ---
 
