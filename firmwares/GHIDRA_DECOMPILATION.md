@@ -254,7 +254,7 @@ Processes a circular queue of incoming 16-byte frames (`DAT_0082d440 + 0x14` rin
 | `0x38` | `pressure` | `0x0082ca54` | Sub `0x01` reads pressure value, else sets pressure unit — see §3.17. |
 | `0x39` | `hrvSetting` | `0x0082c9da` | Reads/sets HRV config; uses `FUN_0083468e`. |
 | `0x3a` | `sugarLipidsSetting` | `0x0082cc1e` | Sub `0x03`/`0x04` read/write sugar/lipids settings. |
-| `0x3b` | `uvSetting` / `touchControl` | `0x0082cbc8` | Read/write UV/touch config byte at `DAT_0082cfe8 + 8`. |
+| `0x3b` | `uvSetting` / `touchControl` | `0x0082cbc8` | Read/write UV/touch config byte at `DAT_0082cfe8 + 8` — see §3.18. |
 | `0x43` | `readDetailSport` | `0x0082d034` | Reads detailed sport records by date range — see §3.6. |
 | `0x72` | `pushMsgUint` | `0x00829e92` | Buffers a notification/emoji Unicode string for display — see §3.3. |
 | `0x77` | `phoneSport` | `0x0082ce0c` | Jump-table dispatch on sub-byte. |
@@ -455,6 +455,88 @@ frequency, etc.) rather than the on/off bit that `0x38`
 owns. The host should not confuse the two: `0x37` is the
 *settings* opcode (long fragmented response), `0x38` is the
 *value* opcode (3-byte ack).
+
+### 3.18 Opcode `0x3b` uvSetting / touchControl (`FUN_0082cbc8`)
+
+A 1-byte read/write of the UV / touch-screen control byte
+stored at `DAT_0082cfe8 + 8` (a different config struct from
+the one used by `0x2c` SpO2 and `0x38` pressure — this one
+lives in the *display* config block rather than the
+*sensor* config block). The handler is also notable for its
+**"echo the request" response** pattern: instead of building
+the response from scratch, it `memcpy`s the 16-byte request
+into the response buffer and overwrites only byte 0 (with
+the cmd) and byte 15 (with the checksum).
+
+#### Sub-opcode dispatch
+
+| `req[1]` | `req[2]` | Action |
+|---:|---:|---|
+| `0x01` | `0x00` | **Read**: `uStack_15 = *(DAT_0082cfe8 + 8)` (returns the 1-byte UV/touch config) |
+| `0x02` | `0x00` | **Write**: `*(DAT_0082cfe8 + 8) = req[3]`; commit via `FUN_00827624()` |
+| other | `0x00` | No-op: response is just an echo of the request |
+| any | `!= 0x00` | No-op: response is just an echo of the request |
+
+The `req[2] == 0` guard is unusual — most config opcodes
+treat `req[1]` as the only sub-opcode. Here, `req[2]` is a
+**"batch mode"** flag: when set, the read/write is *not*
+performed and the watch just echoes the request back. This
+is the same pattern that `0x18 displayClock` uses for its
+"label ≥ 13 bytes" spill to `DAT_0082cfec` (see §3.5) — a
+host that wants to push a multi-frame value sends the first
+frame with `req[2] != 0` (so the watch doesn't commit
+prematurely) and the last frame with `req[2] == 0` (so the
+watch commits the final value).
+
+#### Response layout (16-byte frame, mostly request-echo)
+
+```
+byte  0: 0x3B                 (cmd, overwritten)
+byte  1: req[1]               (sub-opcode echo)
+byte  2: req[2]               (echo — batch-mode flag preserved)
+byte  3: read value (0x01 path) | req[3] (0x02 path) | req[3] (no-op)
+byte  4..14: req[4..14]       (echo)
+byte 15: additive checksum    (per §3)
+```
+
+Because the handler `memcpy`s the request into the response
+*before* touching bytes 0/3, the only fields that ever differ
+between the request and the response are byte 0 (always
+`0x3B`) and byte 3 (only for the `0x01` read path). The
+rest of the response is a byte-for-byte echo.
+
+#### Persistent state
+
+| Off | Field | Notes |
+|---:|---|---|
+| `DAT_0082cfe8 + 8` | `uv_touch_config` (u8) | the 1-byte control value |
+
+Unlike `0x2c` (`*(DAT_008277f0 + 0x2D)` bit 1) and `0x38`
+(`*(DAT_008277f0 + 0x2D)` bit 3), the UV/touch value is a
+**full byte** (0..255), not a 1-bit flag. The host should
+not assume any particular bit layout when reading it back;
+treat the value as an opaque feature-mode byte that the
+firmware-side producer (the UV sensor / touch-screen
+driver) consumes.
+
+#### `FUN_00827624` — config-commit
+
+Called on the write path after the byte is stored. Same
+function used by `0x01 setTime` and by the Channel-A
+dispatcher's restart paths (§3.4). Marks the config
+*dirty* so the next `0x81` config-chunk write flushes the
+new value to flash, and re-arms the bitmap-driven
+UI re-render.
+
+#### Why the request-echo response
+
+* For a *single-frame* read or write, the echo is
+  indistinguishable from a hand-built response and saves a
+  handful of cycles per handler invocation.
+* For the *multi-frame batch* use case, the echo doubles as
+  a frame-receipt: the host can use the unmodified bytes
+  4..14 in the response as confirmation that the same
+  payload arrived intact, without a separate echo frame.
 
 ### 3.2 Opcode `0xc7` vibration / motor pattern player (`FUN_00832ebc`)
 
