@@ -2549,7 +2549,7 @@ polling the link does not bump the timer.
 | `0x50 'P'` | **Inline** alert: `FUN_0082994c(0x14, 0x10, 1, 0x19)` + `FUN_0082a5c8(8)` (motor + UI) | inline |
 | `0x51 'Q'` | "Find phone" / alert trigger | `FUN_0082c5b8` |
 | `0x60` | (handler) | `FUN_0082be90` |
-| `0x61 'a'` | Status response (battery / daily counters) | `FUN_0082bee6` |
+| `0x61 'a'` | Status response (battery / daily counters) | `FUN_0082bee6` | see §8.3 |
 | `0x69 'i'` | Multi-step mode control (start/stop/cancel) | `FUN_0082c2f4` |
 | `0x6a 'j'` | Continuation of `0x69` mode control | `FUN_0082c1e2` |
 | `0x7b, 0xb0, 0xc2, 0xcc, 0xf0, 0xf1` | No-op (early return) | — |
@@ -2673,7 +2673,7 @@ Immediate / explicitly routed opcodes:
 | `0x50` `'P'` | inline | Calls `FUN_0082994c(0x14,0x10,1,0x19)` + `FUN_0082a5c8(8)` (alert/motor) |
 | `0x51` `'Q'` | `FUN_0082c5b8` | "Find phone" / alert trigger; arms pattern when `payload[1]==1` |
 | `0x60` | `FUN_0082be90` | |
-| `0x61` `'a'` | `FUN_0082bee6` | Status response (battery / daily counters) |
+| `0x61` `'a'` | `FUN_0082bee6` | Status response (battery / daily counters) — see §8.3 |
 | `0x69` `'i'` | `FUN_0082c2f4` | Multi-step mode control (start/stop/cancel of a remote feature) |
 | `0x6a` `'j'` | `FUN_0082c1e2` | Continuation of `0x69` mode control |
 | `0x90` | `FUN_00827ad2` | Echo `[0x90]` |
@@ -2793,6 +2793,101 @@ read helper `FUN_0082b986`). A host that connects to the
 `0xFEE7` service can issue `0x48` once to learn the device
 info and then poll `0x43` at a low rate to verify the link
 is still up.
+
+### 8.3 0x61 `'a'` status response (`FUN_0082bee6`)
+
+The vendor "live status" push endpoint. Carries a 4-byte
+LE u32 status value (`DAT_0082bfd4 + 0x2C`) — the same
+field that backs `0x48 'H'` battery percent — plus a
+single-bit *idle* flag that lets the watch suppress the
+status push when nothing has changed.
+
+#### Behavior
+
+```c
+void FUN_0082bee6() {
+    memset(rsp, 0, 0x10);
+    rsp[0] = 0x61;
+    if (FUN_0082762c() == 1 && FUN_0082d754() == 0) {
+        // "idle" path — bytes 1..4 stay 0
+        rsp[15] = FUN_0082b0c4(rsp, 0xf);
+    } else {
+        u32 v = *(u32*)(DAT_0082bfd4 + 0x2C);
+        rsp[1] = v & 0xff;
+        rsp[2] = (v >> 8) & 0xff;
+        rsp[3] = (v >> 0x10) & 0xff;
+        rsp[4] = (v >> 0x18) & 0xff;
+        rsp[15] = FUN_0082b0c4(rsp, 0xf);
+    }
+    FUN_0082ebdc(rsp);
+}
+```
+
+The two helper gates are:
+
+| Helper | Reads | Returns |
+|---|---|---|
+| `FUN_0082762c` | `*(DAT_0082780c + 0x12)` | 1-byte state sentinel |
+| `FUN_0082d754` | `*(DAT_0082db50 + 1)` | 1-byte state sentinel |
+
+The "idle" path (`FUN_0082762c() == 1 && FUN_0082d754() == 0`)
+returns an **all-zeros** status with the cmd byte alone —
+the host can use this as a cheap heartbeat ("watch is alive
+but nothing changed") instead of a full battery/counter
+update. The "active" path returns the live u32.
+
+#### Response layout
+
+```
+byte  0: 0x61                (cmd)
+byte  1..4: u32 status (LE) from DAT_0082bfd4 + 0x2C
+                on the active path, or 0/0/0/0 on the idle path
+byte  5..14: 0
+byte 15: additive checksum
+```
+
+The same `DAT_0082bfd4 + 0x2C` field is the source for the
+`0x48 'H'` battery-percent helper (§8.2). The two responses
+will therefore always agree on byte 1 (low byte of the
+battery / daily-counter u32) — `0x61` is essentially the
+"current snapshot" and `0x48` is the "device-info block
+that includes the same snapshot".
+
+#### Why the 1-byte-cmd-on-idle
+
+The idle path is the cheapest possible response (16 bytes,
+5 instructions, no memory reads beyond the two state
+sentinels). A host that polls `0x61` aggressively can
+treat repeated all-zero responses as "no change since last
+poll" and avoid re-decoding the full status u32 each time.
+
+#### State sentinels
+
+`DAT_0082780c + 0x12` is the per-task state byte that
+`FUN_008275d8` (the system reset routine used by `0xff` and
+`0xc6`) clears at boot. `DAT_0082db50 + 1` is a similar
+state byte in the deferred-command-ring worker (the same
+ring that `0x77 phoneSport` and `0x43 readDetailSport` write
+into). The handler checks both because the active state
+depends on the *combined* condition: the task state is
+"set up" AND the worker is "not busy". This means the
+handler pushes a "live" status only when the watch is
+*fully initialised* and the deferred ring is idle — a
+deliberate gate to avoid pushing a status frame before the
+producer side (`DAT_0082bfd4 + 0x2C`) has been populated.
+
+#### Pair with `0x48 'H'`
+
+| | `0x48 'H'` | `0x61 'a'` |
+|---|---|---|
+| Polling cost | full 15-byte device-info block | 5-byte u32 status |
+| Idle response | (always returns full block) | all-zeros 1-byte-cmd ack |
+| Live battery data | yes (FUN_0083dfba(_, 100) mod 100) | yes (same source as `0x48`) |
+| Keep-alive exempt | yes (§8.1) | no — bumps `FUN_0082eebe` |
+
+A host that wants *fast* battery updates can poll `0x61`
+instead of `0x48` and skip the 11-byte header overhead, but
+has to handle the idle-path "all zeros" response.
 
 ---
 
