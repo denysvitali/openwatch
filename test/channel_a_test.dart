@@ -368,6 +368,42 @@ void main() {
       },
     );
 
+    test(
+      'hrvSetting 0x39 header (pl[2]==0x1E) routes to onHrvHeader',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final got = d.onHrvHeader.first;
+        // Header dword `0x1E050039` LE → frame bytes [0x39, slotId,
+        // 0x05, 0x1E]; pl shifts down by one so pl[2] = 0x1E.
+        final f = Codec.buildChannelA(OpA.hrv, [0x00, 0x05, 0x1e]);
+        t.inA.add(f);
+        final h = await got.timeout(const Duration(seconds: 1));
+        expect(h.slotId, 0x00);
+      },
+    );
+
+    test(
+      'hrvSetting 0x39 non-header frame routes to onHrvChunk',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final got = d.onHrvChunk.first;
+        // pl[2] != 0x1E → chunk frame.
+        final f = Codec.buildChannelA(OpA.hrv, [
+          0x01,
+          0x00,
+          0x00,
+          0xde, 0xad, 0xbe, 0xef,
+        ]);
+        t.inA.add(f);
+        final c = await got.timeout(const Duration(seconds: 1));
+        expect(c.payload.length, 14);
+      },
+    );
+
     test('readHeartRate 0x15 header frame fires onHeartRateHeader', () async {
       final t = _StubTransport();
       final d = ChannelADispatcher(t);

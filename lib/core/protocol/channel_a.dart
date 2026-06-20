@@ -38,7 +38,8 @@ class ChannelADispatcher {
   final _pressureSettingChunk =
       StreamController<PressureSettingChunk>.broadcast();
   final _pressure = StreamController<PressureReading>.broadcast();
-  final _hrv = StreamController<HrvSetting>.broadcast();
+  final _hrvHeader = StreamController<HrvSettingHeader>.broadcast();
+  final _hrvChunk = StreamController<HrvSettingChunk>.broadcast();
   final _sugarLipids = StreamController<SugarLipidsSetting>.broadcast();
   final _uvTouch = StreamController<UvTouchSetting>.broadcast();
   final _sedentary = StreamController<SedentaryConfig>.broadcast();
@@ -117,8 +118,23 @@ class ChannelADispatcher {
   /// Pressure reading / unit (`0x38`).
   Stream<PressureReading> get onPressure => _pressure.stream;
 
-  /// HRV config (`0x39`).
-  Stream<HrvSetting> get onHrv => _hrv.stream;
+  /// HRV config (`0x39`) — header discriminator (`pl[2] == 0x1E`).
+  ///
+  /// Per `GHIDRA_DECOMPILATION.md` §3.21 the read response is a
+  /// two-phase fragmenter pattern: a single 16-byte header frame
+  /// (the literal dword `0x1E050039` little-endian → `pl[2] == 0x1E`)
+  /// followed by up to four 13-byte-chunk payload frames via the
+  /// shared `FUN_0082c988`. **Note**: the 0x1E feature id is the
+  /// same as `0x37 pressureSetting` — disambiguate by cmd byte
+  /// (`OpA.hrv` 0x39 vs `OpA.pressureSetting` 0x37).
+  Stream<HrvSettingHeader> get onHrvHeader => _hrvHeader.stream;
+
+  /// HRV config (`0x39`) — payload chunk after the header.
+  ///
+  /// See [onHrvHeader] for the full two-phase flow. Each chunk
+  /// carries up to 13 payload bytes of the 49-byte HRV record
+  /// (4-byte header + 45-byte body per `FUN_0083468e`).
+  Stream<HrvSettingChunk> get onHrvChunk => _hrvChunk.stream;
 
   /// Sugar/lipids setting (`0x3a`).
   Stream<SugarLipidsSetting> get onSugarLipids => _sugarLipids.stream;
@@ -473,14 +489,22 @@ class ChannelADispatcher {
   }
 
   /// `hrv` (0x39): read/write HRV config.
+  /// `hrvSetting` (0x39): two-phase read response.
+  ///
+  /// Per `GHIDRA_DECOMPILATION.md` §3.21 the response is
+  /// structurally identical to `0x37 pressureSetting` — a single
+  /// 16-byte header frame followed by up to four 13-byte-chunk
+  /// payload frames via `FUN_0082c988`. The header discriminator
+  /// is `pl[2] == 0x1E` (the `0x1E050039` little-endian dword);
+  /// the *same* 0x1E feature id as `0x37 pressureSetting`, so
+  /// the cmd byte is the only reliable route discriminator.
   void _decodeHrv(Uint8List pl) {
-    if (pl.length < 2) return;
-    _hrv.add(
-      HrvSetting(
-        enabled: pl[1] != 0,
-        intervalMinutes: pl.length >= 3 ? pl[2] : 0,
-      ),
-    );
+    if (pl.length < 4) return;
+    if (pl[2] == 0x1e) {
+      _hrvHeader.add(HrvSettingHeader(slotId: pl[0]));
+      return;
+    }
+    _hrvChunk.add(HrvSettingChunk(payload: pl));
   }
 
   /// `sugarLipidsSetting` (0x3a): sub `0x03`/`0x04` read/write.
@@ -803,7 +827,8 @@ class ChannelADispatcher {
       _pressureSettingHeader,
       _pressureSettingChunk,
       _pressure,
-      _hrv,
+      _hrvHeader,
+      _hrvChunk,
       _sugarLipids,
       _uvTouch,
       _sedentary,
@@ -937,6 +962,25 @@ class HrvSetting {
   const HrvSetting({required this.enabled, required this.intervalMinutes});
   final bool enabled;
   final int intervalMinutes;
+}
+
+/// Header frame of a `0x39` hrvSetting read (`pl[2] == 0x1E`).
+/// [slotId] echoes `req[1]` (today = 0, yesterday = 1, ...).
+/// See `GHIDRA_DECOMPILATION.md` §3.21.
+class HrvSettingHeader {
+  const HrvSettingHeader({required this.slotId});
+  final int slotId;
+}
+
+/// Payload chunk of a `0x39` hrvSetting read (frames 2..N of
+/// the two-phase response). Each chunk carries up to 13 payload
+/// bytes of the 49-byte HRV record (4-byte header + 45-byte
+/// body per `FUN_0083468e`). There is no end-of-message
+/// marker — consumers reassemble by waiting for a quiet period
+/// after the header.
+class HrvSettingChunk {
+  const HrvSettingChunk({required this.payload});
+  final Uint8List payload;
 }
 
 class SugarLipidsSetting {
