@@ -256,7 +256,7 @@ Processes a circular queue of incoming 16-byte frames (`DAT_0082d440 + 0x14` rin
 | `0x3a` | `sugarLipidsSetting` | `0x0082cc1e` | Sub `0x03`/`0x04` read/write sugar/lipids settings. |
 | `0x3b` | `uvSetting` / `touchControl` | `0x0082cbc8` | Read/write UV/touch config byte at `DAT_0082cfe8 + 8`. |
 | `0x43` | `readDetailSport` | `0x0082d034` | Reads detailed sport records by date range, sends multi-frame `0x43` responses. |
-| `0x72` | `pushMsgUint` | `0x00829e92` | Buffers a notification/emoji Unicode string for display; UTF-8 length parsing. |
+| `0x72` | `pushMsgUint` | `0x00829e92` | Buffers a notification/emoji Unicode string for display — see §3.3. |
 | `0x77` | `phoneSport` | `0x0082ce0c` | Jump-table dispatch on sub-byte. |
 | `0x7a` | `muslim` | `0x0082cb3a` | Sub `0x01` reads Muslim prayer config, `0x02 0x01` resets it. |
 | `0x81` | — | `0x0082cdac` | Stores 6-byte config chunk and calls `FUN_00840568` (flash/config write). |
@@ -362,6 +362,79 @@ by the no-presence path. The `*DAT_0083230c` mutex pointer is the same
 serialising lock used by all motor-handler routines (`FUN_00831fde`,
 `FUN_00832010`, `FUN_00832044`), so two patterns cannot be active at
 once.
+
+### 3.3 Opcode `0x72` push-message / Unicode notifier (`FUN_00829e92`)
+
+The watch-side handler for an incoming push notification or
+emoji-bearing string. The handler is a **chunked accumulator** — the
+host may issue several `0x72` frames in a row, each appending 11 bytes
+to an internal buffer, then send a final "flush" frame to render.
+
+The handler maintains a private context anchored at `DAT_00829f6c`:
+
+| Offset (from `DAT_00829f6c`) | Field | Notes |
+|---:|---|---|
+| `-0xa7` | `cursor` (u8) | Current write position in the text buffer |
+| `-0x88` | `text[0x85]` | 133-byte UTF-8 message buffer |
+| `+0x08` | `category` (u8) | Set by the renderer to `0` (idle) or `0x16` (displayed) |
+
+#### Request layout
+
+| Byte | Field | Notes |
+|---:|---|---|
+| 0 | `opcode` | `0x72` (consumed by dispatcher) |
+| 1 | `notification_type` | 0..14, indexes a per-type table at `DAT_00829f7c - 0x18` |
+| 2 | `flush_marker` | When `== flush_marker` of the *next* byte, the buffer is rendered and cleared |
+| 3 | `flush_marker` (echo) | Must match byte 2 to trigger a flush — avoids spurious flushes from stale data |
+| 4..14 | `payload[11]` | Up to 11 UTF-8 bytes appended to the message buffer |
+
+The `flush_marker` equal-pair guard is the *only* thing distinguishing
+"data" frames from "end-of-message" frames, so the host can stream
+arbitrarily long messages with no length prefix.
+
+#### Accumulator (`FUN_00829e92`)
+
+1. If `cursor + 11 ≤ 0x84` (still room in the 133-byte buffer):
+   - `memcpy(text + cursor, payload, 11)`
+   - `cursor += 11`
+2. If `req[2] == req[3]` (flush trigger):
+   - `FUN_0082b986(0x72, 0)` — send a 1-byte `0x72` ack.
+   - If `notification_type < 15`:
+     - If `cursor > 0x74` (text would exceed 116 bytes), walk the
+       buffer from byte 0 parsing UTF-8 lead-byte widths
+       (1, 2, 3, 4, 5, 6, 7 for ranges `<0x80`, `0xC0..0xDF`,
+       `0xE0..0xEF`, `0xF0..0xF7`, `0xF8..0xFB`, `0xFC..0xFD`,
+       else) and stop at the last codepoint that fits before
+       offset `0x7D` (125). Append the UTF-8 ellipsis
+       (`\xE2\x80\xA6`) at the truncation point and bump the
+       cursor past it.
+     - Look up `table[notification_type]` in the 16-byte type table
+       at `DAT_00829f7c - 0x18` to get the *category* byte, then
+       call `FUN_00829cfe(&state)` to render.
+   - `memset(text, 0, 0x85)` and reset `cursor = 0` regardless of
+     whether a render happened.
+
+#### Renderer (`FUN_00829cfe`)
+
+The renderer's `state` dword is `[type, ?, category]`. It dispatches
+on the `category` byte:
+
+| Category | Behavior |
+|---:|---|
+| `0x00` | If the user is on the home screen (`FUN_0082a826() == 0`) **and** the per-type enabled bit at `*(iVar6 + 0x2c) & 1` is set, fire a short motor alert `FUN_0082994c(0x12, 1, 3, 0x32)`, store `type` at `*puVar2`, store the current RTC at `*(puVar2 + 4)`, and call `FUN_008279e4()` to draw the message buffer to the display. |
+| `0x15` | `type == 0` clears any pending message: `FUN_00829a56()` + `FUN_0082a5cc()`. Other `type` values are no-ops (return). |
+| other | If `type == 0` fire a long alert `FUN_0082994c(0x12, 1, 3, 5, ...)` + `FUN_0082a5b2(3)`. If `type == 1`, walk the 32-entry `category` table at `DAT_00829f7c` and fire the alert for any matching entry whose `*((iVar6 + 0x2c) & (1 << idx))` bit is set. Always set `puVar2[8] = 0x16` (mark "displayed"). |
+
+`FUN_0082b986(cmd, isNotify)` (the small 1-byte opcode ack sender used
+on the flush path) builds a 16-byte frame with `cmd` (or `cmd | 0x80`
+for notify) at byte 0 and queues it via `FUN_0082ebdc` — see §3
+"Common response path".
+
+The handler is the watch's bridge between the
+`ChannelADispatcher.pushMsgUint` stream (in `lib/core/protocol/channel_a.dart`)
+and the on-screen notification UI; a peer on the host can use the
+fragmented helper from §3.2 to send messages longer than 11 bytes per
+frame.
 
 ### Opcode `0xa1` factory/test mode (`FUN_00827f5c`)
 
