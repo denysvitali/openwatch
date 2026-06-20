@@ -351,17 +351,20 @@ class ChannelADispatcher {
     _bloodOxygen.add(BloodOxygenSetting(sub: pl[0], enabled: pl[1] != 0));
   }
 
-  /// `pressure` (0x38): sub `0x01` reads value; else writes unit.
+  /// `pressure` (0x38): 1-bit on/off setting (analogous to 0x2c SpO2).
+  ///
+  /// Per `FUN_0082ca54` / `GHIDRA_DECOMPILATION.md` §3.17:
+  ///   `pl[0]` = sub-opcode echo (0x01 read / 0x02+ write)
+  ///   `pl[1]` = pressure enabled value (0/1 for read; echoed
+  ///             req[2] for write)
+  ///
+  /// The H59MA pressure sensor (if present) is either enabled or
+  /// disabled — not a continuous reading. A host that wants the
+  /// actual mmHg / kPa must subscribe to a push channel (likely
+  /// 0x2B-routed event) rather than poll 0x38.
   void _decodePressure(Uint8List pl) {
     if (pl.length < 2) return;
-    final sub = pl[0];
-    if (sub == 0x01) {
-      final sys = pl[1] & 0xFF;
-      final dia = pl.length >= 3 ? pl[2] & 0xFF : 0;
-      _pressure.add(PressureReading(systolic: sys, diastolic: dia));
-    } else {
-      _pressure.add(PressureReading(unit: pl[1]));
-    }
+    _pressure.add(PressureReading(enabled: pl[1] != 0));
   }
 
   /// `pressureSetting` (0x37): read/write config.
@@ -755,13 +758,12 @@ class BloodOxygenSetting {
   final bool enabled;
 }
 
+/// Pressure enabled flag (`0x38`). The H59MA pressure sensor is
+/// either on or off — there is no continuous reading on this
+/// opcode. See `GHIDRA_DECOMPILATION.md` §3.17 / `FUN_0082ca54`.
 class PressureReading {
-  const PressureReading({this.systolic = 0, this.diastolic = 0, this.unit = 0});
-  final int systolic;
-  final int diastolic;
-
-  /// Unit byte when the frame was a unit-write (sub != 0x01).
-  final int unit;
+  const PressureReading({required this.enabled});
+  final bool enabled;
 }
 
 class PressureSetting {

@@ -226,6 +226,32 @@ void main() {
       expect(m.stubbed, isFalse);
     });
 
+    test(
+      'pressure 0x38 decodes 1-bit on/off setting (sub echo + value)',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final got = d.onPressure.first;
+        // sub = 0x01 (read), value = 0x01 (enabled).
+        final f = Codec.buildChannelA(OpA.pressure, [0x01, 0x01]);
+        t.inA.add(f);
+        final p = await got.timeout(const Duration(seconds: 1));
+        expect(p.enabled, isTrue);
+      },
+    );
+
+    test('pressure 0x38 disabled maps value 0 to enabled=false', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final got = d.onPressure.first;
+      final f = Codec.buildChannelA(OpA.pressure, [0x01, 0x00]);
+      t.inA.add(f);
+      final p = await got.timeout(const Duration(seconds: 1));
+      expect(p.enabled, isFalse);
+    });
+
     test('readHeartRate 0x15 header frame fires onHeartRateHeader', () async {
       final t = _StubTransport();
       final d = ChannelADispatcher(t);
