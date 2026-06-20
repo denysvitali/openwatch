@@ -78,6 +78,9 @@ class OpA {
   static const int muslim = 0x7a;
   static const int muslimRemind = 0x52;
   static const int muslimTarget = 0x7b;
+  static const int vibrationResponse =
+      0xc7; // Vibration / motor pattern player (Channel A, fragmented
+  // reply — see GHIDRA_DECOMPILATION.md §3.2 + FUN_0082b938).
 
   // Persistent notify-only opcodes (watch -> phone pushes)
   static const int packageLength = 0x2f;
@@ -183,6 +186,9 @@ class Fee7 {
   static const int otaTrigger = 0xc3; // Routes into OTA state machine
 
   /// Whether [opcode] should be decoded as a `UnaryOpcode` (no payload decode).
+  ///
+  /// Note: [vibrationPattern] (0xfe) is excluded — it has structured decoding
+  /// and is surfaced on its own `onVibration` stream.
   static bool isUnary(int opcode) {
     if (opcode >= unaryRangeStart && opcode <= unaryRangeEnd) return true;
     switch (opcode) {
@@ -195,7 +201,6 @@ class Fee7 {
       case unaryC9:
       case unaryCd:
       case unaryCe:
-      case vibrationPattern:
         return true;
       default:
         return false;

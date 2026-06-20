@@ -43,6 +43,8 @@ class ChannelADispatcher {
   final _factoryReset = StreamController<void>.broadcast();
   final _restoreKey = StreamController<void>.broadcast();
   final _factoryCommand = StreamController<FactoryCommand>.broadcast();
+  final _vibrationChunks = StreamController<VibrationChunk>.broadcast();
+  int _vibrationSeq = 0;
 
   /// Live-time, type, lang, tz embedded in the SetTime 0x01 ACK.
   Stream<DateTime> get onTime => _time.stream;
@@ -102,6 +104,14 @@ class ChannelADispatcher {
   /// form is `0xa1` because `rxOpcode` strips the top bit).
   Stream<FactoryCommand> get onFactoryCommand => _factoryCommand.stream;
 
+  /// Vibration / motor pattern chunk (`0xc7`). The firmware fragments each
+  /// play request into up to 6 chunks of ≤14 payload bytes (see
+  /// `GHIDRA_DECOMPILATION.md` §3.2 — `FUN_0082b938`). There is **no end
+  /// marker** on the wire; consumers must reassemble by buffering chunks
+  /// until a quiet period (e.g. 100 ms) elapses, or until 6 chunks have
+  /// arrived (the maximum the firmware emits).
+  Stream<VibrationChunk> get onVibrationChunk => _vibrationChunks.stream;
+
   /// Any frame we couldn't type-decode.
   Stream<ChannelAFrame> get unknown => _unknown.stream;
 
@@ -159,6 +169,8 @@ class ChannelADispatcher {
         _decodeMenstruation(pl);
       case OpA.restoreKey:
         _restoreKey.add(null);
+      case OpA.vibrationResponse || 0x47:
+        _decodeVibration(pl);
       case 0xa1 || 0x21:
         _decodeFactory(pl);
       case 0xff:
@@ -412,6 +424,17 @@ class ChannelADispatcher {
     );
   }
 
+  /// `vibrationResponse` (0xc7) — fragmented motor-pattern reply. Each
+  /// fragment carries up to 14 payload bytes; the firmware emits up to 6
+  /// chunks per play request (`FUN_0082b938` + `min(duration, 6)`). We
+  /// surface a monotonically-increasing `seq` so a UI layer can reassemble
+  /// the chunks by buffering until a quiet period or 6 chunks have arrived.
+  void _decodeVibration(Uint8List pl) {
+    _vibrationChunks.add(
+      VibrationChunk(seq: _vibrationSeq++, payload: Uint8List.fromList(pl)),
+    );
+  }
+
   /// Maps a factory sub-byte to its typed [FactoryAction] (per the table in
   /// `firmwares/GHIDRA_DECOMPILATION.md` §3.1 "Opcode 0xa1 factory/test mode").
   static FactoryAction _factoryAction(int sub) {
@@ -455,6 +478,7 @@ class ChannelADispatcher {
       _factoryReset,
       _restoreKey,
       _factoryCommand,
+      _vibrationChunks,
     ]) {
       c.close();
     }
@@ -659,4 +683,18 @@ class FactoryCommand {
   /// Original `pl[0]` byte from the frame, kept verbatim so callers can
   /// log unrecognized subs without losing data.
   final int rawSub;
+}
+
+/// A single fragment of a vibration / motor pattern response (opcode `0xc7`).
+///
+/// The firmware fragments each play request into up to 6 chunks of ≤14
+/// payload bytes (`FUN_0082b938` + `min(duration, 6)`). There is no explicit
+/// end-of-message marker on the wire — consumers must reassemble by
+/// buffering chunks until a quiet period (e.g. 100 ms) elapses, or until
+/// 6 chunks have arrived. [seq] is monotonically increasing per
+/// [ChannelADispatcher] instance so reassemblers can detect dropped chunks.
+class VibrationChunk {
+  const VibrationChunk({required this.seq, required this.payload});
+  final int seq;
+  final Uint8List payload;
 }

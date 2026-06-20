@@ -172,5 +172,36 @@ void main() {
       final u = await got;
       expect(u.opcode, -1);
     });
+
+    test('vibration 0xc7 fragments arrive on onVibrationChunk', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final chunks = <VibrationChunk>[];
+      final sub = d.onVibrationChunk.listen(chunks.add);
+
+      // Send three fragments (simulating a 0xc7 fragmented response). The
+      // codec pads short payloads to 14 bytes with zeros — that is the
+      // wire shape (the firmware never emits a <14-byte chunk, but our
+      // build helper pads for tests).
+      final payloads = [
+        Uint8List.fromList(List<int>.generate(14, (i) => i + 1)),
+        Uint8List.fromList(List<int>.generate(14, (i) => i + 0x10)),
+        Uint8List.fromList(List<int>.generate(14, (i) => i + 0x20)),
+      ];
+      for (final pl in payloads) {
+        t.inA.add(Codec.buildChannelA(OpA.vibrationResponse, pl));
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(chunks.length, 3);
+      expect(chunks[0].seq, 0);
+      expect(chunks[1].seq, 1);
+      expect(chunks[2].seq, 2);
+      expect(chunks[0].payload, payloads[0]);
+      expect(chunks[1].payload, payloads[1]);
+      expect(chunks[2].payload, payloads[2]);
+      await sub.cancel();
+    });
   });
 }
