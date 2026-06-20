@@ -2690,8 +2690,8 @@ polling the link does not bump the timer.
 | `0x95` | (handler) | `FUN_00827b54` |
 | `0x96` | Sends `[0x96,0,0,0x96,…]` and resets state | `FUN_00827b7c` — see §8.4 |
 | `0x97..0xa0` | High-range `switch8` at `0x82c6e0` (10 cases + default) | Per-entry thunk — detailed below |
-| `0xbf` | (handler) | `FUN_0082ba94` |
-| `0xc0` | (handler) | `FUN_0082bb0c` |
+| `0xbf` | Vendor memory write (host→watch, arbitrary addr) | `FUN_0082ba94` | see §8.17 |
+| `0xc0` | Vendor memory read (watch→host, fragmented) | `FUN_0082bb0c` | see §8.17 |
 | `0xc1` | Sends a long/fragmented response: `FUN_008337fa(DAT_0082caf0)` + `FUN_0082b938(*param_1, DAT_0082caf0, 1)` | inline |
 | `0xc3` | If `param_1[2] == 1` → `FUN_0082dfde()`; then drive OTA state machine via `FUN_0082fe52(4 or 0, 0)` based on `param_1[1]` (1=push 4, 2=push 0, other=return) | inline |
 | `0xc4` | No-op | `FUN_00830462` |
@@ -2904,8 +2904,8 @@ entries decoded from the two `switch8` tables:
 | `0x9e` | `FUN_00827cc8` | Conditional 10-byte copy from `DAT_00827e8c + 0x7a` |
 | `0x9f` | `FUN_00827b16` | No-op |
 | `0xa0` | `FUN_00827d1a` | Multi-byte status frame builder |
-| `0xbf` | `FUN_0082ba94` | |
-| `0xc0` | `FUN_0082bb0c` | |
+| `0xbf` | `FUN_0082ba94` | Vendor memory write — see §8.17 |
+| `0xc0` | `FUN_0082bb0c` | Vendor memory read — see §8.17 |
 | `0xc1` | `FUN_008337fa` + `FUN_0082b938` | Sends a long/fragmented response |
 | `0xc3` | `FUN_0082fe52` | Drives the OTA/DFU state machine (`param[2]==1` also calls `FUN_0082dfde`) |
 | `0xc4` | `FUN_00830462` | No-op in firmware |
@@ -4566,3 +4566,151 @@ this frame is a `0x60` ack". The host SDK that consumes
 `0x60` should special-case the byte-15 verification rather
 than trusting the additive checksum (which will be `0xC0`,
 not `0x60`).
+
+### 8.17 0xbf / 0xc0 vendor memory R/W (`FUN_0082ba94`, `FUN_0082bb0c`)
+
+The **arbitrary-memory read/write pair** for OEM vendor
+tools. `0xbf` lets the host write `up_to_8_bytes` to any
+4-byte address; `0xc0` lets the host read `16..512_bytes`
+from any 4-byte address via the fragmented streamer. These
+are the *most powerful* opcodes in the 0xFEE7 dispatcher
+— a host can inspect or modify any RAM byte the firmware
+exposes, including the per-feature state at `DAT_008277f0`,
+the deferred-ring state at `DAT_0082bfcc`, the OTA state at
+`DAT_00830120/0124`, etc.
+
+#### `0xbf` — vendor memory write
+
+```c
+void FUN_0082ba94(undefined1 *param_1) {
+    uint8_t len = param_1[5];
+    if (len > 8) len = 8;
+    if (len != 0) {
+        func_0x0003f848(   // memcpy
+            (uint32_t)(param_1[1])        | // destination address
+            ((uint32_t)(param_1[2]) <<  8) |
+            ((uint32_t)(param_1[3]) << 16) |
+            ((uint32_t)(param_1[4]) << 24),
+            param_1 + 6,                    // source = payload[6..6+len]
+            len
+        );
+    }
+    FUN_0082b986(*param_1, 0);             // 1-byte cmd ack
+}
+```
+
+The destination address is built big-endian from
+`req[1..4]` and passed to `func_0x0003f848` (memcpy) as a
+**raw pointer**. The firmware does *no validation* of the
+address — a misbehaving host can scribble anywhere in RAM,
+including the vector table at `0x00826400`, the firmware
+constants, and the deferred-ring worker state.
+
+#### `0xc0` — vendor memory read
+
+```c
+void FUN_0082bb0c(undefined1 *param_1) {
+    uint16_t len = (uint32_t)(param_1[5])        |
+                   ((uint32_t)(param_1[6]) <<  8) |
+                   ((uint32_t)(param_1[7]) << 16) |
+                   ((uint32_t)(param_1[8]) << 24);
+    if (len == 0)      len = 0x10;       // default 16 B
+    else if (len > 0x200) len = 0x200;    // cap at 512 B
+    FUN_0082b938(   // fragmented streamer
+        *param_1,
+        (uint32_t)(param_1[1])        |
+        ((uint32_t)(param_1[2]) <<  8) |
+        ((uint32_t)(param_1[3]) << 16) |
+        ((uint32_t)(param_1[4]) << 24),
+        len & 0xffff
+    );
+}
+```
+
+The length is built big-endian from `req[5..8]`, clamped to
+`[0x10, 0x200]` (16..512 bytes), and passed to the
+`FUN_0082b938` fragmented streamer (see §3.2 / §3.11).
+The source address is also built big-endian from `req[1..4]`
+and passed to `FUN_0082b938` as a raw pointer.
+
+#### Request layouts
+
+**`0xbf` request:**
+```
+byte 0: 0xBF                (cmd)
+byte 1..4: address (u32 BE) — destination in firmware RAM
+byte 5: length (clamped to 0..8)
+byte 6..14: payload (up to 8 B to copy)
+```
+
+**`0xc0` request:**
+```
+byte 0: 0xC0                (cmd)
+byte 1..4: address (u32 BE) — source in firmware RAM
+byte 5..8: length (u32 BE) — clamped to [0x10, 0x200]
+byte 9..14: unused
+```
+
+#### Response layouts
+
+**`0xbf` response:** 1-byte cmd ack via `FUN_0082b986` —
+`[0xBF, 0x80, 0, ..., 0, cksum]` (cmd with the high bit set,
+plus the additive checksum).
+
+**`0xc0` response:** fragmented payload via `FUN_0082b938`
+— N frames of `[0xC0, seq, 13 data bytes, cksum]` where the
+data is `length` bytes copied from the requested source.
+Reassemble using the standard fragmented-streamer recipe.
+
+#### Security implications
+
+These two opcodes are **insecure by design**: a hostile host
+with a paired BLE link can:
+* `0xc0` — read any RAM byte, including security state, BLE
+  pairing keys, the OTA signature buffer, etc.
+* `0xbf` — write any RAM byte, including the per-feature
+  state bitmap at `DAT_008277f0 + 0x2D` (which would let
+  the host force `0x36` HR-enable, `0x38` pressure-enable,
+  etc. without going through the normal opcodes), the
+  deferred-ring state, or even the firmware's own
+  return-address stack.
+
+A production firmware *should* gate these behind a "vendor
+mode" flag that requires an OEM-signed unlock, but the
+H59MA v14 firmware does not — `FUN_0082ba94` and
+`FUN_0082bb0c` are unconditionally called from the 0xFEE7
+dispatcher (§8.1).
+
+#### Why these opcodes exist
+
+The pair is a **debug / factory-test escape hatch** — the
+OEM vendor tools use it to:
+* Inspect the runtime state of the watch during production
+  calibration (read the step-counter bias, HR baseline, etc.).
+* Patch the runtime config to skip the splash screen or
+  force-enable a feature for a specific test batch.
+* Hot-patch a bug in a pre-release firmware without rebuilding
+  the whole image.
+
+The OpenWatch host SDK should *not* call these opcodes
+unless it has explicit user consent (e.g. an "Advanced /
+Developer" toggle in the host app). A normal user-driven BLE
+session should never expose `0xbf` / `0xc0`.
+
+#### Pair with `0xce` (§8.10) and `0xa1` (§3.x)
+
+The vendor R/W pair sits **below** `0xce` (which calls into
+*function-pointer tables* the OEM populates) and `0xa1`
+(which calls into the structured factory-test helpers).
+`0xbf` / `0xc0` are *raw-memory access* — the lowest level
+of the test-tool hierarchy. An OEM tool would typically use
+`0xa1` for "normal" tests, `0xce` for "vendor-function"
+tests, and `0xbf` / `0xc0` for "raw memory" debug.
+
+#### Why no address validation
+
+The firmware uses `func_0x0003f848` (the standard memcpy)
+directly with the host-supplied address. There is *no*
+bounds check, *no* MPU-region check, *no* "is this address
+in a vendor-readable region?" gate. The watchdog is the
+host SDK's own policy — the firmware trusts the caller.
