@@ -2571,7 +2571,7 @@ polling the link does not bump the timer.
 | `0xc8` | Same as `0xc5` but writes `DAT_0082caec[4]` | inline |
 | `0xc9` | `DAT_0082caec[5] = param_1[1]` | inline |
 | `0xcd` | Byte-reverse echo of req[3..6] (link sanity test) | `FUN_0082be12` | see §8.9 |
-| `0xce` | Factory/test sub-commands (`0x01`, `0x02`, `' '`, `'!'`, `'"'`) | `FUN_0082bcde` |
+| `0xce` | Factory/test sub-commands (`0x01`, `0x02`, `' '`, `'!'`, `'"'`) | `FUN_0082bcde` | see §8.10 |
 | `0xfe` | `FUN_00844214(*(u16*)(param_1 + 1))` — vibration pattern from a duration arg | inline |
 | other | Vendor NAK: `FUN_0082bcba(opcode)` | `FUN_0082bcba` |
 
@@ -2701,7 +2701,7 @@ Immediate / explicitly routed opcodes:
 | `0xc8` | — | Sets `DAT_0082caec[4]` from `param[1]` |
 | `0xc9` | — | Sets `DAT_0082caec[5] = param[1]` |
 | `0xcd` | `FUN_0082be12` | Byte-reverse echo of req[3..6] (link sanity test) — see §8.9 |
-| `0xce` | `FUN_0082bcde` | Factory/test sub-commands (`0x01`, `0x02`, `' '`, `'!'`, `'"'`) |
+| `0xce` | `FUN_0082bcde` | Factory/test sub-commands (`0x01`, `0x02`, `' '`, `'!'`, `'"'`) — see §8.10 |
 | `0xfe` | `FUN_00844214` | Builds a vibration pattern from a duration argument |
 
 Opcodes `0x2b`, `0x37`, `0x38`, `0x3a`, `0x3b`, `0x43`, `0x72`, `0x77`, `0x7a`, `0x7d`, `0x81`, `0xa1`, `0xc6`, `0xc7`, `0xff` and most of the `0x00`–`0x2a` switch table are routed to `FUN_0082be64`, which copies the frame into a deferred 16-byte command ring. Opcodes `0x7b`, `0xb0`, `0xc2`, `0xcc`, `0xf0`, `0xf1` are explicit no-ops. Unrecognized opcodes fall through to `FUN_0082bcba`.
@@ -3552,9 +3552,164 @@ same as `rev` + `lsl #0` would give, but `rev16` is a
 16-bit Thumb instruction and uses one fewer cycle than
 the 32-bit `rev`.
 
----
+### 8.10 0xce factory/test sub-commands (`FUN_0082bcde`)
 
-## 10. Open Questions / Next Steps
+The vendor-test entry point. Dispatches on five
+*non-sequential* sub-cmd bytes — `0x01`, `0x02`, `' '`
+(0x20), `'!'` (0x21), `'"'` (0x22) — to a mix of generic
+config writers and vendor-specific self-test loops.
+
+#### Request layout
+
+| Byte | Field | Notes |
+|---:|---|---|
+| 0 | `0xce` | cmd (consumed by dispatcher) |
+| 1 | `sub` | selects the sub-command (see table below) |
+| 2 | `param0` (u8) | passed as first arg to FUN_008336e8/0083361c/00838fae/008381a2/008381c0 |
+| 3 | `param1` (char) | passed as second arg to FUN_008336e8/0083361c |
+| 4 | `len` (u8) | copied into `local_18` — the response-copy length |
+| 5..14 | `data[10]` | copied into the `local_28` buffer |
+
+#### Sub-cmd dispatch
+
+| `req[1]` | Action | Helper |
+|---:|---|---|
+| `0x01` | `FUN_008336e8(local_1c, cVar2, &local_28, local_18)` — write 10-byte config chunk | `FUN_008336e8` |
+| `0x02` | `FUN_0083361c(local_1c, cVar2, &local_28, local_18)` — read 10-byte config chunk | `FUN_0083361c` |
+| `' '` (0x20) | **Hardware self-test loop** (see below) | `FUN_00838bc0` + 9×`(*puVar3)()` + `FUN_00833400` |
+| `'!'` (0x21) | **Bit-test** — `local_28 = ((*(uint*)(DAT_0082bfc8 + 0x10) & FUN_00838fae(local_1c)) != 0); local_18 = 1` | `FUN_00838fae` |
+| `'"'` (0x22) | `FUN_008381a2(local_1c, 0x5A); FUN_008381c0(local_1c, 0, 1, cVar2 == 0)` | `FUN_008381a2` + `FUN_008381c0` |
+| other | falls through to response copy only | — |
+
+#### `' '` (0x20) hardware self-test
+
+```c
+FUN_00838bc0(DAT_0082bfc0);              // reset vendor test context
+puVar3 = DAT_0082bfc4;                  // function pointer table
+for (i = 0; i < 9; i++) {
+    FUN_008381c0(0x14, 0, 1);          // vendor write 1
+    (*puVar3)(1);                        // call test routine
+    FUN_008381c0(0x14, 0, 1);          // vendor write 1 again
+    (*puVar3)(1);                        // call test routine
+}
+FUN_008381c0(0x15, 0, 1);              // vendor write 2
+(*puVar3)(1);                            // call test routine
+FUN_008381c0(0x15, 0, 1);              // vendor write 2 again
+(*puVar3)(1);                            // call test routine
+FUN_00833400();                          // finalise test
+```
+
+The `' '` self-test runs **20 vendor calls** in a tight loop
+(9 iterations × 2 calls each = 18 + 2 trailing calls = 20).
+Each pair is "write-vendor-reg `0x14` then call the
+test-routine; do it again". The trailing 2 calls use
+vendor-reg `0x15` (a different control register) and call
+the same test routine. The `FUN_00838bc0(DAT_0082bfc0)`
+is a "reset vendor test context" prep, and `FUN_00833400()`
+is a "finalise" / "log result" tail call.
+
+The `(*puVar3)()` indirection through `DAT_0082bfc4`
+(function-pointer table) means the actual test routine is
+**not** in the firmware body — it's loaded from a vendor-
+specific table that lives elsewhere in the image (likely a
+patch table the OEM ships for factory testing). A host that
+sends `' '` without that vendor table populated will jump
+to whatever pointer is at `DAT_0082bfc4` at runtime; if
+the table is null, this is a *crash*.
+
+This makes the `' '` sub-cmd a **factory-floor-only command**:
+the OEM populates `DAT_0082bfc4` with a vendor-supplied
+test routine before flashing the production firmware, and
+only factory-floor equipment is expected to send it. A
+normal OpenWatch host should never send `' '`.
+
+#### `'!'` (0x21) bit-test
+
+```c
+uVar5 = FUN_00838fae(local_1c);          // read a vendor status u32
+local_28 = ((*(uint*)(DAT_0082bfc8 + 0x10) & uVar5) != 0);
+local_18 = 1;
+```
+
+A **mask + bit-test**: the handler reads a 4-byte vendor
+status register via `FUN_00838fae(local_1c)`, AND-masks it
+against the value stored at `DAT_0082bfc8 + 0x10`, and
+writes a single byte (`0x00` or `0x01`) into `local_28[0]`
+based on whether the masked result is non-zero. `local_18`
+is set to `1` so the response carries exactly one byte of
+result. The host supplies `local_1c` (the status index) and
+reads back a single boolean.
+
+#### `'"'` (0x22) generic vendor write + check
+
+```c
+FUN_008381a2(local_1c, 0x5A);            // vendor write with mode 0x5A
+FUN_008381c0(local_1c, 0, 1, cVar2 == 0); // vendor write with check
+```
+
+Two vendor helper calls. `FUN_008381a2` writes the
+"diagnostic mode" value `0x5A` to the vendor register
+indexed by `local_1c`. `FUN_008381c0` then writes a
+"check" value (the second arg `0`, third arg `1`, fourth
+arg is `cVar2 == '\0'`) to the same register. The
+`cVar2 == '\0'` flag is the "fail-on-error" toggle: the
+host's `req[3]` selects whether the check is allowed to
+fail.
+
+#### Response layout
+
+After the dispatch, the handler copies `local_18` bytes
+from `local_28` into the response:
+
+```c
+memcpy(rsp + 1, &local_28, local_18);
+rsp[15] = FUN_0082b0c4(rsp, 0xf);
+FUN_0082ebdc(rsp);
+```
+
+So the response is:
+
+```
+byte  0: 0xCE                         (cmd)
+byte  1..N: <local_18 bytes of local_28> (N = local_18 = req[4])
+byte  N+1..14: 0
+byte 15: additive checksum
+```
+
+The `local_18` value (originally `req[4]`, but rewritten
+for the `'!'` sub-cmd to `1`) controls how many payload
+bytes the response carries:
+* For `'0x01'` / `'0x02'` config R/W: `local_18 == req[4]`
+  (the requested chunk length).
+* For `' '` self-test: `local_18` is unchanged from `req[4]`,
+  but `local_28` is all zeros (the helper doesn't write
+  anything back). The response carries `req[4]` zero bytes.
+* For `'!'` bit-test: `local_18 == 1` (the boolean result).
+* For `'"'` generic: `local_18` is unchanged from `req[4]`,
+  but `local_28` is all zeros.
+
+#### Why the ASCII sub-cmd bytes
+
+The use of `' '`, `'!'`, `'"'` (ASCII 0x20 / 0x21 / 0x22) as
+sub-cmd selectors is a *vendor convention*: it lets a human
+operator type the literal sub-cmd on a serial-terminal
+interface and have the firmware do the right thing. The
+firmware treats the sub-cmd byte as opaque data and never
+parses the ASCII semantics — `0x20` and `0x21` are just
+two more values in the dispatch switch.
+
+#### Pair with `0xA1` factory/test mode (Channel-A)
+
+`0xa1` is the Channel-A *user-facing* factory-test mode
+(§3.x). It dispatches on sub-cmd bytes `0x01..0x06` for
+HR step-counter operations. `0xce` is the 0xFEE7 vendor
+*factory-floor* test mode that talks to the OEM's vendor
+test tables (`DAT_0082bfc0`/`bfc4`/`bfc8`). They are
+*orthogonal* features: `0xa1` is reachable by any host;
+`0xce` is reachable only when the OEM has populated the
+vendor tables.
+
+---
 
 ## 10. Open Questions / Next Steps
 
