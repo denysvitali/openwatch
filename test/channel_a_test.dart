@@ -168,6 +168,33 @@ void main() {
       expect(s.startMinute, 30);
     });
 
+    test('bloodOxygenSetting 0x2c decodes 1-bit SpO2 toggle', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final got = d.onBloodOxygen.first;
+      // sub=0x01 (read), value=0x01 (enabled).
+      final f = Codec.buildChannelA(OpA.bloodOxygenSetting, [0x01, 0x01]);
+      t.inA.add(f);
+      final s = await got.timeout(const Duration(seconds: 1));
+      expect(s.sub, 0x01);
+      expect(s.enabled, isTrue);
+    });
+
+    test(
+      'bloodOxygenSetting 0x2c disabled maps value 0 to enabled=false',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final got = d.onBloodOxygen.first;
+        final f = Codec.buildChannelA(OpA.bloodOxygenSetting, [0x01, 0x00]);
+        t.inA.add(f);
+        final s = await got.timeout(const Duration(seconds: 1));
+        expect(s.enabled, isFalse);
+      },
+    );
+
     test(
       'emitFactoryReset fires onFactoryReset (host-side optimistic ack)',
       () async {

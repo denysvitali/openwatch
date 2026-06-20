@@ -299,19 +299,16 @@ class ChannelADispatcher {
   }
 
   /// `bloodOxygenSetting` (0x2c): sub `0x01` reads, `0x02` writes.
+  ///
+  /// The handler is a single-bit on/off flag for the SpO2 (blood-oxygen)
+  /// sensor, stored as bit 1 of a shared config byte (per
+  /// `FUN_0082d1c2` — see `GHIDRA_DECOMPILATION.md` §3.10). The
+  /// response layout is:
+  ///   `pl[0] = req[1]` echo (0x01 read / 0x02 write)
+  ///   `pl[1] = SpO2 enabled value (0 = off, 1 = on)`
   void _decodeBloodOxygen(Uint8List pl) {
     if (pl.length < 2) return;
-    final sub = pl[0];
-    final value = pl[1];
-    final enabled = value != 0;
-    final intervalMin = pl.length >= 3 ? pl[2] : 0;
-    _bloodOxygen.add(
-      BloodOxygenSetting(
-        sub: sub,
-        enabled: enabled,
-        intervalMinutes: intervalMin,
-      ),
-    );
+    _bloodOxygen.add(BloodOxygenSetting(sub: pl[0], enabled: pl[1] != 0));
   }
 
   /// `pressure` (0x38): sub `0x01` reads value; else writes unit.
@@ -668,14 +665,9 @@ class HeartRateRecord {
 }
 
 class BloodOxygenSetting {
-  const BloodOxygenSetting({
-    required this.sub,
-    required this.enabled,
-    required this.intervalMinutes,
-  });
+  const BloodOxygenSetting({required this.sub, required this.enabled});
   final int sub;
   final bool enabled;
-  final int intervalMinutes;
 }
 
 class PressureReading {
