@@ -251,7 +251,7 @@ Processes a circular queue of incoming 16-byte frames (`DAT_0082d440 + 0x14` rin
 | `0x2b` | `menstruation` (mixture container) | `0x0082ba54` | Sub `0x01`/`0x02` read/write mixture data; cycle-phase detector + notification sender — see §3.1. |
 | `0x2c` | `bloodOxygenSetting` | `0x0082d1c2` | Sub `0x01` reads SpO2 setting, `0x02` writes it — see §3.10. |
 | `0x37` | `pressureSetting` | `0x0082caa6` | Reads/sets pressure config; uses `FUN_008344fe`. |
-| `0x38` | `pressure` | `0x0082ca54` | Sub `0x01` reads pressure value, else sets pressure unit. |
+| `0x38` | `pressure` | `0x0082ca54` | Sub `0x01` reads pressure value, else sets pressure unit — see §3.17. |
 | `0x39` | `hrvSetting` | `0x0082c9da` | Reads/sets HRV config; uses `FUN_0083468e`. |
 | `0x3a` | `sugarLipidsSetting` | `0x0082cc1e` | Sub `0x03`/`0x04` read/write sugar/lipids settings. |
 | `0x3b` | `uvSetting` / `touchControl` | `0x0082cbc8` | Read/write UV/touch config byte at `DAT_0082cfe8 + 8`. |
@@ -396,6 +396,65 @@ The helper functions `FUN_00830c7e`, `FUN_00830cb2`, `FUN_00830cbc`,
 `FUN_00830c82` live in the step-counter / sport-motion library
 (`vc_SportMotion_Int`) referenced in
 `firmwares/_re/strings-mining/findings.txt`.
+
+### 3.17 Opcode `0x38` pressure (1-bit read/write) (`FUN_0082ca54`)
+
+The simplest "1-bit setting" pair in the table — analogous to
+the `0x2c bloodOxygenSetting` handler from §3.10. The
+"pressure value" is a single bit stored in the same shared
+config byte at `DAT_008277f0 + 0x2D` that holds the SpO2 flag,
+UV-touch byte, etc.
+
+#### Sub-opcode dispatch
+
+| `req[1]` | Action | Helper used |
+|---:|---|---|
+| `0x01` (read) | `cStack_1e = FUN_00827772()` — read bit 3 of `*(DAT_008277f0 + 0x2D)`, masked `& 0xF >> 3` yields `0` or `1` | `FUN_00827772` |
+| other (write) | `FUN_0082777e(req[2] == 1)` — if `req[2] == 1`, set bit 3; else clear it. The handler then **echoes** `req[2]` (not the coerced 0/1) into the response. | `FUN_0082777e` |
+
+The mask `& 0xF` and the `<< 3` shift confirm that only bit 3
+of the shared config byte is owned by the pressure setting;
+the other 7 bits of that byte belong to other features
+(SpO2, UV-touch, etc.).
+
+#### Response layout (3 useful bytes + 13 zero bytes + checksum)
+
+```
+byte  0: 0x38                (cmd echo)
+byte  1: req[1]              (sub-opcode echo: 0x01 read / 0x02+ write)
+byte  2: pressure value      (0/1 for read; echoed req[2] for write)
+byte  3..14: 0
+byte 15: additive checksum
+```
+
+The response is built directly on the stack (the handler
+clears the 16-byte frame once at the top and writes only the
+three output bytes), so the rest of the frame is always zero.
+
+#### Why this is so short
+
+* The 1-bit storage means the entire pressure "value" is a
+  boolean — the H59MA pressure sensor (if present) is either
+  enabled or disabled, not a continuous reading. A host that
+  wants the actual mmHg / kPa reading must subscribe to a
+  push channel (likely a `0x2B`-routed event) rather than
+  poll `0x38`.
+* The 0/1 read and the echoed `req[2]` write response are
+  **deliberately consistent** with the `0x2c` SpO2 and `0x3b`
+  UV-touch handlers — the host code can treat all three
+  "1-bit setting" opcodes uniformly with the same
+  `read = 0x01 / write = 0x02` sub-opcode pattern.
+
+#### Companion opcode `0x37` pressureSetting
+
+`0x37` (`FUN_0082caa6`) is a *separate* config opcode that
+uses the same shared `FUN_0082c988` 13-byte-chunk fragmenter
+as `0x7a muslim` (§3.11) and `0x39 hrv`. It likely configures
+the per-mode pressure algorithm (high/low threshold, alert
+frequency, etc.) rather than the on/off bit that `0x38`
+owns. The host should not confuse the two: `0x37` is the
+*settings* opcode (long fragmented response), `0x38` is the
+*value* opcode (3-byte ack).
 
 ### 3.2 Opcode `0xc7` vibration / motor pattern player (`FUN_00832ebc`)
 
