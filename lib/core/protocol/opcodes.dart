@@ -126,3 +126,79 @@ class OpB {
   static const int rspInner = 5;
   static const int rspLowBattery = 6;
 }
+
+/// Opcodes handled by the vendor `0xFEE7` GATT service write handler
+/// (`FUN_0082c944` in H59MA v14, see `GHIDRA_DECOMPILATION.md` §8).
+///
+/// Wire format is identical to Channel A: a fixed 16-byte frame whose last
+/// byte is the additive 8-bit checksum of bytes `0..14`. Several opcodes
+/// overlap with Channel A (e.g. `0x48`, `0x50`, `0x51`, `0x69`, `0x6a`,
+/// `0x3c`, `0x3e`) — the device treats the two GATT services as parallel
+/// command surfaces.
+class Fee7 {
+  Fee7._();
+
+  // Health
+  static const int spo2HrUpdate = 0x36; // SpO2/HR read or set
+  static const int capabilityBlock = 0x3c; // Returns fixed device-cap block
+  static const int bloodOxygenUpdate = 0x3e; // SpO2 read/set
+
+  // Device info / handshake
+  static const int handshakeResponse = 0x48; // 'H' — 15-byte info block
+
+  // Alerts / find-phone
+  static const int alertTrigger = 0x50; // 'P' — alarm/motor pattern
+  static const int findPhoneEvent = 0x51; // 'Q' — arms pattern when pl[1]==1
+  static const int miscAncs = 0x60; // FUN_0082be90
+
+  // Status
+  static const int statusResponse = 0x61; // 'a' — battery / step counters
+
+  // Mode control (multi-step + continuation)
+  static const int modeControl = 0x69; // 'i'
+  static const int modeControlCont = 0x6a; // 'j'
+
+  // Echo / unary probes
+  static const int echoBase = 0x90; // FUN_00827ad2
+  static const int echoBase2 = 0x91; // FUN_00827aee
+
+  // Range 0x92..0x9f — vendor unary echoes / probes (one handler each).
+  static const int unaryRangeStart = 0x92;
+  static const int unaryRangeEnd = 0x9f;
+
+  // Out-of-range unary opcodes handled as standalone cases.
+  static const int unaryA0 = 0xa0;
+  static const int unaryBf = 0xbf;
+  static const int unaryC0 = 0xc0;
+  static const int unaryC4 = 0xc4;
+  static const int unaryC5 = 0xc5;
+  static const int unaryC8 = 0xc8;
+  static const int unaryC9 = 0xc9;
+  static const int unaryCd = 0xcd;
+  static const int unaryCe = 0xce; // factory/test sub-commands
+  static const int vibrationPattern = 0xfe; // FUN_00844214
+
+  // Special handling
+  static const int longResponse = 0xc1; // Fragmented long reply
+  static const int otaTrigger = 0xc3; // Routes into OTA state machine
+
+  /// Whether [opcode] should be decoded as a `UnaryOpcode` (no payload decode).
+  static bool isUnary(int opcode) {
+    if (opcode >= unaryRangeStart && opcode <= unaryRangeEnd) return true;
+    switch (opcode) {
+      case unaryA0:
+      case unaryBf:
+      case unaryC0:
+      case unaryC4:
+      case unaryC5:
+      case unaryC8:
+      case unaryC9:
+      case unaryCd:
+      case unaryCe:
+      case vibrationPattern:
+        return true;
+      default:
+        return false;
+    }
+  }
+}

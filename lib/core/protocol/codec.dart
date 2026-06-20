@@ -34,7 +34,19 @@ class Codec {
   }
 
   /// The base opcode of a received frame, with the error flag stripped.
+  ///
+  /// Channel-A semantics: the top bit (`0x80`) is the device-side error
+  /// flag; this method removes it before returning so callers see the
+  /// base opcode (`0x00..0x7f`). For protocols where the top bit is part
+  /// of the opcode namespace — the vendor `0xFEE7` channel is dense in
+  /// `0x80..0xff`, see `GHIDRA_DECOMPILATION.md` §8 — use [rxOpcodeRaw].
   static int rxOpcode(Uint8List frame) => frame[0] & ~errorFlag;
+
+  /// The raw opcode byte with no error-flag stripping. Use this for
+  /// protocols where the top bit is part of the opcode namespace (the
+  /// vendor `0xFEE7` channel's opcode table is dense in `0x80..0xff`,
+  /// see `GHIDRA_DECOMPILATION.md` §8).
+  static int rxOpcodeRaw(Uint8List frame) => frame[0] & 0xFF;
 
   /// Whether the device flagged an error on this response (top bit of opcode).
   static bool rxIsError(Uint8List frame) => (frame[0] & errorFlag) != 0;
@@ -137,6 +149,9 @@ class Codec {
   static List<int> u16le(int v) => [v & 0xFF, (v >> 8) & 0xFF];
 
   static int readU16le(List<int> b, int off) => b[off] | (b[off + 1] << 8);
+
+  static int readU24le(List<int> b, int off) =>
+      b[off] | (b[off + 1] << 8) | (b[off + 2] << 16);
 
   static int readU32le(List<int> b, int off) =>
       b[off] | (b[off + 1] << 8) | (b[off + 2] << 16) | (b[off + 3] << 24);

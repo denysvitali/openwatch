@@ -49,6 +49,7 @@ class BleTransport {
   final _state = ValueNotifier<LinkState>(LinkState.disconnected);
   final _inboundA = StreamController<Uint8List>.broadcast();
   final _inboundB = StreamController<Uint8List>.broadcast();
+  final _inboundFee7 = StreamController<Uint8List>.broadcast();
 
   // Serialized write queue.
   final Queue<_WriteOp> _queue = Queue<_WriteOp>();
@@ -65,6 +66,13 @@ class BleTransport {
   ValueListenable<LinkState> get state => _state;
   Stream<Uint8List> get inboundA => _inboundA.stream;
   Stream<Uint8List> get inboundB => _inboundB.stream;
+
+  /// Inbound 16-byte frames received on the vendor `0xFEE7` notify
+  /// characteristic. Emits only after the characteristic has been discovered
+  /// and notifications enabled (i.e. once `_fee7Notify` is non-null); no-op
+  /// for watches that do not expose the service.
+  Stream<Uint8List> get fee7Inbound => _inboundFee7.stream;
+
   BluetoothDevice? get device => _device;
   bool get isReady => _state.value == LinkState.ready;
 
@@ -155,6 +163,10 @@ class BleTransport {
       await _notifyB!.setNotifyValue(true);
       _subs.add(_notifyB!.onValueReceived.listen(_onChannelB));
     }
+    if (_fee7Notify != null) {
+      await _fee7Notify!.setNotifyValue(true);
+      _subs.add(_fee7Notify!.onValueReceived.listen(_onFee7));
+    }
     _log.info('ble', 'Notifications enabled');
 
     // Handshake: read hardware then firmware revision; ready once both return.
@@ -231,6 +243,24 @@ class BleTransport {
     _inboundB.add(Uint8List.fromList(data));
   }
 
+  void _onFee7(List<int> data) {
+    final frame = Uint8List.fromList(data);
+    if (!Codec.isValidChannelA(frame)) {
+      _log.frame(
+        'rx',
+        'RX-FEE7(DROPPED len=${frame.length})',
+        data,
+        level: LogLevel.warn,
+      );
+      return;
+    }
+    // Use rxOpcodeRaw — fee7 opcodes are dense in 0x80..0xff where the
+    // top bit is part of the opcode namespace, not an error indicator.
+    final opcode = Codec.rxOpcodeRaw(frame);
+    _log.frame('rx', 'RX-FEE7 op=0x${opcode.toRadixString(16)}', data);
+    _inboundFee7.add(frame);
+  }
+
   // ---------------------------------------------------------------------------
   // Channel A: commands
   // ---------------------------------------------------------------------------
@@ -292,6 +322,33 @@ class BleTransport {
       final chunk = Uint8List.sublistView(framed, off, end);
       await _enqueue(_WriteOp(char, chunk, withoutResponse: true));
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Vendor 0xFEE7 command channel (parallel 16-byte command path)
+  // ---------------------------------------------------------------------------
+
+  /// Whether the vendor `0xFEE7` write characteristic was discovered.
+  bool get hasFee7Write => _fee7Write != null;
+
+  /// Sends a 16-byte frame on the vendor `0xFEE7` service. The frame is
+  /// expected to be already checksummed (use [Codec.buildChannelA]).
+  ///
+  /// Throws if the device did not advertise the `0xFEE7` write characteristic.
+  Future<void> sendFee7(Uint8List frame) {
+    final char = _fee7Write;
+    if (char == null) {
+      throw const BleTransportException(
+        'Vendor 0xFEE7 write characteristic not available',
+      );
+    }
+    if (!Codec.isValidChannelA(frame)) {
+      throw const BleTransportException(
+        '0xFEE7 frame must be 16 bytes with valid additive checksum',
+      );
+    }
+    _log.frame('tx', 'TX-FEE7 op=0x${frame[0].toRadixString(16)}', frame);
+    return _enqueue(_WriteOp(char, frame, withoutResponse: false));
   }
 
   // ---------------------------------------------------------------------------
@@ -374,6 +431,7 @@ class BleTransport {
     _state.dispose();
     unawaited(_inboundA.close());
     unawaited(_inboundB.close());
+    unawaited(_inboundFee7.close());
   }
 }
 
