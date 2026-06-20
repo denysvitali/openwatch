@@ -2572,7 +2572,7 @@ polling the link does not bump the timer.
 | `0xc9` | `DAT_0082caec[5] = param_1[1]` | inline |
 | `0xcd` | Byte-reverse echo of req[3..6] (link sanity test) | `FUN_0082be12` | see §8.9 |
 | `0xce` | Factory/test sub-commands (`0x01`, `0x02`, `' '`, `'!'`, `'"'`) | `FUN_0082bcde` | see §8.10 |
-| `0xfe` | `FUN_00844214(*(u16*)(param_1 + 1))` — vibration pattern from a duration arg | inline |
+| `0xfe` | `FUN_00844214(*(u16*)(param_1 + 1))` — vibration pattern from a duration arg | inline | see §8.13 |
 | other | Vendor NAK: `FUN_0082bcba(opcode)` | `FUN_0082bcba` |
 
 #### Deferred-command ring (`FUN_0082be64`)
@@ -2702,7 +2702,7 @@ Immediate / explicitly routed opcodes:
 | `0xc9` | — | Sets `DAT_0082caec[5] = param[1]` |
 | `0xcd` | `FUN_0082be12` | Byte-reverse echo of req[3..6] (link sanity test) — see §8.9 |
 | `0xce` | `FUN_0082bcde` | Factory/test sub-commands (`0x01`, `0x02`, `' '`, `'!'`, `'"'`) — see §8.10 |
-| `0xfe` | `FUN_00844214` | Builds a vibration pattern from a duration argument |
+| `0xfe` | `FUN_00844214` | Builds a vibration pattern from a duration argument — see §8.13 |
 
 Opcodes `0x2b`, `0x37`, `0x38`, `0x3a`, `0x3b`, `0x43`, `0x72`, `0x77`, `0x7a`, `0x7d`, `0x81`, `0xa1`, `0xc6`, `0xc7`, `0xff` and most of the `0x00`–`0x2a` switch table are routed to `FUN_0082be64`, which copies the frame into a deferred 16-byte command ring. Opcodes `0x7b`, `0xb0`, `0xc2`, `0xcc`, `0xf0`, `0xf1` are explicit no-ops. Unrecognized opcodes fall through to `FUN_0082bcba`.
 
@@ -3899,6 +3899,124 @@ falls into the `0x39 < uVar2 < 0x43` chain and reaches
 between Channel-A and 0xFEE7 — the dispatcher for both
 tables lands on the same handler. The host SDK can call it
 from either transport.
+
+### 8.13 0xfe vibration-pattern-from-duration (inline in `FUN_0082c944`)
+
+The only 0xFEE7 opcode that is **fire-and-forget** with **no
+response frame at all**. The dispatcher inline-calls
+`FUN_00844214` with the u16 LE duration from `req[1..2]`
+and returns without queuing a response.
+
+#### Dispatcher body
+
+```c
+case 0xfe:
+    FUN_00844214(*(u16 *)(param_1 + 1));
+    return;
+```
+
+No `FUN_0082ebdc` is called — the watch accepts the
+request, builds the pattern, and goes silent.
+
+#### Request layout
+
+| Byte | Field | Notes |
+|---:|---|---|
+| 0 | `0xfe` | cmd (consumed by dispatcher) |
+| 1..2 | `duration` (u16 LE) | vibration pattern length in **10 ms ticks**; clamped to `900` (9 s) inside `FUN_00844214` |
+| 3..14 | unused | — |
+
+The duration unit is 10 ms (the `FUN_0083dfd6(_, 0x5A0)` calls
+inside `FUN_00844214` — `0x5A0 = 1440`, divided by 144 = 10).
+
+#### `FUN_00844214` behavior
+
+The handler is a full vibration-pattern synthesizer:
+
+1. **Clamp**: `if (duration > 900) duration = 900`.
+2. **Reset**: `FUN_00844a64()` — stop any currently-running
+   vibration.
+3. **Anchor RTC**: `FUN_00840f30()` — read the current RTC
+   tick; the pattern is anchored to this time so it can be
+   resumed across a power-cycle.
+4. **Allocate** a fresh pattern record at `DAT_00844324`
+   (the global "current vibration" slot).
+5. **Compute the pattern** in a `while (duration != 0)` loop.
+   The loop picks one of 5 intensity levels (0 = off, 1..5 =
+   increasing) based on the elapsed RTC vs the pattern's
+   nominal tick. The level choice is driven by the
+   *elapsed-time brackets* (in RTC ticks):
+   * `< 0x3C` (60 s): level 2, step 30 ticks (0x1E)
+   * `< 0x50` (80 s): level 3, step 15 ticks (0x0F)
+   * `< 0x5C` (92 s): level 4, step 10 ticks (0x0A)
+   * `< 0x62` (98 s): level 5, step 5 ticks
+   * `>= 0x62`: level 0 (off), step 30 ticks — but bumps
+     the loop's "intensity counter" at `puVar1[5]`
+6. **Cap** the pattern at 40 entries (`if (puVar1[0x13] > 0x27)
+   break`).
+7. **Commit**: `FUN_008316fe()` — start the pattern playback.
+
+The intensity brackets are the **envelope**: a short
+duration plays only the strong/quick pulses (level 2..3),
+a long duration adds the weak/slow pulses (level 4..5), and
+the final "off" stage cools the motor back to silent. This is
+a classic "ramp down" pattern used to signal the end of a
+host-driven operation.
+
+#### Persistent pattern record (`DAT_00844324`)
+
+| Off | Field | Notes |
+|---:|---|---|
+| 0 | `start_tick` (u32) | RTC tick when the pattern was armed |
+| 5 | `intensity_counter` (u8) | total patterns played (caps at 5, then `0`) |
+| 6 | `duration_ticks` (u16 LE) | the duration value passed by the host |
+| 0xE | `first_pattern_offset` (u16) | offset into the pattern table |
+| 0x13 | `next_pattern_idx` (u8) | next free slot in the pattern table |
+| 0x14.. | `pattern[]` (u8 array) | up to 40 entries, each a `level` (0..5) |
+| 0x3C.. | `durations[]` (u8 array) | corresponding tick durations for each entry |
+
+The `FUN_0083dfd6(time, ticks)` helper adds `ticks` to the
+running RTC. The `FUN_008267cc()` helper reads the current RTC.
+
+#### Why no response
+
+A vibration pattern is a **delayed side-effect**: the watch
+plays the pattern over the next several seconds, and the
+host wants to know "when does it finish?" not "did you
+accept the pattern?". Since `FUN_00844214` returns the
+expected pattern duration (via `puVar1[6]`), the host SDK
+can compute the expected finish time *locally* without
+needing a response frame.
+
+A response frame would also be wasted on the BLE link
+because the pattern plays for up to 9 s; the response would
+arrive immediately, long before the host cares about
+completion. So the no-response design trades a small
+"did-you-accept" verification for lower link usage.
+
+#### Pair with `0xc7 'D'` vibration pattern player (Channel-A)
+
+`0xc7 'D'` (§3.2) is the *Channel-A* equivalent: the host
+sends a 16-byte frame with a specific vibration pattern, the
+watch plays it. The two are *functionally* the same — both
+build a vibration pattern from host-supplied data and play
+it. The difference is that `0xfe` takes a **single u16
+duration** and *generates* a ramp-down envelope internally,
+while `0xc7` takes an **explicit pattern** (presence + id +
+duration + 12-byte pattern data) and plays it verbatim. A
+host that wants a simple "beep for N ticks" should use
+`0xfe`; a host that wants a custom tune should use `0xc7`.
+
+#### Why `0xfe` is inline in the dispatcher
+
+Most 0xFEE7 handlers are routed through `FUN_0082be64`
+(deferred ring — see §8.1). `0xfe` is *inline* in the
+dispatcher because the dispatcher needs the host-supplied
+u16 duration *before* it can queue the work; the deferred
+ring does not carry per-call parameters, only the raw 16-byte
+frame. Inlining `0xfe` lets the dispatcher pass the duration
+*directly* to `FUN_00844214` without an intermediate
+indirection through `FUN_0082be64`.
 
 ---
 
