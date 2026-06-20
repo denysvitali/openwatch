@@ -278,20 +278,124 @@ Most handlers build a 16-byte response buffer, compute an additive checksum with
 
 `FUN_0082b986(opcode, isNotify)` sends a simple 1-byte opcode response (with `0x80` flag for notify-only opcodes).
 
-### Opcode `0x77` `phoneSport` sub-command dispatch (`FUN_0082ce0c`)
+### 3.16 Opcode `0x77` `phoneSport` sub-command dispatch (`FUN_0082ce0c`)
 
-`FUN_0082ce0c` reads `subData[0]` (frame byte `3`) and dispatches via `__ARM_common_switch8` with max index `6`:
+The 0x77 handler is a *two-stage* dispatcher: the main handler
+`FUN_0082ce0c` reads `req[1]` and indexes a switch8 at
+`0x82ce23` (7 active entries, max-index `6`), then jumps to
+one of the per-sub-byte thunks. The thunks are tiny
+"register-only" stubs whose locals have all been optimized
+out by the compiler — the decompiler shows them as
+`unaff_r4..r7` because the parent dispatcher passes the
+request pointer in `r4`, the state byte in `r5`, the sport
+context in `r6`, and zero in `r7`, and the thunks reuse
+those registers directly.
 
-| Sub-byte | Handler | Notes |
-|---|---|---|
+#### Dispatcher entry (`FUN_0082ce0c`)
+
+```asm
+push {r4,r5,r6,r7,lr}
+mov  r4, r0                   ; r4 = request frame
+ldrb r0, [r0, #1]             ; r0 = sub-byte
+ldr  r1, [0x82cff8]           ; r1 = state ptr
+sub  sp, #0x14
+ldr  r6, [0x82cff4]           ; r6 = sport context ptr
+ldrb r5, [r1]                 ; r5 = state byte
+movs r7, #0
+movs r3, r0                   ; r3 = sub-byte (for switch8)
+bl   0x8405fc                ; __ARM_common_switch8
+```
+
+So the registers passed into the per-sub-byte thunks are:
+- `r4` = request frame pointer
+- `r5` = 1-byte sport state (loaded from `*DAT_0082cff8`)
+- `r6` = sport context (20-byte block at `DAT_0082cff4`)
+- `r7` = 0
+
+The switch8 at `0x82ce23` dispatches on `req[1]` to:
+
+| `req[1]` | Thunk | Notes |
+|---:|---|---|
 | `0x00`, `0x06` | `FUN_0082cede` | Default ack — builds `0x77` response with checksum |
-| `0x01` | `FUN_0082ce2a` | Start/finish sport session; zeros `DAT_0082cff4`; calls `FUN_00828af4`, `FUN_00830c7e`; arms a 1000 ms timer |
-| `0x02` | `FUN_0082ce64` | Calls `FUN_00830cb2`; sets `DAT_0082cff4+1` flag |
-| `0x03` | `FUN_0082ce72` | Calls `FUN_00830cd4`; sets `DAT_0082cff4+1` flag |
-| `0x04` | `FUN_0082ce80` | Cancels timer (`_DAT_0082cffc`); calls `FUN_00830c7e` |
-| `0x05` | `FUN_0082ce96` | GPS/position delta: reads two 3-byte little-endian values from `subData[2..6]` and `subData[6..10]`, updates cumulative distance/step counters |
+| `0x01` | `FUN_0082ce2a` | Start/finish sport session |
+| `0x02` | `FUN_0082ce64` | Pause / resume bit |
+| `0x03` | `FUN_0082ce72` | Lap / split bit |
+| `0x04` | `FUN_0082ce80` | Cancel sport session |
+| `0x05` | `FUN_0082ce96` | GPS/position delta |
 
-The helper functions `FUN_00830c7e`, `FUN_00830cb2`, `FUN_00830cd4` live in the step-counter / sport-motion library (`vc_SportMotion_Int`).
+#### Sub-handler details
+
+The `unaff_r*` accesses are the optimizer-removed parameters.
+The recovered semantics are:
+
+* **`0x01` start/finish (`FUN_0082ce2a`)**:
+  1. `memset(sport_ctx, 0, 0x14)` — clear the 20-byte sport context.
+  2. If `r5 != 0` (state byte): call `FUN_00830c7e()` (stop sport).
+  3. `FUN_00828af4()` — HR step-counter running check; if non-zero,
+     call `FUN_0082b108()` (likely the same "ack" builder used by
+     the deferred ring) and return — *sport session cannot start
+     while HR is busy*.
+  4. `FUN_00830c82(req[2])` — start sport in mode `req[2]`
+     (the per-mode flag from the H59MA SDK).
+  5. `*sport_ctx = 1` — set "running" flag at offset 0.
+  6. `func_0x00013694(DAT_0082cffc, 1000)` — arm a 1000 ms
+     one-shot timer at the 2nd literal-pool slot (the 1 Hz sport
+     tick that the main loop drains to update step counts).
+  7. `FUN_0082b108()` + `FUN_0082cede()` — emit the 0x77 ack.
+
+* **`0x02` pause bit (`FUN_0082ce64`)** and **`0x03` lap bit
+  (`FUN_0082ce72`)** are mirror images: if `r5 != 0`, set
+  `*(sport_ctx + 1) = 1` (the "pause/lap in progress" flag),
+  call `FUN_00830cb2` (pause) or `FUN_00830cbc` (lap), restore
+  the original `r7` value (always 0 in the dispatcher) to byte
+  1, and emit the ack. If `r5 == 0`, the call is a no-op
+  `FUN_0082b0c4` + `FUN_0082ebdc` (i.e. an empty response).
+
+* **`0x04` cancel (`FUN_0082ce80`)**: cancel the 1000 ms tick
+  timer via `func_0x000136bc(DAT_0082cffc)`, set the in-progress
+  flag at `sport_ctx[1] = 1` (so the dispatcher's "if r5 != 0"
+  guard is satisfied for the remainder of the session), call
+  `FUN_00830c7e()` to stop the step-counter / sport-motion
+  library, and emit the ack.
+
+* **`0x05` GPS delta (`FUN_0082ce96`)** is the only data-bearing
+  sub-byte. The handler reads two 3-byte little-endian u24 values
+  from the request and integrates them into cumulative counters
+  on the sport context:
+
+  ```c
+  uint32_t new_lat = (req[3] | (req[4] << 8) | (req[5] << 16));
+  uint32_t new_lng = (req[7] | (req[8] << 8) | (req[9] << 16));
+  sport_ctx[0xc / 4] += (int32_t)(new_lat - sport_ctx[4 / 4]);  // lat delta
+  sport_ctx[0x10 / 4] += (int32_t)(new_lng - sport_ctx[8 / 4]); // lng delta
+  sport_ctx[4 / 4] = new_lat;
+  sport_ctx[8 / 4] = new_lng;
+  ```
+
+  The 12-byte sport context fields are therefore:
+
+  | Off | Field | Notes |
+  |---:|---|---|
+  | 0 | `running_flag` | 1 if a session is in progress |
+  | 1 | `pause_or_lap_flag` | 1 if a pause/lap sub-cmd is mid-handler |
+  | 2..3 | (unused) | |
+  | 4..7 | `last_lat` (u32 LE) | last reported latitude value |
+  | 8..11 | `last_lng` (u32 LE) | last reported longitude value |
+  | 12..15 | `cum_lat` (i32 LE) | cumulative latitude delta |
+  | 16..19 | `cum_lng` (i32 LE) | cumulative longitude delta |
+
+  The two u24 values in the request are **arbitrary bit-pattern
+  encodings** of latitude and longitude, not BCD degrees-minutes;
+  the watch just keeps a running sum of the per-tick deltas and
+  surfaces the total in the 0x77 response. The `req[1] == 0x01
+  || req[1] == 0x06` branch in the sub-handler is the same
+  guard that the default-ack thunk uses to decide whether to
+  emit a 14-byte response or a 0-byte response.
+
+The helper functions `FUN_00830c7e`, `FUN_00830cb2`, `FUN_00830cbc`,
+`FUN_00830c82` live in the step-counter / sport-motion library
+(`vc_SportMotion_Int`) referenced in
+`firmwares/_re/strings-mining/findings.txt`.
 
 ### 3.2 Opcode `0xc7` vibration / motor pattern player (`FUN_00832ebc`)
 
