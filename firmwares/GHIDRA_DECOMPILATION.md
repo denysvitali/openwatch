@@ -251,18 +251,81 @@ Strings confirm additional algorithm libraries: `VC_HRV_16Bit_integration_6.0_ad
 
 ---
 
-## 8. Vendor `0xFEE7` GATT Service
+## 8. Vendor `0xFEE7` GATT Service — Active Protocol Role
 
-The firmware attribute table declares a fourth vendor service `0x0000fee7` at body offset `0x008456bc` (UUID bytes `e7 fe 00 00 ...`). Characteristic UUIDs are laid out nearby:
+The `0xFEE7` vendor service is **not** table decoration. It is registered during BLE initialization (`FUN_0082e464` → `FUN_0082e8ec`) using an attribute table at base `0x00845604` (size `0xa8`). Three handler pointers are active in the GATT records:
 
-| Char | Body UUID offset |
-|---|---|
-| `0xfea1` write+CCCD | `0x008456f2` |
-| `0xfec9` read | nearby |
-| `0xfea2` notify+CCCD | nearby |
-| `0x2a00` Device Name | nearby |
+| Handler | Address | Role |
+|---|---|---|
+| `FUN_0082e850` | `0x0082e850` | Read handler — returns a runtime buffer pointed to by `DAT_0082e934` (length stored at `buffer[-2]`) |
+| `FUN_0082e87a` | `0x0082e87a` | Write/notify handler — GATT event `2` routes to the protocol dispatcher `FUN_0082c944` |
+| `FUN_0082e8ce` | `0x0082e8ce` | CCCD/log handler — only emits debug traces |
 
-No code references to the `0xFEE7` service endpoints were located during this decompilation pass; the service is present in the GATT table but its protocol usage (if any) is not exercised by the Channel A/B paths documented above. The OpenWatch app currently probes it during discovery only.
+The write handler is the protocol entry point.
+
+### Wire format
+
+`FUN_0082c944` expects 16-byte writes and uses the same framing as Channel A:
+
+```
+byte 0      opcode
+byte 1..14  payload / parameters
+byte 15     additive checksum (sum of bytes 0..14)
+```
+
+If `opcode` is not `'C'` (`0x43`) or `'H'` (`0x48`) the firmware first resets a keep-alive timer (`FUN_0082eebe`), then dispatches on the opcode.
+
+Responses are built with `FUN_0082b0c4` (additive checksum) and queued through `FUN_0082ebdc` / `FUN_0082eb8a` into the same 16-byte notify ring used by Channel A. Many commands are simply copied into a deferred command ring (`FUN_0082be64`) and processed later.
+
+### Opcode → handler map (from `FUN_0082c944`)
+
+Immediate / explicitly routed opcodes:
+
+| Opcode | Handler | Notes |
+|---|---|---|
+| `0x36` | `FUN_0082c112` | Heart-rate related read/set |
+| `0x3c` | `FUN_0082c50e` | Returns fixed capability block `[0x3c,0,0x40,0xa0,0x20,...]` |
+| `0x3e` | `FUN_0082c550` | SpO2 / blood-oxygen related read/set |
+| `0x48` `'H'` | `FUN_0082bf40` | Handshake response — sends 15-byte device-info block |
+| `0x50` `'P'` | inline | Calls `FUN_0082994c(0x14,0x10,1,0x19)` + `FUN_0082a5c8(8)` (alert/motor) |
+| `0x51` `'Q'` | `FUN_0082c5b8` | "Find phone" / alert trigger; arms pattern when `payload[1]==1` |
+| `0x60` | `FUN_0082be90` | |
+| `0x61` `'a'` | `FUN_0082bee6` | Status response (battery / daily counters) |
+| `0x69` `'i'` | `FUN_0082c2f4` | Multi-step mode control (start/stop/cancel of a remote feature) |
+| `0x6a` `'j'` | `FUN_0082c1e2` | Continuation of `0x69` mode control |
+| `0x90` | `FUN_00827ad2` | Echo `[0x90]` |
+| `0x91` | `FUN_00827aee` | Echo `[0x91]` |
+| `0x92` | `FUN_00827b14` | |
+| `0x93` | `FUN_00827c4a` | |
+| `0x94` | `FUN_00827b2e` | |
+| `0x95` | `FUN_00827b54` | |
+| `0x96` | `FUN_00827b7c` | Sends `[0x96,0,0,0x96,...]` and resets state |
+| `0x97` | `FUN_00827ba4` | |
+| `0x98` | `FUN_00827be6` | |
+| `0x99` | `FUN_00827bea` | |
+| `0x9a` | `FUN_00827bec` | |
+| `0x9b` | `FUN_00827bf0` | |
+| `0x9c` | `FUN_00827c1e` | |
+| `0x9e` | `FUN_00827cc8` | |
+| `0x9f` | `FUN_00827d1a` | |
+| `0xa0` | `FUN_00827b16` | |
+| `0xbf` | `FUN_0082ba94` | |
+| `0xc0` | `FUN_0082bb0c` | |
+| `0xc1` | `FUN_008337fa` + `FUN_0082b938` | Sends a long/fragmented response |
+| `0xc3` | `FUN_0082fe52` | Drives the OTA/DFU state machine (`param[2]==1` also calls `FUN_0082dfde`) |
+| `0xc4` | `FUN_00830462` | No-op in firmware |
+| `0xc5` | — | Sets `DAT_0082caec[3]` from `param[1]` |
+| `0xc8` | — | Sets `DAT_0082caec[4]` from `param[1]` |
+| `0xc9` | — | Sets `DAT_0082caec[5] = param[1]` |
+| `0xcd` | `FUN_0082be12` | Stores a 16-bit value / alarm-like setting |
+| `0xce` | `FUN_0082bcde` | Factory/test sub-commands (`0x01`, `0x02`, `' '`, `'!'`, `'"'`) |
+| `0xfe` | `FUN_00844214` | Builds a vibration pattern from a duration argument |
+
+Opcodes `0x2b`, `0x37`, `0x38`, `0x3a`, `0x3b`, `0x43`, `0x72`, `0x77`, `0x7a`, `0x7d`, `0x81`, `0xa1`, `0xc6`, `0xc7`, `0xff` and most of the `0x00`–`0x2a` switch table are routed to `FUN_0082be64`, which copies the frame into a deferred 16-byte command ring. Opcodes `0x7b`, `0xb0`, `0xc2`, `0xcc`, `0xf0`, `0xf1` are explicit no-ops. Unrecognized opcodes fall through to `FUN_0082bcba`.
+
+### Take-away
+
+The `0xFEE7` service carries a parallel 16-byte command channel that overlaps some Channel-A opcodes (e.g. `0x48`, `0x50`, `0x51`, `0x69`, `0x6a`, `0x3c`, `0x3e`) and adds vendor-specific commands (`0x90`–`0x9f`, `0xce`, `0xfe`). The OpenWatch host code should treat it as a second command path rather than a passive discovery UUID.
 
 ---
 
@@ -288,4 +351,4 @@ No code references to the `0xFEE7` service endpoints were located during this de
 
 1. Recover the exact meaning of opcode `0x2b` mixture container fields.
 2. Identify the 32-byte `image_digest` algorithm used for OTA and the container header digest at `0x1c4`. No SHA-256 constants were found in the body; it may be computed by the bootloader or host tool.
-3. Determine whether the `0xFEE7` vendor service has any active protocol role in the firmware.
+3. ~~Determine whether the `0xFEE7` vendor service has any active protocol role in the firmware.~~ **Resolved** — see §8; it implements a second 16-byte command channel.
