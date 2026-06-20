@@ -42,6 +42,7 @@ class ChannelADispatcher {
   final _realtimeHr = StreamController<int>.broadcast();
   final _factoryReset = StreamController<void>.broadcast();
   final _restoreKey = StreamController<void>.broadcast();
+  final _factoryCommand = StreamController<FactoryCommand>.broadcast();
 
   /// Live-time, type, lang, tz embedded in the SetTime 0x01 ACK.
   Stream<DateTime> get onTime => _time.stream;
@@ -96,6 +97,10 @@ class ChannelADispatcher {
 
   /// Reboot / restore-key sequence started (`0xc6`).
   Stream<void> get onRestoreKey => _restoreKey.stream;
+
+  /// Factory / test-mode command received (`0x21`; the error-flagged response
+  /// form is `0xa1` because `rxOpcode` strips the top bit).
+  Stream<FactoryCommand> get onFactoryCommand => _factoryCommand.stream;
 
   /// Any frame we couldn't type-decode.
   Stream<ChannelAFrame> get unknown => _unknown.stream;
@@ -154,6 +159,8 @@ class ChannelADispatcher {
         _decodeMenstruation(pl);
       case OpA.restoreKey:
         _restoreKey.add(null);
+      case 0xa1 || 0x21:
+        _decodeFactory(pl);
       case 0xff:
         // Factory reset ack; the request payload is `"fff"`.
         if (frame.length >= 16 &&
@@ -339,9 +346,41 @@ class ChannelADispatcher {
   }
 
   /// `phoneSport` (0x77): jump-table dispatch on sub-byte (per decomp).
+  ///
+  /// The firmware's `FUN_0082ce0c` reads `subData[0]` and dispatches:
+  /// `0x00`/`0x06` default-ack, `0x01` start/finish session, `0x02` calls
+  /// `FUN_00830cb2`, `0x03` calls `FUN_00830cd4`, `0x04` cancels timer,
+  /// `0x05` GPS/position delta (two u24 LE values: steps, meters).
   void _decodePhoneSport(Uint8List pl) {
     if (pl.isEmpty) return;
-    _phoneSport.add(PhoneSportUpdate(sub: pl[0]));
+    final sub = pl[0];
+    GpsDelta? gps;
+    if (sub == 0x05 && pl.length >= 9) {
+      gps = GpsDelta(
+        steps: Codec.readU24le(pl, 2),
+        meters: Codec.readU24le(pl, 6),
+      );
+    }
+    _phoneSport.add(PhoneSportUpdate(sub: _phoneSportSub(sub), gpsDelta: gps));
+  }
+
+  static PhoneSportSub _phoneSportSub(int raw) {
+    switch (raw) {
+      case 0x01:
+        return PhoneSportSub.startFinish;
+      case 0x02:
+        return PhoneSportSub.controlA;
+      case 0x03:
+        return PhoneSportSub.controlB;
+      case 0x04:
+        return PhoneSportSub.cancel;
+      case 0x05:
+        return PhoneSportSub.gpsDelta;
+      case 0x00:
+      case 0x06:
+      default:
+        return PhoneSportSub.defaultAck;
+    }
   }
 
   /// `muslim` (0x7a): sub `0x01` reads, `0x02 0x01` resets.
@@ -355,6 +394,43 @@ class ChannelADispatcher {
   void _decodeMenstruation(Uint8List pl) {
     if (pl.length < 2) return;
     _menstruation.add(MenstruationMixture(sub: pl[0], payload: pl.sublist(1)));
+  }
+
+  /// `factory` (0x21) — factory / test mode dispatch (per `FUN_00827f5c`).
+  /// `pl[0]` selects the test action (subs `0x01`..`0x06`); unknown subs map
+  /// to [FactoryAction.unknown].
+  void _decodeFactory(Uint8List pl) {
+    if (pl.isEmpty) {
+      _factoryCommand.add(
+        const FactoryCommand(action: FactoryAction.unknown, rawSub: 0),
+      );
+      return;
+    }
+    final sub = pl[0];
+    _factoryCommand.add(
+      FactoryCommand(action: _factoryAction(sub), rawSub: sub),
+    );
+  }
+
+  /// Maps a factory sub-byte to its typed [FactoryAction] (per the table in
+  /// `firmwares/GHIDRA_DECOMPILATION.md` §3.1 "Opcode 0xa1 factory/test mode").
+  static FactoryAction _factoryAction(int sub) {
+    switch (sub) {
+      case 0x01:
+        return FactoryAction.fullReset;
+      case 0x02:
+        return FactoryAction.restoreState;
+      case 0x03:
+        return FactoryAction.powerOff;
+      case 0x04:
+        return FactoryAction.startHr;
+      case 0x05:
+        return FactoryAction.stopHr;
+      case 0x06:
+        return FactoryAction.saveAndPowerOff;
+      default:
+        return FactoryAction.unknown;
+    }
   }
 
   void dispose() {
@@ -378,6 +454,7 @@ class ChannelADispatcher {
       _realtimeHr,
       _factoryReset,
       _restoreKey,
+      _factoryCommand,
     ]) {
       c.close();
     }
@@ -475,9 +552,61 @@ class PushMsgUint {
   final String text;
 }
 
+/// Sub-commands of opcode `0x77` `phoneSport` as dispatched by
+/// `FUN_0082ce0c` in H59MA v14. See `GHIDRA_DECOMPILATION.md` §3.
+enum PhoneSportSub {
+  /// `0x00` and `0x06` — default-ack handler `FUN_0082cede`.
+  defaultAck,
+
+  /// `0x01` — start or finish a sport session (`FUN_0082ce2a`).
+  startFinish,
+
+  /// `0x02` — control A: invokes `FUN_00830cb2` and sets the
+  /// `DAT_0082cff4+1` flag (`FUN_0082ce64`).
+  controlA,
+
+  /// `0x03` — control B: invokes `FUN_00830cd4` and sets the
+  /// `DAT_0082cff4+1` flag (`FUN_0082ce72`).
+  controlB,
+
+  /// `0x04` — cancel: tears down the 1000 ms timer (`FUN_0082ce80`).
+  cancel,
+
+  /// `0x05` — GPS / position delta carrying two u24 LE fields (`FUN_0082ce96`).
+  gpsDelta,
+}
+
+/// A single phone-side sport update frame on Channel A opcode `0x77`.
+///
+/// The firmware reply is a single `PhoneSportUpdate` per inbound frame.
+/// For sub [PhoneSportSub.gpsDelta] the firmware replies with a
+/// `FUN_0082ce96` body carrying two cumulative u24 LE counters
+/// (steps and meters); for all other subs only the dispatcher flag is
+/// reported.
 class PhoneSportUpdate {
-  const PhoneSportUpdate({required this.sub});
-  final int sub;
+  const PhoneSportUpdate({required this.sub, this.gpsDelta});
+
+  final PhoneSportSub sub;
+
+  /// Populated only when [sub] is [PhoneSportSub.gpsDelta] and the frame
+  /// carries the full 9-byte body.
+  final GpsDelta? gpsDelta;
+}
+
+/// GPS / position delta body of a `phoneSport` `0x05` frame.
+///
+/// Both fields are decoded as u24 little-endian. They are cumulative
+/// counters maintained by `FUN_0082ce96` — a phone feeding the watch GPS
+/// samples should subtract the previous frame to obtain a per-update
+/// delta.
+class GpsDelta {
+  const GpsDelta({required this.steps, required this.meters});
+
+  /// Cumulative step counter at the time of this GPS update (u24 LE).
+  final int steps;
+
+  /// Cumulative distance in meters at the time of this GPS update (u24 LE).
+  final int meters;
 }
 
 class MuslimConfig {
@@ -489,4 +618,45 @@ class MenstruationMixture {
   const MenstruationMixture({required this.sub, required this.payload});
   final int sub;
   final Uint8List payload;
+}
+
+/// Sub-commands of opcode `0xa1` factory / test mode dispatched by
+/// `FUN_00827f5c` in H59MA v14. See `GHIDRA_DECOMPILATION.md` §3.1.
+enum FactoryAction {
+  /// `0x01` — full reset: stop sensors/motor, save state, power off.
+  fullReset,
+
+  /// `0x02` — restore the saved state back into the sensor modules.
+  restoreState,
+
+  /// `0x03` — power off / enter DLPS immediately.
+  powerOff,
+
+  /// `0x04` — start HR measurement in `0x800` mode.
+  startHr,
+
+  /// `0x05` — stop HR measurement.
+  stopHr,
+
+  /// `0x06` — save current state and then power off.
+  saveAndPowerOff,
+
+  /// Any sub-byte outside the `0x01`..`0x06` range. The firmware responds
+  /// with `0xffa1` (error) in this case.
+  unknown,
+}
+
+/// A factory / test-mode command received on Channel A opcode `0xa1`.
+///
+/// The firmware dispatches on `pl[0]` to one of six actions; subs outside
+/// `0x01`..`0x06` map to [FactoryAction.unknown] but [rawSub] preserves the
+/// original byte for diagnostics.
+class FactoryCommand {
+  const FactoryCommand({required this.action, required this.rawSub});
+
+  final FactoryAction action;
+
+  /// Original `pl[0]` byte from the frame, kept verbatim so callers can
+  /// log unrecognized subs without losing data.
+  final int rawSub;
 }
