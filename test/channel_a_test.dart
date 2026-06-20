@@ -120,6 +120,54 @@ void main() {
       expect(s.enabled, isFalse);
     });
 
+    test('readSitLong 0x26 decodes BCD window + flags + interval', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final got = d.onSedentary.first;
+      // pl[0..5] = BCD start_hour, BCD start_min, BCD end_hour,
+      // BCD end_min, flags, interval. Build a 09:00..22:00 window,
+      // enabled (flags=0x01), interval=30 minutes.
+      final f = Codec.buildChannelA(OpA.readSitLong, [
+        Codec.toBcd(9),
+        Codec.toBcd(0),
+        Codec.toBcd(22),
+        Codec.toBcd(0),
+        0x01,
+        30,
+      ]);
+      t.inA.add(f);
+      final s = await got.timeout(const Duration(seconds: 1));
+      expect(s.enabled, isTrue);
+      expect(s.startHour, 9);
+      expect(s.startMinute, 0);
+      expect(s.endHour, 22);
+      expect(s.endMinute, 0);
+      expect(s.flags, 0x01);
+      expect(s.interval, 30);
+    });
+
+    test('readSitLong 0x26 flags bit 0 maps to enabled=false', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final got = d.onSedentary.first;
+      // flags=0x00 (disabled), interval=0
+      final f = Codec.buildChannelA(OpA.readSitLong, [
+        Codec.toBcd(8),
+        Codec.toBcd(30),
+        Codec.toBcd(18),
+        Codec.toBcd(0),
+        0x00,
+        0,
+      ]);
+      t.inA.add(f);
+      final s = await got.timeout(const Duration(seconds: 1));
+      expect(s.enabled, isFalse);
+      expect(s.startHour, 8);
+      expect(s.startMinute, 30);
+    });
+
     test(
       'emitFactoryReset fires onFactoryReset (host-side optimistic ack)',
       () async {

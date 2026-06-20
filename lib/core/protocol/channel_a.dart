@@ -367,13 +367,27 @@ class ChannelADispatcher {
   }
 
   /// `readSitLong` (0x26) / `setSitLong` (0x25): sedentary reminder.
+  ///
+  /// The read response (per `FUN_0082d258` + `FUN_0082ae84`, see
+  /// `GHIDRA_DECOMPILATION.md` §3.9) carries:
+  ///   `pl[0] = BCD(start_hour)`, `pl[1] = BCD(start_min)`,
+  ///   `pl[2] = BCD(end_hour)`,  `pl[3] = BCD(end_min)`,
+  ///   `pl[4] = flags`,           `pl[5] = interval` (raw u8, ≤ 60).
+  /// (Frame byte numbers in the RE doc are 1..6 because they include
+  /// the cmd byte; [Codec.rxPayload] strips the cmd so the pl indices
+  /// shift down by one.)
   void _decodeSedentary(Uint8List pl) {
-    if (pl.length < 3) return;
+    if (pl.length < 6) return;
+    final enabled = (pl[4] & 0x01) != 0;
     _sedentary.add(
       SedentaryConfig(
-        enabled: pl[1] != 0,
-        startHour: pl[2],
-        endHour: pl.length >= 4 ? pl[3] : 0,
+        enabled: enabled,
+        startHour: Codec.fromBcd(pl[0]),
+        startMinute: Codec.fromBcd(pl[1]),
+        endHour: Codec.fromBcd(pl[2]),
+        endMinute: Codec.fromBcd(pl[3]),
+        flags: pl[4],
+        interval: pl[5],
       ),
     );
   }
@@ -701,11 +715,34 @@ class SedentaryConfig {
   const SedentaryConfig({
     required this.enabled,
     required this.startHour,
+    this.startMinute = 0,
     required this.endHour,
+    this.endMinute = 0,
+    this.flags = 0,
+    this.interval = 0,
   });
   final bool enabled;
+
+  /// Sedentary window start hour-of-day (0..23).
   final int startHour;
+
+  /// Sedentary window start minute (0..59).
+  final int startMinute;
+
+  /// Sedentary window end hour-of-day (0..23). May be < [startHour]
+  /// when the window crosses midnight.
   final int endHour;
+
+  /// Sedentary window end minute (0..59).
+  final int endMinute;
+
+  /// Raw `flags` byte from the response. Bit 0 is the enabled flag;
+  /// remaining bits are a day-of-week bitmap (semantics carried over
+  /// from the producer — see `GHIDRA_DECOMPILATION.md` §3.9).
+  final int flags;
+
+  /// Nudge interval in minutes (clamped to ≤ 60 by the firmware).
+  final int interval;
 }
 
 /// Header frame for a `0x43` per-hour activity dump (phase 1).
