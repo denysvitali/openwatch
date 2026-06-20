@@ -1,8 +1,0 @@
-=== ERROR/STATUS: v13 ===
-1722:0x0001B824  ascii    Ready to update MAC!
-1743:0x0001BAFB  ascii    #malloc %d bytes fail!
-1773:0x0001BFB0  ascii    malloc %d bytes fail!
-=== ERROR/STATUS: v14 ===
-1680:0x0001A604  ascii    Ready to update MAC!
-1699:0x0001A87B  ascii    #malloc %d bytes fail!
-1718:0x0001ABF4  ascii    malloc %d bytes fail!

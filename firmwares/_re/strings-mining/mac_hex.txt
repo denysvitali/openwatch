@@ -1,6 +1,0 @@
-=== MAC/address patterns v13 ===
-(none)
-=== MAC v14 ===
-(none)
-=== HEX literals (in text, 6+ hex with 0x) v13 ===
-=== HEX v14 ===

@@ -1,5 +1,0 @@
-=== COMMANDS: v13 ===
-2116:0x00020568  ascii    %02d:%02d]sleep algorithm reset
-2251:0x000226F0  ascii    Reset
-=== COMMANDS: v14 ===
-2129:0x000209E4  ascii    Reset

@@ -1,4 +1,0 @@
-=== file-like strings v13 (.bin/.dat/.res/.img/.dat etc) ===
-(none)
-=== file-like strings v14 ===
-(none)

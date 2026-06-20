@@ -1,6 +1,0 @@
-=== BLE/GATT: v13 ===
-2171:0x00021D14  ascii    gatts_add_client
-2306:0x000233B2  ascii    V1 read characteristic
-=== BLE/GATT: v14 ===
-2051:0x000200C8  ascii    gatts_add_client
-2182:0x0002157A  ascii    V1 read characteristic
