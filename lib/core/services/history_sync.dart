@@ -12,10 +12,12 @@ import '../protocol/fragment_reassembler.dart';
 import '../protocol/opcodes.dart';
 import '../protocol/sleep_parser.dart';
 import 'app_log.dart';
+import 'history_store.dart';
 
 // Re-export sleep model types so existing consumers can keep importing
 // them from `history_sync.dart` after the move to `sleep_parser.dart`.
 export '../protocol/sleep_parser.dart' show SleepSegment, SleepStage;
+export 'history_store.dart' show DateOnly, DailyHistory;
 
 /// A 5-minute HR sample.
 @immutable
@@ -96,14 +98,24 @@ class DailyTotals {
 ///
 /// Multi-packet responses are reassembled here (the SDK does this in Java;
 /// the original payload layout is 13 bytes per sample at 5-min slots).
+///
+/// **Local-first**: when a [HistoryStore] is supplied, fetched samples are
+/// persisted to disk as they arrive, the store's per-day data is loaded
+/// into memory on startup, and subsequent [syncAll] calls only re-fetch
+/// days the watch says have new data AND we haven't already stored. The
+/// watermark is bumped only after a successful pass so a partial sync
+/// (transport drop, etc.) leaves previously-stored data intact and the
+/// next sync picks up where we left off.
 class HistorySync extends ChangeNotifier {
   HistorySync(
     this.transport,
     this.onTotals, {
     ChannelADispatcher? dispatcher,
     ChannelBParser? bParser,
+    HistoryStore? store,
   }) : _dispatcher = dispatcher,
-       _bParser = bParser {
+       _bParser = bParser,
+       _store = store {
     _inbound = transport.inboundA.listen(_collectRx);
     // Channel-B sleep responses (`0x27` night + `0x3e` lunch per
     // PROTOCOL.md §4.4) only flow through the BC-fragmented
@@ -117,12 +129,26 @@ class HistorySync extends ChangeNotifier {
   final BleTransport transport;
   final ChannelADispatcher? _dispatcher;
   final ChannelBParser? _bParser;
+  HistoryStore? _store;
   final void Function(DailyTotals) onTotals;
   StreamSubscription<ChannelBCommand>? _bCmdSub;
+
+  /// In-memory mirror of the persisted store, keyed by [DateOnly]. Hydrated
+  /// by [loadFromStore]; updated in-place by [syncAll] as new samples
+  /// arrive. The single source of truth for the UI.
+  final Map<DateOnly, DailyHistory> _days = {};
 
   final List<HrSample> _hr = [];
   final List<SleepSegment> _sleep = [];
   final Set<int> _availableDays = {};
+
+  /// Days for which the watch reported data during the most recent
+  /// [syncAll] — used by the UI to render the availability ribbon.
+  final Set<DateOnly> _watchDaysWithData = {};
+
+  /// Days that were actually re-fetched in the most recent [syncAll].
+  /// The UI can highlight these so the user sees exactly what changed.
+  final Set<DateOnly> _fetchedDays = {};
 
   // Lazily-allocated FragmentReassemblers for the two-phase
   // `0x37 pressureSetting` (§3.20) and `0x39 hrvSetting` (§3.21)
@@ -225,36 +251,124 @@ class HistorySync extends ChangeNotifier {
   List<SleepSegment> get sleep => List.unmodifiable(_sleep);
   Set<int> get availableDays => Set.unmodifiable(_availableDays);
 
+  /// Days the watch reported as having data during the most recent sync.
+  /// Empty until the first sync completes — UI should treat that as
+  /// "unknown" and not as "no data".
+  Set<DateOnly> get watchDaysWithData => Set.unmodifiable(_watchDaysWithData);
+
+  /// Days that were actually fetched during the most recent sync.
+  /// A subset of [watchDaysWithData] — only days we didn't already
+  /// have persisted are re-fetched.
+  Set<DateOnly> get fetchedDays => Set.unmodifiable(_fetchedDays);
+
+  /// Snapshot of every persisted day, sorted oldest → newest.
+  List<DailyHistory> get days {
+    final list = _days.values.toList()..sort((a, b) => a.day.compareTo(b.day));
+    return List.unmodifiable(list);
+  }
+
+  /// Convenience accessor for one day's record. Returns null when the
+  /// store has nothing for [day] — callers should render an empty card
+  /// rather than throw.
+  DailyHistory? dayOf(DateOnly day) => _days[day];
+
+  /// Most recent [lastSyncedAt] from the persistent store. Null until
+  /// the first successful sync persists a watermark.
+  DateTime? get lastSyncedAt => _store?.lastSyncedAt;
+
   bool _syncing = false;
   bool get syncing => _syncing;
+
+  /// Last sync error message — null when the most recent sync succeeded
+  /// (or no sync has been attempted yet). Cleared at the start of each
+  /// [syncAll] call.
+  String? lastSyncError;
 
   StreamSubscription<Uint8List>? _inbound;
   final List<Uint8List> _rxQueue = [];
 
-  /// Trigger a full sync: ask the watch which days have data, then pull HR
-  /// and sleep for each of them.
+  /// The day the in-flight HR chunks belong to. Set just before we send
+  /// `0x15` for a given day; consumed by [_flushHrChunks]. Channel-B
+  /// sleep commands carry their own day offset so they don't need this.
+  DateOnly? _currentSyncDay;
+
+  /// Hydrate the in-memory cache from the persistent store. Safe to call
+  /// more than once — the latest store snapshot wins.
+  ///
+  /// When no [HistoryStore] is wired (legacy test scenarios) this is a
+  /// no-op so existing call sites don't have to special-case it.
+  Future<void> loadFromStore() async {
+    final store = _store;
+    if (store == null) return;
+    final persisted = await store.persistedDays();
+    for (final d in persisted) {
+      _days[d] = await store.readDay(d);
+    }
+    _hr
+      ..clear()
+      ..addAll(_days.values.expand((d) => d.hr));
+    _hr.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    _sleep
+      ..clear()
+      ..addAll(_days.values.expand((d) => d.sleep));
+    _sleep.sort((a, b) => a.start.compareTo(b.start));
+    notifyListeners();
+  }
+
+  /// Late-binds a [HistoryStore] and hydrates the in-memory cache from
+  /// it. Idempotent — calling it again with the same store is a no-op,
+  /// calling it with a new store re-reads the disk.
+  Future<void> bindStore(HistoryStore store) async {
+    if (identical(_store, store)) return;
+    _store = store;
+    await loadFromStore();
+  }
+
+  /// Trigger a sync. When a [HistoryStore] is wired:
+  ///   * in-memory cache is hydrated from disk on first call;
+  ///   * the watch's distribution bitmask is queried for which days
+  ///     have data;
+  ///   * only days we don't already have persisted are re-fetched;
+  ///   * each day's HR + sleep samples are persisted as they land;
+  ///   * the sync watermark is bumped only on a clean pass.
+  ///
+  /// Without a store, behaves like the legacy in-memory sync (clears
+  /// the lists, refetches every requested day). [daysBack] caps how
+  /// far into the past we look at the distribution bitmask — the
+  /// bitmask is a 32-day window so values above 32 are clamped.
   Future<void> syncAll({int daysBack = 7}) async {
     if (_syncing) return;
     _syncing = true;
+    lastSyncError = null;
     _rxQueue.clear();
     _hr.clear();
     _sleep.clear();
     _availableDays.clear();
+    _watchDaysWithData.clear();
+    _fetchedDays.clear();
     _hrChunks.clear();
+    _days.clear();
     notifyListeners();
-    AppLog.instance.info('history', 'Sync start (last $daysBack days)');
+
+    final effectiveDaysBack = daysBack.clamp(1, 32);
+    AppLog.instance.info(
+      'history',
+      'Sync start (last $effectiveDaysBack days, store=${_store != null})',
+    );
 
     try {
+      // Hydrate from disk so we don't drop already-stored data even
+      // if the watch drops the link halfway through a re-fetch.
+      await loadFromStore();
+
       // Distribution bitmask
       _dispatcher?.markDistributionQuery();
       await transport.sendA(Commands.queryDataDistribution());
-      await Future<void>.delayed(const Duration(milliseconds: 800));
+      // Drain the response BEFORE computing wantsDays — the bitmask
+      // arrives on the same Channel-A inbound stream and won't be
+      // visible to `_parse` until we explicitly flush `_rxQueue`.
+      await _drainRx(const Duration(milliseconds: 800));
 
-      // HR history for each day the device reports as having data.
-      // If the distribution query errored (e.g. the watch doesn't
-      // expose HR at all), _availableDays stays empty and we fall
-      // back to polling today only so the user still gets feedback.
-      //
       // The watch expects a **packed BCD date index** per GHIDRA
       // §3.12 (`FUN_0082cf48` + `FUN_008279c4`) — NOT a unix
       // timestamp as PROTOCOL.md §4.3 implies. We pre-construct a
@@ -263,34 +377,81 @@ class HistorySync extends ChangeNotifier {
       // reads year/month/day so the hour/minute/second components
       // don't matter.
       final today = DateTime.now();
-      final wantsDays = _availableDays.isEmpty
-          ? {0}
-          : _availableDays.where((d) => d < daysBack).toSet();
+      final todayD = DateOnly.fromDateTime(today);
+      // The watch bitmask is 0-indexed from today; day 0 = today,
+      // day 1 = yesterday, etc. Combine with what we already have
+      // on disk to decide which days to fetch.
+      final wantsDays = <int>{
+        if (_availableDays.isEmpty)
+          0
+        else
+          for (final d in _availableDays)
+            if (d < effectiveDaysBack) d,
+      };
+
+      var fetched = 0;
       for (final d in wantsDays) {
-        final day = DateTime(
-          today.year,
-          today.month,
-          today.day,
-        ).subtract(Duration(days: d));
-        await transport.sendA(Commands.readHeartRateHistory(day: day));
+        final day = todayD.addDays(d);
+        // Skip if the store already has this day AND we don't expect
+        // any newer data — the watch doesn't expose a per-day
+        // modified-at timestamp, so the watermark is "skip days we
+        // already pulled after the last sync". A user who wants to
+        // force a refresh can `clearAll()` on the store (UI hook
+        // TBD) or just relaunch the app and tap Sync again — the
+        // first day's freshness window ensures we always re-fetch
+        // today at minimum.
+        final alreadyHave = _days.containsKey(day);
+        final isToday = day == todayD;
+        if (alreadyHave && !isToday) {
+          AppLog.instance.debug(
+            'history',
+            'skip ${day.iso} (already in store)',
+          );
+          continue;
+        }
+        _fetchedDays.add(day);
+        fetched++;
+        // Stage an empty record so the UI sees the day even if the
+        // watch has nothing in it (error frame).
+        _days.putIfAbsent(day, () => DailyHistory(day: day));
+        _currentSyncDay = day;
+        await transport.sendA(Commands.readHeartRateHistory(day: day.midnight));
         await _drainRx(Duration(milliseconds: 600));
+        _currentSyncDay = null;
+        // Drain any sleep segments that came back on Channel B as
+        // part of this day's poll. The parser may emit a few frames
+        // after the per-day drain — [_onChannelBCommand] will
+        // append them and notify.
+        await Future<void>.delayed(const Duration(milliseconds: 50));
       }
-      // Sleep (new protocol, Channel-B) — night for last night
-      // (`0x27`) and lunch/nap (`0x3e`). The replies travel as
-      // fragment-reassembled Channel-B commands handled by
-      // [_onChannelBCommand] — the `_drainRx` settle window is
-      // enough for the parser to emit at least one assembled
-      // command; anything still in-flight when the window closes
-      // surfaces on the next `notifyListeners()` triggered by
-      // [_onChannelBCommand].
-      await transport.sendB(Commands.readSleepNewProtocol(dayOffset: 0));
-      await transport.sendB(Commands.readSleepLunchProtocol(dayOffset: 0));
-      await _drainRx(Duration(milliseconds: 600));
+
+      // Sleep for the most recent N days — the new protocol emits
+      // a single day offset per request, so we fire-and-await for
+      // each. We only fetch days we haven't already pulled sleep
+      // for (the parser's payload always includes the day's
+      // segments, so re-fetching is safe but wasteful).
+      for (final d in wantsDays) {
+        final day = todayD.addDays(d);
+        final existing = _days[day];
+        if (existing != null && existing.sleep.isNotEmpty && d != 0) {
+          continue;
+        }
+        await transport.sendB(Commands.readSleepNewProtocol(dayOffset: d));
+        await transport.sendB(Commands.readSleepLunchProtocol(dayOffset: d));
+        await _drainRx(Duration(milliseconds: 600));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+
+      // Bump the watermark — only after a clean pass.
+      await _store?.markSynced(DateTime.now());
+
       AppLog.instance.info(
         'history',
-        'Sync complete: hr=${_hr.length} sleep=${_sleep.length} days=${_availableDays.length}',
+        'Sync complete: hr=${_hr.length} sleep=${_sleep.length} '
+            'fetched=$fetched days=${_watchDaysWithData.length}',
       );
     } catch (e) {
+      lastSyncError = e.toString();
       AppLog.instance.error('history', 'Sync failed: $e');
     } finally {
       _syncing = false;
@@ -323,8 +484,12 @@ class HistorySync extends ChangeNotifier {
         // watch normally only fills the first 4.
         if (pl.length >= 4) {
           final v = Codec.readU32be(pl, 0);
+          final today = DateOnly.today();
           for (var d = 0; d < 32; d++) {
-            if ((v & (1 << d)) != 0) _availableDays.add(d);
+            if ((v & (1 << d)) != 0) {
+              _availableDays.add(d);
+              _watchDaysWithData.add(today.addDays(-d));
+            }
           }
         }
       case OpA.readHeartRate:
@@ -339,6 +504,9 @@ class HistorySync extends ChangeNotifier {
           _hrChunks.clear();
         } else if (tag == 0xff) {
           _hrChunks.clear();
+          // Persist the (possibly empty) record so the UI shows the
+          // day even when the watch has no HR data for it.
+          _commitCurrentDayHr();
         } else if (tag >= 1 && tag <= 23) {
           if (pl.length >= 1 + 13) {
             _hrChunks.add(Uint8List.fromList(pl.sublist(1, 1 + 13)));
@@ -370,13 +538,54 @@ class HistorySync extends ChangeNotifier {
     final dayStart = DateTime.fromMillisecondsSinceEpoch(
       Codec.readU32le(rec, 0) * 1000,
     );
+    final samples = <HrSample>[];
     for (var i = 4; i < rec.length; i++) {
       final bpm = rec[i];
       if (bpm == 0xff || bpm == 0x00) continue;
       if (bpm < 30 || bpm > 240) continue;
-      _hr.add(HrSample(dayStart.add(Duration(minutes: (i - 4) * 5)), bpm));
+      samples.add(HrSample(dayStart.add(Duration(minutes: (i - 4) * 5)), bpm));
     }
     _hrChunks.clear();
+
+    // Attribute to the day we asked for, not whatever the device
+    // echoed back — the firmware's BCD date echo may differ by a
+    // timezone near midnight, but we already know what we asked for.
+    final day = _currentSyncDay ?? DateOnly.fromDateTime(dayStart);
+    final previous = _days[day] ?? DailyHistory(day: day);
+    final mergedByTs = <int, HrSample>{
+      for (final h in previous.hr) h.timestamp.millisecondsSinceEpoch: h,
+      for (final h in samples) h.timestamp.millisecondsSinceEpoch: h,
+    };
+    final mergedHr = mergedByTs.values.toList()
+      ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    final updated = DailyHistory(
+      day: day,
+      hr: mergedHr,
+      sleep: previous.sleep,
+      steps: previous.steps,
+      energyKcal: previous.energyKcal,
+      distanceMeters: previous.distanceMeters,
+      lastUpdated: DateTime.now(),
+    );
+    _days[day] = updated;
+    _hr
+      ..clear()
+      ..addAll(_days.values.expand((d) => d.hr));
+    _hr.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    unawaited(_store?.mergeHr(day, mergedHr));
+  }
+
+  /// Persist the currently-attributed day as an empty HR record. Called
+  /// when the watch returns `pl[0] == 0xff` (no data for this slot).
+  /// Without this, an empty day would never be written to disk and the
+  /// next sync would re-fetch it forever.
+  void _commitCurrentDayHr() {
+    final day = _currentSyncDay;
+    if (day == null) return;
+    final previous = _days[day] ?? DailyHistory(day: day);
+    if (previous.hr.isNotEmpty) return; // already persisted
+    _days[day] = previous;
+    unawaited(_store?.writeDay(previous, lastUpdated: DateTime.now()));
   }
 
   @override
@@ -413,25 +622,77 @@ class HistorySync extends ChangeNotifier {
     }
   }
 
+  /// Extracts the day offset from the payload of a `0x27` / `0x3e` Ch-B
+  /// sleep reply (PROTOCOL.md §4.4: first payload byte = dayOffset,
+  /// 0 = today, 1 = yesterday, …). Some older firmware revisions omit
+  /// the prefix entirely; in that case we default to the current sync
+  /// day (the one we just polled) so the data still lands in the
+  /// correct file.
+  DateOnly _dayFromSleepPayload(Uint8List payload) {
+    final today = DateOnly.today();
+    if (payload.isNotEmpty && payload[0] <= 31) {
+      return today.addDays(-payload[0]);
+    }
+    return _currentSyncDay ?? today;
+  }
+
   int _decodeSleepNew(Uint8List payload) {
-    final anchor = DateTime.now();
-    final added = SleepParser.parseNightSleepSegments(
-      payload,
-      anchor: DateTime(anchor.year, anchor.month, anchor.day),
-    );
+    final day = _dayFromSleepPayload(payload);
+    final anchor = day.midnight;
+    final added = SleepParser.parseNightSleepSegments(payload, anchor: anchor);
     if (added.isEmpty) return 0;
-    _sleep.addAll(added);
+    final previous = _days[day] ?? DailyHistory(day: day);
+    final mergedByStart = <int, SleepSegment>{
+      for (final s in previous.sleep) s.start.millisecondsSinceEpoch: s,
+      for (final s in added) s.start.millisecondsSinceEpoch: s,
+    };
+    final merged = mergedByStart.values.toList()
+      ..sort((a, b) => a.start.compareTo(b.start));
+    final updated = DailyHistory(
+      day: day,
+      hr: previous.hr,
+      sleep: merged,
+      steps: previous.steps,
+      energyKcal: previous.energyKcal,
+      distanceMeters: previous.distanceMeters,
+      lastUpdated: DateTime.now(),
+    );
+    _days[day] = updated;
+    _sleep
+      ..clear()
+      ..addAll(_days.values.expand((d) => d.sleep));
+    _sleep.sort((a, b) => a.start.compareTo(b.start));
+    unawaited(_store?.mergeSleep(day, merged));
     return added.length;
   }
 
   int _decodeSleepLunch(Uint8List payload) {
-    final anchor = DateTime.now();
-    final added = SleepParser.parseLunchSleepSegments(
-      payload,
-      anchor: DateTime(anchor.year, anchor.month, anchor.day),
-    );
+    final day = _dayFromSleepPayload(payload);
+    final anchor = day.midnight;
+    final added = SleepParser.parseLunchSleepSegments(payload, anchor: anchor);
     if (added.isEmpty) return 0;
-    _sleep.addAll(added);
+    final previous = _days[day] ?? DailyHistory(day: day);
+    final mergedByStart = <int, SleepSegment>{
+      for (final s in previous.sleep) s.start.millisecondsSinceEpoch: s,
+      for (final s in added) s.start.millisecondsSinceEpoch: s,
+    };
+    final merged = mergedByStart.values.toList()
+      ..sort((a, b) => a.start.compareTo(b.start));
+    final updated = DailyHistory(
+      day: day,
+      hr: previous.hr,
+      sleep: merged,
+      steps: previous.steps,
+      energyKcal: previous.energyKcal,
+      distanceMeters: previous.distanceMeters,
+      lastUpdated: DateTime.now(),
+    );
+    _days[day] = updated;
+    _sleep
+      ..clear()
+      ..addAll(_days.values.expand((d) => d.sleep));
+    _sleep.sort((a, b) => a.start.compareTo(b.start));
+    unawaited(_store?.mergeSleep(day, merged));
     return added.length;
   }
 }

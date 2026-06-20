@@ -7,6 +7,8 @@ import 'package:flutter_riverpod/legacy.dart';
 import '../ble/ble_transport.dart';
 import '../services/cloud_api.dart';
 import '../services/firmware_service.dart';
+import '../services/history_store.dart';
+import '../services/history_sync.dart';
 import '../services/settings_service.dart';
 import '../services/watch_manager.dart';
 
@@ -118,3 +120,40 @@ final cloudApiProvider = Provider<CloudApi?>((ref) {
 final firmwareServiceProvider = Provider<FirmwareService>(
   (ref) => FirmwareService(),
 );
+
+// --- History (local-first store + sync) -------------------------------------
+
+/// Persistent on-device store for HR/sleep/steps per day. Opens the
+/// `<app docs>/history/` directory on first access and exposes async
+/// readers/writers; the UI uses [historySyncProvider] for reactive
+/// access to the in-memory mirror.
+final historyStoreProvider = FutureProvider<HistoryStore>(
+  (ref) => HistoryStore.open(),
+);
+
+/// Singleton [HistorySync] wired against the [BleTransport] + a
+/// persistent [HistoryStore]. Built once and reused across all screens
+/// — `HistorySync` is a `ChangeNotifier` so any `Consumer*` watching it
+/// rebuilds automatically when samples land.
+///
+/// The store future resolves asynchronously (path_provider +
+/// SharedPreferences). We construct the sync without a store initially
+/// and rebind it via [HistorySync.bindStore] once the FutureProvider
+/// resolves — the sync then hydrates from disk in the background and
+/// the next `syncAll` will persist.
+final historySyncProvider = ChangeNotifierProvider<HistorySync>((ref) {
+  final transport = ref.watch(bleTransportProvider);
+  final manager = ref.watch(watchManagerProvider);
+  final sync = HistorySync(
+    transport,
+    (_) {}, // totals are surfaced on the dashboard via WatchManager
+    dispatcher: manager.hub.channelA,
+    bParser: manager.hub.channelB,
+  );
+  ref.listen(historyStoreProvider, (_, next) {
+    next.whenData((store) {
+      sync.bindStore(store);
+    });
+  }, fireImmediately: true);
+  return sync;
+});

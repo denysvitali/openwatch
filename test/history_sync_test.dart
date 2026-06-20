@@ -644,5 +644,38 @@ void main() {
       sync.dispose();
       d.dispose();
     });
+
+    // ------------------------------------------------------------------
+    // Local-first: state exposed for the UI without an in-memory store.
+    // ------------------------------------------------------------------
+
+    test('days / watchDaysWithData / fetchedDays are exposed (regression '
+        'for new HistorySync API consumed by history_screen)', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final sync = HistorySync(t, (_) {}, dispatcher: d);
+      expect(sync.days, isEmpty);
+      expect(sync.watchDaysWithData, isEmpty);
+      expect(sync.fetchedDays, isEmpty);
+      expect(sync.dayOf(DateOnly.today()), isNull);
+      expect(sync.lastSyncedAt, isNull);
+
+      final future = sync.syncAll();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      // Bitmask reports day 0 + day 2 have data.
+      t.inA.add(
+        Codec.buildChannelA(OpA.queryDataDistribution, [0, 0, 0, 0x05]),
+      );
+      await future;
+      final today = DateOnly.today();
+      expect(sync.watchDaysWithData, containsAll([today, today.addDays(-2)]));
+      // No store → fetched set still tracks which days were polled.
+      expect(sync.fetchedDays, contains(today));
+      // Day 0 always re-fetched; day 2 also fetched because no store.
+      expect(sync.fetchedDays.length, 2);
+      sync.dispose();
+      d.dispose();
+    });
   });
 }
