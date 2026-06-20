@@ -31,9 +31,21 @@ class BleUuids {
   static final Guid firmwareRevision = Guid(
     '00002a26-0000-1000-8000-00805f9b34fb',
   );
-  static final Guid softwareRevision = Guid(
-    '00002a28-0000-1000-8000-00805f9b34fb',
-  );
+
+  // Note: `0x2a28` (Software Revision) is NOT a real Device-Info characteristic
+  // on this firmware. Per `firmwares/R2_ANALYSIS.md` §7, the bytes that look
+  // like `0x2a28` are actually a `0x2803` char-decl + value-UUID `0x2a00`
+  // (Device Name, inside the Chinese-vendor `0xfee7` service).
+
+  // --- Vendor "fee7" service (PROTOCOL.md §2.1, R2_ANALYSIS.md §7) ---
+  // Present on this OEM's firmware. Currently the app only logs its presence
+  // during discovery; no operational characteristic is wired up yet (it is a
+  // possible alternate command/OTA surface or Device-Name holder).
+  static final Guid serviceFee7 = Guid('0000fee7-0000-1000-8000-00805f9b34fb');
+  static final Guid fee7Write = Guid('0000fea1-0000-1000-8000-00805f9b34fb');
+  static final Guid fee7Read = Guid('0000fec9-0000-1000-8000-00805f9b34fb');
+  static final Guid fee7Notify = Guid('0000fea2-0000-1000-8000-00805f9b34fb');
+  static final Guid deviceName = Guid('00002a00-0000-1000-8000-00805f9b34fb');
 
   /// Default Channel-B chunk size before PackageLength (`0x2f`) negotiation.
   static const int defaultPackageLength = 20;

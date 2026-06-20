@@ -37,6 +37,13 @@ class BleTransport {
   BluetoothCharacteristic? _notifyA;
   BluetoothCharacteristic? _writeB;
   BluetoothCharacteristic? _notifyB;
+  // Probe-only: vendor fee7 service + Device Name char. Currently logged at
+  // connect time; reserved for future alternate OTA/command paths (see
+  // `firmwares/R2_ANALYSIS.md` §7).
+  BluetoothCharacteristic? _fee7Write;
+  BluetoothCharacteristic? _fee7Read;
+  BluetoothCharacteristic? _fee7Notify;
+  BluetoothCharacteristic? _deviceName;
 
   final _subs = <StreamSubscription<dynamic>>[];
   final _state = ValueNotifier<LinkState>(LinkState.disconnected);
@@ -107,12 +114,28 @@ class BleTransport {
           if (c.uuid == BleUuids.writeB) _writeB = c;
           if (c.uuid == BleUuids.notifyB) _notifyB = c;
         }
+      } else if (svc.uuid == BleUuids.serviceFee7) {
+        // Vendor 0xfee7 service: probe-only. Logging which characteristics the
+        // firmware actually declared lets us detect future OEM-specific OTA or
+        // command paths without breaking the canonical Channel-A/B flow.
+        for (final c in svc.characteristics) {
+          if (c.uuid == BleUuids.fee7Write) _fee7Write = c;
+          if (c.uuid == BleUuids.fee7Read) _fee7Read = c;
+          if (c.uuid == BleUuids.fee7Notify) _fee7Notify = c;
+          if (c.uuid == BleUuids.deviceName) _deviceName = c;
+        }
+      } else if (svc.uuid == BleUuids.deviceInfo) {
+        for (final c in svc.characteristics) {
+          if (c.uuid == BleUuids.deviceName) _deviceName = c;
+        }
       }
     }
     _log.info(
       'ble',
       'Chars: writeA=${_writeA != null} notifyA=${_notifyA != null} '
-          'writeB=${_writeB != null} notifyB=${_notifyB != null}',
+          'writeB=${_writeB != null} notifyB=${_notifyB != null} '
+          'fee7=${_fee7Write != null || _fee7Read != null || _fee7Notify != null} '
+          'devName=${_deviceName != null}',
     );
     if (_writeA == null || _notifyA == null) {
       throw const BleTransportException(
@@ -338,6 +361,7 @@ class BleTransport {
     final d = _device;
     _device = null;
     _writeA = _notifyA = _writeB = _notifyB = null;
+    _fee7Write = _fee7Read = _fee7Notify = _deviceName = null;
     if (d != null) {
       try {
         await d.disconnect();

@@ -50,15 +50,36 @@ the same connection (see §2). The cloud layer is a separate HTTPS/JSON + WebSoc
 | `de5bf729-d711-4e47-af26-65e3012a5dc7` | NOTIFY | B | `SERIAL_PORT_CHARACTER_NOTIFY`. Parsed by `LargeDataParser`/`DfuHandle`. |
 | `00002902-0000-1000-8000-00805f9b34fb` | CCCD descriptor | A & B | `GATT_NOTIFY_CONFIG`. Written `ENABLE_NOTIFICATION_VALUE` on both notify chars. |
 | `0000180A-…` | SERVICE Device Information | — | `SERVICE_DEVICE_INFO`. Read during handshake. |
+| `00002A25-…` | READ Serial Number | — | DevInfo. |
 | `00002A27-…` | READ Hardware Revision | — | `CHAR_HW_REVISION`. First handshake read. |
 | `00002A26-…` | READ Firmware Revision | — | `CHAR_FIRMWARE_REVISION`. Second read (+200 ms); completion → `setReady(true)`. |
-| `00002A28-…` | READ Software Revision | — | `CHAR_SOFTWARE_REVISION`. Defined but not in core handshake. |
+| `00002A23-…` | READ System ID | — | DevInfo. |
+| `0000FEE7-…` | SERVICE Vendor "fee7" | — | Chinese-vendor profile. `fea1` write + CCCD, `fec9` read, `fea2` notify + CCCD, plus `2a00` Device Name. **Probe-only** in this app — see `firmwares/R2_ANALYSIS.md` §7. |
+| `00002A28-…` | — | — | **Phantom.** Bytes at v13 `0x20faf` / v14 `0x1f363` look like `0x2a28` but are a `0x2803` char-decl followed by value-UUID `0x2a00` (Device Name, inside the `0xFEE7` service). The firmware does **not** declare a SW Revision characteristic. |
 
-H59MA firmware stores the BLE UUIDs as little-endian table data and confirms both logical channels:
-v13 Channel B service at body `0x20d7c`, Channel A service at `0x20e40`; v14 Channel B service at
-`0x1f130`, Channel A service at `0x1f1f4`. The corresponding Channel-A write/notify UUIDs are at
-v13 `0x20e8a`/`0x20ec2` and v14 `0x1f238`/`0x1f274`; Channel-B write/notify are at v13
-`0x20dca`/`0x20dfc` and v14 `0x1f17e`/`0x1f1b2`.
+H59MA firmware stores the BLE UUIDs as little-endian table data and confirms both logical channels
+plus the vendor `0xFEE7` service. Body offsets below are for the relevant **UUID bytes** (the
+preceding attribute-table offset in `RE_FIRMWARE.md` differs by a few bytes — see
+`firmwares/R2_ANALYSIS.md` §7 for the corrected table).
+
+| UUID | v13 body offset | v14 body offset |
+|---|---:|---:|
+| Device Info service | `0x20c78` | `0x1f02c` |
+| Serial Number `2a25` | `0x20cae` | `0x1f062` |
+| HW revision `2a27` | `0x20ce6` | `0x1f09a` |
+| FW revision `2a26` | `0x20d1e` | `0x1f0d2` |
+| System ID `2a23` | `0x20d56` | `0x1f10a` |
+| Channel B service `de5bf728` | `0x20d7c` | `0x1f130` |
+| Channel B write `de5bf72a` | `0x20dc6` | `0x1f17a` |
+| Channel B notify `de5bf729` | `0x20dfe` | `0x1f1b2` |
+| Channel A service `6e40fff0` | `0x20e40` | `0x1f1f4` |
+| Channel A write `6e400002` | `0x20e8a` | `0x1f23e` |
+| Channel A notify `6e400003` | `0x20ec2` | `0x1f276` |
+| Vendor `0xFEE7` service | `0x20f08` | `0x1f2bc` |
+| Vendor `fea1` write | `0x20f3e` | `0x1f2f2` |
+| Vendor `fec9` read | `0x20f92` | `0x1f346` |
+| Vendor `fea2` notify | `0x20fca` | `0x1f37e` |
+| Device Name `2a00` | `0x20fb0` | `0x1f364` |
 
 ```mermaid
 graph LR
@@ -152,6 +173,13 @@ The SDK transport itself sends **no** automatic bind/SetTime; those are app-leve
 ```
 
 - **Always** 16 bytes. No fragmentation on this channel — long data must use Channel B.
+- **Channel-A framing & dispatch are phone-side, not firmware-side.** The H59MA firmware
+  (`firmwares/R2_ANALYSIS.md` §6) has no routine that strips `0x80` and indexes an opcode table on a
+  16-byte frame. The two plausible candidates in the body (`0x22490` opcode bucket, v13-only and
+  unreferenced; `0x21b58`/`0x1ff0c` constant pool, used only by a health-metric clamp) are both dead
+  in practice. The framing, additive CRC8, error flag, and `BeanFactory`/`SparseArray` dispatch all
+  live in the Oudmon SDK on the phone. **v13 ↔ v14 are wire-compatible** — v14 is a debug-log
+  strip + dead-table cleanup, no protocol change.
 - TX build (`BaseReqCmd.getData`): `buf=new byte[16]; buf[0]=key; arraycopy(getSubData,0,buf,1,len); addCRC(buf)`.
 - RX dispatch (`QCBluetoothCallbackReceiver.onCharacteristicChange` on `6e400003`):
   1. len **must** == 16 else dropped.
