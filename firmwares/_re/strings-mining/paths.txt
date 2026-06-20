@@ -1,0 +1,42 @@
+=== ASSET PATHS: v13 ===
+177:0x000029D0  ascii    /t(|0s
+441:0x00007C7A  ascii    /BUee6e
+677:0x0000B056  ascii    !%)+-/37;@
+887:0x0000D9AE  ascii    8!/H
+917:0x0000E0AC  ascii    /J0K
+1026:0x0000F8B5  ascii    %	x/F
+1086:0x00010B4D  ascii    M,h/F
+1143:0x00011733  ascii    ](/X
+1184:0x00011FE0  ascii    .K/J&3
+1199:0x0001243D  ascii    F/I@
+1235:0x00012CED  ascii    F/F(F
+1310:0x00013F67  ascii    F/FT
+1355:0x000148FC  ascii    (M/Ps
+1472:0x00016814  ascii    iF/H
+1494:0x00016CD3  ascii    `/aoa
+1529:0x00017A5A  ascii    <F/F
+1546:0x00017F1D  ascii    h/F F
+1557:0x00018362  ascii    qA/F
+1562:0x00018492  ascii    tA`F/F
+1565:0x00018677  ascii    	,@.@/F
+2129:0x00020795  ascii    F5Fd=/F;7!
+=== ASSET PATHS: v14 ===
+179:0x00002924  ascii    /t(|0s
+450:0x00007C2A  ascii    /BUee6e
+685:0x0000B00E  ascii    !%)+-/37;@
+927:0x0000E0B0  ascii    /J0K
+1040:0x0000F8C9  ascii    %	x/F
+1100:0x00010B61  ascii    M,h/F
+1157:0x00011747  ascii    ](/X
+1198:0x00012000  ascii    .K/J&3
+1213:0x0001245D  ascii    F/I@
+1249:0x00012D0D  ascii    F/F(F
+1324:0x00013F87  ascii    F/FT
+1370:0x00014924  ascii    (M/Ps
+1487:0x0001683C  ascii    iF/H
+1509:0x00016CFB  ascii    `/aoa
+1544:0x00017A82  ascii    <F/F
+1568:0x000182BA  ascii    qA/F
+1573:0x000183EA  ascii    tA`F/F
+1576:0x000185CF  ascii    	,@.@/F
+2017:0x0001ECB9  ascii    F5Fd=/F;7!

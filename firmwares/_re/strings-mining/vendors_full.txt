@@ -1,0 +1,91 @@
+=== Full vendor listing v13 ===
+1:0x00000010  ascii    H59MA_1.00.13_251230
+2:0x00000030  ascii    H59MA_V1.0
+3:0x000000B8  ascii    sdk#####
+126:0x00001FA4  ascii    H59MA_V1.0
+148:0x00002406  ascii    QC"y<#ZC
+154:0x000024AA  ascii    QC"y<#ZC
+276:0x00004899  ascii    x<"QC
+277:0x000048A6  ascii    Ay<"QC
+307:0x00004E6B  ascii    z<"QC
+354:0x00005BD0  ascii    hr_realtime_test_id
+478:0x00008594  ascii    H59MAX_
+487:0x00008784  ascii    H59MA_V1.0
+488:0x00008790  ascii    H59MA_
+522:0x00009194  ascii    m_ble_packet_timer_id
+538:0x0000951C  ascii    H59MA_V1.0
+562:0x00009940  ascii    H59MAX_
+563:0x00009948  ascii    H59MA_V1.0
+564:0x00009954  ascii    H59MA_
+635:0x0000A90C  ascii    H59MA_V1.0
+636:0x0000A918  ascii    H59MA_1.00.13_251230
+658:0x0000ACCA  ascii    #qcy2{
+865:0x0000D420  ascii    gsensor_read_timer_id
+866:0x0000D43C  ascii    gsensor_shake_flag_timer_id
+867:0x0000D45C  ascii    ..\..\..\..\qc_code\app_module\gsensor\lis3dh_spi.c
+885:0x0000D908  ascii    ..\..\..\..\qc_code\app_module\hr\hr_module.c
+924:0x0000E27B  ascii    x<"QC
+1281:0x000135F6  ascii    HrGHN
+1503:0x00016E96  ascii    )L"hR
+1677:0x0001AC66  ascii    ABd"QC
+1695:0x0001B2F7  ascii    rIid"QC
+1718:0x0001B773  ascii    `DhRC$
+1747:0x0001BB78  ascii    %02d:%02d]default rest hr:%d
+1748:0x0001BB98  ascii    %02d:%02d]default sleep hr:%d
+1874:0x0001D1D4  ascii    B`fJQC
+1875:0x0001D1EB  ascii    ``JQC
+1876:0x0001D201  ascii    `[JQC
+1961:0x0001E42C  ascii    *`_"khR
+2041:0x0001F5A0  ascii    sdk lib version: %d.%d.%d.%d ,commit ID:%x 
+2046:0x0001F804  ascii    %02d:%02d]set rest hr:%d
+2048:0x0001F854  ascii    %02d:%02d]set sleep hr:%d
+2064:0x0001FBA0  ascii    %02d:%02d]wake hr hi=%d,count=%d
+2065:0x0001FBC4  ascii    %02d:%02d]wake hr deep=%d,count=%d
+2066:0x0001FBE8  ascii    %02d:%02d]awake get hr=%d
+2082:0x0001FF10  ascii    %02d:%02d]get sleep hr=%d,avg=%d
+2083:0x0001FF34  ascii    %02d:%02d]set sleep hr=%d
+2084:0x0001FF50  ascii    %02d:%02d]hr rest=%d
+2103:0x000203B8  ascii    %02d:%02d]hr deep=%d,count=%d/%d
+2104:0x000203DC  ascii    %02d:%02d]hr low=%d,count=%d/%d
+2105:0x000203FC  ascii    %02d:%02d]hr high2=%d,count=%d/%d
+2106:0x00020420  ascii    %02d:%02d]hr high=%d,count=%d/%d
+2107:0x00020444  ascii    %02d:%02d]get hr=%d
+2114:0x00020520  ascii    %02d:%02d]deep hr pass
+2307:0x000234E4  ascii    VC_HRV_16Bit_integration_6.0_addRMSSD
+=== Full vendor listing v14 ===
+1:0x00000010  ascii    H59MA_1.00.14_260508
+2:0x00000030  ascii    H59MA_V1.0
+3:0x000000B8  ascii    sdk#####
+128:0x00001EF8  ascii    H59MA_V1.0
+150:0x0000235A  ascii    QC"y<#ZC
+156:0x000023FE  ascii    QC"y<#ZC
+279:0x000047ED  ascii    x<"QC
+280:0x000047FA  ascii    Ay<"QC
+312:0x00004DBF  ascii    }<"QC
+361:0x00005B30  ascii    hr_realtime_test_id
+486:0x00008544  ascii    H59MAX_
+495:0x0000873C  ascii    H59MA_V1.0
+496:0x00008748  ascii    H59MA_
+530:0x0000914C  ascii    m_ble_packet_timer_id
+546:0x000094D4  ascii    H59MA_V1.0
+570:0x000098F8  ascii    H59MAX_
+571:0x00009900  ascii    H59MA_V1.0
+572:0x0000990C  ascii    H59MA_
+643:0x0000A8C4  ascii    H59MA_V1.0
+644:0x0000A8D0  ascii    H59MA_1.00.14_260508
+666:0x0000AC82  ascii    #qcy2{
+873:0x0000D3D8  ascii    gsensor_read_timer_id
+874:0x0000D3F4  ascii    gsensor_shake_flag_timer_id
+875:0x0000D414  ascii    ..\..\..\..\qc_code\app_module\gsensor\lis3dh_spi.c
+892:0x0000D8B4  ascii    ..\..\..\..\qc_code\app_module\hr\hr_module.c
+1295:0x00013616  ascii    HrGHN
+1518:0x00016EBE  ascii    )L"hR
+1637:0x00019A66  ascii    ABd"QC
+1655:0x0001A0F7  ascii    rIid"QC
+1677:0x0001A573  ascii    `DhRC$
+1820:0x0001BE34  ascii    B`fJQC
+1821:0x0001BE4B  ascii    ``JQC
+1822:0x0001BE61  ascii    `[JQC
+1907:0x0001D08C  ascii    *`_"khR
+1988:0x0001E238  ascii    sdk lib version: %d.%d.%d.%d ,commit ID:%x 
+2183:0x000216A0  ascii    VC_HRV_16Bit_integration_6.0_addRMSSD

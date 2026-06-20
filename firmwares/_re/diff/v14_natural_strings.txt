@@ -1,0 +1,459 @@
+H59MA_1.00.14_260508
+H`pGd 
+Thu Mar 17 10:58:10 2022
+oI F
+%bI.F
+iF F
+{< AChh
+qc_app
+tpGmH 0@{
+pGjJ 2Q{
+pGXH 0@{@
+ppG=H
+9L 4 pap
+ipG2H@ipG0H
+I 1J{R
+"Fd%jC
+w pG
+w pG
+qFH@0@
+lF p
+q rar
+'kF_p
+H59MA_V1.0
+@xfNfL
+c  pax
+ax x
+fI F
+F$H}%DC
+d pG
+SL F
+H@xpG
+p%FiF
+=I8F	h
+:F)F0F
+:F)F0F
+%q%pp
+d$>qd! F
+%#F*F!F
+qc_timer_restart
+>5rh?0z
+=hx.F
+ophx2\
+&x%p0F
+long press timer
+debounce timer
+allowed enter dlps
+p=Hd!
+m_motor_timer_id
+s.p(x
+"iF F
+) )FAC
+q) AC
+phF@x
+x<!HCiF	yZN@
+) 9FACQH
+HC-!I
+"iF F
+F <`w!w
+xmM@
+%DBv
+$x iF
+pQp@
+qhF@y
+app_ring_sport_data_id
+qhF@y
+qhF@y
+Li&"z!F
+eq%q
+yay y
+m_heart_rate_timer_id
+hr_realtime_test_id
+a iF
+pj iF
+F@xf(
+F@xyI
+w iF
+w jF
+pQp( 
+H@xpG
+@8`y`8hyh
+@8`y`8hyh@"
+@8`y`8hyhqJ
+/BUee6e
+Ky I
+PH@~pG
+_%01X%01X%01X%01X
+O_%s_%01X%01X%01X%01X
+%s_%01X%01X%01X%01X
+H59MAX_
+%s%01X%01X%01X%01X
+H59MA_V1.0
+H59MA_
+&iFNq
+m_ble_packet_timer_id
+"FP:9F
+m_ota_write_flag_id
+H59MA_V1.0
+Lah	x@
+HiF@hd"
+H59MAX_
+H59MA_V1.0
+H59MA_
+) 1FAChF
+HiF@h@x
+) 9FAChF
+) 2FBC
+UbF 2d
+UbF 2d
++Mhx
+._cimq.u.!(S
+ax x
+battery_sample_power_on
+x=MQ
+con paramter update timer
+RI#HH+H1Ha^H@HHHdH
+"iF F
+q@zPq
+qH@x
+:C*p)u
+9F'F F
+H59MA_V1.0
+H59MA_1.00.14_260508
+z aI
+!AppG H
+product_test_drv50ms_timer_id
+product_test_timeout_timeout_handler
+H@xpG
+Hfq@x
+tM.F
+6hx4F@4
+Tph@
+sqh@
+sports_mode_timer
+p xp
+{Ap x
+iFE 
+iFB 
+"iF F
+FBx@
+qhFAx x
+phFAy x
+Ap x@
+I@9Ih
+@9Jhd$
+d!HC b k
+mL@<ah
+AL@<`h
+b c`a
+a b`c
+H@hpG
+H@jpG
+kIk@
+-H@ipG
+CJppG'H@x
+pG%J
+H ICj
+iF	x @@)
+iF	x @@)
+"iF F
+"iF F
+"iF F
+"iFA 
+1]jF)C2 
+"iF F
+"iF F
+"iFg 
+xpG H
+H%qup
+@xiF
+@xiF
+eL y
+PH@ypG
+Ap+I
+gsensor_read_timer_id
+gsensor_shake_flag_timer_id
+..\..\..\..\qc_code\app_module\gsensor\lis3dh_spi.c
+A iF
+%#F*F!F
+..\..\..\..\qc_code\app_module\hr\hr_module.c
+jpG,H 0
+:HA,F`
+F FZ8
+xap@x
+ppG=I
+"iF F
+@iFHp
+@iF 0Hp
+"iFH 
+"iFH 
+hF@x
+0p(F@0C5
+"iFT 
+"iFS 
+"iFV 
+lF x
+lF x
+lF x
+x pux@
+x%ppx-
+&lF#x
+%FEC
+FtI@
+p1F F
+a)F F
+q`q-H@8
+THx@
+N FiF
+F(p(x9x@
+Nui,F 4 ~
+Mhi 0
+IIi 1	~
+M,h/F
+riF@ 
+#F2F9F3 
+#F2F9F3 
++FiF
+P%kR
+P%kR
+simulate_timer
+WI:FHaTIUH
+(qPH@i
+$H}p%q
+q@pG
+pGError! Please implement your ISR Handler for IRQ %d!
+FhI@
+FUI@
+FLI@
+FBI@
+%HN0@Z
+@ `ohP
+F/F(F
+8x aUH
+lpG )
+@mpG
+npG@lpG
+npG@npG
+hKh/
+hHKXC@
+cpG$I@1
+FpG (
+C ehm
+C eQMP )h
+C e)h
+C e`h
+F_I_H
+QL F	
+&iFNq
+Ch:F
+F/FT
+!=Pp] s
+xh|K 
+0Ih`C@
+K@hG3
+0ih`C@
+cI\H
+hiF&
+&oF>p
+hLC 
+(M/Ps
+&HFC6
+]IAC@C@
+\JBCQ
+qLq 
+JJJJ J6JJ;@JEJJJ%J`
+GVO 
+:FPH
+jF?H
+HkF@
+=HjFo0
+2HkF@
+-HkF
+HjF@
+HiF@
+[HjF@
+HjF@
+HkF@
+F7 jF
+HjF@
+HkF@
+=HkF
+HiF@
+F9 jF
+HkF@
+HkF@
+F; jF
+cHiF@
+iF/H
+*HkF@
+%HkF
+HkF@
+Z hp
+NHMI.0Jz
+`/aoa
+yX:i
+yX:j
+yX:k
+F%HI
+j@jQ
+'<F+F>F
+jh x
++F2F!F
+C 6 F%`1F
+qA/F
+A #fF
+tA`F/F
+FEC.F
+FEC.F
+@AbF
+0ppj@
+Id&JirC
+@BwJ
+@BhJQ
+&FHAxI
+Hg(.Q
+gP.J
+@HBI
+PbpG\
+&wH5F
+(lH%p
+hZP@
+Ready to update MAC!
+hIh:F
+wrong signature! Read %8X != Requried %8X
+:F)F0F
+#malloc %d bytes fail!
+xHC&!HC1F
+old config len %d
+item[%d] len %d
+malloc %d bytes fail!
+new config len %d, backup_len %d
+Header is invalid
+pos %02x, offset %02x
+item[%02x] found!
+@XpG
+K F1F
+K F)F
+F"F+F
+F2F F)F
+F F)F
+C F)F
+F F)F
+?UUUUUU
+%FECuH(
+NheC-
+D&uC
+`.MqFi\
+&uFNU
+i"aZi@
+!mFj\
+FmC_h-
+&J6wC
+mBWK_a
+@CIC@
+hFCX F
+:KYCR
+MYcU@
+*`_"khR
+%IKC
+8H`+HDh$
+&HACH
+mB>F&'~Cv
+@YpE
+vB&'}Cm
+J`ChE%
+(xax@
+!aq&q.q
+Fd `C
+@CIC@
+@BpG
+%d!bq
+iF F
+sdk lib version: %d.%d.%d.%d ,commit ID:%x 
+Q\!q_I01Kx2+
+F5Fd=/F;7!
+t qp
+app_send_msg_to_apptask
+app_main_task
+hub_task_init
+send_msg_to_hub_task
+hub_task
+DUK-AL20
+VOG-AL00
+SM-G975U
+SM-N970U
+CLT-AL00
+core30fx_v0.23
+ancs_get_app_attr
+ancs_add_client
+ancs_send_msg_to_app
+app_parse_notification_source_data
+ancs_client_cb
+ancs_handle_msg
+ancs_init
+gatts_add_client
+le_vendor_drop_acl_data
+le_vendor_update_conn_param
+le_vendor_set_priority
+_cfg_write_to_flash
+cfg_add_item
+cfg_del_item
+0123456789ABCDEF@0X
+0123456789abcdef@0x
+Scene_B
+Scene_C
+com.atebits.Tweetie2
+com.apple.MobileSMS
+jp.naver.line
+com.apple.mobilephone
+com.skype.skype
+ph.telegra.Telegraph
+com.facebook.Facebook
+com.google.Gmail
+com.burbn.instagram
+com.tencent.tim
+com.linkedin
+com.tencent.xin
+vn.com.vng.zingalo
+com.toyopagroup.picaboo
+net.whatsapp.WhatsApp
+com.tencent.mipadqq
+com.tencent.mqq
+com.viber
+com.facebook.Messenger
+com.tumblr.tumblr
+vc30fx_sc
+GDMA0 Channel0
+GPIO_Group0
+Enhanced_Timer0
+GDMA0 Channel1
+GPIO_Group1
+Enhanced_Timer1
+GDMA0 Channel2
+GPIO_Group2
+GDMA0 Channel3
+GPIO_Group3
+Timer4-5
+I2S0_RX
+I2S0_TX
+CAP_Touch
+SPI_Flash
+PTA_Mailbox
+I@1Kh
+J@2Rh
+6hnP@
+6hnP@
+dM8=hh
+_Lp4 hah
+` hPI
+KY`@j
+kbJ@2
+lKa@k
+cHI@1
+lKa@k
+b@lP`
+V1 read characteristic
+VC_HRV_16Bit_integration_6.0_addRMSSD
+lib_BIODetect_V14_1
+spo2_VC30F_S_int_limit_ed01
+vc_SportMotion_Int

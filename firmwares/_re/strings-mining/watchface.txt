@@ -1,0 +1,6 @@
+=== WATCHFACE/UI STRINGS: v13 ===
+2194:0x0002240C  ascii    com.facebook.Facebook
+2206:0x000224F0  ascii    com.facebook.Messenger
+=== WATCHFACE/UI STRINGS: v14 ===
+2072:0x00020700  ascii    com.facebook.Facebook
+2084:0x000207E4  ascii    com.facebook.Messenger

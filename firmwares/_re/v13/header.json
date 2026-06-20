@@ -1,0 +1,199 @@
+{
+  "magic": "e5c3bd81",
+  "filename": "firmwares/H59MA_1.00.13_251230.bin",
+  "hw_id": "H59MA_V1.0",
+  "size": 145552,
+  "sha256": "7347dc5fe7c552d4f0fb93cffa2dd9cab6945b5628900705a07eb7a357781b65",
+  "header": {
+    "magic": "e5c3bd81",
+    "load_size": 145472,
+    "firmware_size": 145472,
+    "unknown32a": 13537518,
+    "version": "H59MA_1.00.13_251230",
+    "hw_id": "H59MA_V1.0",
+    "flags": 159449100,
+    "sdk_id": 10131,
+    "unknown32b": 144448,
+    "build_time": 2120961273,
+    "crc_or_a": 300664081,
+    "signature_hex": "11c5eb118282f74a0c0cef5b00648200",
+    "nonce_or_key_hex": "00648200000000000060820000000000",
+    "board_marker": 4161,
+    "sdk_string": "sdk#####",
+    "nonce2_hex": "000000008d50aa228b80d953cbf61600",
+    "crc2": 0,
+    "crc3": 0,
+    "fields": [
+      {
+        "offset": 0,
+        "size": 4,
+        "name": "magic",
+        "value": "e5c3bd81",
+        "hex": "e5c3bd81",
+        "note": "H59MA signature E5 C3 BD 81"
+      },
+      {
+        "offset": 4,
+        "size": 4,
+        "name": "load_size",
+        "value": 145472,
+        "hex": "40380200",
+        "note": "bytes the bootloader copies to RAM"
+      },
+      {
+        "offset": 8,
+        "size": 4,
+        "name": "firmware_size",
+        "value": 145472,
+        "hex": "40380200",
+        "note": "total image size on disk (little-endian u32)"
+      },
+      {
+        "offset": 12,
+        "size": 4,
+        "name": "unknown32_a",
+        "value": 13537518,
+        "hex": "ee90ce00",
+        "note": "always 0x00CE90EE in observed samples"
+      },
+      {
+        "offset": 16,
+        "size": 24,
+        "name": "version_string",
+        "value": "H59MA_1.00.13_251230",
+        "hex": "4835394d415f312e30302e31335f32353132333000000000",
+        "note": "ASCII, e.g. H59MA_1.00.13_251230"
+      },
+      {
+        "offset": 48,
+        "size": 16,
+        "name": "hw_id",
+        "value": "H59MA_V1.0",
+        "hex": "4835394d415f56312e30000000000000",
+        "note": "hardware identifier, e.g. H59MA_V1.0"
+      },
+      {
+        "offset": 80,
+        "size": 4,
+        "name": "flags",
+        "value": 159449100,
+        "hex": "0c008109",
+        "note": "feature flags (semantics unknown)"
+      },
+      {
+        "offset": 84,
+        "size": 4,
+        "name": "sdk_id",
+        "value": 10131,
+        "hex": "93270000",
+        "note": "0x00092793 in observed samples"
+      },
+      {
+        "offset": 88,
+        "size": 4,
+        "name": "unknown32_b",
+        "value": 144448,
+        "hex": "40340200"
+      },
+      {
+        "offset": 92,
+        "size": 4,
+        "name": "build_time_unix",
+        "value": "2037-03-18T03:54:33Z",
+        "hex": "f94c6b7e",
+        "note": "0x? - interpret as little-endian unix timestamp or counter"
+      },
+      {
+        "offset": 96,
+        "size": 16,
+        "name": "signature_a",
+        "value": "11c5eb118282f74a0c0cef5b00648200",
+        "hex": "11c5eb118282f74a0c0cef5b00648200",
+        "note": "0x? - 16-byte signature-like block; algorithm unknown"
+      },
+      {
+        "offset": 112,
+        "size": 16,
+        "name": "nonce_or_key",
+        "value": "00648200000000000060820000000000",
+        "hex": "00648200000000000060820000000000",
+        "note": "0x? - looks like a key/nonce; do not interpret"
+      },
+      {
+        "offset": 176,
+        "size": 4,
+        "name": "board_marker",
+        "value": 4161,
+        "hex": "41100000",
+        "note": "0x00001041 in observed samples"
+      },
+      {
+        "offset": 184,
+        "size": 8,
+        "name": "sdk_string",
+        "value": "sdk#####",
+        "hex": "73646b2323232323",
+        "note": "ASCII, e.g. sdk#####"
+      },
+      {
+        "offset": 448,
+        "size": 16,
+        "name": "nonce2",
+        "value": "000000008d50aa228b80d953cbf61600",
+        "hex": "000000008d50aa228b80d953cbf61600",
+        "note": "0x? - 16-byte block before payload start"
+      },
+      {
+        "offset": 544,
+        "size": 4,
+        "name": "crc2",
+        "value": 0,
+        "hex": "00000000",
+        "note": "0x? - checksum slot"
+      },
+      {
+        "offset": 832,
+        "size": 4,
+        "name": "crc3",
+        "value": 0,
+        "hex": "00000000",
+        "note": "0x? - checksum slot"
+      }
+    ]
+  },
+  "sections": [
+    {
+      "name": "header",
+      "offset": 0,
+      "size": 1104,
+      "kind": "header",
+      "note": "decoded H59MA header"
+    },
+    {
+      "name": "secondary_signature",
+      "offset": 1088,
+      "size": 16,
+      "kind": "signature",
+      "note": "0x? — 16-byte block at body boundary"
+    },
+    {
+      "name": "body",
+      "offset": 1104,
+      "size": 144448,
+      "kind": "payload",
+      "note": "ARM-Thumb code + embedded assets"
+    },
+    {
+      "name": "embedded_jpeg@0x21EEF",
+      "offset": 138991,
+      "size": 6561,
+      "kind": "embedded-asset",
+      "format": "jpeg"
+    }
+  ],
+  "notes": [
+    "Header layout is reverse-engineered from H59MA 1.00.13 / 1.00.14 binaries.",
+    "Body offset 0x450 begins an ARM-Thumb code region; payload is opaque.",
+    "No explicit section table was found; sections here are derived from marker bytes."
+  ]
+}

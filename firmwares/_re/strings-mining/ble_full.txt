@@ -1,0 +1,14 @@
+=== Common BLE GATT service names v13 ===
+2171:0x00021D14  ascii    gatts_add_client
+2197:0x0002244C  ascii    com.tencent.tim
+2199:0x0002246C  ascii    com.tencent.xin
+2203:0x000224C0  ascii    com.tencent.mipadqq
+2204:0x000224D4  ascii    com.tencent.mqq
+2249:0x000226DC  ascii    Keyscan
+=== Common BLE GATT service names v14 ===
+2051:0x000200C8  ascii    gatts_add_client
+2075:0x00020740  ascii    com.tencent.tim
+2077:0x00020760  ascii    com.tencent.xin
+2081:0x000207B4  ascii    com.tencent.mipadqq
+2082:0x000207C8  ascii    com.tencent.mqq
+2127:0x000209D0  ascii    Keyscan

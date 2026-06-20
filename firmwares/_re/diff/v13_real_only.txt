@@ -1,0 +1,79 @@
+%02d:%02d]active=%d,valid_count clear=%d
+%02d:%02d]another ,%d:%d->%d:%d,
+%02d:%02d]awake = %d
+%02d:%02d]awake=%d
+%02d:%02d]awake get hr=%d
+%02d:%02d]awake ignore
+%02d:%02d]clear end %d:%d
+%02d:%02d]day index adjust
+%02d:%02d]deep hr pass
+%02d:%02d]default rest hr:%d
+%02d:%02d]default sleep hr:%d
+%02d:%02d]delay sleep=%d,%d
+%02d:%02d]delay sleep to dropoff
+%02d:%02d]drop off
+%02d:%02d]drop off to movement
+%02d:%02d]finish 1
+%02d:%02d]finish 2
+%02d:%02d]finish nap
+%02d:%02d]generate state:%d, min:%d
+%02d:%02d]get hr=%d
+%02d:%02d]get sleep hr=%d,avg=%d
+%02d:%02d]get up at %d:%d
+%02d:%02d]hr deep=%d,count=%d/%d
+%02d:%02d]hr high2=%d,count=%d/%d
+%02d:%02d]hr high=%d,count=%d/%d
+%02d:%02d]hr low=%d,count=%d/%d
+%02d:%02d]hr rest=%d
+%02d:%02d]invalid data,clear
+%02d:%02d]little active too much
+%02d:%02d]long time to droopoff
+%02d:%02d]nap awake finish
+%02d:%02d]not wear
+%02d:%02d]pre_active out=%d
+%02d:%02d]return sleep
+%02d:%02d]set rest hr:%d
+%02d:%02d]set sleep hr:%d
+%02d:%02d]set sleep hr=%d
+%02d:%02d]sleep algorithm reset
+%02d:%02d]sleep clr,%d,%d
+%02d:%02d]sleep start %d:%d,state=%d
+%02d:%02d]sleep too long
+%02d:%02d]unwear=%d
+%02d:%02d]unwear_minute drop off
+%02d:%02d]wake hr deep=%d,count=%d
+%02d:%02d]wake hr hi=%d,count=%d
+%02d:%02d]zero count pass
+8L 4 pap
+bEb4H
+bh0x
+bh8x
+Cm8h
+DHCL
+F09Ix
+F3Fb
+F3FM
+F3FO
+F3FP
+F_AcF;C
+FyAnC7
+h1F8F
+hHgI
+HhQh
+HpGh
+.HxDv0
+HxDZ8
+IHDr
+IxCyD2FL9A
+jpGFI
+oIyD
+PbpGL
+pGTI
+pGWH 0@{@
+PIhh
+qIyD
+t8Fd0
+TbFR
+tHsI
+uFfF
+wHjF

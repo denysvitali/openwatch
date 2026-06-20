@@ -1,0 +1,145 @@
+Wrote /home/workspace/git/openwatch/firmwares/_re/ble-hunt/scan_results.json
+
+=== v13_full (size=145552) ===
+  header_magic_e5c3bd81: 0 hits
+  channelB_magic_0xbc: 93 hit(s) at offsets [1642, 1918, 2329, 3078, 4962, 6626, 6709, 6713]
+  uuid_6e400002_raw_le: 1 hit(s) at offsets [135910]
+  uuid_6e40_le_u16: 6 hit(s) at offsets [10767, 43767, 77454, 135838, 135912, 135968]
+  uuid_6e400003_le_u16: 2 hit(s) at offsets [92541, 119482]
+  uuid_6e400003_le_u32: 1 hit(s) at offsets [135966]
+  uuid_fff0_le_u16: 14 hit(s) at offsets [4785, 12365, 17115, 23643, 37859, 42675, 56497, 99938]
+  uuid_de5bf728_le_u32: 1 hit(s) at offsets [135640]
+  uuid_de5bf729_le_u32: 1 hit(s) at offsets [135770]
+  uuid_de5bf72a_le_u32: 1 hit(s) at offsets [135714]
+  uuid_180a_le_u16: 9 hit(s) at offsets [7981, 10430, 16416, 39908, 40040, 62107, 114242, 119562]
+  uuid_2a26_le_u16: 3 hit(s) at offsets [48265, 130969, 135534]
+  uuid_2a27_le_u16: 2 hit(s) at offsets [42841, 135478]
+  uuid_2a28_le_u16: 6 hit(s) at offsets [3059, 26603, 83932, 109397, 128260, 136191]
+  uuid_180a_le_u32: 6 hit(s) at offsets [73504, 112696, 137328, 139216, 139364, 141132]
+  uuid_2902_le_u16: 43 hit(s) at offsets [8770, 23388, 25050, 27878, 29580, 30922, 32306, 32432]
+  opcode_0x01: count=4613, first5=[182, 552, 1186, 1296, 1532], last=145549
+  opcode_0x02: count=2424, first5=[6, 10, 90, 1124, 1134], last=144237
+  opcode_0x10: count=1807, first5=[177, 1120, 1130, 1140, 1150], last=145550
+  opcode_0x12: count=542, first5=[183, 1588, 2314, 2858, 3708], last=144333
+  opcode_0x1d: count=365, first5=[1740, 1742, 1986, 2313, 2315], last=142108
+  opcode_0x1f: count=300, first5=[1346, 1380, 1874, 2070, 2352], last=144199
+  opcode_0x29: count=882, first5=[1123, 1133, 1143, 1153, 1163], last=145414
+  opcode_0x2a: count=511, first5=[1258, 1591, 3024, 3060, 3413], last=143216
+  opcode_0x2f: count=166, first5=[1248, 1998, 9598, 10110, 10590], last=145406
+  opcode_0x32: count=404, first5=[30, 33, 2240, 2242, 2243], last=145273
+  opcode_0x3c: count=284, first5=[2088, 2339, 2393, 2519, 3840], last=143770
+  opcode_0x3d: count=119, first5=[2012, 2736, 3778, 4328, 5856], last=144698
+  opcode_0x3f: count=139, first5=[5108, 8460, 8754, 10775, 11746], last=144197
+  opcode_0x73: count=376, first5=[184, 1312, 1456, 1514, 2023], last=145270
+  opcode_0x78: count=1386, first5=[557, 1232, 1446, 1842, 3297], last=145521
+  opcode_0xbc: count=93, first5=[1642, 1918, 2329, 3078, 4962], last=140042
+  crc16_a001_le: 1 hit(s) at offsets [136540]
+  crc16_1021_le: 33 hit(s) at offsets [9855, 9867, 9889, 9917, 9929, 10101, 10113, 10139]
+
+=== v14_full (size=137804) ===
+  header_magic_e5c3bd81: 0 hits
+  channelB_magic_0xbc: 90 hit(s) at offsets [2109, 2858, 5220, 6454, 6537, 6541, 7142, 7152]
+  uuid_6e400002_raw_le: 1 hit(s) at offsets [128666]
+  uuid_6e40_le_u16: 6 hit(s) at offsets [10595, 43695, 77486, 128594, 128668, 128724]
+  uuid_6e400003_le_u16: 2 hit(s) at offsets [92581, 114458]
+  uuid_6e400003_le_u32: 1 hit(s) at offsets [128722]
+  uuid_fff0_le_u16: 9 hit(s) at offsets [12161, 18471, 26218, 85541, 99770, 114684, 128592, 131608]
+  uuid_de5bf728_le_u32: 1 hit(s) at offsets [128396]
+  uuid_de5bf729_le_u32: 1 hit(s) at offsets [128526]
+  uuid_de5bf72a_le_u32: 1 hit(s) at offsets [128470]
+  uuid_180a_le_u16: 9 hit(s) at offsets [7809, 10258, 16244, 39836, 39968, 62127, 109190, 114538]
+  uuid_2a26_le_u16: 2 hit(s) at offsets [48193, 128290]
+  uuid_2a27_le_u16: 2 hit(s) at offsets [42769, 128234]
+  uuid_2a28_le_u16: 6 hit(s) at offsets [2839, 26441, 83964, 104789, 123292, 128947]
+  uuid_180a_le_u32: 6 hit(s) at offsets [73536, 108056, 130084, 131972, 132120, 133696]
+  uuid_2902_le_u16: 41 hit(s) at offsets [8598, 23228, 24890, 27716, 29436, 30842, 32226, 32352]
+  opcode_0x01: count=4358, first5=[182, 552, 1312, 1320, 1332], last=137801
+  opcode_0x02: count=2287, first5=[6, 10, 90, 1124, 1134], last=136501
+  opcode_0x10: count=1736, first5=[177, 1120, 1130, 1140, 1150], last=137802
+  opcode_0x12: count=536, first5=[183, 1368, 2094, 2638, 3488], last=136597
+  opcode_0x1d: count=352, first5=[1520, 1522, 1766, 2093, 2095], last=134404
+  opcode_0x1f: count=310, first5=[1156, 1162, 1654, 1850, 2132], last=136463
+  opcode_0x29: count=852, first5=[1123, 1133, 1143, 1290, 1644], last=137666
+  opcode_0x2a: count=502, first5=[1371, 1422, 1698, 2804, 2840], last=135480
+  opcode_0x2f: count=152, first5=[1412, 1778, 2948, 4846, 9426], last=137658
+  opcode_0x32: count=297, first5=[30, 2020, 2022, 2023, 2844], last=137525
+  opcode_0x3c: count=226, first5=[1868, 2119, 2173, 2299, 3620], last=136034
+  opcode_0x3d: count=101, first5=[1792, 3558, 4108, 4914, 5960], last=136950
+  opcode_0x3f: count=126, first5=[4200, 4590, 8288, 10603, 11542], last=136461
+  opcode_0x73: count=334, first5=[184, 1142, 1803, 1807, 1867], last=137522
+  opcode_0x78: count=1332, first5=[1132, 1622, 3077, 3155, 3407], last=137748
+  opcode_0xbc: count=90, first5=[2109, 2858, 5220, 6454, 6537], last=132619
+  crc16_a001_le: 1 hit(s) at offsets [129296]
+  crc16_1021_le: 29 hit(s) at offsets [9683, 9695, 9717, 9745, 9757, 9929, 9941, 9967]
+
+=== v13_body (size=144448) ===
+  header_magic_e5c3bd81: 0 hits
+  channelB_magic_0xbc: 93 hit(s) at offsets [538, 814, 1225, 1974, 3858, 5522, 5605, 5609]
+  uuid_6e400002_raw_le: 1 hit(s) at offsets [134806]
+  uuid_6e40_le_u16: 6 hit(s) at offsets [9663, 42663, 76350, 134734, 134808, 134864]
+  uuid_6e400003_le_u16: 2 hit(s) at offsets [91437, 118378]
+  uuid_6e400003_le_u32: 1 hit(s) at offsets [134862]
+  uuid_fff0_le_u16: 14 hit(s) at offsets [3681, 11261, 16011, 22539, 36755, 41571, 55393, 98834]
+  uuid_de5bf728_le_u32: 1 hit(s) at offsets [134536]
+  uuid_de5bf729_le_u32: 1 hit(s) at offsets [134666]
+  uuid_de5bf72a_le_u32: 1 hit(s) at offsets [134610]
+  uuid_180a_le_u16: 9 hit(s) at offsets [6877, 9326, 15312, 38804, 38936, 61003, 113138, 118458]
+  uuid_2a26_le_u16: 3 hit(s) at offsets [47161, 129865, 134430]
+  uuid_2a27_le_u16: 2 hit(s) at offsets [41737, 134374]
+  uuid_2a28_le_u16: 6 hit(s) at offsets [1955, 25499, 82828, 108293, 127156, 135087]
+  uuid_180a_le_u32: 6 hit(s) at offsets [72400, 111592, 136224, 138112, 138260, 140028]
+  uuid_2902_le_u16: 43 hit(s) at offsets [7666, 22284, 23946, 26774, 28476, 29818, 31202, 31328]
+  opcode_0x01: count=4611, first5=[82, 192, 428, 436, 448], last=144445
+  opcode_0x02: count=2421, first5=[20, 30, 40, 50, 60], last=143133
+  opcode_0x10: count=1806, first5=[16, 26, 36, 46, 56], last=144446
+  opcode_0x12: count=541, first5=[484, 1210, 1754, 2604, 3504], last=143229
+  opcode_0x1d: count=365, first5=[636, 638, 882, 1209, 1211], last=141004
+  opcode_0x1f: count=300, first5=[242, 276, 770, 966, 1248], last=143095
+  opcode_0x29: count=882, first5=[19, 29, 39, 49, 59], last=144310
+  opcode_0x2a: count=511, first5=[154, 487, 1920, 1956, 2309], last=142112
+  opcode_0x2f: count=166, first5=[144, 894, 8494, 9006, 9486], last=144302
+  opcode_0x32: count=402, first5=[1136, 1138, 1139, 1960, 4184], last=144169
+  opcode_0x3c: count=284, first5=[984, 1235, 1289, 1415, 2736], last=142666
+  opcode_0x3d: count=119, first5=[908, 1632, 2674, 3224, 4752], last=143594
+  opcode_0x3f: count=139, first5=[4004, 7356, 7650, 9671, 10642], last=143093
+  opcode_0x73: count=375, first5=[208, 352, 410, 919, 923], last=144166
+  opcode_0x78: count=1385, first5=[128, 342, 738, 2193, 2271], last=144417
+  opcode_0xbc: count=93, first5=[538, 814, 1225, 1974, 3858], last=138938
+  crc16_a001_le: 1 hit(s) at offsets [135436]
+  crc16_1021_le: 33 hit(s) at offsets [8751, 8763, 8785, 8813, 8825, 8997, 9009, 9035]
+
+=== v14_body (size=136700) ===
+  header_magic_e5c3bd81: 0 hits
+  channelB_magic_0xbc: 90 hit(s) at offsets [1005, 1754, 4116, 5350, 5433, 5437, 6038, 6048]
+  uuid_6e400002_raw_le: 1 hit(s) at offsets [127562]
+  uuid_6e40_le_u16: 6 hit(s) at offsets [9491, 42591, 76382, 127490, 127564, 127620]
+  uuid_6e400003_le_u16: 2 hit(s) at offsets [91477, 113354]
+  uuid_6e400003_le_u32: 1 hit(s) at offsets [127618]
+  uuid_fff0_le_u16: 9 hit(s) at offsets [11057, 17367, 25114, 84437, 98666, 113580, 127488, 130504]
+  uuid_de5bf728_le_u32: 1 hit(s) at offsets [127292]
+  uuid_de5bf729_le_u32: 1 hit(s) at offsets [127422]
+  uuid_de5bf72a_le_u32: 1 hit(s) at offsets [127366]
+  uuid_180a_le_u16: 9 hit(s) at offsets [6705, 9154, 15140, 38732, 38864, 61023, 108086, 113434]
+  uuid_2a26_le_u16: 2 hit(s) at offsets [47089, 127186]
+  uuid_2a27_le_u16: 2 hit(s) at offsets [41665, 127130]
+  uuid_2a28_le_u16: 6 hit(s) at offsets [1735, 25337, 82860, 103685, 122188, 127843]
+  uuid_180a_le_u32: 6 hit(s) at offsets [72432, 106952, 128980, 130868, 131016, 132592]
+  uuid_2902_le_u16: 41 hit(s) at offsets [7494, 22124, 23786, 26612, 28332, 29738, 31122, 31248]
+  opcode_0x01: count=4356, first5=[208, 216, 228, 442, 454], last=136697
+  opcode_0x02: count=2284, first5=[20, 30, 40, 232, 238], last=135397
+  opcode_0x10: count=1735, first5=[16, 26, 36, 46, 50], last=136698
+  opcode_0x12: count=535, first5=[264, 990, 1534, 2384, 3284], last=135493
+  opcode_0x1d: count=352, first5=[416, 418, 662, 989, 991], last=133300
+  opcode_0x1f: count=310, first5=[52, 58, 550, 746, 1028], last=135359
+  opcode_0x29: count=852, first5=[19, 29, 39, 186, 540], last=136562
+  opcode_0x2a: count=502, first5=[267, 318, 594, 1700, 1736], last=134376
+  opcode_0x2f: count=152, first5=[308, 674, 1844, 3742, 8322], last=136554
+  opcode_0x32: count=296, first5=[916, 918, 919, 1740, 3790], last=136421
+  opcode_0x3c: count=226, first5=[764, 1015, 1069, 1195, 2516], last=134930
+  opcode_0x3d: count=101, first5=[688, 2454, 3004, 3810, 4856], last=135846
+  opcode_0x3f: count=126, first5=[3096, 3486, 7184, 9499, 10438], last=135357
+  opcode_0x73: count=333, first5=[38, 699, 703, 763, 767], last=136418
+  opcode_0x78: count=1332, first5=[28, 518, 1973, 2051, 2303], last=136644
+  opcode_0xbc: count=90, first5=[1005, 1754, 4116, 5350, 5433], last=131515
+  crc16_a001_le: 1 hit(s) at offsets [128192]
+  crc16_1021_le: 29 hit(s) at offsets [8579, 8591, 8613, 8641, 8653, 8825, 8837, 8863]

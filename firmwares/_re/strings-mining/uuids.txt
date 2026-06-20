@@ -1,0 +1,8 @@
+=== PRINTABLE UUIDs (8-4-4-4-12) v13 ===
+(none)
+=== PRINTABLE UUIDs v14 ===
+(none)
+=== 32-hex (UUID base) v13 ===
+(none)
+=== 32-hex v14 ===
+(none)
