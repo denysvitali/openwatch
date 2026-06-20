@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import '../ble/fee7_service.dart';
 import '../services/app_log.dart';
+import 'channel_a.dart';
 import 'codec.dart';
 import 'opcodes.dart';
 
@@ -25,6 +26,7 @@ class Fee7Dispatcher {
   final _spo2Hr = StreamController<SpO2HrUpdate>.broadcast();
   final _capability = StreamController<CapabilityBlock>.broadcast();
   final _bloodOxygen = StreamController<BloodOxygenUpdate>.broadcast();
+  final _hrv = StreamController<HrvSetting>.broadcast();
   final _handshake = StreamController<HandshakeResponse>.broadcast();
   final _alert = StreamController<AlertTrigger>.broadcast();
   final _findPhone = StreamController<FindPhoneEvent>.broadcast();
@@ -45,6 +47,13 @@ class Fee7Dispatcher {
 
   /// `0x3e` SpO2 read or set.
   Stream<BloodOxygenUpdate> get onBloodOxygen => _bloodOxygen.stream;
+
+  /// HRV setting (`0x39` on the 0xFEE7 service). Mirrors the
+  /// Channel-A path but the wire shape lives in
+  /// `FUN_0082c9da` (see `GHIDRA_DECOMPILATION.md` §8.1). For
+  /// now we surface the same `HrvSetting` shape; specialised
+  /// payload decode can be added when the producer side ships.
+  Stream<HrvSetting> get onHrv => _hrv.stream;
 
   /// `0x48` 'H' handshake — 15-byte device-info payload.
   Stream<HandshakeResponse> get onHandshake => _handshake.stream;
@@ -111,6 +120,15 @@ class Fee7Dispatcher {
         _capability.add(_decodeCapabilityBlock(frame));
       case Fee7.bloodOxygenUpdate:
         _bloodOxygen.add(_decodeBloodOxygenUpdate(pl));
+      case Fee7.hrv:
+        // Reuse the Channel-A HrvSetting shape until the fee7
+        // producer-side payload details are pinned down.
+        _hrv.add(
+          HrvSetting(
+            enabled: pl.isNotEmpty && pl[0] != 0,
+            intervalMinutes: pl.length >= 3 ? pl[2] : 0,
+          ),
+        );
       case Fee7.handshakeResponse:
         _handshake.add(_decodeHandshakeResponse(frame, pl));
       case Fee7.alertTrigger:
@@ -225,6 +243,7 @@ class Fee7Dispatcher {
       _spo2Hr,
       _capability,
       _bloodOxygen,
+      _hrv,
       _handshake,
       _alert,
       _findPhone,

@@ -157,6 +157,7 @@ class Fee7 {
 
   // Health
   static const int spo2HrUpdate = 0x36; // SpO2/HR read or set
+  static const int hrv = 0x39; // HRV read/set (FUN_0082c9da)
   static const int capabilityBlock = 0x3c; // Returns fixed device-cap block
   static const int bloodOxygenUpdate = 0x3e; // SpO2 read/set
 

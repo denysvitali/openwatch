@@ -156,6 +156,23 @@ void main() {
       await svc.dispose();
     });
 
+    test('routes 0x39 HRV setting to onHrv stream', () async {
+      final host = _StubHost();
+      final svc = Fee7Service.attach(host);
+      final d = Fee7Dispatcher(svc);
+      d.bind();
+
+      final got = d.onHrv.first;
+      // pl[0] = enabled flag (non-zero → true), pl[2] = interval minutes.
+      final frame = Codec.buildChannelA(Fee7.hrv, [0x01, 0x00, 30]);
+      host.inbound.add(frame);
+
+      final s = await got.timeout(const Duration(seconds: 1));
+      expect(s.enabled, isTrue);
+      expect(s.intervalMinutes, 30);
+      await svc.dispose();
+    });
+
     test('routes 0x3e blood-oxygen update', () async {
       final host = _StubHost();
       final svc = Fee7Service.attach(host);
