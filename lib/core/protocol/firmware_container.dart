@@ -130,7 +130,8 @@ class FirmwareContainer {
       VerificationCheck(
         name: 'body_size',
         passed: header.bodySize > 0 && header.bodySize <= maxBody,
-        detail: 'header.bodySize=${header.bodySize} '
+        detail:
+            'header.bodySize=${header.bodySize} '
             'max=$maxBody',
       ),
     );
@@ -147,7 +148,8 @@ class FirmwareContainer {
         VerificationCheck(
           name: 'image_chk_a',
           passed: (header.imageChkA & 0x00FFFFFF) == computed,
-          detail: 'header.imageChkA=0x${header.imageChkA.toRadixString(16)} '
+          detail:
+              'header.imageChkA=0x${header.imageChkA.toRadixString(16)} '
               'computed=0x${computed.toRadixString(16)}',
         ),
       );
@@ -158,7 +160,8 @@ class FirmwareContainer {
         VerificationCheck(
           name: 'image_chk_a_whitelist',
           passed: (header.imageChkA & 0x00FFFFFF) == whitelist,
-          detail: 'header.imageChkA=0x${header.imageChkA.toRadixString(16)} '
+          detail:
+              'header.imageChkA=0x${header.imageChkA.toRadixString(16)} '
               'whitelist=0x${whitelist.toRadixString(16)}',
         ),
       );
@@ -199,7 +202,8 @@ class FirmwareContainer {
         VerificationCheck(
           name: 'flash_app_end',
           passed: header.flashAppEnd == expectedEnd,
-          detail: 'flashAppStart=0x${header.flashAppStart.toRadixString(16)} '
+          detail:
+              'flashAppStart=0x${header.flashAppStart.toRadixString(16)} '
               'loadSize=0x${header.loadSize.toRadixString(16)} '
               'flashAppEnd=0x${header.flashAppEnd.toRadixString(16)} '
               'expected=0x${expectedEnd.toRadixString(16)}',

@@ -102,8 +102,8 @@ class HistorySync extends ChangeNotifier {
     this.onTotals, {
     ChannelADispatcher? dispatcher,
     ChannelBParser? bParser,
-  })  : _dispatcher = dispatcher,
-        _bParser = bParser {
+  }) : _dispatcher = dispatcher,
+       _bParser = bParser {
     _inbound = transport.inboundA.listen(_collectRx);
     // Channel-B sleep responses (`0x27` night + `0x3e` lunch per
     // PROTOCOL.md §4.4) only flow through the BC-fragmented
@@ -129,10 +129,14 @@ class HistorySync extends ChangeNotifier {
   // streams. Constructing one wires two broadcast subscriptions on
   // the dispatcher — defer until the first listener so a host that
   // never reads pressure/HRV records pays zero cost.
-  FragmentReassembler<PressureSettingHeader, PressureSettingChunk,
-      PressureRecord>? _pressureReassembler;
+  FragmentReassembler<
+    PressureSettingHeader,
+    PressureSettingChunk,
+    PressureRecord
+  >?
+  _pressureReassembler;
   FragmentReassembler<HrvSettingHeader, HrvSettingChunk, HrvRecord>?
-      _hrvReassembler;
+  _hrvReassembler;
   StreamSubscription<PressureRecord>? _pressureRecordsSub;
   StreamSubscription<HrvRecord>? _hrvRecordsSub;
 
@@ -154,28 +158,32 @@ class HistorySync extends ChangeNotifier {
         'HistorySync.pressureRecords requires a ChannelADispatcher',
       );
     }
-    final reassembler = FragmentReassembler<PressureSettingHeader,
-        PressureSettingChunk, PressureRecord>(
-      headers: dispatcher.onPressureSettingHeader,
-      chunks: dispatcher.onPressureSettingChunk,
-      build: (header, payload) => PressureRecord(
-        slotId: header.slotId,
-        header: Uint8List.sublistView(
-          payload,
-          0,
-          payload.length < 4 ? payload.length : 4,
-        ),
-        body: Uint8List.sublistView(
-          payload,
-          payload.length < 4 ? payload.length : 4,
-          payload.length,
-        ),
-      ),
-      // 250 ms quiet window — same as the helper default; long
-      // enough to coalesce the 4-chunk sequence the firmware
-      // emits via FUN_0082c988, short enough for responsive UI.
-      quietWindow: const Duration(milliseconds: 250),
-    );
+    final reassembler =
+        FragmentReassembler<
+          PressureSettingHeader,
+          PressureSettingChunk,
+          PressureRecord
+        >(
+          headers: dispatcher.onPressureSettingHeader,
+          chunks: dispatcher.onPressureSettingChunk,
+          build: (header, payload) => PressureRecord(
+            slotId: header.slotId,
+            header: Uint8List.sublistView(
+              payload,
+              0,
+              payload.length < 4 ? payload.length : 4,
+            ),
+            body: Uint8List.sublistView(
+              payload,
+              payload.length < 4 ? payload.length : 4,
+              payload.length,
+            ),
+          ),
+          // 250 ms quiet window — same as the helper default; long
+          // enough to coalesce the 4-chunk sequence the firmware
+          // emits via FUN_0082c988, short enough for responsive UI.
+          quietWindow: const Duration(milliseconds: 250),
+        );
     _pressureReassembler = reassembler;
     return reassembler.assembled;
   }
@@ -192,23 +200,23 @@ class HistorySync extends ChangeNotifier {
     }
     final reassembler =
         FragmentReassembler<HrvSettingHeader, HrvSettingChunk, HrvRecord>(
-      headers: dispatcher.onHrvHeader,
-      chunks: dispatcher.onHrvChunk,
-      build: (header, payload) => HrvRecord(
-        slotId: header.slotId,
-        header: Uint8List.sublistView(
-          payload,
-          0,
-          payload.length < 4 ? payload.length : 4,
-        ),
-        body: Uint8List.sublistView(
-          payload,
-          payload.length < 4 ? payload.length : 4,
-          payload.length,
-        ),
-      ),
-      quietWindow: const Duration(milliseconds: 250),
-    );
+          headers: dispatcher.onHrvHeader,
+          chunks: dispatcher.onHrvChunk,
+          build: (header, payload) => HrvRecord(
+            slotId: header.slotId,
+            header: Uint8List.sublistView(
+              payload,
+              0,
+              payload.length < 4 ? payload.length : 4,
+            ),
+            body: Uint8List.sublistView(
+              payload,
+              payload.length < 4 ? payload.length : 4,
+              payload.length,
+            ),
+          ),
+          quietWindow: const Duration(milliseconds: 250),
+        );
     _hrvReassembler = reassembler;
     return reassembler.assembled;
   }

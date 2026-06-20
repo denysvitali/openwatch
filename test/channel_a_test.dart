@@ -574,8 +574,7 @@ void main() {
       },
     );
 
-    test(
-        '0xC6 frame WITHOUT outbound mark goes to onQueryDataDistribution '
+    test('0xC6 frame WITHOUT outbound mark goes to onQueryDataDistribution '
         '(default — no spurious onRestoreKey)', () async {
       // When the host hasn't called either markRebootRequest() or
       // markDistributionQuery(), a 0xC6 frame must NOT fire

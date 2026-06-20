@@ -261,7 +261,8 @@ void main() {
         expect(
           r.body,
           [...body, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE],
-          reason: 'producer header is 4 B, body is the remaining 52 B '
+          reason:
+              'producer header is 4 B, body is the remaining 52 B '
               'from 4 × 14-byte frames',
         );
         await sub.cancel();
@@ -270,8 +271,7 @@ void main() {
       },
     );
 
-    test(
-        'hrvSetting 0x39 header + 4 chunks assembles into one '
+    test('hrvSetting 0x39 header + 4 chunks assembles into one '
         'HrvRecord (regression for §3.21 two-phase wire format)', () async {
       final t = _StubTransport();
       final d = ChannelADispatcher(t);
@@ -308,8 +308,7 @@ void main() {
       d.dispose();
     });
 
-    test(
-        'pressureSetting 0x37 two back-to-back records emit two '
+    test('pressureSetting 0x37 two back-to-back records emit two '
         'PressureRecords (regression for reassembler over multiple '
         'phases)', () async {
       final t = _StubTransport();
@@ -434,8 +433,7 @@ void main() {
       d.dispose();
     });
 
-    test(
-        'pressureSetting 0x37 quiet-period flush emits in-flight record '
+    test('pressureSetting 0x37 quiet-period flush emits in-flight record '
         'after 250 ms with no further header (regression for reassembler '
         'quiet-window timer)', () async {
       final t = _StubTransport();
@@ -496,8 +494,7 @@ void main() {
     // — the sleep list was always empty.
     // ------------------------------------------------------------------
 
-    test(
-        'Channel-B 0x27 night sleep frame populates HistorySync.sleep '
+    test('Channel-B 0x27 night sleep frame populates HistorySync.sleep '
         '(regression for missing Ch-B sleep consumer)', () async {
       final t = _StubTransport();
       final d = ChannelADispatcher(t);
@@ -521,10 +518,11 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 30));
 
       expect(sync.sleep, hasLength(3));
-      expect(
-        sync.sleep.map((s) => s.stage),
-        [SleepStage.light, SleepStage.deep, SleepStage.rem],
-      );
+      expect(sync.sleep.map((s) => s.stage), [
+        SleepStage.light,
+        SleepStage.deep,
+        SleepStage.rem,
+      ]);
       expect(sync.sleep[0].duration.inMinutes, 30);
       expect(sync.sleep[1].duration.inMinutes, 90);
       expect(sync.sleep[2].duration.inMinutes, 60);
@@ -533,30 +531,32 @@ void main() {
       b.dispose();
     });
 
-    test('Channel-B 0x3e lunch sleep frame populates HistorySync.sleep',
-        () async {
-      final t = _StubTransport();
-      final d = ChannelADispatcher(t);
-      d.bind();
-      final b = ChannelBParser(t);
-      b.bind();
-      final sync = HistorySync(t, (_) {}, dispatcher: d, bParser: b);
+    test(
+      'Channel-B 0x3e lunch sleep frame populates HistorySync.sleep',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final b = ChannelBParser(t);
+        b.bind();
+        final sync = HistorySync(t, (_) {}, dispatcher: d, bParser: b);
 
-      final lunchPayload = Uint8List.fromList([
-        0x3C, 0x00, // endMin 60 (13:00)
-        0x01, 0x3C, // light 60
-      ]);
-      t.inB.add(Codec.buildChannelB(OpB.sleepLunchNew, lunchPayload));
+        final lunchPayload = Uint8List.fromList([
+          0x3C, 0x00, // endMin 60 (13:00)
+          0x01, 0x3C, // light 60
+        ]);
+        t.inB.add(Codec.buildChannelB(OpB.sleepLunchNew, lunchPayload));
 
-      await Future<void>.delayed(const Duration(milliseconds: 30));
+        await Future<void>.delayed(const Duration(milliseconds: 30));
 
-      expect(sync.sleep, hasLength(1));
-      expect(sync.sleep.single.stage, SleepStage.light);
-      expect(sync.sleep.single.duration.inMinutes, 60);
-      sync.dispose();
-      d.dispose();
-      b.dispose();
-    });
+        expect(sync.sleep, hasLength(1));
+        expect(sync.sleep.single.stage, SleepStage.light);
+        expect(sync.sleep.single.duration.inMinutes, 60);
+        sync.dispose();
+        d.dispose();
+        b.dispose();
+      },
+    );
 
     test('syncAll sends both 0x27 night and 0x3e lunch on Channel-B', () async {
       final t = _StubTransport();

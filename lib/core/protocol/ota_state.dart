@@ -86,7 +86,8 @@ class OtaStateMachine {
   bool transition(OtaPhase next) {
     final allowed = _allowedTransitions[session.phase]!;
     if (!allowed.contains(next)) {
-      final msg = 'illegal transition ${session.phase.name} → ${next.name} '
+      final msg =
+          'illegal transition ${session.phase.name} → ${next.name} '
           '(allowed: ${allowed.map((e) => e.name).join(", ")})';
       session.errorMessage = msg;
       session.phase = OtaPhase.error;

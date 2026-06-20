@@ -17,10 +17,7 @@ void main() {
         0x02, 0x5A, // deep,  90 min
         0x03, 0x3C, // rem,   60 min
       ]);
-      final segs = SleepParser.parseNightSleepSegments(
-        pl,
-        anchor: anchor,
-      );
+      final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
       expect(segs, hasLength(3));
       expect(segs[0].stage, SleepStage.light);
       expect(segs[0].duration.inMinutes, 30);
@@ -47,10 +44,7 @@ void main() {
         0x02, 0x5A, // deep 90
         0x03, 0x3C, // rem 60
       ]);
-      final segs = SleepParser.parseNightSleepSegments(
-        pl,
-        anchor: anchor,
-      );
+      final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
       expect(segs, hasLength(3));
       expect(segs.map((s) => s.stage), [
         SleepStage.light,
@@ -69,10 +63,7 @@ void main() {
         0xF0, 0x00, // endMin 240 = 04:00
         0x03, 0x3C, // rem 60
       ]);
-      final segs = SleepParser.parseNightSleepSegments(
-        pl,
-        anchor: anchor,
-      );
+      final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
       expect(segs, hasLength(3));
       // Block #2 is just one REM segment starting at 03:00.
       expect(segs[2].stage, SleepStage.rem);
@@ -82,10 +73,7 @@ void main() {
 
     test('returns an empty list for an empty payload', () {
       expect(
-        SleepParser.parseNightSleepSegments(
-          Uint8List(0),
-          anchor: anchor,
-        ),
+        SleepParser.parseNightSleepSegments(Uint8List(0), anchor: anchor),
         isEmpty,
       );
     });
@@ -104,13 +92,7 @@ void main() {
       // endMin = 0xFFFF (65535) is garbage; the parser bails out
       // and returns an empty list rather than emitting nonsense.
       final pl = Uint8List.fromList([0xFF, 0xFF, 0x01, 0x1E]);
-      expect(
-        SleepParser.parseNightSleepSegments(
-          pl,
-          anchor: anchor,
-        ),
-        isEmpty,
-      );
+      expect(SleepParser.parseNightSleepSegments(pl, anchor: anchor), isEmpty);
     });
 
     test('maps unknown stage bytes to SleepStage.awake', () {
@@ -120,10 +102,7 @@ void main() {
         0x2A, 0x00, // endMin = 42
         0x09, 0x14, // unknown 0x09 → awake, 20 min
       ]);
-      final segs = SleepParser.parseNightSleepSegments(
-        pl,
-        anchor: anchor,
-      );
+      final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
       expect(segs.single.stage, SleepStage.awake);
       expect(segs.single.duration.inMinutes, 20);
     });
@@ -138,10 +117,7 @@ void main() {
         0x0C, 0x03, // endMin 780 (13:00)
         0x01, 0x3C, // light 60 min
       ]);
-      final segs = SleepParser.parseLunchSleepSegments(
-        pl,
-        anchor: anchor,
-      );
+      final segs = SleepParser.parseLunchSleepSegments(pl, anchor: anchor);
       expect(segs.single.stage, SleepStage.light);
       expect(segs.single.duration.inMinutes, 60);
       expect(segs.single.start, DateTime(2026, 6, 20, 12, 0));
@@ -149,10 +125,7 @@ void main() {
 
     test('returns an empty list for an empty payload', () {
       expect(
-        SleepParser.parseLunchSleepSegments(
-          Uint8List(0),
-          anchor: anchor,
-        ),
+        SleepParser.parseLunchSleepSegments(Uint8List(0), anchor: anchor),
         isEmpty,
       );
     });

@@ -120,12 +120,12 @@ class DashboardScreen extends ConsumerWidget {
   }
 
   String _describe(LinkState s) => switch (s) {
-        LinkState.ready => 'Connected',
-        LinkState.connecting => 'Connecting…',
-        LinkState.discovering => 'Discovering services…',
-        LinkState.readingDeviceInfo => 'Reading device info…',
-        LinkState.disconnected => 'Disconnected',
-      };
+    LinkState.ready => 'Connected',
+    LinkState.connecting => 'Connecting…',
+    LinkState.discovering => 'Discovering services…',
+    LinkState.readingDeviceInfo => 'Reading device info…',
+    LinkState.disconnected => 'Disconnected',
+  };
 }
 
 class _MetricCard extends StatelessWidget {

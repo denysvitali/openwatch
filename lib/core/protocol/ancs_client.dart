@@ -222,7 +222,7 @@ class AncsNotification extends AncsEvent {
 /// attribute payload from `FUN_00839fee`.
 class AncsDataSource extends AncsEvent {
   const AncsDataSource({required int clientId, required this.payload})
-      : super(clientId);
+    : super(clientId);
   final Uint8List payload;
 }
 
@@ -231,7 +231,7 @@ class AncsDataSource extends AncsEvent {
 /// subtitle, etc.
 class AncsDataAttribute extends AncsEvent {
   const AncsDataAttribute({required int clientId, required this.payload})
-      : super(clientId);
+    : super(clientId);
   final Uint8List payload;
 }
 

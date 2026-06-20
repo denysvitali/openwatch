@@ -181,8 +181,9 @@ class Fee7Dispatcher {
     final fixed = frame.length >= 6
         ? Uint8List.sublistView(frame, 0, 6)
         : Uint8List.fromList(frame);
-    final tail =
-        frame.length > 6 ? Uint8List.sublistView(frame, 6) : Uint8List(0);
+    final tail = frame.length > 6
+        ? Uint8List.sublistView(frame, 6)
+        : Uint8List(0);
     return CapabilityBlock(fixed: fixed, tail: tail);
   }
 
@@ -320,7 +321,7 @@ class SpO2HrUpdate {
 /// preserved in [tail] for diagnostics.
 class CapabilityBlock {
   CapabilityBlock({required this.fixed, Uint8List? tail})
-      : tail = tail ?? _empty;
+    : tail = tail ?? _empty;
   final Uint8List fixed;
   final Uint8List tail;
 }

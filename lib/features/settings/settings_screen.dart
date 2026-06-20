@@ -203,9 +203,9 @@ class _SectionHeader extends StatelessWidget {
       child: Text(
         title.toUpperCase(),
         style: Theme.of(context).textTheme.labelMedium?.copyWith(
-              color: Theme.of(context).colorScheme.primary,
-              letterSpacing: 1,
-            ),
+          color: Theme.of(context).colorScheme.primary,
+          letterSpacing: 1,
+        ),
       ),
     );
   }

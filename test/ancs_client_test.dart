@@ -25,20 +25,16 @@ void main() {
         final id = c.addClient();
         // 8-byte ANCS notification source: added(0), flags=0, cat=1, count=2.
         // action byte = 0x01 ("modified") per GHIDRA_DECOMPILATION.md §4.1.
-        c.onFirmwareEvent(
-            1,
-            id,
-            [
-              0x00,
-              0x00,
-              0x01,
-              0x00,
-              0x00,
-              0x00,
-              0x02,
-              0x00,
-            ],
-            action: 0x01);
+        c.onFirmwareEvent(1, id, [
+          0x00,
+          0x00,
+          0x01,
+          0x00,
+          0x00,
+          0x00,
+          0x02,
+          0x00,
+        ], action: 0x01);
         await Future<void>.delayed(const Duration(milliseconds: 50));
         expect(events.length, greaterThanOrEqualTo(2));
         final notification = events.whereType<AncsNotification>().first;

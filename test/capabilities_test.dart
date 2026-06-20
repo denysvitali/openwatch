@@ -24,8 +24,7 @@ void main() {
       expect(caps.sleep, isTrue);
     });
 
-    test(
-        'flags bloodOxygen + bloodPressure + weather + customWallpaper '
+    test('flags bloodOxygen + bloodPressure + weather + customWallpaper '
         'from pl[3]', () {
       // pl[3] = 0b0010_0111 = 0x27.
       final caps = DeviceCapabilities.fromSetTime(setTimePayload({3: 0x27}));

@@ -34,8 +34,8 @@ class ChannelBParser {
   ChannelBParser(
     this._transport, {
     this.fragmentTimeout = const Duration(seconds: 2),
-  })  : _inboundB = _transport.inboundB,
-        _sendA = _transport.sendA;
+  }) : _inboundB = _transport.inboundB,
+       _sendA = _transport.sendA;
 
   final BleTransport _transport;
   final Stream<Uint8List> _inboundB;
@@ -65,11 +65,11 @@ class ChannelBParser {
 
   /// Subscribes to the transport and starts feeding the parser. Idempotent.
   StreamSubscription<Uint8List> bind() => _inboundB.listen(
-        _onChunk,
-        onError: (Object e, StackTrace _) {
-          _log.error('chb', 'inbound stream error: $e');
-        },
-      );
+    _onChunk,
+    onError: (Object e, StackTrace _) {
+      _log.error('chb', 'inbound stream error: $e');
+    },
+  );
 
   /// Builds an ACK/NAK for Channel-B responses (mirrors `FUN_0082ee00`).
   ///

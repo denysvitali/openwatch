@@ -73,9 +73,9 @@ class Commands {
   /// completing as "reset accepted". See
   /// `GHIDRA_DECOMPILATION.md` §3.8.
   static Uint8List factoryReset() => Codec.buildChannelA(
-        OpA.factoryReset,
-        const [0x66, 0x66, 0x66], // "fff" magic
-      );
+    OpA.factoryReset,
+    const [0x66, 0x66, 0x66], // "fff" magic
+  );
 
   /// `RestoreKeyReq` (`0x66`): restore-key sequence (separate from the
   /// factory reset above — this is the "send restore confirm" path).
@@ -116,9 +116,9 @@ class Commands {
   /// hdr `[0]=00`{size, range}, data `[0]=01`{ts i32 LE + samples}, `0xFF`=end.
   /// Samples are 13-byte stride (per §4.3).
   static Uint8List readHeartRateHistory(DateTime since) => Codec.buildChannelA(
-        OpA.readHeartRate,
-        Codec.u32le(since.toUtc().millisecondsSinceEpoch ~/ 1000),
-      );
+    OpA.readHeartRate,
+    Codec.u32le(since.toUtc().millisecondsSinceEpoch ~/ 1000),
+  );
 
   /// New sleep protocol (Channel-B `0x27`) for a given day offset. Sent as
   /// a framed BC/27/len/crc/payload frame; see PROTOCOL.md §4.4.
@@ -141,9 +141,9 @@ class Commands {
   /// `PROTOCOL.md` §4.3).
   @Deprecated('Use readHeartRateHistory; wire format is identical.')
   static Uint8List readHeartRate(DateTime since) => Codec.buildChannelA(
-        OpA.readHeartRate,
-        Codec.u32le(since.toUtc().millisecondsSinceEpoch ~/ 1000),
-      );
+    OpA.readHeartRate,
+    Codec.u32le(since.toUtc().millisecondsSinceEpoch ~/ 1000),
+  );
 
   /// `StartHeartRateReq` (0x69): start a live measurement of [type].
   static Uint8List startMeasure(MeasureType type) =>
@@ -220,16 +220,15 @@ class Commands {
     required int maxDeg,
     int humidity = 0,
     bool umbrella = false,
-  }) =>
-      Codec.buildChannelA(OpA.weatherForecast, [
-        index & 0xFF,
-        ...Codec.u32le(time.toUtc().millisecondsSinceEpoch ~/ 1000),
-        weatherType & 0xFF,
-        minDeg & 0xFF,
-        maxDeg & 0xFF,
-        humidity & 0xFF,
-        umbrella ? 1 : 2,
-      ]);
+  }) => Codec.buildChannelA(OpA.weatherForecast, [
+    index & 0xFF,
+    ...Codec.u32le(time.toUtc().millisecondsSinceEpoch ~/ 1000),
+    weatherType & 0xFF,
+    minDeg & 0xFF,
+    maxDeg & 0xFF,
+    humidity & 0xFF,
+    umbrella ? 1 : 2,
+  ]);
 
   /// `SwitchOTARsp` trigger (0x0f): ask the device to enter OTA mode before
   /// the Channel-B DFU flow.
