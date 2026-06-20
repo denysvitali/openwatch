@@ -252,6 +252,35 @@ void main() {
       expect(p.enabled, isFalse);
     });
 
+    test('touchControl 0x3b read decodes sub + batch + config byte', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final got = d.onUvTouch.first;
+      // sub=0x01 (read), batch=0x00 (commit), configByte=0x42.
+      final f = Codec.buildChannelA(OpA.touchControl, [0x01, 0x00, 0x42]);
+      t.inA.add(f);
+      final u = await got.timeout(const Duration(seconds: 1));
+      expect(u.sub, 0x01);
+      expect(u.batchMode, isFalse);
+      expect(u.configByte, 0x42);
+    });
+
+    test(
+      'touchControl 0x3b batch mode (req[1]!=0) sets batchMode=true',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final got = d.onUvTouch.first;
+        final f = Codec.buildChannelA(OpA.touchControl, [0x02, 0x01, 0x42]);
+        t.inA.add(f);
+        final u = await got.timeout(const Duration(seconds: 1));
+        expect(u.sub, 0x02);
+        expect(u.batchMode, isTrue);
+      },
+    );
+
     test('readHeartRate 0x15 header frame fires onHeartRateHeader', () async {
       final t = _StubTransport();
       final d = ChannelADispatcher(t);

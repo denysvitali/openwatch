@@ -395,14 +395,22 @@ class ChannelADispatcher {
     _sugarLipids.add(SugarLipidsSetting(sub: pl[0], value: pl[1]));
   }
 
-  /// `touchControl` (0x3b) / `uvSetting`: config byte.
+  /// `touchControl` (0x3b) / `uvSetting`: 1-byte read/write of the
+  /// UV/touch control byte at `DAT_0082cfe8 + 8`.
+  ///
+  /// Per `FUN_0082cbc8` / `GHIDRA_DECOMPILATION.md` §3.18:
+  ///   `pl[0] = sub-opcode echo (0x01 read / 0x02 write)`
+  ///   `pl[1] = batch-mode flag` (non-zero → don't commit, response
+  ///              is just an echo of the request)
+  ///   `pl[2] = read value (0x01 path)` | `req[3] (0x02 + no-op)`
+  ///
+  /// The rest of the frame is a byte-for-byte echo of the request
+  /// — the handler `memcpy`s the request into the response and
+  /// overwrites only byte 0 (cmd) and byte 2 (read value).
   void _decodeUvTouch(Uint8List pl) {
-    if (pl.length < 2) return;
+    if (pl.length < 3) return;
     _uvTouch.add(
-      UvTouchSetting(
-        touchWake: (pl[1] & 0x01) != 0,
-        uv: pl.length >= 3 ? pl[2] : 0,
-      ),
+      UvTouchSetting(sub: pl[0], configByte: pl[2], batchMode: pl[1] != 0),
     );
   }
 
@@ -784,10 +792,30 @@ class SugarLipidsSetting {
   final int value;
 }
 
+/// UV / touch-screen control-byte response (`0x3b`).
+///
+/// Per `GHIDRA_DECOMPILATION.md` §3.18 the response is mostly an
+/// echo of the request — only [configByte] carries the actual
+/// value (read OR echoed `req[3]`). [batchMode] reflects
+/// `req[1]` (the host's "don't commit" flag).
 class UvTouchSetting {
-  const UvTouchSetting({required this.touchWake, required this.uv});
-  final bool touchWake;
-  final int uv;
+  const UvTouchSetting({
+    required this.sub,
+    required this.configByte,
+    required this.batchMode,
+  });
+
+  /// Sub-opcode echo (0x01 read / 0x02 write).
+  final int sub;
+
+  /// 1-byte UV/touch control value. For the `0x01` read path this
+  /// is the current config byte from `DAT_0082cfe8 + 8`; for
+  /// write paths this echoes `req[3]`.
+  final int configByte;
+
+  /// `true` when `req[1] != 0` (host asked the watch not to
+  /// commit, e.g. for a multi-frame batched write).
+  final bool batchMode;
 }
 
 class SedentaryConfig {
