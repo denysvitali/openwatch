@@ -163,9 +163,7 @@ class ChannelADispatcher {
           _factoryReset.add(null);
         }
       default:
-        _unknown.add(
-          ChannelAFrame(opcode, pl, error: Codec.rxIsError(frame)),
-        );
+        _unknown.add(ChannelAFrame(opcode, pl, error: Codec.rxIsError(frame)));
     }
   }
 
@@ -220,7 +218,10 @@ class ChannelADispatcher {
       if (samples.isNotEmpty) {
         _heartRateRecord.add(
           HeartRateRecord(
-            timestamp: DateTime.fromMillisecondsSinceEpoch(ts * 1000, isUtc: true),
+            timestamp: DateTime.fromMillisecondsSinceEpoch(
+              ts * 1000,
+              isUtc: true,
+            ),
             samples: samples,
           ),
         );
@@ -242,11 +243,13 @@ class ChannelADispatcher {
     final value = pl[1];
     final enabled = value != 0;
     final intervalMin = pl.length >= 3 ? pl[2] : 0;
-    _bloodOxygen.add(BloodOxygenSetting(
-      sub: sub,
-      enabled: enabled,
-      intervalMinutes: intervalMin,
-    ));
+    _bloodOxygen.add(
+      BloodOxygenSetting(
+        sub: sub,
+        enabled: enabled,
+        intervalMinutes: intervalMin,
+      ),
+    );
   }
 
   /// `pressure` (0x38): sub `0x01` reads value; else writes unit.
@@ -266,7 +269,10 @@ class ChannelADispatcher {
   void _decodePressureSetting(Uint8List pl) {
     if (pl.length < 2) return;
     _pressureSetting.add(
-      PressureSetting(enabled: pl[1] != 0, intervalMinutes: pl.length >= 3 ? pl[2] : 0),
+      PressureSetting(
+        enabled: pl[1] != 0,
+        intervalMinutes: pl.length >= 3 ? pl[2] : 0,
+      ),
     );
   }
 
@@ -274,23 +280,27 @@ class ChannelADispatcher {
   void _decodeHrv(Uint8List pl) {
     if (pl.length < 2) return;
     _hrv.add(
-      HrvSetting(enabled: pl[1] != 0, intervalMinutes: pl.length >= 3 ? pl[2] : 0),
+      HrvSetting(
+        enabled: pl[1] != 0,
+        intervalMinutes: pl.length >= 3 ? pl[2] : 0,
+      ),
     );
   }
 
   /// `sugarLipidsSetting` (0x3a): sub `0x03`/`0x04` read/write.
   void _decodeSugarLipids(Uint8List pl) {
     if (pl.length < 2) return;
-    _sugarLipids.add(
-      SugarLipidsSetting(sub: pl[0], value: pl[1]),
-    );
+    _sugarLipids.add(SugarLipidsSetting(sub: pl[0], value: pl[1]));
   }
 
   /// `touchControl` (0x3b) / `uvSetting`: config byte.
   void _decodeUvTouch(Uint8List pl) {
     if (pl.length < 2) return;
     _uvTouch.add(
-      UvTouchSetting(touchWake: (pl[1] & 0x01) != 0, uv: pl.length >= 3 ? pl[2] : 0),
+      UvTouchSetting(
+        touchWake: (pl[1] & 0x01) != 0,
+        uv: pl.length >= 3 ? pl[2] : 0,
+      ),
     );
   }
 
@@ -311,7 +321,9 @@ class ChannelADispatcher {
     if (pl.length < 5) return;
     final ts = Codec.readU32le(pl, 1);
     _sportDetail.add(
-      SportDetail(timestamp: DateTime.fromMillisecondsSinceEpoch(ts * 1000, isUtc: true)),
+      SportDetail(
+        timestamp: DateTime.fromMillisecondsSinceEpoch(ts * 1000, isUtc: true),
+      ),
     );
   }
 
@@ -409,11 +421,7 @@ class BloodOxygenSetting {
 }
 
 class PressureReading {
-  const PressureReading({
-    this.systolic = 0,
-    this.diastolic = 0,
-    this.unit = 0,
-  });
+  const PressureReading({this.systolic = 0, this.diastolic = 0, this.unit = 0});
   final int systolic;
   final int diastolic;
 

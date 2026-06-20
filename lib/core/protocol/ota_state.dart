@@ -25,15 +25,7 @@ final _log = AppLog.instance;
 ///
 /// State transitions and required fields are validated before each send so a
 /// stale `init` after `data` cannot silently reset the device.
-enum OtaPhase {
-  idle,
-  started,
-  initialized,
-  data,
-  checking,
-  complete,
-  error,
-}
+enum OtaPhase { idle, started, initialized, data, checking, complete, error }
 
 /// Per-session OTA metadata.
 class OtaSession {

@@ -70,10 +70,12 @@ void main() {
       d.bind();
       final got = d.onPushMsg.first;
       // type, lenLo, lenHi, "Hello" + zero pad
-      final f = Codec.buildChannelA(
-        OpA.pushMsgUint,
-        [0x02, 5, 0, ...'Hello'.codeUnits],
-      );
+      final f = Codec.buildChannelA(OpA.pushMsgUint, [
+        0x02,
+        5,
+        0,
+        ...'Hello'.codeUnits,
+      ]);
       t.inA.add(f);
       final msg = await got.timeout(const Duration(seconds: 1));
       expect(msg.type, 0x02);

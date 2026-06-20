@@ -22,7 +22,16 @@ void main() {
       c.events.listen(events.add);
       final id = c.addClient();
       // 8-byte ANCS notification source: added(0), flags=0, cat=1, count=2
-      c.onFirmwareEvent(1, id, [0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00]);
+      c.onFirmwareEvent(1, id, [
+        0x00,
+        0x00,
+        0x01,
+        0x00,
+        0x00,
+        0x00,
+        0x02,
+        0x00,
+      ]);
       await Future<void>.delayed(const Duration(milliseconds: 50));
       expect(events.length, greaterThanOrEqualTo(2));
       final notification = events.whereType<AncsNotification>().first;

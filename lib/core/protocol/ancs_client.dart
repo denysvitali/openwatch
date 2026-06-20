@@ -116,10 +116,7 @@ class AncsClient {
     if (data.length < 8) return null;
     final eventId = data[0] & 0xFF;
     final flags = data[1] & 0xFF;
-    final cat = data[2] |
-        (data[3] << 8) |
-        (data[4] << 16) |
-        (data[5] << 24);
+    final cat = data[2] | (data[3] << 8) | (data[4] << 16) | (data[5] << 24);
     final count = data[6] | (data[7] << 8);
     return AncsNotificationSource(
       eventId: eventId,
@@ -178,7 +175,7 @@ class AncsDisconnect extends AncsEvent {
 
 class AncsNotification extends AncsEvent {
   AncsNotification({required int clientId, required this.source})
-      : super(clientId);
+    : super(clientId);
   final AncsNotificationSource source;
 
   /// `0` added, `1` modified, `2` removed.
@@ -189,6 +186,6 @@ class AncsNotification extends AncsEvent {
 
 class AncsData extends AncsEvent {
   const AncsData({required int clientId, required this.payload})
-      : super(clientId);
+    : super(clientId);
   final Uint8List payload;
 }

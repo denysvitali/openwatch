@@ -216,10 +216,7 @@ class ChannelBParser {
       return;
     }
 
-    _log.info(
-      'chb',
-      'RX cmd=0x${cmd.toRadixString(16)} len=${payload.length}',
-    );
+    _log.info('chb', 'RX cmd=0x${cmd.toRadixString(16)} len=${payload.length}');
 
     _emit(cmd, payload);
     // Default ACK (status=0) for non-OTA commands — mirrors the firmware's
