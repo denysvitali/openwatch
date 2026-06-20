@@ -73,7 +73,7 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
       setState(
         () => _error =
             'Bluetooth permission is required to scan. Grant "Nearby devices" '
-            'in system settings, then try again.',
+                'in system settings, then try again.',
       );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -102,8 +102,7 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
     // above SDK 30, so requesting it just returns denied).
     final scan = await Permission.bluetoothScan.request();
     final connect = await Permission.bluetoothConnect.request();
-    final bleGranted =
-        (scan.isGranted || scan.isLimited) &&
+    final bleGranted = (scan.isGranted || scan.isLimited) &&
         (connect.isGranted || connect.isLimited);
     if (bleGranted) return true;
 
@@ -148,11 +147,10 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
   Widget build(BuildContext context) {
     final adapter = ref.watch(adapterStateProvider).value;
     final scanning = ref.watch(isScanningProvider).value ?? false;
-    final results =
-        (ref.watch(scanResultsProvider).value ?? <ScanResult>[])
-            .where(_looksLikeWatch)
-            .toList()
-          ..sort((a, b) => b.rssi.compareTo(a.rssi));
+    final results = (ref.watch(scanResultsProvider).value ?? <ScanResult>[])
+        .where(_looksLikeWatch)
+        .toList()
+      ..sort((a, b) => b.rssi.compareTo(a.rssi));
 
     return Scaffold(
       appBar: AppBar(
@@ -229,8 +227,8 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
                       final name = r.device.platformName.isNotEmpty
                           ? r.device.platformName
                           : (r.advertisementData.advName.isNotEmpty
-                                ? r.advertisementData.advName
-                                : '(unknown)');
+                              ? r.advertisementData.advName
+                              : '(unknown)');
                       return ListTile(
                         leading: const Icon(Icons.watch),
                         title: Text(name),

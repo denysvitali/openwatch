@@ -150,11 +150,11 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   }
 
   IconData _iconFor(SleepStage s) => switch (s) {
-    SleepStage.awake => Icons.wb_sunny,
-    SleepStage.light => Icons.bedtime,
-    SleepStage.deep => Icons.nights_stay,
-    SleepStage.rem => Icons.visibility,
-  };
+        SleepStage.awake => Icons.wb_sunny,
+        SleepStage.light => Icons.bedtime,
+        SleepStage.deep => Icons.nights_stay,
+        SleepStage.rem => Icons.visibility,
+      };
 }
 
 class _HrChart extends StatelessWidget {

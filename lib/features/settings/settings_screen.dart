@@ -56,7 +56,6 @@ class SettingsScreen extends ConsumerWidget {
                 ? () => _confirmReset(context, manager.factoryReset)
                 : null,
           ),
-
           const _SectionHeader('Cloud sync'),
           SwitchListTile(
             secondary: Icon(
@@ -96,7 +95,6 @@ class SettingsScreen extends ConsumerWidget {
                 ],
               ),
             ),
-
           const _SectionHeader('Diagnostics'),
           ListTile(
             leading: const Icon(Icons.bug_report_outlined),
@@ -105,7 +103,6 @@ class SettingsScreen extends ConsumerWidget {
             trailing: const Icon(Icons.chevron_right),
             onTap: () => context.push('/logs'),
           ),
-
           const _SectionHeader('About'),
           ListTile(
             leading: const Icon(Icons.link_off),
@@ -206,9 +203,9 @@ class _SectionHeader extends StatelessWidget {
       child: Text(
         title.toUpperCase(),
         style: Theme.of(context).textTheme.labelMedium?.copyWith(
-          color: Theme.of(context).colorScheme.primary,
-          letterSpacing: 1,
-        ),
+              color: Theme.of(context).colorScheme.primary,
+              letterSpacing: 1,
+            ),
       ),
     );
   }

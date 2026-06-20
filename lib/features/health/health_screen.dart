@@ -40,17 +40,15 @@ class HealthScreen extends ConsumerWidget {
             child: Row(
               children: [
                 FilledButton.tonalIcon(
-                  onPressed: (ready && hrSupported)
-                      ? manager.startHeartRate
-                      : null,
+                  onPressed:
+                      (ready && hrSupported) ? manager.startHeartRate : null,
                   icon: const Icon(Icons.play_arrow),
                   label: const Text('Start'),
                 ),
                 const SizedBox(width: 12),
                 OutlinedButton.icon(
-                  onPressed: (ready && hrSupported)
-                      ? manager.stopHeartRate
-                      : null,
+                  onPressed:
+                      (ready && hrSupported) ? manager.stopHeartRate : null,
                   icon: const Icon(Icons.stop),
                   label: const Text('Stop'),
                 ),

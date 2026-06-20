@@ -261,8 +261,7 @@ void main() {
         expect(
           r.body,
           [...body, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE],
-          reason:
-              'producer header is 4 B, body is the remaining 52 B '
+          reason: 'producer header is 4 B, body is the remaining 52 B '
               'from 4 × 14-byte frames',
         );
         await sub.cancel();
@@ -271,7 +270,8 @@ void main() {
       },
     );
 
-    test('hrvSetting 0x39 header + 4 chunks assembles into one '
+    test(
+        'hrvSetting 0x39 header + 4 chunks assembles into one '
         'HrvRecord (regression for §3.21 two-phase wire format)', () async {
       final t = _StubTransport();
       final d = ChannelADispatcher(t);
@@ -308,7 +308,8 @@ void main() {
       d.dispose();
     });
 
-    test('pressureSetting 0x37 two back-to-back records emit two '
+    test(
+        'pressureSetting 0x37 two back-to-back records emit two '
         'PressureRecords (regression for reassembler over multiple '
         'phases)', () async {
       final t = _StubTransport();
@@ -433,7 +434,8 @@ void main() {
       d.dispose();
     });
 
-    test('pressureSetting 0x37 quiet-period flush emits in-flight record '
+    test(
+        'pressureSetting 0x37 quiet-period flush emits in-flight record '
         'after 250 ms with no further header (regression for reassembler '
         'quiet-window timer)', () async {
       final t = _StubTransport();
@@ -494,7 +496,8 @@ void main() {
     // — the sleep list was always empty.
     // ------------------------------------------------------------------
 
-    test('Channel-B 0x27 night sleep frame populates HistorySync.sleep '
+    test(
+        'Channel-B 0x27 night sleep frame populates HistorySync.sleep '
         '(regression for missing Ch-B sleep consumer)', () async {
       final t = _StubTransport();
       final d = ChannelADispatcher(t);
@@ -530,7 +533,8 @@ void main() {
       b.dispose();
     });
 
-    test('Channel-B 0x3e lunch sleep frame populates HistorySync.sleep', () async {
+    test('Channel-B 0x3e lunch sleep frame populates HistorySync.sleep',
+        () async {
       final t = _StubTransport();
       final d = ChannelADispatcher(t);
       d.bind();

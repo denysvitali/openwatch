@@ -13,8 +13,8 @@ import 'settings_service.dart';
 /// auth/signature scheme mirrors the original app (`PROTOCOL.md` §6.2).
 class CloudApi {
   CloudApi({required AppSettings settings})
-    : _settings = settings,
-      _dio = Dio(_baseOptions(settings)) {
+      : _settings = settings,
+        _dio = Dio(_baseOptions(settings)) {
     if (settings.authToken == null) {
       AppLog.instance.warn(
         'cloud',
@@ -97,8 +97,7 @@ class CloudApi {
       return null;
     }
     final map = data.cast<dynamic, dynamic>();
-    final url =
-        map['downloadUrl'] ??
+    final url = map['downloadUrl'] ??
         map['url'] ??
         map['fileUrl'] ??
         map['firmwareUrl'];
@@ -150,15 +149,17 @@ class CloudApi {
   }
 
   static String _describe(DioException e) => switch (e.type) {
-    DioExceptionType.connectionError || DioExceptionType.connectionTimeout =>
-      'Cannot reach the server. Check your '
-          'internet connection (the device may be offline or the host is blocked).',
-    DioExceptionType.receiveTimeout ||
-    DioExceptionType.sendTimeout => 'The server took too long to respond.',
-    DioExceptionType.badResponse =>
-      'Server returned ${e.response?.statusCode ?? 'an error'}.',
-    _ => 'Network error: ${e.message ?? e.type.name}',
-  };
+        DioExceptionType.connectionError ||
+        DioExceptionType.connectionTimeout =>
+          'Cannot reach the server. Check your '
+              'internet connection (the device may be offline or the host is blocked).',
+        DioExceptionType.receiveTimeout ||
+        DioExceptionType.sendTimeout =>
+          'The server took too long to respond.',
+        DioExceptionType.badResponse =>
+          'Server returned ${e.response?.statusCode ?? 'an error'}.',
+        _ => 'Network error: ${e.message ?? e.type.name}',
+      };
 }
 
 /// A user-facing cloud error with a clean message.
@@ -194,8 +195,8 @@ class _SignatureInterceptor extends Interceptor {
     final payload = options.method.toUpperCase() == 'GET'
         ? _canonicalQuery(options.queryParameters)
         : options.data == null
-        ? ''
-        : jsonEncode(options.data);
+            ? ''
+            : jsonEncode(options.data);
     final bodyHash = md5.convert(utf8.encode(payload)).toString();
     final sig = Hmac(
       sha256,

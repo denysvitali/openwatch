@@ -129,7 +129,8 @@ void main() {
       );
     });
 
-    test('finds HR at pl[3] on the wider v14 layout (regression: HR bpm '
+    test(
+        'finds HR at pl[3] on the wider v14 layout (regression: HR bpm '
         'offset was missed on earlier firmware variants)', () {
       expect(
         HrParser.parseDeviceNotify(
@@ -139,7 +140,8 @@ void main() {
       );
     });
 
-    test('finds HR at pl[4] when two byte dataType + two byte padding '
+    test(
+        'finds HR at pl[4] when two byte dataType + two byte padding '
         'precede the bpm', () {
       expect(
         HrParser.parseDeviceNotify(

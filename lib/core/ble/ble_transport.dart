@@ -226,9 +226,8 @@ class BleTransport implements Fee7Host {
     // Persistent push: PackageLength negotiation for Channel B.
     if (opcode == OpA.packageLength) {
       final v = frame[1] & 0xFF;
-      packageLength = v > BleUuids.defaultPackageLength
-          ? v
-          : BleUuids.defaultPackageLength;
+      packageLength =
+          v > BleUuids.defaultPackageLength ? v : BleUuids.defaultPackageLength;
     }
 
     final waiters = _pending[opcode];
@@ -371,8 +370,7 @@ class BleTransport implements Fee7Host {
       while (_queue.isNotEmpty) {
         final op = _queue.removeFirst();
         try {
-          final noResp =
-              op.withoutResponse &&
+          final noResp = op.withoutResponse &&
               op.characteristic.properties.writeWithoutResponse;
           await op.characteristic
               .write(op.value, withoutResponse: noResp)

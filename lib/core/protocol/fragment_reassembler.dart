@@ -37,8 +37,8 @@ class FragmentReassembler<Header, Chunk, T> {
     required Stream<Chunk> chunks,
     required T Function(Header header, Uint8List assembledPayload) build,
     Duration quietWindow = const Duration(milliseconds: 250),
-  }) : _build = build,
-       _quietWindow = quietWindow {
+  })  : _build = build,
+        _quietWindow = quietWindow {
     _subscription = _merged(headers, chunks).listen(
       _onEvent,
       onError: (Object e, StackTrace st) {

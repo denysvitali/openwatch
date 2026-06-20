@@ -134,17 +134,17 @@ class Codec {
   // ---------------------------------------------------------------------------
 
   static List<int> u32le(int v) => [
-    v & 0xFF,
-    (v >> 8) & 0xFF,
-    (v >> 16) & 0xFF,
-    (v >> 24) & 0xFF,
-  ];
+        v & 0xFF,
+        (v >> 8) & 0xFF,
+        (v >> 16) & 0xFF,
+        (v >> 24) & 0xFF,
+      ];
 
   static List<int> u24le(int v) => [
-    v & 0xFF,
-    (v >> 8) & 0xFF,
-    (v >> 16) & 0xFF,
-  ];
+        v & 0xFF,
+        (v >> 8) & 0xFF,
+        (v >> 16) & 0xFF,
+      ];
 
   static List<int> u16le(int v) => [v & 0xFF, (v >> 8) & 0xFF];
 

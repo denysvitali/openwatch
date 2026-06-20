@@ -59,9 +59,7 @@ class _FirmwareScreenState extends ConsumerState<FirmwareScreen> {
           'region=${ref.read(settingsProvider).region.name}',
     );
     try {
-      final fw = await ref
-          .read(firmwareServiceProvider)
-          .fetchLatest(
+      final fw = await ref.read(firmwareServiceProvider).fetchLatest(
             cloud: cloud,
             model: model,
             currentVersion: manager.firmwareRevision,
@@ -152,9 +150,8 @@ class _FirmwareScreenState extends ConsumerState<FirmwareScreen> {
             '${report.summary()}',
       );
       if (!report.isValid) {
-        final failed = report.failures
-            .map((c) => '${c.name}: ${c.detail}')
-            .join('; ');
+        final failed =
+            report.failures.map((c) => '${c.name}: ${c.detail}').join('; ');
         throw FormatException('Image rejected: $failed');
       }
 

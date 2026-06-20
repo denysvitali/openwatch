@@ -6,7 +6,8 @@ import 'package:openwatch/core/protocol/fragment_reassembler.dart';
 
 void main() {
   group('FragmentReassembler', () {
-    test('single header + 3 chunks emits 1 assembled record with '
+    test(
+        'single header + 3 chunks emits 1 assembled record with '
         'concatenated payload', () async {
       final hCtrl = StreamController<int>.broadcast();
       final cCtrl = StreamController<_PayloadChunk>.broadcast();
@@ -14,8 +15,7 @@ void main() {
       final r = FragmentReassembler<int, _PayloadChunk, String>(
         headers: hCtrl.stream,
         chunks: cCtrl.stream,
-        build: (h, payload) =>
-            'h=$h bytes=${payload.length} '
+        build: (h, payload) => 'h=$h bytes=${payload.length} '
             'sum=${payload.fold<int>(0, (a, b) => a + b)}',
         quietWindow: const Duration(milliseconds: 30),
       );
@@ -67,7 +67,8 @@ void main() {
       await cCtrl.close();
     });
 
-    test('quiet window elapses with no further chunks → emits '
+    test(
+        'quiet window elapses with no further chunks → emits '
         'in-progress record', () async {
       final hCtrl = StreamController<int>.broadcast();
       final cCtrl = StreamController<_PayloadChunk>.broadcast();
@@ -93,7 +94,8 @@ void main() {
       await cCtrl.close();
     });
 
-    test('build receives the correct header and assembled payload '
+    test(
+        'build receives the correct header and assembled payload '
         'bytes (order preserved)', () async {
       final hCtrl = StreamController<String>.broadcast();
       final cCtrl = StreamController<_PayloadChunk>.broadcast();

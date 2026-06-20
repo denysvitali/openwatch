@@ -77,14 +77,16 @@ class SleepParser {
   static List<SleepSegment> parseNightSleepSegments(
     Uint8List pl, {
     required DateTime anchor,
-  }) => _parseChained(pl, anchor: anchor);
+  }) =>
+      _parseChained(pl, anchor: anchor);
 
   /// Parses a `0x3e` lunch/nap-sleep payload. Same wire shape as the
   /// night variant; the only difference is the channel-B cmd id.
   static List<SleepSegment> parseLunchSleepSegments(
     Uint8List pl, {
     required DateTime anchor,
-  }) => _parseChained(pl, anchor: anchor);
+  }) =>
+      _parseChained(pl, anchor: anchor);
 
   /// Walks [pl] as a sequence of chained day blocks; each block is
   /// `u16 LE endMin` + `(stageByte, durMin)*`. The first block may

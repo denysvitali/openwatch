@@ -40,12 +40,14 @@ class AppSettings {
     CloudRegion? region,
     String? authToken,
     bool? autoSyncTimeOnConnect,
-  }) => AppSettings(
-    cloudSyncEnabled: cloudSyncEnabled ?? this.cloudSyncEnabled,
-    region: region ?? this.region,
-    authToken: authToken ?? this.authToken,
-    autoSyncTimeOnConnect: autoSyncTimeOnConnect ?? this.autoSyncTimeOnConnect,
-  );
+  }) =>
+      AppSettings(
+        cloudSyncEnabled: cloudSyncEnabled ?? this.cloudSyncEnabled,
+        region: region ?? this.region,
+        authToken: authToken ?? this.authToken,
+        autoSyncTimeOnConnect:
+            autoSyncTimeOnConnect ?? this.autoSyncTimeOnConnect,
+      );
 }
 
 /// Persists [AppSettings] in `SharedPreferences`.
@@ -79,11 +81,11 @@ class SettingsService {
   }
 
   AppSettings load() => AppSettings(
-    cloudSyncEnabled: _prefs.getBool(_kCloud) ?? false,
-    region: CloudRegion.values[_prefs.getInt(_kRegion) ?? 0],
-    authToken: _prefs.getString(_kToken),
-    autoSyncTimeOnConnect: _prefs.getBool(_kAutoTime) ?? true,
-  );
+        cloudSyncEnabled: _prefs.getBool(_kCloud) ?? false,
+        region: CloudRegion.values[_prefs.getInt(_kRegion) ?? 0],
+        authToken: _prefs.getString(_kToken),
+        autoSyncTimeOnConnect: _prefs.getBool(_kAutoTime) ?? true,
+      );
 
   Future<void> save(AppSettings s) async {
     await _prefs.setBool(_kCloud, s.cloudSyncEnabled);
