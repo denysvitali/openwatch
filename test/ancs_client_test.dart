@@ -16,27 +16,66 @@ void main() {
       expect((events.first as AncsConnect).name, 'foo');
     });
 
-    test('onFirmwareEvent(1) parses notification source', () async {
+    test(
+      'onFirmwareEvent(1) parses notification source with action byte',
+      () async {
+        final c = AncsClient();
+        final events = <AncsEvent>[];
+        c.events.listen(events.add);
+        final id = c.addClient();
+        // 8-byte ANCS notification source: added(0), flags=0, cat=1, count=2.
+        // action byte = 0x01 ("modified") per GHIDRA_DECOMPILATION.md §4.1.
+        c.onFirmwareEvent(1, id, [
+          0x00,
+          0x00,
+          0x01,
+          0x00,
+          0x00,
+          0x00,
+          0x02,
+          0x00,
+        ], action: 0x01);
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        expect(events.length, greaterThanOrEqualTo(2));
+        final notification = events.whereType<AncsNotification>().first;
+        expect(notification.eventId, 0);
+        expect(notification.categoryId, 1);
+        expect(notification.action, AncsNotificationAction.modified);
+      },
+    );
+
+    test('onFirmwareEvent(2) action=0 emits AncsDataSource', () async {
       final c = AncsClient();
       final events = <AncsEvent>[];
       c.events.listen(events.add);
       final id = c.addClient();
-      // 8-byte ANCS notification source: added(0), flags=0, cat=1, count=2
-      c.onFirmwareEvent(1, id, [
-        0x00,
-        0x00,
-        0x01,
-        0x00,
-        0x00,
-        0x00,
-        0x02,
-        0x00,
-      ]);
+      c.onFirmwareEvent(2, id, [0xde, 0xad], action: 0);
       await Future<void>.delayed(const Duration(milliseconds: 50));
-      expect(events.length, greaterThanOrEqualTo(2));
-      final notification = events.whereType<AncsNotification>().first;
-      expect(notification.eventId, 0);
-      expect(notification.categoryId, 1);
+      final src = events.whereType<AncsDataSource>().first;
+      expect(src.payload, [0xde, 0xad]);
+    });
+
+    test('onFirmwareEvent(2) action=1 emits AncsDataAttribute', () async {
+      final c = AncsClient();
+      final events = <AncsEvent>[];
+      c.events.listen(events.add);
+      final id = c.addClient();
+      c.onFirmwareEvent(2, id, [0xbe, 0xef], action: 1);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      final attr = events.whereType<AncsDataAttribute>().first;
+      expect(attr.payload, [0xbe, 0xef]);
+    });
+
+    test('AncsNotificationAction.fromByte covers the switch8 table', () async {
+      expect(AncsNotificationAction.fromByte(0), AncsNotificationAction.added);
+      expect(
+        AncsNotificationAction.fromByte(10),
+        AncsNotificationAction.fetchAttrs,
+      );
+      expect(
+        AncsNotificationAction.fromByte(99),
+        AncsNotificationAction.unknown,
+      );
     });
 
     test('toPushMsg returns null without a notification', () {

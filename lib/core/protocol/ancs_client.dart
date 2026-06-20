@@ -51,11 +51,25 @@ class AncsClient {
     return id;
   }
 
-  /// Dispatches a lifecycle event from the firmware (mirrors `ancs_client_cb`).
+  /// Dispatches a lifecycle event from the firmware (mirrors
+  /// `ancs_client_cb` `FUN_0083a116` — see `GHIDRA_DECOMPILATION.md` §4.1).
   ///
   /// [event] is one of:
   ///   `0` connect, `1` notification, `2` data, `3` disconnect.
-  void onFirmwareEvent(int event, int clientId, List<int> data) {
+  ///
+  /// [action] is the per-event action byte:
+  ///   * for `event == 1` (notification): the `event[4]` NotificationAction
+  ///     byte, decoded via the 16-entry switch8 table at `0x83a1b5`. Values
+  ///     `0..15` map to [AncsNotificationAction].
+  ///   * for `event == 2` (data): `0` = NotificationSource, `1` =
+  ///     AppAttribute (FUN_0083a036). Other values are reserved.
+  ///   * ignored for `event == 0/3`.
+  void onFirmwareEvent(
+    int event,
+    int clientId,
+    List<int> data, {
+    int action = 0,
+  }) {
     final state = _clients[clientId];
     if (state == null) {
       _log.warn('ancs', 'event $event for unknown client $clientId');
@@ -69,12 +83,24 @@ class AncsClient {
         final parsed = _parseNotificationSource(data);
         if (parsed != null) {
           state.lastNotification = parsed;
-          _emit(AncsNotification(clientId: clientId, source: parsed));
+          _emit(
+            AncsNotification(
+              clientId: clientId,
+              source: parsed,
+              action: AncsNotificationAction.fromByte(action),
+            ),
+          );
         }
       case 2:
-        // Data source event — the longer attribute payload.
+        // Data source event — sub-classified on action byte.
         state.lastData = Uint8List.fromList(data);
-        _emit(AncsData(clientId: clientId, payload: state.lastData!));
+        if (action == 1) {
+          _emit(
+            AncsDataAttribute(clientId: clientId, payload: state.lastData!),
+          );
+        } else {
+          _emit(AncsDataSource(clientId: clientId, payload: state.lastData!));
+        }
       case 3:
         _emit(AncsDisconnect(id: clientId));
         _clients.remove(clientId);
@@ -174,9 +200,17 @@ class AncsDisconnect extends AncsEvent {
 }
 
 class AncsNotification extends AncsEvent {
-  AncsNotification({required int clientId, required this.source})
-    : super(clientId);
+  AncsNotification({
+    required int clientId,
+    required this.source,
+    required this.action,
+  }) : super(clientId);
   final AncsNotificationSource source;
+
+  /// Per-event notification action byte (`event[4]` in
+  /// `ancs_client_cb`), routed via the 16-entry switch8 table at
+  /// `0x83a1b5`. See [AncsNotificationAction].
+  final AncsNotificationAction action;
 
   /// `0` added, `1` modified, `2` removed.
   int get eventId => source.eventId;
@@ -184,8 +218,51 @@ class AncsNotification extends AncsEvent {
   int get categoryId => source.categoryId;
 }
 
-class AncsData extends AncsEvent {
-  const AncsData({required int clientId, required this.payload})
+/// NotificationSource data payload (event_id=2, action=0). The longer
+/// attribute payload from `FUN_00839fee`.
+class AncsDataSource extends AncsEvent {
+  const AncsDataSource({required int clientId, required this.payload})
     : super(clientId);
   final Uint8List payload;
+}
+
+/// AppAttribute data payload (event_id=2, action=1). The
+/// `FUN_0083a036` attribute parser feeds this — covers app-display-name,
+/// subtitle, etc.
+class AncsDataAttribute extends AncsEvent {
+  const AncsDataAttribute({required int clientId, required this.payload})
+    : super(clientId);
+  final Uint8List payload;
+}
+
+/// Per-event notification action byte (`event[4]`), routed via the
+/// 16-entry ARM-Thumb switch8 table at `0x83a1b5` (see
+/// `GHIDRA_DECOMPILATION.md` §4.1).
+enum AncsNotificationAction {
+  added(0),
+  modified(1),
+  removed(2),
+  action(3),
+  category(4),
+  subAction(7),
+  fetchAttrs(10),
+  appAttrResponse(11),
+  pressOnly(13),
+  releaseOnly(15),
+  reserved(5),
+  noop(6),
+  other(8),
+  reservedDebug(12),
+  reservedDefault(14),
+  unknown(-1);
+
+  const AncsNotificationAction(this.byte);
+  final int byte;
+
+  static AncsNotificationAction fromByte(int b) {
+    for (final a in AncsNotificationAction.values) {
+      if (a.byte == b) return a;
+    }
+    return AncsNotificationAction.unknown;
+  }
 }
