@@ -239,7 +239,7 @@ Processes a circular queue of incoming 16-byte frames (`DAT_0082d440 + 0x14` rin
 
 | Opcode | Dart name (from `lib/core/protocol/opcodes.dart`) | Handler address | Handler summary |
 |---|---|---|---|
-| `0x01` | `setTime` | `0x0082bb4e` | Converts BCD date/time fields, updates RTC, sends `0x2f` packet-length notify, then `0x01` ack. |
+| `0x01` | `setTime` | `0x0082bb4e` | Converts BCD date/time fields, updates RTC, sends `0x2f` packet-length notify, then a 14-byte `0x01` ack — see §3.4. |
 | `0x06` | `dnd` | `0x0082d298` | Sub-opcode `0x01` reads DND state, `0x02` sets it. Builds response and sends via `FUN_0082ebdc`. |
 | `0x08` | *(special)* | `0x00827516`, `0x008275b6`, `0x00827ba6`, `0x008280fe` | Camera/find-device/long-press branch: checks sub-byte and routes to motor/vibrate/screen routines. |
 | `0x0e` | `bpReadConform` | `0x0082cb28` | If sub-byte `0` → `FUN_00834410()` + `FUN_0082c0a4()`. |
@@ -435,6 +435,120 @@ The handler is the watch's bridge between the
 and the on-screen notification UI; a peer on the host can use the
 fragmented helper from §3.2 to send messages longer than 11 bytes per
 frame.
+
+### 3.4 Opcode `0x01` setTime / clock sync (`FUN_0082bb4e`)
+
+The clock-sync handler. Decodes six BCD date/time bytes from the
+request, applies the result to the RTC, and then sends a 14-byte
+`0x01` capability-shaped ack that tells the host the new packet-size
+capability the watch will use going forward.
+
+#### Request layout
+
+| Byte | Field | Notes |
+|---:|---|---|
+| 0 | `opcode` | `0x01` (consumed by dispatcher) |
+| 1 | `year_lo` (BCD) | low byte of year, e.g. `0x26` for 2026 |
+| 2 | `month` (BCD) | `0x01`..`0x12` |
+| 3 | `day` (BCD) | `0x01`..`0x31` |
+| 4 | `hour` (BCD) | `0x00`..`0x23` |
+| 5 | `minute` (BCD) | `0x00`..`0x59` |
+| 6 | `second` (BCD) | `0x00`..`0x59` |
+| 7 | `flags` | `0xFF` → skip the "tick" re-init at the end of the handler; other → call `FUN_00827956()` + `FUN_008276d2()` (refreshes the live counter / re-arms the seconds tick) |
+| 8..14 | unused | — |
+
+`FUN_0082edc4(bcd)` is the BCD-to-binary helper used to decode every
+field: returns `(hi_nibble*10 + lo_nibble) & 0xFF` if both nibbles
+are `< 10`, else `0` (defensive default for malformed frames).
+
+#### Pre-ack `0x2f` MTU notify
+
+Before the `0x01` ack, the handler publishes the negotiated ATT MTU on
+a separate opcode:
+
+```c
+uint8 mtu = FUN_0082df12();          // reads *(DAT_0082e054 + 0x19)
+if (mtu < 0x33) mtu = 0x14;          // floor: ATT_MTU=23 ⇒ payload 20
+FUN_0082b23a(0x2f, mtu);             // send 16-byte frame [0x2f, mtu, 0…]
+```
+
+`FUN_0082b23a` is the small "two-byte opcode sender" used elsewhere for
+configuration pings: it builds a 16-byte frame, places the cmd in byte
+0 and the parameter in byte 1, and queues it via `FUN_0082ebdc`. The
+host reads the value as the new `payload_cap` for all subsequent
+Channel-A frames.
+
+#### RTC update logic
+
+After BCD-decoding the 6 time fields into a stack struct
+`{year, month, day, hour, minute, second}` and calling
+`FUN_00827ba6(2)` (display refresh), the handler compares the parsed
+time to the current RTC value (`FUN_00827956()`):
+
+1. **First set** (`*(DAT_0082bfb8 + 2) == 0`):
+   - `FUN_00828390(&parsed)` — convert BCD date struct to seconds
+     since epoch (uses `FUN_00828176` to derive a day-of-year, then
+     `day_of_year * DAT_008284f8 + hour*3600 + minute*60 + second`).
+   - `FUN_00827948(seconds)` — set RTC.
+   - Mark `*(DAT_0082bfb8 + 2) = 1` and `*(DAT_0082bfbc + 0xd) = 1`
+     (the "time has been set" latches).
+   - `FUN_00827624()` + `thunk_FUN_00827424()` — re-init the
+     tick-driver and broadcast a fresh time to all consumers.
+2. **Subsequent set**:
+   - Compute `cur_q = FUN_0083dfba(cur_seconds, 900)` and
+     `req_q = FUN_0083dfba(req_seconds, 900)` — the 15-minute
+     quarter-hour buckets of the two times.
+   - Same bucket: `FUN_00827948(req_seconds)` (set directly).
+   - `cur < req` (the watch is behind): `FUN_00827948((cur_q + 1) * 900)`
+     (set to the *next* quarter boundary, then `FUN_008317d4()` to
+     align the tick display).
+   - `0 < cur - req < 3` seconds: no-op (avoid jitter from a slow
+     host).
+   - Otherwise (forward jump): `FUN_00827948(req_seconds)` +
+     `FUN_00827624()`.
+
+The "set to the next 15-min boundary when behind" path is the
+practical difference between this and a naïve "just write the time":
+it prevents the watch from showing `:14:59` after a host that has
+been disconnected for an hour pushes its clock.
+
+#### Response layout (14 bytes via `FUN_0082b938`)
+
+After the RTC is settled, the handler always sends a 14-byte `0x01`
+ack with a fixed pattern:
+
+```
+local_30 = 0x16010000   // bytes  1..4:  0x00 0x00 0x01 0x16
+local_2c = 0            // bytes  5..8:  0x00 0x00 0x00 0x00
+local_28 = 0x200001     // bytes  9..12: 0x01 0x00 0x20 0x00
+local_24 = 0x3000       // bytes 13..14: 0x00 0x00  (high 2 bytes 0)
+```
+
+After `FUN_0082b938(0x01, &local_30, 0xe)` the wire frame is
+
+```
+byte  0: 0x01                    // cmd
+byte  1: 0x00
+byte  2: 0x00
+byte  3: 0x01
+byte  4: 0x16
+byte  5: 0x00
+byte  6: 0x00
+byte  7: 0x00
+byte  8: 0x00
+byte  9: 0x01
+byte 10: 0x00
+byte 11: 0x20
+byte 12: 0x00
+byte 13: 0x00
+byte 14: 0x00
+byte 15: additive checksum
+```
+
+The four little-endian dwords are a static capability shape used as
+"set OK" — the host should treat the 14-byte payload as opaque and
+parse the meaning only after the matching `0x5A 0x01` read of the
+device-info block (see §2.7).
 
 ### Opcode `0xa1` factory/test mode (`FUN_00827f5c`)
 
