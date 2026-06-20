@@ -196,6 +196,37 @@ void main() {
     );
 
     test(
+      'muslim 0x7a stub flag fires on [0x7A, 0xFF] (unimplemented RE)',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final got = d.onMuslim.first;
+        // Per GHIDRA_DECOMPILATION.md §3.11 the v14 firmware returns the
+        // one-byte stub error frame [0x7A, 0xFF] for every read because
+        // FUN_00829c88 is unimplemented.
+        final f = Codec.buildChannelA(OpA.muslim, [0x01, 0xff]);
+        t.inA.add(f);
+        final m = await got.timeout(const Duration(seconds: 1));
+        expect(m.sub, 0x01);
+        expect(m.stubbed, isTrue);
+      },
+    );
+
+    test('muslim 0x7a non-stub frame leaves stubbed=false', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final got = d.onMuslim.first;
+      // pl[1] != 0xFF — assume a future firmware would emit the
+      // header byte instead of the stub error.
+      final f = Codec.buildChannelA(OpA.muslim, [0x01, 0x00]);
+      t.inA.add(f);
+      final m = await got.timeout(const Duration(seconds: 1));
+      expect(m.stubbed, isFalse);
+    });
+
+    test(
       'emitFactoryReset fires onFactoryReset (host-side optimistic ack)',
       () async {
         final t = _StubTransport();

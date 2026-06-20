@@ -496,9 +496,20 @@ class ChannelADispatcher {
   }
 
   /// `muslim` (0x7a): sub `0x01` reads, `0x02 0x01` resets.
+  ///
+  /// **v14 firmware status**: the read+reset helpers
+  /// `FUN_00829c88`/`FUN_00829c90` are unimplemented stubs in H59MA
+  /// v14 — every read returns a one-byte `0x7A 0xFF` error frame and
+  /// every reset is a no-op. We surface [MuslimConfig.stubbed] = true
+  /// so a UI can show "prayer times not supported on this firmware"
+  /// instead of hanging on a missing reply. The two-phase response
+  /// (header + 13-byte-chunk fragmented payload via `FUN_0082c988`,
+  /// see `GHIDRA_DECOMPILATION.md` §3.11) will be wired up here when
+  /// the producer side ships.
   void _decodeMuslim(Uint8List pl) {
     if (pl.isEmpty) return;
-    _muslim.add(MuslimConfig(sub: pl[0]));
+    final stubbed = pl.length >= 2 && pl[1] == 0xff;
+    _muslim.add(MuslimConfig(sub: pl[0], stubbed: stubbed));
   }
 
   /// `menstruation` (0x2b): mixture container; firmware uses additive
@@ -848,8 +859,14 @@ class GpsDelta {
 }
 
 class MuslimConfig {
-  const MuslimConfig({required this.sub});
+  const MuslimConfig({required this.sub, this.stubbed = false});
   final int sub;
+
+  /// `true` when the firmware returned the stub "not implemented"
+  /// frame `[0x7A, 0xFF]` instead of prayer data. See
+  /// `GHIDRA_DECOMPILATION.md` §3.11 — the read+reset helpers are
+  /// unimplemented in H59MA v14.
+  final bool stubbed;
 }
 
 class MenstruationMixture {
