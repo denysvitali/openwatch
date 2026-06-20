@@ -34,11 +34,12 @@ byte 6..    payload bytes
 |---|---|---|
 | `0x0082efea` | `FUN_0082efea` | **Parser / fragment reassembly** |
 | `0x0082eee6` | `FUN_0082eee6` | **Dispatcher** after full frame received |
+| `0x0082fc0c` | `FUN_0082fc0c` | **Async command processor** (runs from state stored by `FUN_0082f4fa`) |
 | `0x0082f114` | `FUN_0082f114` | **CRC-16/MODBUS** (init `0xFFFF`, poly `0xA001`) |
 | `0x0082ece0` | `FUN_0082ece0` | **Frame builder / sender** (queues `0xBC` notifications) |
 | `0x0082ee00` | `FUN_0082ee00` | **ACK/NAK sender** |
 | `0x0082f098` | `FUN_0082f098` | Starts 2000 ms fragment timeout timer (`m_ble_packet_timer_id`) |
-| `0x0082f4fa` | `FUN_0082f4fa` | Stores parsed Channel B command for consumer |
+| `0x0082f4fa` | `FUN_0082f4fa` | Stores parsed Channel B command for asynchronous consumption |
 | `0x0082fe52` | `FUN_0082fe52` | OTA state machine (DFU) |
 
 ### Parser behavior (`FUN_0082efea`)
@@ -58,6 +59,33 @@ byte 6..    payload bytes
    - `0x01`, `0x02`, `0x21`, `0x31`, `0x35`, `0x36`, `0x61` → `FUN_0082fe52(1, 0)`
    - `0x10`, `0x46` → skip (handled elsewhere / no direct dispatch)
 4. All other commands → `FUN_0082f4fa(cmd, payload, length)` for asynchronous consumption.
+
+### Async processor (`FUN_0082fc0c`)
+
+Consumes the state saved by `FUN_0082f4fa` (`cmd` at offset `+1`, payload ptr at `+4`, length at `+0xc`).
+
+| Cmd | Handler | Notes |
+|---|---|---|
+| `0x01` | `FUN_0082f1a4` | OTA start ack — calls state callback `(1, 0)` |
+| `0x02` | `FUN_0082f1b6` | OTA init — expects 9-byte payload, sub-cmd `0x01`/`0x04`; stores image size and metadata; sets OTA state to `2` |
+| `0x03` | `FUN_0082f240` | OTA data packet — reassembles image, validates first 0x50 bytes, copies a 32-byte digest, writes to flash |
+| `0x04` | `FUN_0082f378` | OTA check — validates state `3` and accumulated size matches expected |
+| `0x05` | `FUN_0082f3b4` | OTA end — finalizes, resets sensors/BLE, reboots after delays |
+| `0x07` | `FUN_0082f410` | OTA sub-ack — calls state callback `(7, 0)` |
+| `0x11` | `FUN_0082f5a2` | Read sleep summary for a day offset |
+| `0x12` | `FUN_0082f50c` | Read detailed sleep data |
+| `0x21`, `0x22`, `0x23`, `0x24` | — | ACK with code `2` |
+| `0x27` | `FUN_0082fada` | Read sleep records (sends both `0x27` night and `0x3e` nap records) |
+| `0x29`, `0x3b`, `0x13` | — | no-op |
+| `0x2a` | `FUN_00833bbc` | Read activity/sport summary for last N days |
+| `0x2c` | `FUN_0082f8ec` | Alarm read/write (sub `0x01` read, `0x02` write) |
+| `0x41` | `FUN_008311b8` | File list (cmd `0x41`) |
+| `0x43`, `0x46` | `FUN_008311b8` | File delete / file init (routed to same handler) |
+| `0x47` | `FUN_008347fa` | no-op |
+| `0x4b` | `FUN_00830460` | no-op |
+| `0x5a` | `FUN_0082f6ec` | Device info/config (sub `0x01` read info, `0x02` write config, `0x03` read version strings, `0x04` reset) |
+
+Unrecognized commands fall through to `FUN_0082ee00(cmd, 0)` (NAK code `0`).
 
 ### CRC-16/MODBUS (`FUN_0082f114`)
 
@@ -87,7 +115,7 @@ pop  {r4,r5,r6,pc}
 
 ## 3. Channel A — 16-Byte Command Channel
 
-Channel A frames are fixed 16 bytes. The main command dispatcher is `FUN_0082d2dc`.
+Channel A frames are fixed 16 bytes. The main command dispatcher is `FUN_0082d2dc` **in the firmware** — this routine processes a circular queue of incoming 16-byte frames, reads the opcode at offset `2`, and dispatches to a handler. Earlier notes in `R2_ANALYSIS.md`/`PROTOCOL.md` claimed Channel-A dispatch was APK-only; that claim is incorrect for v14.
 
 ### Main dispatcher (`FUN_0082d2dc`)
 
@@ -155,9 +183,17 @@ The watch implements an ANCS client so iOS notifications can be pushed to the sc
 
 | Address | Function | Role |
 |---|---|---|
-| `0x00840724` | `FUN_00840724` | OTA signature check — compares 32-bit magic, logs `"wrong signature! Read %8X != Requried %8X"` |
+| `0x00840724` | `FUN_00840724` | OTA signature check — compares first 4 bytes of image to magic `0x8721bee2` (stored at `DAT_00840744`); logs `"wrong signature! Read %8X != Requried %8X"` |
 | `0x0082fe52` | `FUN_0082fe52` | OTA/DFU state machine driven by Channel B cmd ids |
 | `0x0082f160` | `FUN_0082f160` | Starts a one-shot timer (used during reboot/OTA) |
+| `0x0082f1a4` | `FUN_0082f1a4` | OTA start ack |
+| `0x0082f1b6` | `FUN_0082f1b6` | OTA init — parses image header, stores size/digest metadata |
+| `0x0082f240` | `FUN_0082f240` | OTA data — reassembles and writes image, validates a 32-byte digest block |
+| `0x0082f378` | `FUN_0082f378` | OTA check — validates completion and size |
+| `0x0082f3b4` | `FUN_0082f3b4` | OTA end — reboots device |
+| `0x0082f410` | `FUN_0082f410` | OTA sub-ack |
+
+The 32-byte OTA digest buffer is prepared in `FUN_0082f240` but the hashing algorithm itself is not located in the firmware body; it may live in the bootloader or be computed by the host tool.
 
 ---
 
@@ -185,7 +221,22 @@ Strings confirm additional algorithm libraries: `VC_HRV_16Bit_integration_6.0_ad
 
 ---
 
-## 8. Notable Data & Globals
+## 8. Vendor `0xFEE7` GATT Service
+
+The firmware attribute table declares a fourth vendor service `0x0000fee7` at body offset `0x008456bc` (UUID bytes `e7 fe 00 00 ...`). Characteristic UUIDs are laid out nearby:
+
+| Char | Body UUID offset |
+|---|---|
+| `0xfea1` write+CCCD | `0x008456f2` |
+| `0xfec9` read | nearby |
+| `0xfea2` notify+CCCD | nearby |
+| `0x2a00` Device Name | nearby |
+
+No code references to the `0xFEE7` service endpoints were located during this decompilation pass; the service is present in the GATT table but its protocol usage (if any) is not exercised by the Channel A/B paths documented above. The OpenWatch app currently probes it during discovery only.
+
+---
+
+## 9. Notable Data & Globals
 
 | Global | Inferred role |
 |---|---|
@@ -196,13 +247,16 @@ Strings confirm additional algorithm libraries: `VC_HRV_16Bit_integration_6.0_ad
 | `DAT_0082b0b8` | Current time / date shared buffer |
 | `DAT_00827e8c` | Vibration/motor mode |
 | `DAT_0082cfe8` | Config block base (UV, display, etc.) |
+| `DAT_0082fcbc` | Channel B async processor state (cmd, payload ptr, length) |
+| `DAT_0082f458` | OTA state / context pointer base |
+| `DAT_0082f894` | Sleep data context pointer |
+| `DAT_0082f8a4` | Device info context pointer |
 
 ---
 
-## 9. Open Questions / Next Steps
+## 10. Open Questions / Next Steps
 
-1. Decompile the remaining sub-handlers for opcodes `0x77` (phoneSport jump table) and `0xa1` (factory/test).
-2. Map the complete Channel B command table consumed by `FUN_0082f4fa`.
-3. Recover the exact meaning of opcode `0x2b` mixture container fields.
-4. Identify the 32-byte `image_digest` algorithm (no SHA-256 constants found).
-5. Trace the `0xfee7` vendor GATT service usage.
+1. Recover the exact meaning of opcode `0x2b` mixture container fields.
+2. Identify the 32-byte `image_digest` algorithm used for OTA and the container header digest at `0x1c4`. No SHA-256 constants were found in the body; it may be computed by the bootloader or host tool.
+3. Determine whether the `0xFEE7` vendor service has any active protocol role in the firmware.
+4. Decompile the remaining sub-handlers for opcodes `0x77` (phoneSport jump table) and `0xa1` (factory/test) if more detail is needed.

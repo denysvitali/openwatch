@@ -173,13 +173,13 @@ The SDK transport itself sends **no** automatic bind/SetTime; those are app-leve
 ```
 
 - **Always** 16 bytes. No fragmentation on this channel — long data must use Channel B.
-- **Channel-A framing & dispatch are phone-side, not firmware-side.** The H59MA firmware
-  (`firmwares/R2_ANALYSIS.md` §6) has no routine that strips `0x80` and indexes an opcode table on a
-  16-byte frame. The two plausible candidates in the body (`0x22490` opcode bucket, v13-only and
-  unreferenced; `0x21b58`/`0x1ff0c` constant pool, used only by a health-metric clamp) are both dead
-  in practice. The framing, additive CRC8, error flag, and `BeanFactory`/`SparseArray` dispatch all
-  live in the Oudmon SDK on the phone. **v13 ↔ v14 are wire-compatible** — v14 is a debug-log
-  strip + dead-table cleanup, no protocol change.
+- **Channel-A framing is built phone-side, but dispatch is implemented on both sides.** The Oudmon
+  SDK builds frames, computes the additive CRC8, and dispatches responses on the phone. The H59MA
+  v14 firmware also contains a real dispatcher at `FUN_0082d2dc` (`0x0082d2dc`) that reads the opcode
+  from a queued 16-byte frame and calls per-opcode handlers (see `firmwares/GHIDRA_DECOMPILATION.md`
+  §3). The v13 bucket table at `0x22490` remains unreferenced dead code; the v14 dispatcher uses a
+  direct switch/case instead. **v13 ↔ v14 are wire-compatible** — v14 is a debug-log strip +
+  dead-table cleanup, no protocol change.
 - TX build (`BaseReqCmd.getData`): `buf=new byte[16]; buf[0]=key; arraycopy(getSubData,0,buf,1,len); addCRC(buf)`.
 - RX dispatch (`QCBluetoothCallbackReceiver.onCharacteristicChange` on `6e400003`):
   1. len **must** == 16 else dropped.
