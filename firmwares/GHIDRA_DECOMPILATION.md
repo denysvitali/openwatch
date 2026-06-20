@@ -823,11 +823,112 @@ without needing an explicit factory-reset path.
 | Address | Function | Role |
 |---|---|---|
 | `0x00839ac4` | `FUN_00839ac4` | Sends ANCS data over notify char |
-| `0x00839e4e` | `FUN_00839e4e` | `ancs_add_client` — registers ANCS client, allocates client state |
-| `0x0083a116` | `FUN_0083a116` | `ancs_client_cb` — handles ANCS events (`0` connect, `1` notification, `2` data, `3` disconnect) |
-| `0x00839fee` | `FUN_00839fee` | Stores parsed notification source data |
+| `0x00839e4e` | `FUN_00839e4e` | `ancs_add_client` — registers ANCS client, allocates 0x114-byte per-client state |
+| `0x0083a116` | `FUN_0083a116` | `ancs_client_cb` — handles ANCS lifecycle events — see §4.1 |
+| `0x00839fee` | `FUN_00839fee` | NotificationSource data parser — see §4.2 |
+| `0x0083a036` | `FUN_0083a036` | GetAppAttributes follow-up requestor — see §4.3 |
 
-The watch implements an ANCS client so iOS notifications can be pushed to the screen via opcode `0x72`.
+The watch implements an ANCS client so iOS notifications can be pushed
+to the screen via opcode `0x72`.
+
+### 4.1 ANCS client callback (`FUN_0083a116`)
+
+Lifecycle dispatcher. Receives `(ctx, client_idx, event_ptr)` from the
+GATT stack and switches on the first byte of `event_ptr` (the
+"event_id" of the ANCS client wrapper). The handler is the only
+entry point that touches the per-client state at
+`client_idx * 0x114 + state_base + 4`.
+
+#### Event dispatch
+
+| `event_id` | Action |
+|---:|---|
+| `0` (connect) | Sub-classified on `event[4]`: `2` → `func_0x00005aa8(..., connect_log, 0)` + `FUN_008399ec(client_idx, 1)`; `3` → log a different "bind" line. Both fire a debug log line; neither changes state. |
+| `1` (notification) | If `event[6]` (data length) is non-zero, enable the ANCS notification subscription via `func_0x00005aa8(..., notif_subscribe_log, 1)`. Then dispatch on `event[4]` (notification action byte) via a switch8 table at `0x83a1b5` (16 entries) — see below. |
+| `2` (data) | Sub-classified on `event[4]`: `0` (NotificationSource) → `FUN_00839fee(client_idx, event+8, event[6])`; `1` (AppAttribute) → log + `FUN_0083a036(client_idx, event+8, event[6])`. |
+| `3` (disconnect) | Log the disconnect, then `memset(client_state, 0, 0x114)` to wipe the per-client state. The 4 bytes at `state_base + 4` (a u32 reference, e.g. an attribute handle) is preserved across the wipe. |
+
+#### Notification sub-dispatch (`event_id == 1`, switch8 at `0x83a1b5`)
+
+The 16-entry ARM-Thumb switch8 table (base `0x83a1b5`, format
+`u8 half-offset`) decodes the `event[4]` (ANCS "NotificationAction")
+into per-action handlers:
+
+| Action | Handler target | Notes |
+|---:|---|---|
+| `0` | `0x83a1bd` | "added" — likely records the notification UID and starts attribute fetch |
+| `1` | `0x83a1c5` | "modified" — re-records the UID |
+| `2` | `0x83a1cd` | "removed" — clears the UID slot |
+| `3` | `0x83a1e3` | "action" — iOS 12+ "press/release" action dispatch |
+| `4` | `0x83a1f1` | "category" — extract category byte for routing |
+| `5` | `0x83a24d` | reserved (out of range) |
+| `6` | `0x83a1b5` (default) | no-op |
+| `7` | `0x83a255` | "sub-action" — secondary press/release routing |
+| `8` | `0x83a247` | secondary "modified" |
+| `9` | `0x83a1b5` (default) | no-op |
+| `10` | `0x83a1f9` | "fetch-attrs" — request `GetAppAttributes` for the new UID |
+| `11` | `0x83a225` | app-attribute response |
+| `12` | `0x83a217` | reserved / debug |
+| `13` | `0x83a1d7` | "press-only" action |
+| `14` | out-of-function (default) | falls into the default slot |
+| `15` | `0x83a251` | "release-only" action |
+
+The actual per-action bodies are tiny thunks (each ~6 instructions)
+that call the same downstream parsers as the `event_id == 2` path.
+
+### 4.2 NotificationSource data parser (`FUN_00839fee`)
+
+Called from the `event_id == 2, event[4] == 0` path with
+`(client_idx, data_ptr, data_len)`. Logs the raw length, then
+accumulates bytes into the per-client state starting at
+`client_idx * 0x114 + state_base`:
+
+```c
+void FUN_00839fee(int client_idx, char *data, int data_len) {
+  log("notif_src", client_idx, data_len);
+  state = client_idx * 0x114 + state_base;
+  if (*state == 0) {                       // first fragment
+    if (data_len != 0 && *data == 0) *state = 1;   // accept start-of-frame
+  } else if (*state > 15) {
+    return;                                // capacity cap
+  }
+  FUN_00839f30(state, data, data_len);     // append to state buffer
+}
+```
+
+The per-client state is laid out so that `state[0]` is a 1-byte
+fragment counter / flag; subsequent bytes are the raw
+NotificationSource payload (EventID u8, Flags u8, CategoryID u8,
+CategoryCount u8, NotificationUID u32 — 8 B of header, then
+optional component IDs). The cap at `> 15` matches the worst-case
+header + 7 component bytes.
+
+### 4.3 GetAppAttributes follow-up (`FUN_0083a036`)
+
+Called from the `event_id == 2, event[4] == 1` path with
+`(client_idx, data_ptr, data_len)`. Only acts on the canonical
+8-byte `cmd=0x1A` "Get App Attributes" frame:
+
+```c
+if (data_len != 8) return;
+cmd_id   = data[5];      // 0/1/4/6/7 = attr we are requesting
+attr_id  = data[0];      // must NOT be 2 (AppIdentifier — already known)
+if (attr_id == 2) return;
+```
+
+The handler then builds the 14-byte
+`{cmd=0x1A, notif_uid=u32, attr_mask=u16, pad=6x u8}` request
+covering attribute IDs 0..7 (display name, subtitle, message,
+date, positive action label, negative action label, reserved,
+reserved) and submits it via `func_0x00012e82` /
+`FUN_00839a3e`. On success (`func_0x00012ed6 == 0`) it logs a
+debug line; on failure it logs the error and returns.
+
+This is the "second-stage" parser: when a notification arrives
+with a UID the watch has not seen before, the ANCS layer issues a
+GetAppAttributes request to fetch the human-readable app name (and
+optionally subtitle/message) before queuing the push on the
+Channel-A `0x72` path.
 
 ---
 
