@@ -258,7 +258,7 @@ Processes a circular queue of incoming 16-byte frames (`DAT_0082d440 + 0x14` rin
 | `0x43` | `readDetailSport` | `0x0082d034` | Reads detailed sport records by date range — see §3.6. |
 | `0x72` | `pushMsgUint` | `0x00829e92` | Buffers a notification/emoji Unicode string for display — see §3.3. |
 | `0x77` | `phoneSport` | `0x0082ce0c` | Jump-table dispatch on sub-byte. |
-| `0x7a` | `muslim` | `0x0082cb3a` | Sub `0x01` reads Muslim prayer config, `0x02 0x01` resets it. |
+| `0x7a` | `muslim` | `0x0082cb3a` | Sub `0x01` reads Muslim prayer config, `0x02 0x01` resets it — see §3.11. |
 | `0x81` | — | `0x0082cdac` | Stores 6-byte config chunk and calls `FUN_00840568` (flash/config write). |
 | `0xa1` | — | `0x00827f5c` | Factory/test mode commands (`0x01`–`0x06`): reset, read logs, power off, etc. |
 | `0xc6` | `restoreKey` | special | Reboot sequence: clears state, resets BLE, restarts main task. |
@@ -1020,6 +1020,117 @@ zeroed there) and is fast to toggle from the watch face — the
 host's only requirement is that `req[2]` for sub `0x02` be `0` or
 `1` (the handler doesn't reject other values, but the bit-mask
 write will silently coerce them to `0`/`1`).
+
+### 3.11 Opcode `0x7a` muslim (prayer config) (`FUN_0082cb3a`)
+
+Sub-dispatched by `req[1]`. The "read" path uses a *two-phase* response
+(an empty header frame, then a multi-frame payload) via the shared
+fragmenter `FUN_0082c988` (see below). The "reset" path is
+single-shot.
+
+#### Sub-opcode dispatch
+
+| `req[1]` | `req[2]` | Action |
+|---:|---:|---|
+| `0x01` | slot_id | **Read** prayer slot. The handler first calls the stub `FUN_00829c88(slot_id, &buf)` — currently a no-op that always returns `0` — so the read always falls into the "slot empty" path and returns a one-byte `0x7A 0xFF` error. See "Stub status" below. |
+| `0x02` | `0x01` | **Reset** prayer config: `FUN_00829c90()` (also a stub, currently a no-op). No response. |
+| other | any | no-op, no response. |
+
+#### Stub status
+
+Both `FUN_00829c88` (read) and `FUN_00829c90` (reset) are
+**unimplemented stubs** in the v14 firmware — they simply `return 0`
+or `return`. This means the H59MA v14 firmware does not yet
+implement the Muslim prayer feature, even though the opcode is
+allocated in the dispatcher table. The handler still wires up the
+full "happy path" so that, when the producer side is implemented,
+the read will:
+
+1. Send the 16-byte header frame
+   `[0x7A, 0x00, 0x05, 0x3C, 0, 0, …, 0, cksum]` (the literal
+   `0x3C05007A` little-endian dword at offset 0 with the
+   additive checksum on bytes 1..14).
+2. Call `FUN_0082c988(0x7A, &local_3d, 0x31)` where
+   `local_3d[0] = req[2]` (slot id echo) and bytes 1..48 are the
+   prayer-slot payload that the future `FUN_00829c88` will fill
+   in.
+3. The fragmenter then ships 49 bytes in 13-byte chunks as four
+   16-byte frames, sequence-numbered 1..4.
+
+The "send header, then fragmented payload" structure is shared
+with `0x37 pressure` and `0x39 hrv` (the other long-response
+opcodes in the Channel-A table) — they all reuse
+`FUN_0082c988` for the payload.
+
+#### `FUN_0082c988` — 13-byte-chunk fragmented streamer
+
+```c
+void FUN_0082c988(byte cmd, byte *data, int length) {
+  char seq = 1;
+  for (int i = 0; i < length; i += 0xD) {
+    memset(&frame, 0, 0x10);
+    frame[0] = cmd;
+    frame[1] = seq++;
+    chunk = min(length - i, 0xD);
+    memcpy(&frame[2], data + i, chunk);
+    frame[15] = FUN_0082b0c4(&frame, 0xf);
+    FUN_0082ebdc(&frame);
+  }
+}
+```
+
+Each 16-byte notify frame carries:
+
+```
+byte  0: cmd (0x37 / 0x39 / 0x7A)
+byte  1: sequence number (1, 2, 3, …)
+byte  2..14: payload chunk (up to 13 bytes)
+byte 15: additive checksum
+```
+
+For `0x7A` (49-byte payload): ceil(49 / 13) = 4 chunks, sequence
+numbers 1..4. The 0x37 / 0x39 callers will use whatever
+sequence-length fits their payload. The host decodes by
+**collecting all `cmd` frames in order** until it has
+`length` bytes or a sentinel — the `FUN_0082c988` itself does
+not emit an EOM, so the upper layer is responsible for the
+"first frame is the header, follow-up frames are payload
+chunks" interpretation.
+
+#### Response layout for the (unimplemented) read path
+
+Phase 1 — header:
+
+```
+byte  0: 0x7A
+byte  1: 0x00
+byte  2: 0x05         (payload size = 5 dwords? — see below)
+byte  3: 0x3C
+byte  4..14: 0
+byte 15: additive checksum
+```
+
+The `0x3C` in byte 3 is 60 — the same value seen in `0x37`
+pressure's response and in the 0x01 setTime ack. It is the
+static "feature-bitmap-shape" byte the firmware reuses across
+all "long config" responses; the actual meaning is
+producer-specific.
+
+Phase 2 — 4-frame fragmented payload (one per 13-byte chunk):
+
+```
+frame N (N=1..4):
+  byte  0: 0x7A
+  byte  1: N
+  byte  2..14: slot data chunk
+  byte 15: additive checksum
+```
+
+The slot data layout is currently unknown because
+`FUN_00829c88` is a stub; once the prayer feature ships, byte
+0 of the data will identify the slot id (echo of `req[2]`)
+and bytes 1..48 will hold the per-slot prayer record
+(prayer name, time, offset, etc.).
 
 ### Opcode `0xa1` factory/test mode (`FUN_00827f5c`)
 
