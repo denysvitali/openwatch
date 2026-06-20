@@ -1,9 +1,9 @@
 # QWatch Pro / Oudmon BLE Smartwatch — Reverse-Engineering Protocol Spec
 
 > Canonical protocol reference for an open-source Flutter rewrite of `com.qcwireless.qcwatch`
-> ("QWatch Pro"). Derived entirely from static analysis of the shipped APK. Where the source was
-> ambiguous or a value could not be resolved statically, it is marked **TODO**. No opcodes are
-> invented.
+> ("QWatch Pro"). Derived from static analysis of the shipped APK and cross-checked against H59MA
+> firmware where noted. Where the source was ambiguous or a value could not be resolved statically,
+> it is marked **TODO**. No opcodes are invented.
 
 ---
 
@@ -20,6 +20,10 @@
 | Device classes | Smart **rings** and **bracelets/watches** (same APK, capability-negotiated) |
 | Audio/music stacks | Generic + **JieLi** (JL) SPP music streaming |
 | OTA / DFU | **Oudmon-native DFU** over the large-data channel (Channel B). See note below. |
+
+Firmware cross-reference: H59MA firmware r2 notes and address tables live in
+[`firmwares/RE_FIRMWARE.md`](firmwares/RE_FIRMWARE.md). Firmware offsets there are `body.bin`
+offsets unless noted; add `0x450` for the original `.bin` container offset.
 
 **OTA / chip note.** Although the APK bundles a **Realtek** SDK (`com.realsil.sdk.*`), that code is the
 **Bumblebee/bbpro audio-earbud** stack (ANC/APT/EQ/spatial-audio/local-playback) — **NOT** a watch DFU
@@ -49,6 +53,12 @@ the same connection (see §2). The cloud layer is a separate HTTPS/JSON + WebSoc
 | `00002A27-…` | READ Hardware Revision | — | `CHAR_HW_REVISION`. First handshake read. |
 | `00002A26-…` | READ Firmware Revision | — | `CHAR_FIRMWARE_REVISION`. Second read (+200 ms); completion → `setReady(true)`. |
 | `00002A28-…` | READ Software Revision | — | `CHAR_SOFTWARE_REVISION`. Defined but not in core handshake. |
+
+H59MA firmware stores the BLE UUIDs as little-endian table data and confirms both logical channels:
+v13 Channel B service at body `0x20d7c`, Channel A service at `0x20e40`; v14 Channel B service at
+`0x1f130`, Channel A service at `0x1f1f4`. The corresponding Channel-A write/notify UUIDs are at
+v13 `0x20e8a`/`0x20ec2` and v14 `0x1f238`/`0x1f274`; Channel-B write/notify are at v13
+`0x20dca`/`0x20dfc` and v14 `0x1f17e`/`0x1f1b2`.
 
 ```mermaid
 graph LR
@@ -202,7 +212,20 @@ Boolean encoding gotchas:
 | Channel | Algorithm | Scope |
 |---|---|---|
 | A | additive 8-bit sum `& 0xFF` | bytes `[0..14]` |
-| B | CRC16 (`calcCrc16`) | **payload only** (not header) |
+| B | CRC-16/MODBUS (`poly=0xA001`, init `0xFFFF`) | **payload only** (not header) |
+
+Firmware evidence for Channel B: r2 disassembly of H59MA v13 at body `0x8c54..0x8c9c` and v14 at
+`0x8c0c..0x8c54` checks `len >= 6`, compares byte 0 with `0xBC`, reads `len16LE` from bytes 2/3,
+reads `crc16LE` from bytes 4/5, and copies payload from byte 6. The CRC helpers at v13
+`0x8d5c..0x8d9a` and v14 `0x8d14..0x8d52` use init `0xFFFF` and lookup tables at v13 `0x2100c` and
+v14 `0x1f3c0`, whose first words match the canonical reflected `0xA001` table.
+
+Firmware evidence for Channel-A buckets: v13 body `0x22490` is a one-byte-per-opcode bucket table
+matching the APK-derived command families: `0x01..0x09` and `0x0f..0x20` plain request bucket `0x40`,
+`0x0a..0x0e` mixture bucket `0x41`, `0x22..0x30` notify/push bucket `0x02`, `0x42..0x47` bucket
+`0x90`, `0x48..0x5b` bucket `0x10`, `0x62..0x67` bucket `0x88`, and `0x68..0x7b` bucket `0x08`.
+The same contiguous table was not found in v14, but its command literal table moved from v13
+`0x21b58` to v14 `0x1ff0c`.
 
 ### 3.4 Endianness cheat-sheet (the #1 gotcha — three helpers!)
 
