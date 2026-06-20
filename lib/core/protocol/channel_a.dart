@@ -507,10 +507,32 @@ class ChannelADispatcher {
     _hrvChunk.add(HrvSettingChunk(payload: pl));
   }
 
-  /// `sugarLipidsSetting` (0x3a): sub `0x03`/`0x04` read/write.
+  /// `sugarLipidsSetting` (0x3a): sub `0x03` (sugar) / `0x04` (lipids)
+  /// read/write. Per `GHIDRA_DECOMPILATION.md` §3.22 / `FUN_0082cc1e`:
+  ///   * `pl[0]` = sub echo (0x03 sugar / 0x04 lipids)
+  ///   * `pl[1]` = sub-cmd echo (0x01 read / 0x02 write)
+  ///   * `pl[2]` = feature value (0/1 for read; echoed `req[3]` for
+  ///     sugar-write; zeroed out for the lipids 1-byte-cmd ack)
+  ///
+  /// Sugar writes echo the request frame (same shape as `0x06 DND` §3.7
+  /// and `0x3b uvTouch` §3.18), so when `sub == 0x03 && subCmd == 0x02`
+  /// we surface [SugarLipidsSetting.writeAcksEcho] = true. Lipids writes
+  /// use a 1-byte-cmd ack `[0x3A, 0, 0, 0, 0…0, cksum]` and we surface
+  /// `writeAcksEcho = false` — the host can then issue a follow-up read
+  /// to confirm the bit flipped.
   void _decodeSugarLipids(Uint8List pl) {
     if (pl.length < 2) return;
-    _sugarLipids.add(SugarLipidsSetting(sub: pl[0], value: pl[1]));
+    final sub = pl[0];
+    final subCmd = pl[1];
+    final featureValue = pl.length > 2 ? pl[2] : 0;
+    final writeAcksEcho = sub == 0x03 && subCmd == 0x02;
+    _sugarLipids.add(
+      SugarLipidsSetting(
+        sub: sub,
+        featureValue: featureValue,
+        writeAcksEcho: writeAcksEcho,
+      ),
+    );
   }
 
   /// `touchControl` (0x3b) / `uvSetting`: 1-byte read/write of the
@@ -983,10 +1005,41 @@ class HrvSettingChunk {
   final Uint8List payload;
 }
 
+/// `sugarLipidsSetting` (`0x3a`) read/write response. A two-bit-per-feature
+/// config pair (sugar = bit 5, lipids = bit 7 of the shared config byte at
+/// `DAT_008277f0 + 0x2D`) packed into a single Channel-A opcode.
+///
+/// Per `GHIDRA_DECOMPILATION.md` §3.22 (`FUN_0082cc1e`) the response is:
+///   * **read** (`req[1]` = 0x03 or 0x04, `req[2]` = 0x01) — built fresh on
+///     the stack: `[0x3A, sub, 0x01, featureValue, 0…0, cksum]`.
+///   * **write** — the two features use **different** ack shapes:
+///     - sugar (`0x03 0x02`) echoes the 16-byte request unchanged
+///     - lipids (`0x04 0x02`) sends a 1-byte-cmd ack
+///       `[0x3A, 0, 0, 0, 0…0, cksum]`
+///     The `writeAcksEcho` flag lets the host tell these two shapes apart
+///     without keeping outbound-context state.
 class SugarLipidsSetting {
-  const SugarLipidsSetting({required this.sub, required this.value});
+  const SugarLipidsSetting({
+    required this.sub,
+    required this.featureValue,
+    required this.writeAcksEcho,
+  });
+
+  /// Sub-opcode echo from `pl[0]`: `0x03` = sugar, `0x04` = lipids.
   final int sub;
-  final int value;
+
+  /// Feature value at `pl[2]`. For a read this is the live `0/1` bit; for a
+  /// write ack that *echoes the request*, this is the value the watch just
+  /// committed (echoed from `req[3]`). For a lipids 1-byte-cmd ack the
+  /// decoder surfaces `0` (the firmware zeros out the whole response).
+  final int featureValue;
+
+  /// `true` when this is a sugar-write ack (the request frame echoed back
+  /// unchanged — `pl[1] == 0x02` and the rest of the bytes mirror the
+  /// outbound frame). `false` for read responses and for the lipids 1-byte
+  /// ack. See `GHIDRA_DECOMPILATION.md` §3.22 for the asymmetric write
+  /// semantics.
+  final bool writeAcksEcho;
 }
 
 /// UV / touch-screen control-byte response (`0x3b`).

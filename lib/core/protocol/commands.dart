@@ -228,6 +228,47 @@ class Commands {
   /// the Channel-B DFU flow.
   static Uint8List switchToOta() => Codec.buildChannelA(OpA.switchOta);
 
+  /// `SugarLipidsSetting` read (`0x3a`): asks the watch to read one of the
+  /// two 1-bit flags packed into the shared config byte at
+  /// `DAT_008277f0 + 0x2D` (sugar = bit 5, lipids = bit 7). Per
+  /// `GHIDRA_DECOMPILATION.md` §3.22 the response carries
+  /// `[0x3A, 0x03|0x04, 0x01, value, 0…0, cksum]`.
+  ///
+  /// [isLipids] selects the feature: `false` (default) reads sugar
+  /// (`sub = 0x03`), `true` reads lipids (`sub = 0x04`). Sub-cmd is
+  /// always `0x01` (read).
+  static Uint8List readSugarLipids({bool isLipids = false}) {
+    final sub = isLipids ? 0x04 : 0x03;
+    return Codec.buildChannelA(OpA.sugarLipidsSetting, [sub, 0x01]);
+  }
+
+  /// `SugarLipidsSetting` write (`0x3a`): sets one of the two 1-bit flags
+  /// in the shared config byte. Per `GHIDRA_DECOMPILATION.md` §3.22 the
+  /// two features use **different ack shapes**:
+  ///   * sugar (`sub = 0x03`) — the watch echoes the 16-byte request
+  ///     frame unchanged.
+  ///   * lipids (`sub = 0x04`) — the watch sends a 1-byte-cmd ack
+  ///     `[0x3A, 0, 0, 0, 0…0, cksum]`.
+  ///
+  /// A host that wants to confirm a lipids write should follow up with
+  /// [readSugarLipids](isLipids: true) — the lipids ack itself is
+  /// feature-value-free.
+  ///
+  /// [isLipids] selects the feature (`false` → sugar / sub `0x03`,
+  /// `true` → lipids / sub `0x04`); [enabled] is the bit value. Sub-cmd
+  /// is always `0x02` (write).
+  static Uint8List setSugarEnabled({
+    required bool enabled,
+    required bool isLipids,
+  }) {
+    final sub = isLipids ? 0x04 : 0x03;
+    return Codec.buildChannelA(OpA.sugarLipidsSetting, [
+      sub,
+      0x02,
+      enabled ? 1 : 0,
+    ]);
+  }
+
   /// Clamp a string to [max] UTF-8 bytes without splitting a code unit.
   static List<int> utf8Clamp(String s, int max) {
     final bytes = s.codeUnits.where((c) => c < 0x80).take(max).toList();

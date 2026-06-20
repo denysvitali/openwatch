@@ -163,5 +163,38 @@ void main() {
       expect(f[0], OpA.bpReadConform);
       expect(f[1], 0x00);
     });
+
+    test('readSugarLipids defaults to sub 0x03 sugar read', () {
+      final f = Commands.readSugarLipids();
+      expect(f[0], OpA.sugarLipidsSetting);
+      expect(f[1], 0x03);
+      expect(f[2], 0x01);
+    });
+
+    test('readSugarLipids(isLipids:true) emits lipids sub 0x04 read', () {
+      final f = Commands.readSugarLipids(isLipids: true);
+      expect(f[0], OpA.sugarLipidsSetting);
+      expect(f[1], 0x04);
+      expect(f[2], 0x01);
+    });
+
+    test('setSugarEnabled sugar enabled encodes [0x3A, 0x03, 0x02, 0x01]', () {
+      final f = Commands.setSugarEnabled(enabled: true, isLipids: false);
+      expect(f[0], OpA.sugarLipidsSetting);
+      expect(f[1], 0x03);
+      expect(f[2], 0x02);
+      expect(f[3], 0x01);
+    });
+
+    test(
+      'setSugarEnabled lipids disabled encodes [0x3A, 0x04, 0x02, 0x00]',
+      () {
+        final f = Commands.setSugarEnabled(enabled: false, isLipids: true);
+        expect(f[0], OpA.sugarLipidsSetting);
+        expect(f[1], 0x04);
+        expect(f[2], 0x02);
+        expect(f[3], 0x00);
+      },
+    );
   });
 }

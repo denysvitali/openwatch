@@ -700,6 +700,99 @@ void main() {
       expect(u.opcode, -1);
     });
 
+    test(
+      'sugarLipidsSetting 0x3a read sub 0x03 (sugar) decodes feature value',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final got = d.onSugarLipids.first;
+        // pl = [sub=0x03, subCmd=0x01, value=0x01] → sugar enabled.
+        final f = Codec.buildChannelA(OpA.sugarLipidsSetting, [
+          0x03,
+          0x01,
+          0x01,
+        ]);
+        t.inA.add(f);
+        final s = await got.timeout(const Duration(seconds: 1));
+        expect(s.sub, 0x03);
+        expect(s.featureValue, 0x01);
+        expect(s.writeAcksEcho, isFalse);
+      },
+    );
+
+    test(
+      'sugarLipidsSetting 0x3a read sub 0x04 (lipids) decodes feature value',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final got = d.onSugarLipids.first;
+        // pl = [sub=0x04, subCmd=0x01, value=0x00] → lipids disabled.
+        final f = Codec.buildChannelA(OpA.sugarLipidsSetting, [
+          0x04,
+          0x01,
+          0x00,
+        ]);
+        t.inA.add(f);
+        final s = await got.timeout(const Duration(seconds: 1));
+        expect(s.sub, 0x04);
+        expect(s.featureValue, 0x00);
+        expect(s.writeAcksEcho, isFalse);
+      },
+    );
+
+    test(
+      'sugarLipidsSetting 0x3a sugar write echo sets writeAcksEcho=true',
+      () async {
+        // Per GHIDRA_DECOMPILATION.md §3.22, the `0x03 0x02` write ack
+        // echoes the request frame unchanged — verify the dispatcher
+        // surfaces writeAcksEcho=true so the host can distinguish the
+        // echo shape from a regular read response.
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final got = d.onSugarLipids.first;
+        // Build the echo: pl = [0x03, 0x02, 0x01] (sugar write with value=1).
+        final f = Codec.buildChannelA(OpA.sugarLipidsSetting, [
+          0x03,
+          0x02,
+          0x01,
+        ]);
+        t.inA.add(f);
+        final s = await got.timeout(const Duration(seconds: 1));
+        expect(s.sub, 0x03);
+        expect(s.featureValue, 0x01);
+        expect(s.writeAcksEcho, isTrue);
+      },
+    );
+
+    test(
+      'sugarLipidsSetting 0x3a lipids write ack keeps writeAcksEcho=false',
+      () async {
+        // Per GHIDRA_DECOMPILATION.md §3.22, the lipids write path uses a
+        // 1-byte-cmd ack `[0x3A, 0, 0, 0, 0…0, cksum]` — the feature
+        // value byte is zeroed out. Verify the dispatcher surfaces
+        // writeAcksEcho=false so the host knows to issue a follow-up
+        // read to confirm the bit flipped.
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final got = d.onSugarLipids.first;
+        // pl = [0x04, 0x02, 0x00] — the lipids 1-byte-cmd ack.
+        final f = Codec.buildChannelA(OpA.sugarLipidsSetting, [
+          0x04,
+          0x02,
+          0x00,
+        ]);
+        t.inA.add(f);
+        final s = await got.timeout(const Duration(seconds: 1));
+        expect(s.sub, 0x04);
+        expect(s.featureValue, 0x00);
+        expect(s.writeAcksEcho, isFalse);
+      },
+    );
+
     test('vibration 0xc7 fragments arrive on onVibrationChunk', () async {
       final t = _StubTransport();
       final d = ChannelADispatcher(t);
