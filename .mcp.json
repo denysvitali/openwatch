@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "ghidra": {
+      "command": "/home/workspace/git/ghidra-setup/ghidra-mcp-bridge",
+      "args": []
+    }
+  }
+}
