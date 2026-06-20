@@ -281,6 +281,54 @@ void main() {
       },
     );
 
+    test('bpData 0x0d emits chunk with monotonic seq', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final got = d.onBpRecord.first;
+      final payload = List<int>.filled(14, 0xab);
+      final f = Codec.buildChannelA(OpA.bpData, payload);
+      t.inA.add(f);
+      final c = await got.timeout(const Duration(seconds: 1));
+      expect(c.seq, 0);
+      expect(c.payload, Uint8List.fromList(payload));
+    });
+
+    test('bpData 0x0d seq increments per chunk', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final chunks = <BpRecordChunk>[];
+      final sub = d.onBpRecord.listen(chunks.add);
+      // Two chunks: header (14 B) + body (5 B).
+      t.inA.add(Codec.buildChannelA(OpA.bpData, List.filled(14, 0xab)));
+      t.inA.add(
+        Codec.buildChannelA(OpA.bpData, [0x01, 0x02, 0x03, 0x04, 0x05]),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(chunks.length, 2);
+      expect(chunks[0].seq, 0);
+      expect(chunks[1].seq, 1);
+      expect(chunks[0].payload.length, 14);
+      expect(chunks[1].payload, [
+        0x01,
+        0x02,
+        0x03,
+        0x04,
+        0x05,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+      ]);
+      await sub.cancel();
+    });
+
     test('readHeartRate 0x15 header frame fires onHeartRateHeader', () async {
       final t = _StubTransport();
       final d = ChannelADispatcher(t);

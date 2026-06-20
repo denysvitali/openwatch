@@ -95,6 +95,13 @@ class Commands {
   static Uint8List setBrightness(int level) =>
       Codec.buildChannelA(OpA.brightness, [OpA.mixWrite, level & 0xFF]);
 
+  /// `BpReadConformReq` (0x0e): advance the BP record queue and
+  /// emit the next record on `0x0d`. Per `GHIDRA_DECOMPILATION.md`
+  /// §3.19, the handler ignores any `sub != 0` (no advance, no
+  /// response). Default sub is 0 = advance + read next.
+  static Uint8List advanceBpRecord({int sub = 0x00}) =>
+      Codec.buildChannelA(OpA.bpReadConform, [sub & 0xFF]);
+
   /// `ReadTotalSportDataReq` (0x07): `[dayOffset]` (0 = today).
   static Uint8List readTotalSport({int dayOffset = 0}) =>
       Codec.buildChannelA(OpA.readTotalSport, [dayOffset & 0xFF]);

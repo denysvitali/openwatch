@@ -31,6 +31,8 @@ class ChannelADispatcher {
   final _heartRateChunk = StreamController<HeartRateChunk>.broadcast();
   final _heartRateError = StreamController<void>.broadcast();
   final _bloodOxygen = StreamController<BloodOxygenSetting>.broadcast();
+  final _bpRecord = StreamController<BpRecordChunk>.broadcast();
+  int _bpRecordSeq = 0;
   final _pressureSetting = StreamController<PressureSetting>.broadcast();
   final _pressure = StreamController<PressureReading>.broadcast();
   final _hrv = StreamController<HrvSetting>.broadcast();
@@ -50,6 +52,8 @@ class ChannelADispatcher {
   final _vibrationChunks = StreamController<VibrationChunk>.broadcast();
   int _vibrationSeq = 0;
   final _displayClock = StreamController<DisplayClockResponse>.broadcast();
+  final _queryDataDistribution =
+      StreamController<QueryDataDistribution>.broadcast();
 
   /// Live-time, type, lang, tz embedded in the SetTime 0x01 ACK.
   Stream<DateTime> get onTime => _time.stream;
@@ -80,6 +84,12 @@ class ChannelADispatcher {
 
   /// SpO2 setting (`0x2c`).
   Stream<BloodOxygenSetting> get onBloodOxygen => _bloodOxygen.stream;
+
+  /// Blood-pressure record chunk (`0x0d`). The firmware emits a
+  /// fragmented BP record (header always first, body optional
+  /// if record > 14 B) via `FUN_0082b938` after a `0x0e`
+  /// `sub=0` advance. See `GHIDRA_DECOMPILATION.md` §3.19.
+  Stream<BpRecordChunk> get onBpRecord => _bpRecord.stream;
 
   /// Pressure config (`0x37`).
   Stream<PressureSetting> get onPressureSetting => _pressureSetting.stream;
@@ -152,6 +162,12 @@ class ChannelADispatcher {
   /// `GHIDRA_DECOMPILATION.md` §3.5).
   Stream<DisplayClockResponse> get onDisplayClock => _displayClock.stream;
 
+  /// Data-distribution bitmask (`0x46`). The watch reports which of the
+  /// last 32 days have stored health data; bit *d* ⇒ day *d* (where
+  /// day 0 is today). See `PROTOCOL.md` §4.6.
+  Stream<QueryDataDistribution> get onQueryDataDistribution =>
+      _queryDataDistribution.stream;
+
   /// Any frame we couldn't type-decode.
   Stream<ChannelAFrame> get unknown => _unknown.stream;
 
@@ -184,6 +200,8 @@ class ChannelADispatcher {
         _decodeRealtimeHr(pl);
       case OpA.bloodOxygenSetting:
         _decodeBloodOxygen(pl);
+      case OpA.bpData:
+        _decodeBpRecord(pl);
       case OpA.pressure:
         _decodePressure(pl);
       case OpA.pressureSetting:
@@ -211,12 +229,20 @@ class ChannelADispatcher {
         _decodeMenstruation(pl);
       case OpA.restoreKey:
         _restoreKey.add(null);
-      case OpA.deviceReboot || 0x46:
-        // 0xc6 ack path (sub != 0x6C). The 0x6C reboot path tears
-        // down BLE before any response can be parsed — see
-        // GHIDRA_DECOMPILATION.md §3.14. ProtocolHub.notifyDeviceRebootAccepted()
-        // fires the event optimistically from the outbound send.
-        _restoreKey.add(null);
+      case OpA.queryDataDistribution:
+        // `0x46` strips to the same base as the `0xc6` device-reboot
+        // ack (top bit clears). Use the raw opcode to discriminate:
+        // 0xc6 = reboot ack → onRestoreKey; 0x46 = distribution
+        // response (success or error-flagged). The 0x6C reboot
+        // path tears down BLE before any response can be parsed
+        // (see GHIDRA_DECOMPILATION.md §3.14) — ProtocolHub
+        // optimistically fires onRestoreKey on the outbound send
+        // complete via emitRestoreKey().
+        if (Codec.rxOpcodeRaw(frame) == OpA.deviceReboot) {
+          _restoreKey.add(null);
+        } else {
+          _decodeQueryDataDistribution(pl, error: Codec.rxIsError(frame));
+        }
       case OpA.vibrationResponse || 0x47:
         _decodeVibration(pl);
       case 0xa1 || 0x21:
@@ -287,6 +313,20 @@ class ChannelADispatcher {
     }
   }
 
+  /// `queryDataDistribution` (0x46): 4-byte BE bitmask of which
+  /// of the last 32 days have stored health data. Per
+  /// `PROTOCOL.md` §4.6: `isTheDayHasData(day) = (mask >> day) & 1`.
+  /// A wire byte of `0xC6` (`0x46 | 0x80`) means the device is
+  /// reporting a per-opcode error — we surface that via
+  /// [QueryDataDistribution.errorFlag] so callers can decide
+  /// whether to fall back to blind polling.
+  void _decodeQueryDataDistribution(Uint8List pl, {required bool error}) {
+    if (pl.isEmpty) return;
+    _queryDataDistribution.add(
+      QueryDataDistribution.fromPayload(pl, errorFlag: error),
+    );
+  }
+
   /// `readHeartRate` (0x15): two-phase per-record dump.
   ///
   /// Per `FUN_0082cf48` (`GHIDRA_DECOMPILATION.md` §3.12):
@@ -349,6 +389,24 @@ class ChannelADispatcher {
   void _decodeBloodOxygen(Uint8List pl) {
     if (pl.length < 2) return;
     _bloodOxygen.add(BloodOxygenSetting(sub: pl[0], enabled: pl[1] != 0));
+  }
+
+  /// `bpData` (0x0d): blood-pressure record chunk.
+  ///
+  /// Per `GHIDRA_DECOMPILATION.md` §3.19 / `FUN_0082cb28` +
+  /// `FUN_0082c0a4`: the response to a `0x0e sub=0` advance is a
+  /// fragmented BP record — the first chunk is always a 14-byte
+  /// header, followed by an optional body chunk for records longer
+  /// than 14 B. There is no explicit end-of-message marker.
+  ///
+  /// The decoder surfaces each chunk with a monotonically
+  /// increasing [BpRecordChunk.seq] (reset by the consumer on
+  /// each `advanceBpRecord()` request — the dispatcher itself
+  /// cannot know when the host issued one). Consumers reassemble
+  /// by starting a new record each time they see `seq` reset.
+  void _decodeBpRecord(Uint8List pl) {
+    if (pl.isEmpty) return;
+    _bpRecord.add(BpRecordChunk(seq: _bpRecordSeq++, payload: pl));
   }
 
   /// `pressure` (0x38): 1-bit on/off setting (analogous to 0x2c SpO2).
@@ -679,6 +737,7 @@ class ChannelADispatcher {
       _heartRateChunk,
       _heartRateError,
       _bloodOxygen,
+      _bpRecord,
       _pressureSetting,
       _pressure,
       _hrv,
@@ -697,6 +756,7 @@ class ChannelADispatcher {
       _factoryCommand,
       _vibrationChunks,
       _displayClock,
+      _queryDataDistribution,
     ]) {
       c.close();
     }
@@ -769,6 +829,23 @@ class BloodOxygenSetting {
 /// Pressure enabled flag (`0x38`). The H59MA pressure sensor is
 /// either on or off — there is no continuous reading on this
 /// opcode. See `GHIDRA_DECOMPILATION.md` §3.17 / `FUN_0082ca54`.
+/// One chunk of a blood-pressure record (`0x0d`).
+///
+/// Per `GHIDRA_DECOMPILATION.md` §3.19 the record is fragmented
+/// via `FUN_0082b938`: the first chunk is always the 14-byte
+/// header, followed by an optional body chunk when the record
+/// is larger than 14 B. The decoder cannot tell header from body
+/// from a single frame — the discriminator is the *position*
+/// within an advance sequence (host issued `0x0e sub=0`, first
+/// frame = header, optional second frame = body). The dispatcher
+/// exposes a monotonic [seq] so consumers can reset on each
+/// advance request.
+class BpRecordChunk {
+  const BpRecordChunk({required this.seq, required this.payload});
+  final int seq;
+  final Uint8List payload;
+}
+
 class PressureReading {
   const PressureReading({required this.enabled});
   final bool enabled;
@@ -1059,4 +1136,41 @@ class DisplayClockResponse {
   final int length;
   final int echoedLength;
   final Uint8List label;
+}
+
+/// `queryDataDistribution` (`0x46`) bitmask response. The watch
+/// reports a 32-bit big-endian bitmask: bit *d* set ⇒ day *d*
+/// (counted from today backward) has stored health data. The
+/// raw wire byte is `0x46` for a successful reply or `0xC6`
+/// (`0x46 | 0x80`) when the device is reporting a per-opcode
+/// error — in that case [errorFlag] is true and [mask] is
+/// best-effort (only the bytes the firmware bothered to fill
+/// in are meaningful; treat the rest as zero).
+///
+/// See `PROTOCOL.md` §4.6 and `GHIDRA_DECOMPILATION.md` §3.13
+/// for the wire format.
+class QueryDataDistribution {
+  const QueryDataDistribution({required this.mask, required this.errorFlag});
+
+  /// Decode the wire payload (pl[0..13]) as a 32-bit big-endian
+  /// bitmask. Best-effort when the payload is short — only the
+  /// bytes the firmware bothered to fill in are meaningful.
+  factory QueryDataDistribution.fromPayload(
+    Uint8List pl, {
+    required bool errorFlag,
+  }) {
+    final n = pl.length < 4 ? pl.length : 4;
+    var mask = 0;
+    for (var i = 0; i < n; i++) {
+      mask = (mask << 8) | (pl[i] & 0xFF);
+    }
+    return QueryDataDistribution(mask: mask, errorFlag: errorFlag);
+  }
+
+  /// True if bit [day] is set in [mask] (i.e. the device has stored
+  /// health data for that day, where day 0 is today).
+  bool hasData(int day) => day >= 0 && day < 32 && (mask & (1 << day)) != 0;
+
+  final int mask;
+  final bool errorFlag;
 }

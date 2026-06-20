@@ -157,5 +157,11 @@ void main() {
       expect(f[0], OpA.deviceReboot);
       expect(f[1], 0x02);
     });
+
+    test('advanceBpRecord defaults to 0x0e with sub 0 (advance + read)', () {
+      final f = Commands.advanceBpRecord();
+      expect(f[0], OpA.bpReadConform);
+      expect(f[1], 0x00);
+    });
   });
 }
