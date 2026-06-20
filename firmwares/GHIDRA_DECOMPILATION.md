@@ -5112,3 +5112,94 @@ The bytes 0 + 12 vs bytes 0 + 15 split matches the
 byte-length of the second-frame payload (handlers that ship
 a payload in bytes 1..14 of the second frame put the marker
 at byte 12; handlers that ship no payload put it at byte 15).
+
+### 8.20 0x97-0x9f reserved-opcode range summary
+
+The "reserved for future use" tail of the 0xFEE7 dispatcher
+opcode table. The high-range switch8 at `0x82c6e0` (§8.1)
+*appears* to dispatch 10 opcodes (0x97..0xA0), but in practice
+the switch8 entries all route to **two fallback handlers**
+(per-byte default slot + the `0x9D` short-circuit):
+
+```
+0x82c6e0:  0a           ← switch8 count = 10 (opcodes 0x97..0xA0)
+0x82c6e1:  cb cf d3 d7 db df 37 e3 eb   ← 9 per-case offsets
+0x82c6ea:  00 00 23 01 22              ← padding + default-slot thunk address
+```
+
+(The `00 00 23 01 22` tail is the half-word address of the
+default-slot thunk at `0x82c6ea + (0x0123 << 1)` — i.e.
+`0x82c6ea + 0x246 = 0x82c930`.)
+
+Each per-case offset is a half-word count × 2 from `0x82c6e1`.
+For opcodes 0x97..0xA0 the targets are:
+
+| Opcode | Offset | Target |
+|---:|---:|---|
+| `0x97` | `0xcb` | `0x82c877` (default-slot area) |
+| `0x98` | `0xcf` | `0x82c87f` |
+| `0x99` | `0xd3` | `0x82c887` |
+| `0x9A` | `0xd7` | `0x82c88f` |
+| `0x9B` | `0xdb` | `0x82c897` |
+| `0x9C` | `0xdf` | `0x82c89f` |
+| `0x9D` | `0x37` | `0x82c74f` (**DIFFERENT — exit early**) |
+| `0x9E` | `0xe3` | `0x82c8a7` |
+| `0x9F` | `0xeb` | `0x82c8b7` |
+| `0xA0` | (default) | `0x82c930` |
+
+8 of the 9 per-case entries route to a sequence of NOP
+instructions at addresses `0x82c877..0x82c8b7` (one per
+opcode). The NOPs are not "no-op" in the sense of doing
+nothing — they fall through to the same dispatcher
+default-slot logic that calls `FUN_0082bcba` (the vendor NAK
+from §8.1). The `0x9D` entry is the lone exception — its
+offset `0x37` points to a different function that exits the
+dispatcher *before* the default-slot branch, so `0x9D` ships
+**no response at all** (a clean vendor NOP rather than the
+default vendor NAK).
+
+#### Why all 0x97-0x9F / 0xA0 opcodes default-slot
+
+The 0xFEE7 dispatcher (§8.1) was built with a **forward-
+compatible opcode range**: the firmware allocates entries
+0x97..0xA0 in the switch8 table but only one (0x9D) actually
+points to a non-default handler. The other 8 entries are
+NOP-slots that fall through to the default-slot vendor-NAK
+branch.
+
+The intent is presumably for *future firmware revisions* to
+populate the NOP-slots with vendor-specific handlers without
+needing to expand the switch8 table. A host that wants to
+*use* 0x97..0x9F / 0xA0 today would get a vendor-NAK back
+(§8.1) — the opcode is reserved but unimplemented.
+
+#### 0x9D as the lone non-default
+
+The `0x9D` case (offset `0x37`) routes to a handler that
+*exits the dispatcher early* — it doesn't call
+`FUN_0082bcba` (the vendor NAK) and doesn't send a response.
+This makes 0x9D the only "reserved and silently dropped"
+opcode in the range. A host that sends `0x9D` gets *nothing*
+back — no ack, no NAK. The host SDK must time-out the
+request and treat it as "not implemented" rather than as
+"rejected".
+
+#### Cross-reference: §3 table
+
+The §3 Channel-A table lists `0x97..0x9f` as "(handler)" with
+no detail — that handler is exactly the **default-slot
+vendor-NAK** from §8.1. The §3 dispatcher (`FUN_0082d2dc`)
+does *not* have the `0x97..0x9F` range routed (the §3 table
+falls into `FUN_0082ce0c` / `FUN_0082cede` / etc. for opcodes
+in that range), so the 0xFEE7 §8.1 dispatcher is the
+*only* path that recognises 0x97..0x9F.
+
+#### Why this synthesis section exists
+
+The 0x97-0x9F range is the *last* un-decompiled 0xFEE7
+opcode range. Most of the listed handlers are not "missing"
+in the sense of being unknown — they're *deliberately* default-
+slot (reserved for future use). This section captures that
+state so a host SDK that wants to know "is 0x97 implemented
+on H59MA v14?" can answer "no, all of 0x97..0x9F + 0xA0
+return vendor NAK except 0x9D which is silently dropped".
