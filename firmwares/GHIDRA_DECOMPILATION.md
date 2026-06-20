@@ -242,7 +242,7 @@ Processes a circular queue of incoming 16-byte frames (`DAT_0082d440 + 0x14` rin
 | `0x01` | `setTime` | `0x0082bb4e` | Converts BCD date/time fields, updates RTC, sends `0x2f` packet-length notify, then a 14-byte `0x01` ack — see §3.4. |
 | `0x06` | `dnd` | `0x0082d298` | Sub-opcode `0x01` reads DND state, `0x02` sets it — see §3.7. |
 | `0x08` | *(special)* | `0x00827516`, `0x008275b6`, `0x00827ba6`, `0x008280fe` | Camera/find-device/long-press branch — see §3.15. |
-| `0x0e` | `bpReadConform` | `0x0082cb28` | If sub-byte `0` → `FUN_00834410()` + `FUN_0082c0a4()`. |
+| `0x0e` | `bpReadConform` | `0x0082cb28` | If sub-byte `0` → `FUN_00834410()` + `FUN_0082c0a4()` — see §3.19. |
 | `0x15` | `readHeartRate` | `0x0082cf48` | Reads heart-rate record by index; returns `0x15` multi-frame data or `0xff15` error — see §3.12. |
 | `0x18` | `displayClock` | `0x0082ccb6` | Sets watch-face / clock display — see §3.5. |
 | `0x1e` | `realTimeHeartRate` | `0x0082d20c` | Sub `0x01` starts 60s HR measurement, `0x02` stops, `0x03` resets timer — see §3.13. |
@@ -537,6 +537,119 @@ UI re-render.
   a frame-receipt: the host can use the unmodified bytes
   4..14 in the response as confirmation that the same
   payload arrived intact, without a separate echo frame.
+
+### 3.19 Opcode `0x0e` bpReadConform (BP record index advance) (`FUN_0082cb28`)
+
+The smallest handler in the Channel-A table (17 bytes): a
+"confirm and advance" command for the blood-pressure record
+queue. The request opcode is `0x0E` but the response
+opcode is `0x0D` (BP *record* read) — the request is the
+"please advance and emit next record", the response is the
+record itself.
+
+#### Request layout
+
+| Byte | Field | Notes |
+|---:|---|---|
+| 0 | `0x0E` | cmd (consumed by dispatcher) |
+| 1 | `sub` | `0` → advance + read next; other → no-op |
+| 2..14 | unused | — |
+
+The handler does not respond to a non-zero `sub`; it silently
+exits. The "advance" semantics is *not* implicit in receiving
+the opcode — the host must explicitly request the advance by
+sending `sub == 0`, which gives the host a clean way to poll
+without consuming records.
+
+#### Behavior (sub == 0)
+
+```c
+void FUN_0082cb28(int param_1) {
+    if (param_1[1] != 0) return;
+    FUN_00834410();   // advance the BP record index
+    FUN_0082c0a4();   // read next record + emit fragmented 0x0D response
+}
+```
+
+`FUN_00834410` advances a circular index:
+
+```c
+void FUN_00834410() {
+    state = DAT_008344ac;
+    *(u32*)(state + 0x10 + *(u8*)(state + 0xE) * 4) = 0;  // clear current slot
+    *(u8*)(state + 0xE) = *(u8*)(state + 0xE) + 1;          // index++
+}
+```
+
+So `DAT_008344ac` is the BP-record-queue state, byte `+0xE`
+is the "current read index" (wraps at 256), and bytes
+`+0x10 + idx*4` are a circular buffer of u32 slots — each
+slot is presumably the "this record was read at time T" or
+"this record's read-confirm flag" (the handler zeros the slot
+on advance, presumably so a subsequent re-read of the same
+slot will get a fresh value).
+
+`FUN_0082c0a4` then reads the next BP record and ships it:
+
+```c
+void FUN_0082c0a4() {
+    int n = FUN_00834296(&hdr, &body);        // fill header (14 B) + body
+    if (n != 0xff) {
+        FUN_0082b938(0x0D, &hdr, 0xE);        // fragment #1: 14 B header
+        if (n != 0) {
+            FUN_0082b938(0x0D, &body, n);     // fragment #2: n B body
+        }
+    }
+}
+```
+
+* The response cmd is **`0x0D`**, not `0x0E` — the dispatcher
+  emits a *different* opcode for the response than the request.
+  This is the only such case in the Channel-A table; all
+  other "config read" opcodes echo the request cmd.
+* `FUN_0082b938` is the shared 14-byte-chunk fragmented
+  streamer (see §3.2) used by 0x18 / 0xC7 and others. A
+  BP record is split into a fixed 14 B header + variable B
+  body, so a record larger than 14 B takes 2 notify frames.
+* `FUN_00834296` returns `0xFF` to mean "no record" — the
+  handler then sends nothing (the "no data" path).
+
+#### Response layout
+
+For a 14-byte BP record: a single 16-byte notify frame
+`[0x0D, 14 B record data, 0, 0, additive checksum]`.
+
+For a longer BP record: two 16-byte notify frames:
+```
+frame 1: [0x0D, 14 B header..., additive checksum]
+frame 2: [0x0D, N B body...,      additive checksum]
+```
+
+The two-frame boundary is the same 14-byte split used by
+`0x18 displayClock`'s `FUN_0082b938` (the doc's "Common
+response path" helper), so the host can reuse the same
+14-byte collection logic it already uses for `0x18`.
+
+#### Why the request/response opcode split
+
+* The watch's BP *measurement* is triggered separately (e.g.
+  the `0xA1 0x04` factory test path or a real measurement
+  request), and produces a record that ends up in the
+  internal queue. The host then polls `0x0E` to *confirm* it
+  has read the next record, which both advances the index
+  and triggers the next read.
+* Splitting "advance" from "read" lets a host that needs to
+  throttle polls (e.g. on a slow link) send `0x0E 0x01`
+  repeatedly without ever consuming a record, and then send
+  `0x0E 0x00` exactly once when ready to read.
+
+#### Why no ack for the request
+
+The 0x0E handler never emits a 0x0E response — the response
+*is* the 0x0D frame (or its absence when the queue is
+empty). A host that sends `0x0E 0x00` and receives nothing
+within the BLE link timeout should treat the queue as
+exhausted.
 
 ### 3.2 Opcode `0xc7` vibration / motor pattern player (`FUN_00832ebc`)
 
