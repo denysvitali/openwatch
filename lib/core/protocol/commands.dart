@@ -112,13 +112,40 @@ class Commands {
   static Uint8List queryDataDistribution() =>
       Codec.buildChannelA(OpA.queryDataDistribution);
 
-  /// `ReadHeartRateReq` (0x15): `[utcStart i32 LE]`. Multi-packet response:
-  /// hdr `[0]=00`{size, range}, data `[0]=01`{ts i32 LE + samples}, `0xFF`=end.
-  /// Samples are 13-byte stride (per §4.3).
-  static Uint8List readHeartRateHistory(DateTime since) => Codec.buildChannelA(
-    OpA.readHeartRate,
-    Codec.u32le(since.toUtc().millisecondsSinceEpoch ~/ 1000),
-  );
+  /// `ReadHeartRateReq` (0x15): request a stored HR record for a given day.
+  ///
+  /// **Wire format is a packed BCD date index, NOT a unix timestamp**
+  /// (see `GHIDRA_DECOMPILATION.md` §3.12, `FUN_0082cf48` +
+  /// `FUN_008279c4`). The 4-byte index is laid out as
+  /// `year_lo_bcd | (month_bcd << 8) | (day_bcd << 16) | (slot << 24)`,
+  /// matching the byte layout of `setTime`'s BCD date bytes so the
+  /// firmware's shared month-index → epoch helper can decode it
+  /// without any endianness or field-width ambiguity.
+  ///
+  /// * [day] — calendar day the record belongs to. The handler ignores
+  ///   the hour/minute/second components; only year/month/day
+  ///   participate in the lookup.
+  /// * [slot] — record index within that day (`0..N`); `0` is the
+  ///   most-recent record. Sending `0x00000000` (all bytes zero) is
+  ///   the firmware's "current/latest" sentinel and bypasses the
+  ///   date lookup entirely — useful for a "give me whatever is
+  ///   freshest" probe.
+  ///
+  /// Multi-packet response (GHIDRA §3.12): header frame
+  /// `pl[0] == 0x18`, then up to 23 chunk frames with sequence
+  /// bytes `pl[0] ∈ 1..23` each carrying 13 record bytes at
+  /// `pl[1..14]`. `pl[0] == 0xFF` means "no record at this index".
+  /// The first u32 of the reassembled payload echoes the request
+  /// index, so `HistorySync` should ignore the first 4 bytes when
+  /// walking the 5-min BPM slots.
+  static Uint8List readHeartRateHistory({required DateTime day, int slot = 0}) {
+    final yearBcd = Codec.toBcd(day.year % 100) & 0xFF;
+    final monthBcd = Codec.toBcd(day.month) & 0xFF;
+    final dayBcd = Codec.toBcd(day.day) & 0xFF;
+    final packed =
+        yearBcd | (monthBcd << 8) | (dayBcd << 16) | ((slot & 0xFF) << 24);
+    return Codec.buildChannelA(OpA.readHeartRate, Codec.u32le(packed));
+  }
 
   /// New sleep protocol (Channel-B `0x27`) for a given day offset. Sent as
   /// a framed BC/27/len/crc/payload frame; see PROTOCOL.md §4.4.
@@ -134,16 +161,16 @@ class Commands {
   /// `TodaySportData` (0x48): read today's running step total (bare opcode).
   static Uint8List readTodaySport() => Codec.buildChannelA(OpA.todaySport);
 
-  /// `ReadHeartRateReq` (0x15): `[utcStart i32 LE]`.
+  /// `ReadHeartRateReq` (0x15): request the **latest** HR record.
   ///
-  /// Identical wire format to [readHeartRateHistory] — kept for API stability
-  /// but new callers should use [readHeartRateHistory] (the name that matches
-  /// `PROTOCOL.md` §4.3).
-  @Deprecated('Use readHeartRateHistory; wire format is identical.')
-  static Uint8List readHeartRate(DateTime since) => Codec.buildChannelA(
-    OpA.readHeartRate,
-    Codec.u32le(since.toUtc().millisecondsSinceEpoch ~/ 1000),
-  );
+  /// Wire format is the all-zero `0x00000000` packed index — the
+  /// firmware's "current/latest" sentinel (see
+  /// `GHIDRA_DECOMPILATION.md` §3.12, `FUN_0082cf48`:
+  /// `if (local_13c == 0) { timestamp = 0; }`). Useful when the host
+  /// just wants whatever the watch last cached without caring which
+  /// day it belongs to.
+  static Uint8List readLatestHeartRate() =>
+      Codec.buildChannelA(OpA.readHeartRate, Codec.u32le(0));
 
   /// `StartHeartRateReq` (0x69): start a live measurement of [type].
   static Uint8List startMeasure(MeasureType type) =>

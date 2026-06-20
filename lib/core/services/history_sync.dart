@@ -254,17 +254,25 @@ class HistorySync extends ChangeNotifier {
       // If the distribution query errored (e.g. the watch doesn't
       // expose HR at all), _availableDays stays empty and we fall
       // back to polling today only so the user still gets feedback.
-      final now = DateTime.now();
+      //
+      // The watch expects a **packed BCD date index** per GHIDRA
+      // §3.12 (`FUN_0082cf48` + `FUN_008279c4`) — NOT a unix
+      // timestamp as PROTOCOL.md §4.3 implies. We pre-construct a
+      // LOCAL-midnight DateTime for the target day and let
+      // `Commands.readHeartRateHistory` pack it; the firmware only
+      // reads year/month/day so the hour/minute/second components
+      // don't matter.
+      final today = DateTime.now();
       final wantsDays = _availableDays.isEmpty
           ? {0}
           : _availableDays.where((d) => d < daysBack).toSet();
       for (final d in wantsDays) {
-        final dayStart = DateTime(
-          now.year,
-          now.month,
-          now.day,
+        final day = DateTime(
+          today.year,
+          today.month,
+          today.day,
         ).subtract(Duration(days: d));
-        await transport.sendA(Commands.readHeartRateHistory(dayStart));
+        await transport.sendA(Commands.readHeartRateHistory(day: day));
         await _drainRx(Duration(milliseconds: 600));
       }
       // Sleep (new protocol, Channel-B) — night for last night

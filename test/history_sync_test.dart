@@ -87,6 +87,11 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 1000));
       // Header
       t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x18, 0x80, 0x05]));
+      // First 4 bytes of the reassembled record = the day
+      // timestamp LE u32 (per the pre-v14 smali convention — see
+      // GHIDRA §3.12 for the v14 packed-BCD echo). We use the
+      // smali layout here because the regression targets the
+      // chunk-reassembly path, not the v14 packed-date echo.
       // Day-start timestamp = 2026-06-19 00:00 UTC = 0x6A34F600
       final dayStartBytes = [0x00, 0xF6, 0x34, 0x6A];
       // Chunk 1: pl[0]=seq=1, pl[1..4]=dayStart, pl[5..13]=samples
@@ -118,6 +123,63 @@ void main() {
       sync.dispose();
       d.dispose();
     });
+
+    test(
+      'syncAll sends a packed-BCD date index for 0x15 (regression for '
+      'GHIDRA §3.12 — FUN_0082cf48 takes a packed date, not unix sec)',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final sync = HistorySync(t, (_) {}, dispatcher: d);
+        // Compute the expected packed bytes from `DateTime.now()` so
+        // the test is timezone-independent (host TZ can be +00..+12
+        // and the day part still matches).
+        final today = DateTime.now();
+        final expected = Uint8List.fromList([
+          Codec.toBcd(today.year % 100) & 0xFF,
+          Codec.toBcd(today.month) & 0xFF,
+          Codec.toBcd(today.day) & 0xFF,
+          0x00, // slot = 0
+        ]);
+        final future = sync.syncAll();
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        // Bitmask response so day 0 is polled.
+        t.inA.add(
+          Codec.buildChannelA(OpA.queryDataDistribution, [0, 0, 0, 0x01]),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 900));
+        // The wire bytes for the 0x15 request must be the packed
+        // BCD date index, NOT a unix timestamp.
+        final sent = t.sent.firstWhere(
+          (f) => f.isNotEmpty && f[0] == OpA.readHeartRate,
+          orElse: () => Uint8List(0),
+        );
+        expect(sent, isNotEmpty);
+        expect(
+          sent.sublist(1, 5),
+          expected,
+          reason:
+              '0x15 subData must be packed-BCD date (year_lo | month | day '
+              '| slot=0) per GHIDRA §3.12; FUN_008279c4 shares its byte '
+              'layout with the setTime BCD date struct',
+        );
+        // And the request must NOT be a unix timestamp (~1.78e9).
+        // A packed date fits in 4 B comfortably (< ~0x02000000);
+        // anything bigger is the legacy unix-seconds path.
+        expect(
+          Codec.readU32le(sent, 1) < 0x02000000,
+          isTrue,
+          reason:
+              'request was a packed date (small u32), not unix seconds '
+              '(>1.7e9)',
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 1500));
+        await future;
+        sync.dispose();
+        d.dispose();
+      },
+    );
 
     test(
       'readHeartRate 0x15 error frame (pl[0]==0xff) clears pending chunks',
