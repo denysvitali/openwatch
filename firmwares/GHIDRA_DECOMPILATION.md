@@ -2677,7 +2677,7 @@ polling the link does not bump the timer.
 | `0x48 'H'` | Handshake — 15-byte device-info block | `FUN_0082bf40` — see §8.2 |
 | `0x50 'P'` | **Inline** alert: `FUN_0082994c(0x14,0x10,1,0x19)` + `FUN_0082a5c8(8)` (motor + UI) | inline |
 | `0x51 'Q'` | "Find phone" / alert trigger | `FUN_0082c5b8` — see §8.11 |
-| `0x60` | ANCS/message-push related | `FUN_0082be90` |
+| `0x60` | Status-field write (`DAT_0082bfd4 + 0x2c`) | `FUN_0082be90` | see §8.16 |
 | `0x61 'a'` | Status response (battery / daily counters) | `FUN_0082bee6` — see §8.3 |
 | `0x69 'i'` | Multi-step mode control (start/stop/cancel) | `FUN_0082c2f4` — see §8.5 |
 | `0x6a 'j'` | Continuation of `0x69` mode control | `FUN_0082c1e2` |
@@ -2883,7 +2883,7 @@ entries decoded from the two `switch8` tables:
 | `0x48` `'H'` | `FUN_0082bf40` | Handshake response — sends 15-byte device-info block — see §8.2 |
 | `0x50` `'P'` | inline | Calls `FUN_0082994c(0x14,0x10,1,0x19)` + `FUN_0082a5c8(8)` (alert/motor) |
 | `0x51` `'Q'` | `FUN_0082c5b8` | "Find phone" / alert trigger; arms pattern when `payload[1]==1` — see §8.11 |
-| `0x60` | `FUN_0082be90` | ANCS/message-push related |
+| `0x60` | `FUN_0082be90` | Status-field write (`DAT_0082bfd4 + 0x2c`) — see §8.16 |
 | `0x61` `'a'` | `FUN_0082bee6` | Status response (battery / daily counters) — see §8.3 |
 | `0x69` `'i'` | `FUN_0082c2f4` | Multi-step mode control (start/stop/cancel of a remote feature) — see §8.5 |
 | `0x6a` `'j'` | `FUN_0082c1e2` | Continuation of `0x69` mode control |
@@ -4465,3 +4465,104 @@ was kept for compatibility even after the more flexible
 remove `0x3e` once the vendor test routines stop using it,
 but the lipids bit (7) will remain in the shared config
 byte.
+
+### 8.16 0x60 status-field write (`FUN_0082be90`)
+
+The **write** side of the `0x61 'a'` status (§8.3) pair.
+`0x60` lets the host push a 4-byte u32 into the same
+`DAT_0082bfd4 + 0x2C` field that `0x61 'a'` reads. The
+existing docstring ("ANCS/message-push related") is *wrong*
+— the handler's only side effects are (a) writing the status
+u32 and (b) scheduling a 100 ms timer.
+
+#### Behavior
+
+```c
+uint FUN_0082be90(int param_1) {
+    if (FUN_0082762c() == 1 && FUN_0082d754() == 0) {
+        // "all-zeros ack" path
+        rsp[0]  = 0x60; rsp[15] = 0x60;  // self-marker frame
+        FUN_0082ebdc(rsp);
+        FUN_0082fdda(100);               // 100 ms timer
+        return 0x60;
+    }
+    // "store u32" path
+    rsp[0]  = 0x60; rsp[15] = 0x60;
+    FUN_0082ebdc(rsp);
+    uint32_t v = ((req[3] << 16) | (req[4] << 24)) |
+                 (req[1]       )          |
+                 (req[2] << 8);
+    *(u32*)(DAT_0082bfd4 + 0x2C) = v;
+    return 0x60;
+}
+```
+
+The handler has **two paths** that both send the same
+self-marker response frame `[0x60, 0, 0, ..., 0, 0x60]`:
+* "Happy" path: state is good → schedule a 100 ms timer
+  (the standard "next tick" push that the §8.3 status push
+  uses to refresh the live battery / counter data).
+* "Write" path: state is bad → write the 4-byte packed
+  value from `req[1..4]` into `DAT_0082bfd4 + 0x2C`.
+
+#### Self-marker pattern (like `0x90` §8.6 and `0x96` §8.4)
+
+The handler writes `0x60` at **both byte 0 and byte 15** of
+the response — the same self-marker pattern used by `0x90`
+(self-marker echo) and `0x96` (reset-state). The byte-15
+`0x60` is *intentional*, not a checksum. The host verifies
+by `byte 0 == 0x60 && byte 15 == 0x60`.
+
+#### Why a §8.16 if it's a "tiny" handler?
+
+The handler is short (~15 instructions), but it ties
+together three important subsystems:
+
+1. The **`DAT_0082bfd4 + 0x2C` status field** that
+   `0x61 'a'` reads (§8.3) — i.e. `0x60` *writes* what
+   `0x61 'a'` *reads*. Without documenting `0x60`, the
+   `0x61 'a'` status push is a black box.
+2. The **same `FUN_0082762c()` / `FUN_0082d754()` state
+   checks** used by `0x61 'a'` (§8.3). The two handlers
+   share the "is the firmware in the right mode?" guard.
+3. The **same `DAT_0082bfd4` base pointer** used as the
+   state anchor for both `0x60` and `0x61 'a'`. `DAT_0082bfd4`
+   is the "live status" struct that backs the entire
+   battery / counter subsystem; the `+0x2C` field is the
+   "current snapshot" u32 that the host reads via `0x61 'a'`.
+
+#### Request layout
+
+| Byte | Field | Notes |
+|---:|---|---|
+| 0 | `0x60` | cmd (consumed by dispatcher) |
+| 1..4 | `value` (4 B LE) | packed u32 to write to `DAT_0082bfd4 + 0x2C` |
+| 5..14 | unused | — |
+
+The 4-byte packed layout is `req[1] | (req[2] << 8) | (req[3] << 16) | (req[4] << 24)` — i.e.
+**big-endian order of the request bytes** maps to LE u32 in
+the firmware. The host packs the value the same way it
+reads it back from `0x61 'a'` (the `0x61 'a'` response has
+the same byte layout — see §8.3).
+
+#### Pair with `0x61 'a'` (§8.3)
+
+| | `0x60` | `0x61 'a'` |
+|---|---|---|
+| Direction | host → watch (write) | watch → host (read) |
+| Field | `DAT_0082bfd4 + 0x2C` | same |
+| Use case | inject a fake status (test rigs, vendor QA) | read live battery / counter |
+
+A test rig that wants to verify the host's status-decoding
+path can use `0x60` to write a known u32 and `0x61 'a'` to
+read it back. A production host only uses `0x61 'a'`.
+
+#### Why the byte-15 `0x60`?
+
+Like `0x90` self-marker (§8.6) and `0x96` reset-state (§8.4),
+the byte-15 `0x60` is a **handshake / self-identification**
+marker — the response says "the watch is in `0x60` mode and
+this frame is a `0x60` ack". The host SDK that consumes
+`0x60` should special-case the byte-15 verification rather
+than trusting the additive checksum (which will be `0xC0`,
+not `0x60`).
