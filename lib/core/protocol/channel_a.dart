@@ -27,6 +27,9 @@ class ChannelADispatcher {
   final _time = StreamController<DateTime>.broadcast();
   final _dnd = StreamController<DndState>.broadcast();
   final _heartRateRecord = StreamController<HeartRateRecord>.broadcast();
+  final _heartRateHeader = StreamController<void>.broadcast();
+  final _heartRateChunk = StreamController<HeartRateChunk>.broadcast();
+  final _heartRateError = StreamController<void>.broadcast();
   final _bloodOxygen = StreamController<BloodOxygenSetting>.broadcast();
   final _pressureSetting = StreamController<PressureSetting>.broadcast();
   final _pressure = StreamController<PressureReading>.broadcast();
@@ -56,6 +59,24 @@ class ChannelADispatcher {
 
   /// Heart-rate historical record (`0x15`, multi-frame; final frame has `0xff`).
   Stream<HeartRateRecord> get onHeartRateRecord => _heartRateRecord.stream;
+
+  /// Heart-rate historical record header (`0x15`, phase 1). Fires once per
+  /// read before the chunked payload — see
+  /// `GHIDRA_DECOMPILATION.md` §3.12. The header discriminator is
+  /// `pl[0] == 0x18` (the payload-size low byte of the `0x5180015`
+  /// feature-bitmap-shape dword).
+  Stream<void> get onHeartRateHeader => _heartRateHeader.stream;
+
+  /// Heart-rate historical record chunk (`0x15`, phase 2). Fires once
+  /// per 13-byte payload frame; consumers reassemble until 23 chunks
+  /// have arrived (the maximum the firmware emits for a 292-byte record)
+  /// or a quiet period elapses.
+  Stream<HeartRateChunk> get onHeartRateChunk => _heartRateChunk.stream;
+
+  /// Heart-rate historical record "no data at this index" error
+  /// (`0x15` with `pl[0] == 0xFF`). Fires once when the requested index
+  /// resolves to an empty record slot.
+  Stream<void> get onHeartRateError => _heartRateError.stream;
 
   /// SpO2 setting (`0x2c`).
   Stream<BloodOxygenSetting> get onBloodOxygen => _bloodOxygen.stream;
@@ -260,35 +281,35 @@ class ChannelADispatcher {
     }
   }
 
-  /// `readHeartRate` (0x15): multi-frame response.
+  /// `readHeartRate` (0x15): two-phase per-record dump.
   ///
-  /// `pl[0]==0x00` is the header (size + range); `pl[0]==0x01` is a record
-  /// (utcStart i32 LE + samples); `pl[0]==0xff` ends the stream.
+  /// Per `FUN_0082cf48` (`GHIDRA_DECOMPILATION.md` §3.12):
+  ///   * Header frame  — `pl[0] == 0x18` (payload-size low byte),
+  ///                     `pl[1..2] == 0x80 0x05` (rest of the
+  ///                     `0x5180015` feature-bitmap dword).
+  ///   * Payload chunk — `pl[0]` is the 1-based sequence number
+  ///                     (1..23); `pl[1..14]` carries ≤13 payload
+  ///                     bytes of the 292-byte HR record.
+  ///   * Error frame   — `pl[0] == 0xFF` (no record at this index).
+  ///
+  /// The legacy single-frame `HeartRateRecord(timestamp, samples)`
+  /// event is intentionally not fired — consumers should subscribe to
+  /// the chunk stream and reassemble.
   void _decodeHeartRate(Uint8List pl) {
     if (pl.isEmpty) return;
     final tag = pl[0];
-    if (tag == 0xff) return; // end marker; no record emitted
-    if (tag == 0x01 && pl.length >= 5) {
-      final ts = Codec.readU32le(pl, 1);
-      final samples = <int>[];
-      // Firmware samples are 13-byte stride; for the low-fidelity decoder we
-      // surface the first byte of each record as a bpm candidate.
-      for (var off = 5; off + 1 <= pl.length; off += 13) {
-        final v = pl[off] & 0xFF;
-        if (v >= 30 && v <= 240) samples.add(v);
-      }
-      if (samples.isNotEmpty) {
-        _heartRateRecord.add(
-          HeartRateRecord(
-            timestamp: DateTime.fromMillisecondsSinceEpoch(
-              ts * 1000,
-              isUtc: true,
-            ),
-            samples: samples,
-          ),
-        );
-      }
+    if (tag == 0x18) {
+      _heartRateHeader.add(null);
+      return;
     }
+    if (tag == 0xff) {
+      _heartRateError.add(null);
+      return;
+    }
+    // pl[0] = sequence number (1..23); everything past it is payload.
+    _heartRateChunk.add(
+      HeartRateChunk(seq: tag, payload: Uint8List.fromList(pl.sublist(1))),
+    );
   }
 
   /// `realTimeHeartRate` (0x1e): continuous HR push (`pl[0]` = bpm).
@@ -606,6 +627,9 @@ class ChannelADispatcher {
       _time,
       _dnd,
       _heartRateRecord,
+      _heartRateHeader,
+      _heartRateChunk,
+      _heartRateError,
       _bloodOxygen,
       _pressureSetting,
       _pressure,
@@ -673,6 +697,19 @@ class HeartRateRecord {
   const HeartRateRecord({required this.timestamp, required this.samples});
   final DateTime timestamp;
   final List<int> samples;
+}
+
+/// One chunk of a heart-rate historical record (`0x15`, phase 2).
+///
+/// The firmware ships a 292-byte HR record as `ceil(292 / 13) = 23`
+/// chunks of ≤13 bytes each (see `GHIDRA_DECOMPILATION.md` §3.12,
+/// `FUN_0082cf48`). [seq] is the 1-based sequence number; consumers
+/// should buffer chunks until either 23 have arrived or a quiet
+/// period elapses, then reassemble.
+class HeartRateChunk {
+  const HeartRateChunk({required this.seq, required this.payload});
+  final int seq;
+  final Uint8List payload;
 }
 
 class BloodOxygenSetting {

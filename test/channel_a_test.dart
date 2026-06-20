@@ -226,6 +226,65 @@ void main() {
       expect(m.stubbed, isFalse);
     });
 
+    test('readHeartRate 0x15 header frame fires onHeartRateHeader', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      var fired = false;
+      final sub = d.onHeartRateHeader.listen((_) {
+        fired = true;
+      });
+      // pl[0] = 0x18 is the discriminator per GHIDRA_DECOMPILATION.md
+      // §3.12 (the feature-bitmap dword's payload-size low byte).
+      final f = Codec.buildChannelA(OpA.readHeartRate, [0x18, 0x80, 0x05]);
+      t.inA.add(f);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(fired, isTrue);
+      await sub.cancel();
+    });
+
+    test(
+      'readHeartRate 0x15 chunk frame fires onHeartRateChunk with seq + payload',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final got = d.onHeartRateChunk.first;
+        // pl[0] = seq (1); pl[1..] = payload bytes. buildChannelA
+        // pads the rest of the 14-byte payload with zeros — the wire
+        // shape never has trailing-zero filler, but the codec helper
+        // does. The decoder surfaces the raw 13-byte chunk as-is.
+        final payload = [0xde, 0xad, 0xbe, 0xef];
+        final f = Codec.buildChannelA(OpA.readHeartRate, [1, ...payload]);
+        t.inA.add(f);
+        final c = await got.timeout(const Duration(seconds: 1));
+        expect(c.seq, 1);
+        // First 4 payload bytes match what we sent; rest is the codec's
+        // zero-pad (the firmware never emits a <13-byte chunk, but our
+        // build helper pads to fill the 14-byte payload field).
+        expect(c.payload.sublist(0, payload.length), payload);
+        expect(c.payload.length, 13);
+      },
+    );
+
+    test(
+      'readHeartRate 0x15 error frame (pl[0]==0xff) fires onHeartRateError',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        var fired = false;
+        final sub = d.onHeartRateError.listen((_) {
+          fired = true;
+        });
+        final f = Codec.buildChannelA(OpA.readHeartRate, [0xff]);
+        t.inA.add(f);
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        expect(fired, isTrue);
+        await sub.cancel();
+      },
+    );
+
     test(
       'emitFactoryReset fires onFactoryReset (host-side optimistic ack)',
       () async {
