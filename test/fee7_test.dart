@@ -140,5 +140,179 @@ void main() {
       expect(u.opcode, 0x90);
       await svc.dispose();
     });
+
+    test('routes 0x36 SpO2/HR update', () async {
+      final host = _StubHost();
+      final svc = Fee7Service.attach(host);
+      final d = Fee7Dispatcher(svc);
+      d.bind();
+
+      final got = d.onSpO2Hr.first;
+      final frame = Codec.buildChannelA(Fee7.spo2HrUpdate, [0x01, 0x55]);
+      host.inbound.add(frame);
+
+      final s = await got.timeout(const Duration(seconds: 1));
+      expect(s.sub, 0x01);
+      await svc.dispose();
+    });
+
+    test('routes 0x3e blood-oxygen update', () async {
+      final host = _StubHost();
+      final svc = Fee7Service.attach(host);
+      final d = Fee7Dispatcher(svc);
+      d.bind();
+
+      final got = d.onBloodOxygen.first;
+      final frame = Codec.buildChannelA(Fee7.bloodOxygenUpdate, [0x02]);
+      host.inbound.add(frame);
+
+      final s = await got.timeout(const Duration(seconds: 1));
+      expect(s.sub, 0x02);
+      await svc.dispose();
+    });
+
+    test('routes 0x3c capability block', () async {
+      final host = _StubHost();
+      final svc = Fee7Service.attach(host);
+      final d = Fee7Dispatcher(svc);
+      d.bind();
+
+      final got = d.onCapabilityBlock.first;
+      final frame = Codec.buildChannelA(Fee7.capabilityBlock, [
+        0x00,
+        0x40,
+        0xa0,
+        0x20,
+        0x11,
+        0x22,
+      ]);
+      host.inbound.add(frame);
+
+      final b = await got.timeout(const Duration(seconds: 1));
+      expect(b.fixed.length, 6);
+      expect(b.fixed[0], Fee7.capabilityBlock);
+      // fixed[1..5] are the first 5 payload bytes.
+      expect(b.fixed[1], 0x00);
+      expect(b.fixed[2], 0x40);
+      expect(b.fixed[3], 0xa0);
+      await svc.dispose();
+    });
+
+    test('routes 0x50 alert trigger', () async {
+      final host = _StubHost();
+      final svc = Fee7Service.attach(host);
+      final d = Fee7Dispatcher(svc);
+      d.bind();
+
+      final got = d.onAlert.first;
+      final frame = Codec.buildChannelA(Fee7.alertTrigger, [0x14, 0x10, 0x01]);
+      host.inbound.add(frame);
+
+      // payload = frame[1..14], zero-padded to 14 bytes.
+      final a = await got.timeout(const Duration(seconds: 1));
+      expect(a.payload.length, 14);
+      expect(a.payload[0], 0x14);
+      expect(a.payload[1], 0x10);
+      expect(a.payload[2], 0x01);
+      await svc.dispose();
+    });
+
+    test('routes 0x51 find-phone event with armsPattern flag', () async {
+      final host = _StubHost();
+      final svc = Fee7Service.attach(host);
+      final d = Fee7Dispatcher(svc);
+      d.bind();
+
+      final got = d.onFindPhone.first;
+      final frame = Codec.buildChannelA(Fee7.findPhoneEvent, [0x00, 0x01]);
+      host.inbound.add(frame);
+
+      final f = await got.timeout(const Duration(seconds: 1));
+      expect(f.armsPattern, isTrue);
+      await svc.dispose();
+    });
+
+    test('routes 0x69 mode control', () async {
+      final host = _StubHost();
+      final svc = Fee7Service.attach(host);
+      final d = Fee7Dispatcher(svc);
+      d.bind();
+
+      final got = d.onModeControl.first;
+      final frame = Codec.buildChannelA(Fee7.modeControl, [0x03]);
+      host.inbound.add(frame);
+
+      final m = await got.timeout(const Duration(seconds: 1));
+      expect(m.step, 0x03);
+      await svc.dispose();
+    });
+
+    test('routes 0xc3 OTA trigger and detects routesToOta flag', () async {
+      final host = _StubHost();
+      final svc = Fee7Service.attach(host);
+      final d = Fee7Dispatcher(svc);
+      d.bind();
+
+      final got = d.onOta.first;
+      final frame = Codec.buildChannelA(Fee7.otaTrigger, [0x00, 0x00, 0x01]);
+      host.inbound.add(frame);
+
+      final o = await got.timeout(const Duration(seconds: 1));
+      expect(o.routesToOta, isTrue);
+      await svc.dispose();
+    });
+
+    test('routes 0xfe vibration pattern ONLY to onVibration', () async {
+      final host = _StubHost();
+      final svc = Fee7Service.attach(host);
+      final d = Fee7Dispatcher(svc);
+      d.bind();
+
+      final vibEvents = <VibrationPattern>[];
+      final unaryEvents = <UnaryOpcode>[];
+      final vibSub = d.onVibration.listen(vibEvents.add);
+      final unarySub = d.onUnary.listen(unaryEvents.add);
+      final frame = Codec.buildChannelA(Fee7.vibrationPattern, [0x64]);
+      host.inbound.add(frame);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await vibSub.cancel();
+      await unarySub.cancel();
+
+      expect(vibEvents, hasLength(1));
+      expect(unaryEvents, isEmpty); // 0xfe must NOT double-emit on onUnary
+      await svc.dispose();
+    });
+
+    test('unknown opcodes fall through to unknown stream', () async {
+      final host = _StubHost();
+      final svc = Fee7Service.attach(host);
+      final d = Fee7Dispatcher(svc);
+      d.bind();
+
+      final got = d.unknown.first;
+      final frame = Codec.buildChannelA(0x7b); // 0x7b is a documented no-op
+      host.inbound.add(frame);
+
+      final u = await got.timeout(const Duration(seconds: 1));
+      expect(u.opcode, 0x7b);
+      await svc.dispose();
+    });
+
+    test('0x61 status low-byte step counter', () async {
+      final host = _StubHost();
+      final svc = Fee7Service.attach(host);
+      final d = Fee7Dispatcher(svc);
+      d.bind();
+
+      final got = d.onStatus.first;
+      final frame = Codec.buildChannelA(Fee7.statusResponse, [80, 0xAB]);
+      host.inbound.add(frame);
+
+      final s = await got.timeout(const Duration(seconds: 1));
+      expect(s.battery, 80);
+      expect(s.stepsLowByte, 0xAB);
+      expect(s.steps, 0xAB); // back-compat alias
+      await svc.dispose();
+    });
   });
 }

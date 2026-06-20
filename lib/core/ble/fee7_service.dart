@@ -59,13 +59,11 @@ class Fee7Service {
   ///
   /// Invalid frames raise [ArgumentError] before any BLE write is attempted.
   Future<void> sendCommand(Uint8List frame) {
-    if (frame.length != Codec.buildChannelA(0).length) {
-      throw ArgumentError(
-        'Fee7Service.sendCommand requires a 16-byte frame (got ${frame.length})',
-      );
-    }
     if (!Codec.isValidChannelA(frame)) {
-      throw ArgumentError('Fee7Service.sendCommand: frame checksum invalid');
+      throw ArgumentError(
+        'Fee7Service.sendCommand requires a valid 16-byte frame '
+        '(len=${frame.length})',
+      );
     }
     return _transport.sendFee7(frame);
   }

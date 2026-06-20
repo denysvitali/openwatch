@@ -114,31 +114,32 @@ class Fee7Dispatcher {
       case Fee7.handshakeResponse:
         _handshake.add(_decodeHandshakeResponse(frame, pl));
       case Fee7.alertTrigger:
-        _alert.add(_decodeAlertTrigger(frame, pl));
+        _alert.add(_decodeAlertTrigger(pl));
       case Fee7.findPhoneEvent:
-        _findPhone.add(_decodeFindPhoneEvent(frame, pl));
+        _findPhone.add(_decodeFindPhoneEvent(pl));
       case Fee7.statusResponse:
-        _status.add(_decodeStatusResponse(frame, pl));
+        _status.add(_decodeStatusResponse(pl));
       case Fee7.modeControl:
-        _mode.add(_decodeModeControl(frame, pl));
+        _mode.add(_decodeModeControl(pl));
       case Fee7.modeControlCont:
-        _modeCont.add(_decodeModeControlCont(frame, pl));
+        _modeCont.add(_decodeModeControlCont(pl));
       case Fee7.longResponse:
         _long.add(LongResponse(opcode: opcode, payload: pl));
       case Fee7.otaTrigger:
-        _ota.add(_decodeOtaTrigger(frame, pl));
+        _ota.add(_decodeOtaTrigger(pl));
       case Fee7.echoBase:
       case Fee7.echoBase2:
         // Echo back as a unary opcode; firmware simply emits `[opcode]`.
         final u = UnaryOpcode(opcode, payload: pl);
         _unary.add(u);
+      case Fee7.vibrationPattern:
+        // 0xfe has structured decoding and is surfaced on onVibration only;
+        // isUnary() deliberately excludes it so it is NOT also emitted on
+        // onUnary.
+        _vibration.add(VibrationPattern(opcode: opcode, payload: pl));
       default:
         if (Fee7.isUnary(opcode)) {
-          final u = UnaryOpcode(opcode, payload: pl);
-          if (opcode == Fee7.vibrationPattern) {
-            _vibration.add(VibrationPattern(opcode: opcode, payload: pl));
-          }
-          _unary.add(u);
+          _unary.add(UnaryOpcode(opcode, payload: pl));
         } else {
           _unknown.add(UnaryOpcode(opcode, payload: pl));
         }
@@ -183,33 +184,37 @@ class Fee7Dispatcher {
     return HandshakeResponse(payload: payload, raw: pl);
   }
 
-  AlertTrigger _decodeAlertTrigger(Uint8List frame, Uint8List pl) {
+  AlertTrigger _decodeAlertTrigger(Uint8List pl) {
     return AlertTrigger(payload: pl);
   }
 
-  FindPhoneEvent _decodeFindPhoneEvent(Uint8List frame, Uint8List pl) {
+  FindPhoneEvent _decodeFindPhoneEvent(Uint8List pl) {
     // payload[1]==1 arms the pattern (per §8).
     final armsPattern = pl.length >= 2 && pl[1] == 1;
     return FindPhoneEvent(armsPattern: armsPattern, payload: pl);
   }
 
-  StatusResponse _decodeStatusResponse(Uint8List frame, Uint8List pl) {
+  StatusResponse _decodeStatusResponse(Uint8List pl) {
     final battery = pl.isNotEmpty ? pl[0] : 0;
-    final steps = pl.length >= 2 ? pl[1] : 0;
-    return StatusResponse(battery: battery, steps: steps, payload: pl);
+    final stepsLowByte = pl.length >= 2 ? pl[1] : 0;
+    return StatusResponse(
+      battery: battery,
+      stepsLowByte: stepsLowByte,
+      payload: pl,
+    );
   }
 
-  ModeControl _decodeModeControl(Uint8List frame, Uint8List pl) {
+  ModeControl _decodeModeControl(Uint8List pl) {
     final step = pl.isNotEmpty ? pl[0] : 0;
     return ModeControl(step: step, payload: pl);
   }
 
-  ModeControlCont _decodeModeControlCont(Uint8List frame, Uint8List pl) {
+  ModeControlCont _decodeModeControlCont(Uint8List pl) {
     final step = pl.isNotEmpty ? pl[0] : 0;
     return ModeControlCont(step: step, payload: pl);
   }
 
-  OtaTrigger _decodeOtaTrigger(Uint8List frame, Uint8List pl) {
+  OtaTrigger _decodeOtaTrigger(Uint8List pl) {
     // param[2]==1 routes into the OTA state machine (per §8).
     final routesToOta = pl.length >= 3 && pl[2] == 1;
     return OtaTrigger(routesToOta: routesToOta, payload: pl);
@@ -295,16 +300,25 @@ class FindPhoneEvent {
   final Uint8List payload;
 }
 
-/// `0x61` 'a' status response: battery percentage and step counter.
+/// `0x61` 'a' status response: battery percentage + step counter low byte.
+///
+/// The firmware sends `pl[0]=battery` and `pl[1]=steps & 0xFF`. For the
+/// full step counter the host must combine with the cumulative value pushed
+/// separately (not modeled here yet — see `GHIDRA_DECOMPILATION.md` §3).
 class StatusResponse {
   StatusResponse({
     required this.battery,
-    required this.steps,
+    required this.stepsLowByte,
     Uint8List? payload,
   }) : payload = payload ?? _empty;
   final int battery;
-  final int steps;
+
+  /// Low byte of the step counter (`pl[1]`). Truncated to 8 bits.
+  final int stepsLowByte;
   final Uint8List payload;
+
+  /// Back-compat alias for the older `steps` field.
+  int get steps => stepsLowByte;
 }
 
 /// `0x69` 'i' multi-step mode control (start).
