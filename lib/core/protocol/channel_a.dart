@@ -33,7 +33,10 @@ class ChannelADispatcher {
   final _bloodOxygen = StreamController<BloodOxygenSetting>.broadcast();
   final _bpRecord = StreamController<BpRecordChunk>.broadcast();
   int _bpRecordSeq = 0;
-  final _pressureSetting = StreamController<PressureSetting>.broadcast();
+  final _pressureSettingHeader =
+      StreamController<PressureSettingHeader>.broadcast();
+  final _pressureSettingChunk =
+      StreamController<PressureSettingChunk>.broadcast();
   final _pressure = StreamController<PressureReading>.broadcast();
   final _hrv = StreamController<HrvSetting>.broadcast();
   final _sugarLipids = StreamController<SugarLipidsSetting>.broadcast();
@@ -91,8 +94,25 @@ class ChannelADispatcher {
   /// `sub=0` advance. See `GHIDRA_DECOMPILATION.md` §3.19.
   Stream<BpRecordChunk> get onBpRecord => _bpRecord.stream;
 
-  /// Pressure config (`0x37`).
-  Stream<PressureSetting> get onPressureSetting => _pressureSetting.stream;
+  /// Pressure config (`0x37`) — header discriminator (`pl[3] == 0x1E`).
+  ///
+  /// Per `GHIDRA_DECOMPILATION.md` §3.20 the read response is a
+  /// two-phase fragmenter pattern: a single 16-byte header frame
+  /// (the literal dword `0x1E050037` little-endian → `pl[3] == 0x1E`)
+  /// followed by up to four 13-byte-chunk payload frames via the
+  /// shared `FUN_0082c988`. The `slot_id` (today vs yesterday) is
+  /// echoed at `payload[0]`. See the RE for the 49-byte record
+  /// layout (4-byte header + 45-byte body).
+  Stream<PressureSettingHeader> get onPressureSettingHeader =>
+      _pressureSettingHeader.stream;
+
+  /// Pressure config (`0x37`) — payload chunk after the header.
+  ///
+  /// See [onPressureSettingHeader] for the full two-phase flow.
+  /// Each chunk is up to 13 payload bytes; the firmware emits
+  /// 4 chunks for a typical 49-byte record (`ceil(49 / 13) = 4`).
+  Stream<PressureSettingChunk> get onPressureSettingChunk =>
+      _pressureSettingChunk.stream;
 
   /// Pressure reading / unit (`0x38`).
   Stream<PressureReading> get onPressure => _pressure.stream;
@@ -231,15 +251,19 @@ class ChannelADispatcher {
         _restoreKey.add(null);
       case OpA.queryDataDistribution:
         // `0x46` strips to the same base as the `0xc6` device-reboot
-        // ack (top bit clears). Use the raw opcode to discriminate:
-        // 0xc6 = reboot ack → onRestoreKey; 0x46 = distribution
-        // response (success or error-flagged). The 0x6C reboot
-        // path tears down BLE before any response can be parsed
-        // (see GHIDRA_DECOMPILATION.md §3.14) — ProtocolHub
-        // optimistically fires onRestoreKey on the outbound send
-        // complete via emitRestoreKey().
-        if (Codec.rxOpcodeRaw(frame) == OpA.deviceReboot) {
+        // ack (top bit clears). Both raw opcodes land here after
+        // `rxOpcode`. Use the last-marked outbound context to
+        // discriminate:
+        //   * raw 0xc6 + reboot context  → reboot ack → onRestoreKey
+        //   * raw 0xc6 + distribution ctx → distribution error
+        //   * raw 0x46 + anything         → distribution response
+        // The 0x6C reboot path tears down BLE before any response
+        // can be parsed (see GHIDRA_DECOMPILATION.md §3.14) —
+        // ProtocolHub optimistically fires onRestoreKey on the
+        // outbound send complete via emitRestoreKey().
+        if (Codec.rxOpcodeRaw(frame) == OpA.deviceReboot && _expectRebootAck) {
           _restoreKey.add(null);
+          _expectRebootAck = false;
         } else {
           _decodeQueryDataDistribution(pl, error: Codec.rxIsError(frame));
         }
@@ -425,15 +449,27 @@ class ChannelADispatcher {
     _pressure.add(PressureReading(enabled: pl[1] != 0));
   }
 
-  /// `pressureSetting` (0x37): read/write config.
+  /// `pressureSetting` (0x37): two-phase read response.
+  ///
+  /// Per `GHIDRA_DECOMPILATION.md` §3.20 the response is identical
+  /// in shape to the `0x7a muslim` handler — a single 16-byte
+  /// header frame followed by up to four 13-byte-chunk payload
+  /// frames via `FUN_0082c988`. The header discriminator is
+  /// `pl[3] == 0x1E` (the feature-bitmap-shape dword `0x1E050037`
+  /// little-endian → bytes `0x37, 0x00, 0x05, 0x1E`).
+  ///
+  /// The actual 49-byte record (4-byte header + 45-byte body)
+  /// is *not* decoded here — consumers reassemble from the chunks
+  /// and apply the producer-side layout from `FUN_008344fe`.
   void _decodePressureSetting(Uint8List pl) {
-    if (pl.length < 2) return;
-    _pressureSetting.add(
-      PressureSetting(
-        enabled: pl[1] != 0,
-        intervalMinutes: pl.length >= 3 ? pl[2] : 0,
-      ),
-    );
+    if (pl.length < 4) return;
+    // The RE indexes bytes from frame[0] (the cmd byte); [Codec.rxPayload]
+    // strips that off, so pl[2] = frame[3] = the 0x1E discriminator.
+    if (pl[2] == 0x1e) {
+      _pressureSettingHeader.add(PressureSettingHeader(slotId: pl[0]));
+      return;
+    }
+    _pressureSettingChunk.add(PressureSettingChunk(payload: pl));
   }
 
   /// `hrv` (0x39): read/write HRV config.
@@ -727,6 +763,32 @@ class ChannelADispatcher {
     _restoreKey.add(null);
   }
 
+  // ---------------------------------------------------------------------------
+  // Outbound-context tracking.
+  //
+  // The 0x46 distribution opcode and the 0xc6 reboot ack share the
+  // same post-strip opcode (top bit clears). We mark which request
+  // we just sent so the next 0xC6 frame can be routed to the right
+  // stream. The flag is single-shot — it clears on the first
+  // matching response (or whenever a new request overrides it).
+  // ---------------------------------------------------------------------------
+
+  bool _expectRebootAck = false;
+
+  /// Mark that the host just sent a `0xc6` device-reboot request. The
+  /// next 0xC6 response frame will be routed to [onRestoreKey].
+  void markRebootRequest() {
+    _expectRebootAck = true;
+  }
+
+  /// Mark that the host just sent a `0x46` queryDataDistribution
+  /// request. The next response frame on this opcode — including
+  /// any 0xC6 error-flagged variant — will be routed to
+  /// [onQueryDataDistribution].
+  void markDistributionQuery() {
+    _expectRebootAck = false;
+  }
+
   void dispose() {
     for (final c in [
       _unknown,
@@ -738,7 +800,8 @@ class ChannelADispatcher {
       _heartRateError,
       _bloodOxygen,
       _bpRecord,
-      _pressureSetting,
+      _pressureSettingHeader,
+      _pressureSettingChunk,
       _pressure,
       _hrv,
       _sugarLipids,
@@ -851,10 +914,23 @@ class PressureReading {
   final bool enabled;
 }
 
-class PressureSetting {
-  const PressureSetting({required this.enabled, required this.intervalMinutes});
-  final bool enabled;
-  final int intervalMinutes;
+/// Header frame of a `0x37` pressure-setting read (`pl[3] == 0x1E`).
+/// [slotId] echoes `req[1]` (today = 0, yesterday = 1, ...).
+/// See `GHIDRA_DECOMPILATION.md` §3.20.
+class PressureSettingHeader {
+  const PressureSettingHeader({required this.slotId});
+  final int slotId;
+}
+
+/// Payload chunk of a `0x37` pressure-setting read (frames 2..N
+/// of the two-phase response). Each chunk carries up to 13
+/// payload bytes of the 49-byte pressure record (4-byte header
+/// + 45-byte body per `FUN_008344fe`). There is no end-of-message
+/// marker — consumers reassemble by waiting for a quiet period
+/// after the header.
+class PressureSettingChunk {
+  const PressureSettingChunk({required this.payload});
+  final Uint8List payload;
 }
 
 class HrvSetting {

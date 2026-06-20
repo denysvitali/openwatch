@@ -329,6 +329,45 @@ void main() {
       await sub.cancel();
     });
 
+    test(
+      'pressureSetting 0x37 header (pl[2]==0x1E) routes to onPressureSettingHeader',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final got = d.onPressureSettingHeader.first;
+        // Header dword `0x1E050037` LE → frame bytes [0x37, slotId,
+        // 0x05, 0x1E]; pl indexes shift down by one so pl[2] = 0x1E.
+        final f = Codec.buildChannelA(OpA.pressureSetting, [0x00, 0x05, 0x1e]);
+        t.inA.add(f);
+        final h = await got.timeout(const Duration(seconds: 1));
+        expect(h.slotId, 0x00);
+      },
+    );
+
+    test(
+      'pressureSetting 0x37 non-header frame routes to onPressureSettingChunk',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final got = d.onPressureSettingChunk.first;
+        // pl[3] != 0x1E → chunk frame.
+        final payload = [0xde, 0xad, 0xbe, 0xef];
+        final f = Codec.buildChannelA(OpA.pressureSetting, [
+          0x01,
+          0x00,
+          0x00,
+          ...payload,
+        ]);
+        // Pad to 4 bytes minimum (pl[3] discriminator check).
+        // Actually the buildChannelA helper will already zero-pad.
+        t.inA.add(f);
+        final c = await got.timeout(const Duration(seconds: 1));
+        expect(c.payload.length, 14);
+      },
+    );
+
     test('readHeartRate 0x15 header frame fires onHeartRateHeader', () async {
       final t = _StubTransport();
       final d = ChannelADispatcher(t);
@@ -409,6 +448,11 @@ void main() {
       final t = _StubTransport();
       final d = ChannelADispatcher(t);
       d.bind();
+      // Caller marks the outbound context (e.g. ProtocolHub does this
+      // immediately after the 0xc6 send). Without the mark, the
+      // dispatcher can't tell a reboot ack from a distribution
+      // error response — both arrive as wire byte 0xC6.
+      d.markRebootRequest();
       var fired = false;
       final sub = d.onRestoreKey.listen((_) {
         fired = true;
@@ -419,6 +463,107 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 20));
       expect(fired, isTrue);
       await sub.cancel();
+    });
+
+    test(
+      'queryDataDistribution 0x46 success frame fires onQueryDataDistribution '
+      'with decoded bitmask',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        d.markDistributionQuery();
+        final got = d.onQueryDataDistribution.first;
+        // Known mask 0x00000005 → days 0 and 2 have data.
+        final f = Codec.buildChannelA(OpA.queryDataDistribution, [
+          0x00,
+          0x00,
+          0x00,
+          0x05,
+        ]);
+        t.inA.add(f);
+        final q = await got.timeout(const Duration(seconds: 1));
+        expect(q.errorFlag, isFalse);
+        expect(q.mask, 0x00000005);
+        expect(q.hasData(0), isTrue);
+        expect(q.hasData(1), isFalse);
+        expect(q.hasData(2), isTrue);
+        expect(q.hasData(31), isFalse);
+      },
+    );
+
+    test(
+      'queryDataDistribution 0xC6 (0x46|0x80) error frame surfaces errorFlag',
+      () async {
+        // Regression test for the original
+        // `case OpA.deviceReboot || 0x46:` pattern-disjunction bug
+        // which silently routed every 0x46 frame to onRestoreKey.
+        // With markDistributionQuery() called before the request, the
+        // 0xC6 error-flagged response now lands on
+        // onQueryDataDistribution with errorFlag=true, NOT on
+        // onRestoreKey.
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        d.markDistributionQuery();
+        final dist = <QueryDataDistribution>[];
+        final restoreFired = <void>[];
+        final sub1 = d.onQueryDataDistribution.listen(dist.add);
+        final sub2 = d.onRestoreKey.listen(restoreFired.add);
+        // wire byte 0xC6 (= 0x46 | 0x80) is the device-side error
+        // flag pattern. pl[0] = 0xee is the firmware-specific error
+        // subcode. buildChannelA puts 0x46 in byte[0]; OR in the
+        // error flag bit and recompute the checksum so the dispatcher
+        // accepts the frame.
+        final f = Codec.buildChannelA(OpA.queryDataDistribution, [
+          0xee,
+          0x00,
+          0x00,
+          0x00,
+        ]);
+        f[0] = f[0] | 0x80;
+        // Recompute additive checksum over bytes 0..14.
+        var sum = 0;
+        for (var i = 0; i < 15; i++) {
+          sum = (sum + f[i]) & 0xFF;
+        }
+        f[15] = sum;
+        t.inA.add(f);
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        expect(dist.length, 1);
+        expect(dist.first.errorFlag, isTrue);
+        expect(restoreFired, isEmpty);
+        await sub1.cancel();
+        await sub2.cancel();
+      },
+    );
+
+    test('0xC6 frame WITHOUT outbound mark goes to onQueryDataDistribution '
+        '(default — no spurious onRestoreKey)', () async {
+      // When the host hasn't called either markRebootRequest() or
+      // markDistributionQuery(), a 0xC6 frame must NOT fire
+      // onRestoreKey — that was the original bug. The dispatcher
+      // defaults to the distribution decoder since reboot context
+      // is opt-in.
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final dist = <QueryDataDistribution>[];
+      final restoreFired = <void>[];
+      final sub1 = d.onQueryDataDistribution.listen(dist.add);
+      final sub2 = d.onRestoreKey.listen(restoreFired.add);
+      final f = Codec.buildChannelA(OpA.queryDataDistribution, [
+        0x00,
+        0x00,
+        0x00,
+        0x01,
+      ]);
+      t.inA.add(f);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(dist.length, 1);
+      expect(restoreFired, isEmpty);
+      await sub1.cancel();
+      await sub2.cancel();
     });
 
     test(
