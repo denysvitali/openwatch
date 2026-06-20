@@ -45,6 +45,7 @@ class ChannelADispatcher {
   final _factoryCommand = StreamController<FactoryCommand>.broadcast();
   final _vibrationChunks = StreamController<VibrationChunk>.broadcast();
   int _vibrationSeq = 0;
+  final _displayClock = StreamController<DisplayClockResponse>.broadcast();
 
   /// Live-time, type, lang, tz embedded in the SetTime 0x01 ACK.
   Stream<DateTime> get onTime => _time.stream;
@@ -112,6 +113,12 @@ class ChannelADispatcher {
   /// arrived (the maximum the firmware emits).
   Stream<VibrationChunk> get onVibrationChunk => _vibrationChunks.stream;
 
+  /// Watch-face / display-clock response (`0x18`). The watch echoes the
+  /// request back with `response[2] = length` and the echoed label in
+  /// `response[3..]` (`FUN_0082ccb6`, see
+  /// `GHIDRA_DECOMPILATION.md` §3.5).
+  Stream<DisplayClockResponse> get onDisplayClock => _displayClock.stream;
+
   /// Any frame we couldn't type-decode.
   Stream<ChannelAFrame> get unknown => _unknown.stream;
 
@@ -161,6 +168,8 @@ class ChannelADispatcher {
         _decodeSportDetail(pl);
       case OpA.pushMsgUint:
         _decodePushMsg(pl);
+      case OpA.displayClock:
+        _decodeDisplayClock(pl);
       case OpA.phoneSport:
         _decodePhoneSport(pl);
       case OpA.muslim:
@@ -435,6 +444,30 @@ class ChannelADispatcher {
     );
   }
 
+  /// `displayClock` (0x18) — watch-face / clock display response. The
+  /// firmware echoes the request back per `FUN_0082ccb6` (see
+  /// `GHIDRA_DECOMPILATION.md` §3.5): `pl[1]` is the style selector,
+  /// `pl[2]` is the echoed length (label length for style `0x01`, or the
+  /// raw `length` byte from the request for label styles), and `pl[3..]`
+  /// carries the echoed label slice for label styles.
+  void _decodeDisplayClock(Uint8List pl) {
+    if (pl.length < 3) return;
+    final style = pl[0];
+    final length = pl[1];
+    final echoedLength = pl[2];
+    final labelStart = pl.length > 3 ? 3 : pl.length;
+    final labelEnd = (labelStart + echoedLength).clamp(0, pl.length);
+    final label = pl.sublist(labelStart, labelEnd);
+    _displayClock.add(
+      DisplayClockResponse(
+        style: style,
+        length: length,
+        echoedLength: echoedLength,
+        label: Uint8List.fromList(label),
+      ),
+    );
+  }
+
   /// Maps a factory sub-byte to its typed [FactoryAction] (per the table in
   /// `firmwares/GHIDRA_DECOMPILATION.md` §3.1 "Opcode 0xa1 factory/test mode").
   static FactoryAction _factoryAction(int sub) {
@@ -479,6 +512,7 @@ class ChannelADispatcher {
       _restoreKey,
       _factoryCommand,
       _vibrationChunks,
+      _displayClock,
     ]) {
       c.close();
     }
@@ -697,4 +731,25 @@ class VibrationChunk {
   const VibrationChunk({required this.seq, required this.payload});
   final int seq;
   final Uint8List payload;
+}
+
+/// Response to a `displayClock` (0x18) request — the watch-face / clock
+/// display echo. Per `FUN_0082ccb6` (GHIDRA_DECOMPILATION.md §3.5) the
+/// firmware always echoes the request back; [style] is the sub-type
+/// selector, [length] is the request's `length` byte (or the
+/// previously-cached label length for style `0x01`), and [echoedLength]
+/// is `response[2]` — the value the host should use to correlate the
+/// echo. [label] is the echoed label slice for label styles (styles
+/// `0x02`, `0x12`, `0x22`, `0x32`); empty for numeric or pass-through.
+class DisplayClockResponse {
+  const DisplayClockResponse({
+    required this.style,
+    required this.length,
+    required this.echoedLength,
+    required this.label,
+  });
+  final int style;
+  final int length;
+  final int echoedLength;
+  final Uint8List label;
 }
