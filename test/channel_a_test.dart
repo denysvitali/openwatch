@@ -120,6 +120,23 @@ void main() {
       expect(s.enabled, isFalse);
     });
 
+    test(
+      'emitFactoryReset fires onFactoryReset (host-side optimistic ack)',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        var fired = false;
+        final sub = d.onFactoryReset.listen((_) {
+          fired = true;
+        });
+        d.emitFactoryReset();
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        expect(fired, isTrue);
+        await sub.cancel();
+      },
+    );
+
     test('phoneSport start/finish (sub 0x01) decodes to startFinish', () async {
       final t = _StubTransport();
       final d = ChannelADispatcher(t);

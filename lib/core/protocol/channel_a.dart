@@ -194,14 +194,11 @@ class ChannelADispatcher {
         _decodeVibration(pl);
       case 0xa1 || 0x21:
         _decodeFactory(pl);
-      case 0xff:
-        // Factory reset ack; the request payload is `"fff"`.
-        if (frame.length >= 16 &&
-            frame[1] == 0x66 &&
-            frame[2] == 0x66 &&
-            frame[3] == 0x66) {
-          _factoryReset.add(null);
-        }
+      // 0xff (factory-reset trigger, see OpA.factoryReset + FUN_0082cde8)
+      // intentionally has NO switch arm: the handler does not queue a
+      // response, so nothing will ever land in decode() for this opcode.
+      // The WatchManager fires `onFactoryReset` optimistically when its
+      // outbound sendA returns successfully.
       default:
         _unknown.add(ChannelAFrame(opcode, pl, error: Codec.rxIsError(frame)));
     }
@@ -570,6 +567,15 @@ class ChannelADispatcher {
       default:
         return FactoryAction.unknown;
     }
+  }
+
+  /// Optimistic outbound-side hook: the host calls this when its
+  /// `0xff "fff"` send completes without transport error (the firmware
+  /// never queues a response — see
+  /// `GHIDRA_DECOMPILATION.md` §3.8 / `FUN_0082cde8`).
+  void emitFactoryReset() {
+    if (_factoryReset.isClosed) return;
+    _factoryReset.add(null);
   }
 
   void dispose() {

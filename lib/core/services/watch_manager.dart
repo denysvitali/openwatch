@@ -258,7 +258,17 @@ class WatchManager extends ChangeNotifier {
     _hub.enableAncs(name: 'phone:$phoneModel');
   }
 
-  Future<void> factoryReset() => _transport.sendA(Commands.factoryReset());
+  Future<void> factoryReset() async {
+    // Per GHIDRA_DECOMPILATION.md §3.8 (FUN_0082cde8), the firmware does
+    // NOT queue a response frame — the BLE re-init tears down the link
+    // before any reply could be parsed. Treat the send completing
+    // without error as the implicit ack.
+    await _transport.sendA(Commands.factoryReset());
+    // Inject the event into the dispatcher's controller — guarded by a
+    // reflection-free accessor on ProtocolHub so we don't expose the
+    // StreamController itself.
+    _hub.notifyFactoryResetAccepted();
+  }
 
   /// Direct accessor for the underlying typed-streams hub. Exposed so a
   /// diagnostic UI can observe everything the firmware emits without having

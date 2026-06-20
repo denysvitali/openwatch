@@ -41,8 +41,20 @@ class Commands {
   static Uint8List findDevice() =>
       Codec.buildChannelA(OpA.findDevice, const [0x55, 0xAA]);
 
-  /// `RestoreKeyReq`: factory reset / restore defaults (`[0x66, 0x66]`).
-  static Uint8List factoryReset() =>
+  /// `FactoryResetReq` (`0xff`): triggers `FUN_0082cde8` — wipes the
+  /// 164-byte user-config block at `0x00208c8c`, re-initialises the BLE
+  /// stack, and arms a 1000 ms one-shot timer. The handler sends NO
+  /// response frame — the host must optimistically treat the send
+  /// completing as "reset accepted". See
+  /// `GHIDRA_DECOMPILATION.md` §3.8.
+  static Uint8List factoryReset() => Codec.buildChannelA(
+    OpA.factoryReset,
+    const [0x66, 0x66, 0x66], // "fff" magic
+  );
+
+  /// `RestoreKeyReq` (`0x66`): restore-key sequence (separate from the
+  /// factory reset above — this is the "send restore confirm" path).
+  static Uint8List restoreKey() =>
       Codec.buildChannelA(OpA.restoreKey, const [0x66]);
 
   /// `BrightnessSettingsReq` (0x1b) write: `[0x02, level]`.

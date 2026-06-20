@@ -27,6 +27,11 @@ class OpA {
   static const int camera = 0x02;
   static const int restoreKey =
       0x66; // RestoreKeyReq uses caller opcode; reset magic
+  static const int factoryReset =
+      0xff; // Factory-reset trigger — payload `"fff"` (0x66 0x66 0x66);
+  // see GHIDRA_DECOMPILATION.md §3.8 (FUN_0082cde8). The handler sends
+  // NO response frame; the host treats the absence of an error as the
+  // implicit ack.
   static const int switchOta = 0x0f;
 
   // Health

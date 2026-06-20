@@ -111,5 +111,20 @@ void main() {
       final f = Commands.setTime(DateTime(2026, 6, 19, 8, 30, 5), flags: 0x00);
       expect(f[7], 0x00);
     });
+
+    test('factoryReset sends 0xff with the "fff" magic payload', () {
+      final f = Commands.factoryReset();
+      expect(f[0], OpA.factoryReset);
+      // "fff" = 0x66 0x66 0x66 — the magic the firmware gates on.
+      expect(f[1], 0x66);
+      expect(f[2], 0x66);
+      expect(f[3], 0x66);
+    });
+
+    test('restoreKey uses 0x66 (separate from factoryReset)', () {
+      final f = Commands.restoreKey();
+      expect(f[0], OpA.restoreKey);
+      expect(f[0], isNot(equals(OpA.factoryReset)));
+    });
   });
 }

@@ -109,6 +109,14 @@ class ProtocolHub {
     _dispatcher.decode(frame);
   }
 
+  /// Optimistically fires `onFactoryReset` on the dispatcher. The
+  /// `0xff "fff"` handler (FUN_0082cde8) sends no response frame, so the
+  /// host has to drive this from the outbound send completing without
+  /// error — see `GHIDRA_DECOMPILATION.md` §3.8.
+  void notifyFactoryResetAccepted() {
+    _dispatcher.emitFactoryReset();
+  }
+
   /// Allocates a default ANCS client so a notification arriving before
   /// [enableAncs] still gets attributed somewhere. Mirrors the firmware's
   /// behaviour of always having at least one registered client.
