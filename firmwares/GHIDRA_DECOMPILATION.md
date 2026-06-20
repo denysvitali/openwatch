@@ -2818,8 +2818,8 @@ polling the link does not bump the timer.
 | `0x91` | Echo `[0x91]` | `FUN_00827aee` |
 | `0x92` | (handler) | `FUN_00827b14` |
 | `0x93` | Firmware version + build-date string | `FUN_00827c4a` | see §8.18 |
-| `0x94` | (handler) | `FUN_00827b2e` |
-| `0x95` | (handler) | `FUN_00827b54` |
+| `0x94` | State-update mode 1 (deferred-ring drain) | `FUN_00827b2e` | see §8.19 |
+| `0x95` | State-update mode 3 (deferred-ring drain) | `FUN_00827b54` | see §8.19 |
 | `0x96` | Sends `[0x96,0,0,0x96,…]` and resets state | `FUN_00827b7c` — see §8.4 |
 | `0x97..0xa0` | High-range `switch8` at `0x82c6e0` (10 cases + default) | Per-entry thunk — detailed below |
 | `0xbf` | Vendor memory write (host→watch, arbitrary addr) | `FUN_0082ba94` | see §8.17 |
@@ -3023,8 +3023,8 @@ entries decoded from the two `switch8` tables:
 | `0x91` | `FUN_00827aee` | Echo `[0x91]` |
 | `0x92` | `FUN_00827b14` | |
 | `0x93` | `FUN_00827c4a` | Firmware version + build-date string — see §8.18 |
-| `0x94` | `FUN_00827b2e` | |
-| `0x95` | `FUN_00827b54` | |
+| `0x94` | `FUN_00827b2e` | State-update mode 1 — see §8.19 |
+| `0x95` | `FUN_00827b54` | State-update mode 3 — see §8.19 |
 | `0x96` | `FUN_00827b7c` | Sends `[0x96,0,0,0x96,...]` and resets state — see §8.4 |
 | `0x97` | `FUN_00827ba4` | No-op |
 | `0x98` | `FUN_00827be6` | Sets state to `1`, sends `[0x98]` |
@@ -4996,3 +4996,119 @@ packing, `0x93` returns the *raw compile-time string* with no
 transformation. This means a host SDK that prints
 `rsp[1..14]` directly to a UI label gets a readable version
 string with no parsing required.
+
+### 8.19 0x94 / 0x95 state-update commands (`FUN_00827b2e`, `FUN_00827b54`)
+
+The **two missing members** of the 0x90-0x9f vendor
+state-update trio. Together with `0x96` (§8.4), they form
+a 3-state machine controlled by `DAT_00827e88[0]`:
+
+| State value | Set by | Meaning (per `FUN_00827b1a` worker) |
+|---:|---|---|
+| `1` | `0x94` | state-update mode 1 — drain deferred ring, no `DAT_00827e88[1]` clear |
+| `3` | `0x95` | state-update mode 3 — drain deferred ring, **clear `DAT_00827e88[1]`** |
+| `4` | `0x96` (§8.4) | full reset state — drain, clear `DAT_00827e88[1]`, set mode to `4` |
+
+#### `FUN_00827b2e` (0x94)
+
+```c
+void FUN_00827b2e() {
+    rsp[0]  = 0x94;
+    rsp[12] = 0x94;                  // self-marker pattern
+    FUN_0082ebdc(rsp);
+    *DAT_00827e88 = 1;               // state = 1
+    FUN_00827b1a();                  // drain worker
+}
+```
+
+#### `FUN_00827b54` (0x95)
+
+```c
+void FUN_00827b54() {
+    rsp[0]  = 0x95;
+    rsp[12] = 0x95;
+    FUN_0082ebdc(rsp);
+    DAT_00827e88[1] = 0;             // clear secondary flag
+    *DAT_00827e88 = 3;               // state = 3
+    FUN_00827b1a();
+}
+```
+
+#### Behavior common to all three
+
+Each handler ships the same **self-marker response** (cmd
+at byte 0, the same cmd at byte 12, zero elsewhere) — the
+**5th and 6th handler in the table** to use this pattern
+(after `0x90`, `0x96`, `0x60`, `0x93`). All three then:
+
+1. Update the state byte at `DAT_00827e88[0]` to their
+   respective mode value.
+2. Optionally clear the secondary flag at `DAT_00827e88[1]`
+   (`0x95` and `0x96` clear it; `0x94` leaves it alone).
+3. Tail-call `FUN_00827b1a` — the state-update worker from
+   §8.4.
+
+`FUN_00827b1a` then drains the deferred ring and queues a
+state-update notification that pushes the new
+`DAT_00827e88`-derived fields to the host.
+
+#### Why three modes?
+
+The three mode values (1, 3, 4) are **distinct state
+transitions** that the watch's vendor state machine can
+enter:
+
+* Mode `1` — "live data refresh" (e.g. push the current
+  sensor readings to the host).
+* Mode `3` — "ack clear" (the watch acknowledges the host's
+  last `0x96` reset and clears the secondary flag).
+* Mode `4` — "factory reset" (full RAM reset, see §8.4).
+
+The mode value is consumed by `FUN_00827b1a` (and the
+worker it queues) to decide which vendor function tables to
+consult and which events to publish. The host SDK does not
+need to know the per-mode semantics — it just sends the
+opcode and reads back the resulting state-update frames.
+
+#### State byte `DAT_00827e88[0]`
+
+`DAT_00827e88` is the **vendor state** struct. The two bytes
+used by `0x94` / `0x95` / `0x96`:
+
+| Off | Field | Set by |
+|---:|---|---|
+| 0 | `state_mode` | `0x94` → `1`, `0x95` → `3`, `0x96` → `4` |
+| 1 | `secondary_flag` | `0x95` → `0`, `0x96` → `0`, `0x94` → unchanged |
+
+The host can read `DAT_00827e88[0]` via `0xc0` memory
+read (§8.17) to learn which mode the watch is currently in,
+and `DAT_00827e88[1]` to learn whether the secondary flag is
+set.
+
+#### Pair with `0xce ' '` factory-test (0xFEE7 vendor)
+
+`0xce ' '` (§8.10) also calls `FUN_00827b1a` (and other
+helpers) to set up vendor state before running its
+self-test loop. So `0x94` / `0x95` / `0x96` and `0xce` share
+the same vendor state-update plumbing. The difference is
+that `0x94` / `0x95` / `0x96` set the *mode* (1/3/4) without
+running a test, while `0xce` sets the mode (implicit) and
+runs the test loop.
+
+#### Self-marker pattern (5th and 6th occurrences)
+
+`0x94` and `0x95` use the same `rsp[0] = cmd; rsp[12] = cmd;
+FUN_0082ebdc(rsp)` shape as `0x93` (§8.18). The full set of
+self-marker handlers in the table is now:
+
+* `0x60` — bytes 0 + 15 (§8.16)
+* `0x90` — bytes 0 + 15 (§8.6)
+* `0x93` — bytes 0 + 12 (§8.18)
+* `0x94` — bytes 0 + 12 (this section)
+* `0x95` — bytes 0 + 12 (this section)
+* `0x96` — bytes 0 + 15 (§8.4)
+
+The bytes 0 + 12 vs bytes 0 + 15 split matches the
+byte-length of the second-frame payload (handlers that ship
+a payload in bytes 1..14 of the second frame put the marker
+at byte 12; handlers that ship no payload put it at byte 15).
