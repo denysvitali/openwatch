@@ -48,10 +48,9 @@ void main() {
       final bytes = file.readAsBytesSync();
       final c = FirmwareContainer.parse(bytes)!;
       final report = c.verify();
-      // Five unconditional checks: magic, load_size, firmware_size,
-      // body_size, flash_app_end. image_chk_a is opt-in (firmware's
-      // exact summed range is unverified); version_prefix / hw_id_prefix
-      // are opt-in via FirmwareExpectations.
+      // Four unconditional checks: magic, load_size, firmware_size, body_size.
+      // image_chk_a / flash_app_end / version_prefix / hw_id_prefix are all
+      // opt-in via FirmwareExpectations.
       expect(report.summary(), 'verification: 4/4 checks passed');
       expect(report.isValid, isTrue);
     });

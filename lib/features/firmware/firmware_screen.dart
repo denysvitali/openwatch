@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ble/ble_transport.dart';
 import '../../core/protocol/dfu.dart';
+import '../../core/protocol/firmware_container.dart';
 import '../../core/protocol/firmware_version.dart';
 import '../../core/providers/app_providers.dart';
 import '../../core/services/app_log.dart';
@@ -127,6 +128,36 @@ class _FirmwareScreenState extends ConsumerState<FirmwareScreen> {
       final bytes = Uint8List.fromList(
         await ref.read(firmwareServiceProvider).readBytes(fw),
       );
+
+      // Verify the container header before flashing. The DfuFlasher will
+      // re-check size/crc, but a corrupted or wrong-target image can brick
+      // the watch — surface failures early with a typed report.
+      final container = FirmwareContainer.parse(bytes);
+      if (container == null) {
+        throw const FormatException(
+          'Not a valid H59MA firmware image (magic mismatch or too small).',
+        );
+      }
+      final report = container.verify(
+        expected: const FirmwareExpectations(
+          versionPrefix: 'H59MA_',
+          hwIdPrefix: 'H59MA_',
+        ),
+      );
+      AppLog.instance.info(
+        'fw',
+        'image: version=${container.header.version} '
+            'hw=${container.header.hwId} '
+            'digest=${container.header.imageDigestHex.substring(0, 16)}… '
+            '${report.summary()}',
+      );
+      if (!report.isValid) {
+        final failed = report.failures
+            .map((c) => '${c.name}: ${c.detail}')
+            .join('; ');
+        throw FormatException('Image rejected: $failed');
+      }
+
       final flasher = DfuFlasher(ref.read(bleTransportProvider));
       await for (final p in flasher.flash(bytes)) {
         if (!mounted) return;
