@@ -34,7 +34,8 @@ class ChannelADispatcher {
   final _sugarLipids = StreamController<SugarLipidsSetting>.broadcast();
   final _uvTouch = StreamController<UvTouchSetting>.broadcast();
   final _sedentary = StreamController<SedentaryConfig>.broadcast();
-  final _sportDetail = StreamController<SportDetail>.broadcast();
+  final _sportDetailHeader = StreamController<SportDetailHeader>.broadcast();
+  final _sportDetailRecord = StreamController<SportDetailRecord>.broadcast();
   final _pushMsg = StreamController<PushMsgUint>.broadcast();
   final _phoneSport = StreamController<PhoneSportUpdate>.broadcast();
   final _muslim = StreamController<MuslimConfig>.broadcast();
@@ -77,8 +78,19 @@ class ChannelADispatcher {
   /// Sedentary reminder read/write (`0x25`/`0x26`).
   Stream<SedentaryConfig> get onSedentary => _sedentary.stream;
 
-  /// Detailed sport record (`0x43`).
-  Stream<SportDetail> get onSportDetail => _sportDetail.stream;
+  /// Detailed sport record header (`0x43`, phase 1).
+  ///
+  /// The firmware emits a 16-byte header frame carrying the end-of-data
+  /// flag, the record count for the queried range, and the unit flag
+  /// echo. Followed by [onSportDetailRecord] frames (one per counted
+  /// slot). See `GHIDRA_DECOMPILATION.md` §3.6.
+  Stream<SportDetailHeader> get onSportDetailHeader =>
+      _sportDetailHeader.stream;
+
+  /// Detailed sport record payload (`0x43`, phase 2). One frame per
+  /// non-empty hourly slot in the range requested by the host.
+  Stream<SportDetailRecord> get onSportDetailRecord =>
+      _sportDetailRecord.stream;
 
   /// Notification / emoji push (`0x72`).
   Stream<PushMsgUint> get onPushMsg => _pushMsg.stream;
@@ -344,13 +356,59 @@ class ChannelADispatcher {
     );
   }
 
-  /// `readDetailSport` (0x43): detail record; the firmware emits multi-frame.
+  /// `readDetailSport` (0x43): two-phase per-hour activity dump.
+  ///
+  /// Phase 1 (header frame) — `pl[0]` is the end-of-data flag
+  /// (`0xF0` = records follow; `0xFF` = zero records / done), `pl[1]` is
+  /// the record count, `pl[2]` echoes the unit_flag from the request
+  /// (durations are 10-second units when 0, 1-second units when 1).
+  /// Phase 2 (record frames) — `pl[0..2]` are BCD year/month/day for
+  /// the day's "month index", `pl[3..4]` pack `(record_idx)|(slot_idx<<2)`,
+  /// `pl[8..14]` carry the duration u16 split across three byte ranges
+  /// plus the two aux u16s. See `GHIDRA_DECOMPILATION.md` §3.6.
   void _decodeSportDetail(Uint8List pl) {
-    if (pl.length < 5) return;
-    final ts = Codec.readU32le(pl, 1);
-    _sportDetail.add(
-      SportDetail(
-        timestamp: DateTime.fromMillisecondsSinceEpoch(ts * 1000, isUtc: true),
+    if (pl.length < 4) return;
+    final endFlag = pl[0];
+    if (endFlag == 0xf0 || endFlag == 0xff) {
+      _sportDetailHeader.add(
+        SportDetailHeader(
+          endOfData: endFlag == 0xff,
+          recordCount: pl[1],
+          unitFlag: pl[2],
+        ),
+      );
+      return;
+    }
+    // Record frame: BCD date + packed indices + duration/aux. The
+    // 16-byte frame has the opcode at byte[0], so the indices below are
+    // frame-relative - 1 (i.e. they map to pl[] starting at 0).
+    if (pl.length < 14) return;
+    final year = Codec.fromBcd(pl[0]);
+    final month = Codec.fromBcd(pl[1]);
+    final day = Codec.fromBcd(pl[2]);
+    final packed = pl[3] | (pl[4] << 8);
+    // RE wire: packed = (record_idx) | (slot_idx << 2). record_idx is
+    // bounded by `0..count`, slot_idx by `0..23`, so 2 bits for idx and
+    // 6 bits for slot.
+    final recordIdx = packed & 0x3;
+    final slotIdx = (packed >> 2) & 0x3f;
+    // Frame bytes 8..9 = pl[7..8] = duration_lo; frame byte 14 = pl[13]
+    // = duration_hi. Reassemble into a 24-bit value.
+    final duration = pl[7] | (pl[8] << 8) | (pl[13] << 16);
+    // Frame bytes 10..11 = pl[9..10] = aux_lo; frame bytes 12..13 =
+    // pl[11..12] = aux_hi.
+    final auxLo = pl[9] | (pl[10] << 8);
+    final auxHi = pl[11] | (pl[12] << 8);
+    _sportDetailRecord.add(
+      SportDetailRecord(
+        year: year,
+        month: month,
+        day: day,
+        recordIdx: recordIdx,
+        slotIdx: slotIdx,
+        duration: duration,
+        auxLo: auxLo,
+        auxHi: auxHi,
       ),
     );
   }
@@ -502,7 +560,8 @@ class ChannelADispatcher {
       _sugarLipids,
       _uvTouch,
       _sedentary,
-      _sportDetail,
+      _sportDetailHeader,
+      _sportDetailRecord,
       _pushMsg,
       _phoneSport,
       _muslim,
@@ -599,9 +658,51 @@ class SedentaryConfig {
   final int endHour;
 }
 
-class SportDetail {
-  const SportDetail({required this.timestamp});
-  final DateTime timestamp;
+/// Header frame for a `0x43` per-hour activity dump (phase 1).
+///
+/// `endOfData == true` means the range is empty or already finished;
+/// `endOfData == false` means [recordCount] record frames will follow on
+/// [ChannelADispatcher.onSportDetailRecord].
+class SportDetailHeader {
+  const SportDetailHeader({
+    required this.endOfData,
+    required this.recordCount,
+    required this.unitFlag,
+  });
+  final bool endOfData;
+  final int recordCount;
+  final int unitFlag;
+}
+
+/// Record frame for a `0x43` per-hour activity dump (phase 2).
+///
+/// [year]/[month]/[day] are the BCD-decoded date of the day's "month
+/// index" (NOT the slot's timestamp — the slot is per-hour inside the
+/// day). [slotIdx] is the hour-of-day (0..23), [recordIdx] is the
+/// running counter. [duration] units are `10s` when the matching
+/// header has `unitFlag == 0`, otherwise seconds. [auxLo] and [auxHi]
+/// carry the per-slot second u16s (distance / calorie low / etc.,
+/// depending on firmware variant — exact meaning TBD per
+/// `GHIDRA_DECOMPILATION.md` §3.6).
+class SportDetailRecord {
+  const SportDetailRecord({
+    required this.year,
+    required this.month,
+    required this.day,
+    required this.recordIdx,
+    required this.slotIdx,
+    required this.duration,
+    required this.auxLo,
+    required this.auxHi,
+  });
+  final int year;
+  final int month;
+  final int day;
+  final int recordIdx;
+  final int slotIdx;
+  final int duration;
+  final int auxLo;
+  final int auxHi;
 }
 
 class PushMsgUint {

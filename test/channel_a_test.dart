@@ -219,5 +219,57 @@ void main() {
       expect(r.echoedLength, 0x05);
       expect(r.label, Uint8List.fromList(label));
     });
+
+    test(
+      'readDetailSport 0x43 header frame routes to onSportDetailHeader',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final got = d.onSportDetailHeader.first;
+        // endOfData=false (0xf0), count=2, unitFlag=1 (seconds).
+        t.inA.add(Codec.buildChannelA(OpA.readDetailSport, [0xf0, 0x02, 0x01]));
+        final h = await got.timeout(const Duration(seconds: 1));
+        expect(h.endOfData, isFalse);
+        expect(h.recordCount, 0x02);
+        expect(h.unitFlag, 0x01);
+      },
+    );
+
+    test(
+      'readDetailSport 0x43 record frame routes to onSportDetailRecord',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final got = d.onSportDetailRecord.first;
+        // BCD 0x26/0x06/0x14 + packed (record=2, slot=10 -> (2)|(10<<2)=0x2a)
+        // + duration lo u16 LE (0x1234) at pl[7..8] + auxLo (0x5678) at
+        // pl[9..10] + auxHi (0x9a 0x00) at pl[11..12] + duration hi (0x00)
+        // at pl[13].
+        final payload = <int>[
+          0x26, // year BCD
+          0x06, // month BCD
+          0x14, // day BCD
+          0x2a, // packed low
+          0x00, // packed high
+          0x00, 0x00, // reserved
+          0x34, 0x12, // duration lo u16 LE
+          0x78, 0x56, // auxLo u16 LE
+          0x9a, 0x00, // auxHi u16 LE
+          0x00, // duration hi
+        ];
+        t.inA.add(Codec.buildChannelA(OpA.readDetailSport, payload));
+        final r = await got.timeout(const Duration(seconds: 1));
+        expect(r.year, 26);
+        expect(r.month, 6);
+        expect(r.day, 14);
+        expect(r.recordIdx, 2);
+        expect(r.slotIdx, 10);
+        expect(r.duration & 0xffff, 0x1234);
+        expect(r.auxLo, 0x5678);
+        expect(r.auxHi, 0x9a);
+      },
+    );
   });
 }
