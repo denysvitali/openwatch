@@ -5648,3 +5648,122 @@ slot (reserved for future use). This section captures that
 state so a host SDK that wants to know "is 0x97 implemented
 on H59MA v14?" can answer "no, all of 0x97..0x9F + 0xA0
 return vendor NAK except 0x9D which is silently dropped".
+
+### 8.21 Self-marker opcode pattern synthesis
+
+Six 0xFEE7 opcodes use a **self-marker response** (write the
+cmd byte twice — once at the standard byte 0, once at a
+non-standard second position — instead of the additive
+checksum). The pattern was discovered piecemeal across
+§8.4 / §8.6 / §8.16 / §8.18 / §8.19; this section pulls the
+threads together.
+
+#### The full self-marker list
+
+| Opcode | § | Marker offset | Payload in second frame? | Rationale |
+|---|---|---:|---|---|
+| `0x60` | §8.16 | byte 15 | no | 1-byte ack with no payload — marker at byte 15 |
+| `0x90` | §8.6 | byte 15 | no | echo with no payload — marker at byte 15 |
+| `0x93` | §8.18 | byte 12 | yes (14 B version+date string) | version string fills bytes 1..14 — marker at byte 12 |
+| `0x94` | §8.19 | byte 12 | no | state-update mode 1 ack with no payload — marker at byte 12 |
+| `0x95` | §8.19 | byte 12 | no | state-update mode 3 ack with no payload — marker at byte 12 |
+| `0x96` | §8.4 | byte 15 | no | reset-state ack with no payload — marker at byte 15 |
+
+#### The byte 12 vs byte 15 rule
+
+The marker offset is determined by **whether the second
+frame carries a payload**:
+* **Byte 15** (handlers with no payload) — the marker
+  replaces the checksum at byte 15.
+* **Byte 12** (handlers with a 14-byte payload) — the
+  payload fills bytes 1..14, so the marker goes at byte 12
+  (the highest byte of the last u16 of the payload).
+
+The 0x93 case is the only one that ships a payload AND uses
+the self-marker pattern — the 14-byte ASCII payload
+overlaps with where a checksum would normally sit, so the
+marker moves up to byte 12. All other self-marker handlers
+ship empty bodies and use byte 15.
+
+#### Why bypass the checksum at all?
+
+The §3 "Common response path" (§3 "Notable Data & Globals"
+above) computes an **additive checksum** over bytes 0..14 and
+stores it in byte 15. The self-marker handlers replace this
+with a **second copy of the cmd byte**. The rationale:
+
+* The handlers fire-and-forget (no payload, no follow-up
+  frames) — the host doesn't need the checksum to verify
+  the body (there is no body).
+* The marker byte 0 + byte X pair gives the host a cheap
+  self-identification check: `byte 0 == cmd && byte X == cmd`
+  confirms the response came from this opcode without
+  needing to compute or compare checksums.
+* For `0x93`, the payload IS the body — the marker at byte
+  12 acts as a "last byte before checksum" sentinel so the
+  host knows where the version+date string ends.
+
+#### Host SDK recipe
+
+The host SDK that consumes a self-marker response should:
+
+1. **Verify the marker pair** (`byte 0 == byte 15 == cmd` for
+   no-payload handlers; `byte 0 == cmd && byte 12 == cmd`
+   for `0x93`).
+2. **Skip the additive checksum check** — the byte-15 / byte-12
+   value is *not* the additive sum of bytes 0..14. The
+   additive checksum would be wrong (because the marker
+   byte was written instead of the checksum) and verifying
+   it would falsely reject a valid response.
+3. **Treat the response as opaque** — the body between
+   byte 1 and the marker byte (if any) is the meaningful
+   payload; everything else is zero-padded.
+
+A naive host SDK that just verifies `byte 15 == additive_sum
+(bytes 0..14)` will reject every self-marker response as
+malformed. The dedicated self-marker handler checks must be
+added to the SDK's per-opcode response validator.
+
+#### Why six handlers?
+
+The H59MA firmware uses the self-marker pattern for
+**state-transition / config-write / status-push commands** —
+the kinds of opcodes where the host cares more about
+*whether the command was accepted* than about the body
+content. The six self-marker handlers all fall into this
+category:
+
+* `0x60` / `0x90` / `0x94` / `0x95` / `0x96` — pure state
+  transitions ("set / start / ack / reset").
+* `0x93` — single-shot config read with a self-identifying
+  payload (the firmware is "identifying itself" to the
+  host via the cmd+cmd marker pair).
+
+The opposite case — *data-rich* opcodes like `0x37 pressureSetting`
+(§3.20) or `0x7a muslim` (§3.11) — uses the **standard
+additive checksum** because the host cares about the body
+content and the checksum catches transmission errors.
+
+#### §3 Channel-A equivalents?
+
+Channel-A opcodes do *not* use the self-marker pattern. The
+§3 dispatcher (`FUN_0082d2dc`) always emits the standard
+additive checksum. The self-marker pattern is a **0xFEE7-
+only** convention, used by 6 of the ~50 documented 0xFEE7
+opcodes (the rest use the standard checksum).
+
+This makes the self-marker pattern a *signal* — a host SDK
+that sees an opcode is a self-marker handler knows the opcode
+is a state-transition / config-write (vs a data-rich read)
+and can use a simpler validator path.
+
+#### Why this synthesis section exists
+
+The self-marker pattern was discovered piecemeal across
+§8.4 / §8.6 / §8.16 / §8.18 / §8.19 — five separate
+handler sections that each note the `byte 0 == byte 15` /
+`byte 0 == byte 12` pattern in isolation. Without a synthesis
+section, a host SDK author reading the doc would have to
+combine those notes themselves to understand the *common*
+pattern. This section pulls the threads together so the
+synthesis is in one place.
