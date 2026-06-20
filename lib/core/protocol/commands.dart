@@ -8,11 +8,18 @@ import 'opcodes.dart';
 class Commands {
   Commands._();
 
-  /// `SetTimeReq` (0x01): `[BCD y,mo,d,h,mi,s][lang][tz]` where
-  /// `tz = ((offsetHours + 24) % 24) * 2 + 1`. The reply is the capability
-  /// manifest, so this is also the first thing to send after `ready`.
-  static Uint8List setTime(DateTime t, {int lang = 0}) {
-    final tz = ((t.timeZoneOffset.inHours + 24) % 24) * 2 + 1;
+  /// `SetTimeReq` (0x01): `[BCD y,mo,d,h,mi,s][flags]` where `flags`:
+  ///   * `0xFF` → skip the seconds-tick re-init at the end of the handler
+  ///     (`FUN_0082bb4e` skips `FUN_00827956()`/`FUN_008276d2()`).
+  ///   * anything else → re-arm the live counter + seconds tick.
+  ///
+  /// Bytes 8..14 are unused per the firmware RE (see
+  /// `GHIDRA_DECOMPILATION.md` §3.4). The old APK-derived layout
+  /// (`[lang][tzHalfHour+1]`) is not honoured by H59MA v14.
+  ///
+  /// The reply is the capability manifest, so this is also the first thing
+  /// to send after `ready`.
+  static Uint8List setTime(DateTime t, {int flags = 0xff}) {
     return Codec.buildChannelA(OpA.setTime, [
       Codec.toBcd(t.year % 100),
       Codec.toBcd(t.month),
@@ -20,8 +27,7 @@ class Commands {
       Codec.toBcd(t.hour),
       Codec.toBcd(t.minute),
       Codec.toBcd(t.second),
-      lang,
-      tz,
+      flags & 0xFF,
     ]);
   }
 

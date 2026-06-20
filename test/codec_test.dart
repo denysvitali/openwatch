@@ -101,5 +101,15 @@ void main() {
       expect(Codec.fromBcd(f[4]), 8);
       expect(Codec.fromBcd(f[5]), 30);
     });
+
+    test('setTime defaults flags byte to 0xFF (skip tick re-init)', () {
+      final f = Commands.setTime(DateTime(2026, 6, 19, 8, 30, 5));
+      expect(f[7], 0xff);
+    });
+
+    test('setTime honours caller-supplied flags', () {
+      final f = Commands.setTime(DateTime(2026, 6, 19, 8, 30, 5), flags: 0x00);
+      expect(f[7], 0x00);
+    });
   });
 }
