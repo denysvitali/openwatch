@@ -2685,7 +2685,7 @@ polling the link does not bump the timer.
 | `0x90` | Echo `[0x90]` (self-marker) | `FUN_00827ad2` — see §8.6 |
 | `0x91` | Echo `[0x91]` | `FUN_00827aee` |
 | `0x92` | (handler) | `FUN_00827b14` |
-| `0x93` | (handler) | `FUN_00827c4a` |
+| `0x93` | Firmware version + build-date string | `FUN_00827c4a` | see §8.18 |
 | `0x94` | (handler) | `FUN_00827b2e` |
 | `0x95` | (handler) | `FUN_00827b54` |
 | `0x96` | Sends `[0x96,0,0,0x96,…]` and resets state | `FUN_00827b7c` — see §8.4 |
@@ -2890,7 +2890,7 @@ entries decoded from the two `switch8` tables:
 | `0x90` | `FUN_00827ad2` | Echo `[0x90]` |
 | `0x91` | `FUN_00827aee` | Echo `[0x91]` |
 | `0x92` | `FUN_00827b14` | |
-| `0x93` | `FUN_00827c4a` | |
+| `0x93` | `FUN_00827c4a` | Firmware version + build-date string — see §8.18 |
 | `0x94` | `FUN_00827b2e` | |
 | `0x95` | `FUN_00827b54` | |
 | `0x96` | `FUN_00827b7c` | Sends `[0x96,0,0,0x96,...]` and resets state — see §8.4 |
@@ -4714,3 +4714,153 @@ directly with the host-supplied address. There is *no*
 bounds check, *no* MPU-region check, *no* "is this address
 in a vendor-readable region?" gate. The watchdog is the
 host SDK's own policy — the firmware trusts the caller.
+
+### 8.18 0x93 firmware version + build-date string (`FUN_00827c4a`)
+
+The vendor-string variant of `0x48 'H'` handshake (§8.2).
+While `0x48 'H'` returns the device-info block as a
+**packed u32** in bytes 1..4 (the §8.2 "non-uniform byte
+order" layout), `0x93` returns the same firmware version +
+build date as a **human-readable ASCII string** that the
+host SDK can print directly without any byte-order
+interpretation.
+
+#### Behavior
+
+```c
+void FUN_00827c4a() {
+    // header frame [0x93, 0, ..., 0, 0x93]
+    rsp[0]  = 0x93;
+    rsp[12] = 0x93;            // self-marker pattern (like 0x90/0x96/0x60)
+    FUN_0082ebdc(rsp);
+
+    // build the 14-byte payload from two strings
+    char buf[20];
+    memset(buf, 0, 0x14);
+
+    // version string: vendor-supplied OR static fallback
+    if ((*(DAT_00827e8c + 0xd5) & 0x3f) >> 4 == 1)
+        FUN_0083df8c(buf, DAT_00827e8c + 0x9e);  // vendor version
+    else
+        FUN_0083df8c(buf, s_1_00_14__00827e94);  // "1.00.14_"
+
+    // build-date string: vendor-supplied OR static fallback
+    if (*(DAT_00827e8c + 0xd5) >> 6 == 1)
+        FUN_0083df8c(buf + strlen(buf), DAT_00827e8c + 0xae);  // vendor date
+    else
+        FUN_0083df8c(buf + strlen(buf), s_260508_00827ea0);  // "260508"
+
+    // send the version+date string
+    memcpy(rsp + 1, buf, 0xe);
+    rsp[15] = FUN_0082b0c4(rsp, 0xf);
+    FUN_0082ebdc(rsp);
+}
+```
+
+#### The two vendor-supplied strings
+
+The handler reads two strings from the `DAT_00827e8c` vendor
+context (populated by the OEM build):
+
+| Field offset | Length | Purpose |
+|---:|---:|---|
+| `+0x9E` | ≤ 7 B | firmware version (e.g. `"2.00.01_"` if the OEM overrode it) |
+| `+0xAE` | ≤ 7 B | build date (e.g. `"251231"` if the OEM overrode it) |
+
+The two control bits in `DAT_00827e8c + 0xd5`:
+
+| Bit | Effect when set |
+|---:|---|
+| bits 4..5 (`& 0x3f >> 4 == 1`) | Use vendor-supplied version string from `+0x9E` |
+| bit 6 (`>> 6 == 1`) | Use vendor-supplied build date from `+0xAE` |
+
+If either bit is unset, the handler falls back to the
+**statically-compiled strings**:
+
+| Address | String | Meaning |
+|---|---|---|
+| `0x00827e94` | `"1.00.14_"` | firmware version baked at compile time |
+| `0x00827ea0` | `"260508"` | build date baked at compile time (YYMMDD) |
+
+#### Response layout
+
+The handler sends **two frames back-to-back**:
+
+1. **Header frame** (16 B):
+```
+byte  0: 0x93                (cmd)
+byte  1..11: 0
+byte 12: 0x93                (self-marker)
+byte 13..14: 0
+byte 15: additive checksum
+```
+
+2. **Version+date frame** (16 B):
+```
+byte  0: 0x93                (cmd)
+byte  1..N: version string (e.g. "1.00.14_")
+byte  N+1..M: build-date string (e.g. "260508")
+byte  M+1..14: 0
+byte 15: additive checksum
+```
+
+The total string length is `N + M ≤ 14` (the two strings
+concatenated into bytes 1..14). For the H59MA v14 build, the
+payload is `"1.00.14_260508"` (13 bytes, fits with one zero
+padding byte).
+
+#### Self-marker pattern (4th occurrence)
+
+Like `0x90` self-marker (§8.6), `0x96` reset-state (§8.4),
+and `0x60` status-field write (§8.16), the `0x93` handler
+uses a **self-marker at bytes 0 + 12** (not 0 + 15). This
+is the *fourth* handler in the table to bypass the additive
+checksum:
+
+* `0x90` — marker at bytes 0 + 15
+* `0x96` — marker at bytes 0 + 15
+* `0x60` — marker at bytes 0 + 15
+* `0x93` — marker at bytes 0 + 12
+
+The off-by-3 difference (12 vs 15) is deliberate: `0x93`
+ships a 14-byte payload in bytes 1..14 of the *second* frame,
+so byte 15 is reserved for the checksum and the "second
+copy of the marker" goes into byte 12 (the high byte of the
+last u16 of the version+date string).
+
+#### Why two frames?
+
+The handler first sends a **header frame** (with the marker
+at byte 12) so the host SDK can quickly detect the start of a
+`0x93` exchange *before* waiting for the slower version+date
+frame. This is a vendor pattern: a quick "watch is about to
+send a long string" tick, then the actual string. The host
+SDK should:
+
+1. Read the header frame, expect `byte 0 == 0x93 && byte 12
+   == 0x93`.
+2. Read the next frame, parse the string from bytes 1..14.
+
+If the host SDK tries to merge both frames into one, the byte
+12 marker in the header would be mis-parsed as part of the
+string (because the header *also* has byte 0 = 0x93).
+
+#### Pair with `0x48 'H'` handshake (§8.2)
+
+`0x48 'H'` and `0x93` are *two answers* to the same question
+("what firmware is running?"). `0x48` returns the packed u32
+(the OEM-internal format used by the H59MA SDK); `0x93`
+returns the human-readable string (used by vendor tools and
+debug logs). A host that needs to *parse* the firmware version
+should use `0x48`; a host that needs to *display* it (e.g.
+for a "device info" screen) should use `0x93`.
+
+#### Why ASCII instead of BCD
+
+The `1.00.14_` format is **plain ASCII** — bytes `0x31 0x2E
+0x30 0x30 0x2E 0x31 0x34 0x5F` (`"1.00.14_"`). Unlike the
+§8.2 `0x48 'H'` response which uses the OEM's BCD-like byte
+packing, `0x93` returns the *raw compile-time string* with no
+transformation. This means a host SDK that prints
+`rsp[1..14]` directly to a UI label gets a readable version
+string with no parsing required.
