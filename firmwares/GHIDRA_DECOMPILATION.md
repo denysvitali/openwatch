@@ -255,7 +255,7 @@ Processes a circular queue of incoming 16-byte frames (`DAT_0082d440 + 0x14` rin
 | `0x39` | `hrvSetting` | `0x0082c9da` | Reads/sets HRV config; uses `FUN_0083468e`. |
 | `0x3a` | `sugarLipidsSetting` | `0x0082cc1e` | Sub `0x03`/`0x04` read/write sugar/lipids settings. |
 | `0x3b` | `uvSetting` / `touchControl` | `0x0082cbc8` | Read/write UV/touch config byte at `DAT_0082cfe8 + 8`. |
-| `0x43` | `readDetailSport` | `0x0082d034` | Reads detailed sport records by date range, sends multi-frame `0x43` responses. |
+| `0x43` | `readDetailSport` | `0x0082d034` | Reads detailed sport records by date range — see §3.6. |
 | `0x72` | `pushMsgUint` | `0x00829e92` | Buffers a notification/emoji Unicode string for display — see §3.3. |
 | `0x77` | `phoneSport` | `0x0082ce0c` | Jump-table dispatch on sub-byte. |
 | `0x7a` | `muslim` | `0x0082cb3a` | Sub `0x01` reads Muslim prayer config, `0x02 0x01` resets it. |
@@ -634,6 +634,90 @@ preceding the 24-byte `0x18` spill block). Together with the
 written immediately, while the 6-byte chunk is only committed to
 flash when the host sends a corresponding `0x81` and the value
 actually changed.
+
+### 3.6 Opcode `0x43` readDetailSport / per-hour activity dump (`FUN_0082d034`)
+
+Reads detailed sport records (one slot per hour) for a single day
+and returns them as a **two-phase multi-frame** Channel-A response:
+first a *header* frame carrying the count and end-of-data flag,
+then one *record* frame per non-empty slot.
+
+The watch's per-day storage is a fixed 24-slot × 12-byte table
+(`auStack_19c` in the handler, size 0x124 = 292 B which is `4 + 24*12`):
+the first 4 bytes hold the day's "month index" (the same value
+returned by `FUN_008318b0(day)`), the rest is the 24 hourly slots.
+
+#### Request layout
+
+| Byte | Field | Notes |
+|---:|---|---|
+| 0 | `opcode` | `0x43` (consumed by dispatcher) |
+| 1 | `day_offset` | 0 = today, 1 = yesterday, … ; `FUN_0082840e() - day_offset` is the day queried |
+| 2 | `reserved` | unused |
+| 3 | `start_hour` | First slot to scan (`0..23`) |
+| 4 | `end_hour` | Last slot to scan (`0..23`); clamped to the current minute-of-day for "today" |
+| 5 | `unit_flag` | `0` → durations in 10-second units (legacy "minutes"), `1` → durations in 1-second units |
+| 6..14 | unused | — |
+
+#### Phase 1 — header frame
+
+After loading the 292-byte daily block via `FUN_008318b0(day)` (or
+zero-fill on miss) and writing the current RTC minute into the
+in-progress slot when querying "today", the handler scans slots
+`start_hour..end_hour` and classifies each:
+
+| Slot condition | Behavior |
+|---|---|
+| `status == 0` AND `duration == 0` | Skip (empty) |
+| `status == 0` AND `duration != 0` | Count (partial record, duration present) |
+| `status != 0` AND `status != 0xFFFF` | Count (in-progress) |
+| `status == 0xFFFF` (DAT_0082d438 sentinel) | Skip (finalized — surfaced via the `0x77` activity-summary path instead) |
+
+The header frame is then queued:
+
+| Byte | Field | Notes |
+|---:|---|---|
+| 0 | `0x43` | cmd |
+| 1 | `0xF0` if any record found, `0xFF` if zero | end-of-data flag |
+| 2 | `record_count` (uVar9) | number of valid slots in the range |
+| 3 | `unit_flag` echoed (`0x01` if `param_1[5] == 1`) | the host needs this to interpret the per-record duration later |
+| 4..14 | 0 | reserved |
+| 15 | additive checksum | per §3 |
+
+When the day block is unavailable (`local_1a0 == 0` after the load),
+the handler short-circuits with a single error frame
+`[0x43, 0xFF, 0, 0, …, 0, cksum]` (13 zero bytes in the payload).
+
+#### Phase 2 — per-record frames
+
+For each counted slot, the handler reads the day's date (BCD-encoded
+by `FUN_00828462(month_index, &local_7c)` — three bytes
+`{year_off, month, day}`) and emits a 16-byte frame:
+
+| Byte | Field | Notes |
+|---:|---|---|
+| 0 | `0x43` | cmd |
+| 1 | `year_bcd` | via `FUN_0082ede2(year_off)` (decimal-to-BCD encoder) |
+| 2 | `month_bcd` | via `FUN_0082ede2(month)` |
+| 3 | `day_bcd` | via `FUN_0082ede2(day)` |
+| 4..5 | `record_idx` packed | `(record_idx) | (slot_idx << 2)` — both ≤ 24 |
+| 6..7 | 0 | reserved |
+| 8..9 | `duration_lo` (u16) | `slot.duration * (10 if unit_flag == 0 else 1)` |
+| 10..11 | `slot.aux_u16` (low byte) | second u16 of the slot (e.g. distance / calorie low) |
+| 12..13 | `slot.aux_u16 >> 8` | second u16 high byte (one byte of payload only) |
+| 14 | `duration_hi` | high byte of the duration u16 |
+| 15 | additive checksum | per §3 |
+
+`FUN_0082ede2(v)` is a defensive BCD encoder that returns
+`(tens<<4 | units)` for `v ∈ [0, 99]` and `0` otherwise; combined
+with `FUN_00828462` it produces a standard
+`{year_lo, month, day}` BCD date triplet for the response header.
+
+The host reconstructs the day's full activity trace by collecting
+the header (count + flags) and then `count` consecutive `0x43`
+record frames. A trailing "no more data" sentinel is the *header's
+`byte 1 == 0xF0`* — the record frames themselves do not carry an
+EOM marker.
 
 ### Opcode `0xa1` factory/test mode (`FUN_00827f5c`)
 
