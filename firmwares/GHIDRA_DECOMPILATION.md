@@ -3215,6 +3215,143 @@ that v14 does not implement. A host sending `0x92` will
 *not* receive any response (the dispatcher routes it but
 the handler is empty).
 
+### 8.7 0x6a `'j'` mode-control continuation (`FUN_0082c1e2`)
+
+The second half of the `0x69 'i'` / `0x6a 'j'` multi-step
+transaction (§8.5). The dispatcher (§8.1) routes both
+opcodes to `FUN_0082be64` (the deferred ring), but only
+`0x69` starts a new mode; `0x6a` *advances* the mode already
+in progress by re-reading `DAT_0082c578` and dispatching
+on the mode to call the appropriate sensor-read helper.
+
+The handler also enforces a **mode-mismatch guard**: if
+`req[1]` does not match `state[7]` (the mode stored by the
+matching `0x69 'i'`), the handler returns immediately. This
+prevents a stale `0x6a` request from continuing the wrong
+mode if the host lost track of the protocol state.
+
+#### Pre-dispatch: gate and bucket logic
+
+```c
+if (req[1] != state[7]) return;          // mode-mismatch guard
+
+if ((cVar1 == '\r') || (cVar1 == '\x0e')) {
+    FUN_00833704(DAT_0082c580);          // stop HR with stored mode
+    func_0x000136bc(state + 0x10);       // cancel 500 ms timer
+    state[7] = 1;                        // reset to mode 1 (idle)
+} else if (*(u16*)(state + 0xC) < 0x3C) {
+    // 0xC is the "frame count" that 0x69 advanced;
+    // if it's < 60 (the typical full-data threshold),
+    // pick the matching stop parameter and bail early.
+    FUN_00833704(<stop_param>);
+    func_0x000136bc(state + 0x10);
+    if (*(u16*)(state + 0xC) < 0x32) return;
+}
+```
+
+The two pre-dispatch buckets handle:
+
+* **Modes `0x0D` (13) and `0x0E` (14)** — special-case
+  *stop* paths: stop HR using `DAT_0082c580` (the mode
+  parameter stored by `0x69`), cancel the 500 ms tick, and
+  set `state[7] = 1` (the "idle" sentinel).
+* **Modes with `state[0xC] < 60`** — partial-data paths:
+  the `0xC` field is the "frame count" that `0x69`
+  accumulated; if it's under 60, the handler picks the
+  matching stop parameter and *bails before re-entering
+  the per-mode start dispatch*.
+
+If neither bucket fires (mode is not `0x0D/0x0E` AND
+`state[0xC] >= 60`), the handler falls through to the
+full per-mode start dispatch.
+
+#### Per-mode start dispatch
+
+| Mode | Action | Sensor read |
+|---:|---|---|
+| `0x03` | `FUN_00833704(0x20)` | `FUN_00833a50()` |
+| `0x09` | `FUN_00833704(0x400)` | `FUN_0083485c()` |
+| `0x0B` | `FUN_00833704(0x1000)` | `FUN_0082acf6()` |
+| `0x0C` | `FUN_00833704(DAT_0082c57c)` (data-driven) | `FUN_00837ade()` + 3 more reads (see below) |
+| other | `FUN_00833704(1)` | `FUN_00837ade()` |
+
+The `FUN_00833704(<param>)` calls are the same HR-driver
+"stop with mode parameter" wrappers used in `0x69 'i'` and
+`0x1e realTimeHeartRate`. The `uVar4 = <sensor_read>()` is
+the **1-byte result** that ends up in `byte 2` of the
+response.
+
+#### Special case: mode `0x0C` (12)
+
+For mode `0x0C` the handler reads **5 sensor values** and
+packs them into the response frame:
+
+```c
+uVar4 = FUN_00837ade();           // 1st
+local_28 = CONCAT13(uVar4, <0>);  // byte 3 = uVar4
+uVar4 = FUN_008346e4();           // 2nd
+local_24 = CONCAT31(<hi3>, uVar4); // byte 0 of local_24 = uVar4
+uVar4 = FUN_00834556();           // 3rd
+local_24._0_2_ = CONCAT11(uVar4, <old_byte0>); // byte 0 = uVar4
+uVar4 = FUN_0082acf6();           // 4th
+local_20 = CONCAT31(<hi3>, uVar4); // byte 0 of local_20 = uVar4
+FUN_00834092(local_28._3_1_, &local_20 + 1, &local_20 + 2);
+                                   // copy byte 3 of local_28 into bytes 1..2 of local_20
+```
+
+The final `local_28` / `local_24` / `local_20` block holds
+the 5 sensor bytes scattered across the response bytes 2..4
+and bytes 0..1 of `local_20` (which becomes bytes 8..9 of
+the final response). The host must read these bytes in the
+right order to reconstruct the sensor trace.
+
+#### Response layout
+
+The handler writes the cmd and echo **last**:
+
+```c
+local_28 = (uint)CONCAT11(local_28._3_1_, uVar4) << 0x10;  // pack sensor data
+LAB_0082c256:
+local_28._0_2_ = CONCAT11(req[1], 0x6a);                    // overwrite bytes 0..1
+rsp[15] = FUN_0082b0c4(local_28, 0xf);                    // additive checksum
+FUN_0082ebdc(local_28);
+```
+
+So the final 16-byte response is:
+
+```
+byte  0: req[1]              (echo of mode)
+byte  1: 0x6a                (cmd — note: byte 0/1 reversed vs §3 convention)
+byte  2: uVar4 (sensor read) | bytes 2..4 packed sensor trace for 0x0C
+byte  3..14: 0 | packed sensor trace for 0x0C
+byte 15: additive checksum
+```
+
+The **byte 0 / byte 1 reversal** is deliberate: the
+handler builds bytes 0..1 *last* so the cmd is the last
+byte written, but the order in `CONCAT11(req[1], 0x6a)`
+puts `req[1]` at byte 0 and `0x6a` at byte 1. The host
+SDK that consumes `0x6a` must read the cmd from **byte 1**
+and the echo from **byte 0** — *not* the usual `byte 0 =
+cmd` convention used by §3 handlers. This same quirk
+appears in `0x69 'i'` (§8.5) and is the only place in the
+table where the response shape diverges from the §3
+"Common response path".
+
+#### Why the byte 0/1 reversal
+
+The §3 "Common response path" handlers all set `byte 0 =
+cmd` first via `local_18 = CONCAT11(0, cmd)` (low byte 0,
+high byte cmd). The `0x69 'i'` / `0x6a 'j'` pair instead
+set byte 0 = `req[1]` (echo) and byte 1 = cmd, because
+the dispatcher (§8.1) routes both opcodes through the
+**deferred ring** (`FUN_0082be64`) and the worker pops
+the stored frame with the cmd byte at position 1 (so the
+host's echo of `req[1]` is the *first* byte the worker
+sees). This is a vestige of the deferred-ring layout; the
+non-deferred `0x90` self-marker (§8.6) and `0x91` echo
+both follow the §3 convention.
+
 ---
 
 ## 9. Notable Data & Globals
