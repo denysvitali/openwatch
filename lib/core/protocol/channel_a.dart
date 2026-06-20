@@ -211,6 +211,12 @@ class ChannelADispatcher {
         _decodeMenstruation(pl);
       case OpA.restoreKey:
         _restoreKey.add(null);
+      case OpA.deviceReboot || 0x46:
+        // 0xc6 ack path (sub != 0x6C). The 0x6C reboot path tears
+        // down BLE before any response can be parsed — see
+        // GHIDRA_DECOMPILATION.md §3.14. ProtocolHub.notifyDeviceRebootAccepted()
+        // fires the event optimistically from the outbound send.
+        _restoreKey.add(null);
       case OpA.vibrationResponse || 0x47:
         _decodeVibration(pl);
       case 0xa1 || 0x21:
@@ -632,6 +638,15 @@ class ChannelADispatcher {
   void emitFactoryReset() {
     if (_factoryReset.isClosed) return;
     _factoryReset.add(null);
+  }
+
+  /// Optimistic outbound-side hook for the `0xc6` device-reboot path.
+  /// The `0x6C` sub-byte tears down BLE before any response can be
+  /// parsed, so the host fires this on outbound send complete (see
+  /// `GHIDRA_DECOMPILATION.md` §3.14).
+  void emitRestoreKey() {
+    if (_restoreKey.isClosed) return;
+    _restoreKey.add(null);
   }
 
   void dispose() {

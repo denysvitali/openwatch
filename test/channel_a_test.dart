@@ -302,6 +302,40 @@ void main() {
       },
     );
 
+    test('deviceReboot 0xc6 ack frame fires onRestoreKey', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      var fired = false;
+      final sub = d.onRestoreKey.listen((_) {
+        fired = true;
+      });
+      // Ack path: sub != 0x6C, so the watch queues a 1-byte ack.
+      final f = Codec.buildChannelA(OpA.deviceReboot, [0x01]);
+      t.inA.add(f);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(fired, isTrue);
+      await sub.cancel();
+    });
+
+    test(
+      'emitRestoreKey fires onRestoreKey (optimistic 0x6C reboot ack)',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        var fired = false;
+        final sub = d.onRestoreKey.listen((_) {
+          fired = true;
+        });
+        // Sub 0x6C tears down BLE — host fires the event optimistically.
+        d.emitRestoreKey();
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        expect(fired, isTrue);
+        await sub.cancel();
+      },
+    );
+
     test('phoneSport start/finish (sub 0x01) decodes to startFinish', () async {
       final t = _StubTransport();
       final d = ChannelADispatcher(t);

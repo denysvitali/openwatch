@@ -126,5 +126,17 @@ void main() {
       expect(f[0], OpA.restoreKey);
       expect(f[0], isNot(equals(OpA.factoryReset)));
     });
+
+    test('deviceReboot defaults to 0xc6 with sub 0x6C (full reboot)', () {
+      final f = Commands.deviceReboot();
+      expect(f[0], OpA.deviceReboot);
+      expect(f[1], 0x6c);
+    });
+
+    test('deviceReboot honours caller-supplied sub', () {
+      final f = Commands.deviceReboot(sub: 0x02);
+      expect(f[0], OpA.deviceReboot);
+      expect(f[1], 0x02);
+    });
   });
 }

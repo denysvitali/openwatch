@@ -117,6 +117,15 @@ class ProtocolHub {
     _dispatcher.emitFactoryReset();
   }
 
+  /// Optimistically fires `onRestoreKey` on the dispatcher. The
+  /// `0xc6` device-reboot handler (inline in `FUN_0082d2dc` —
+  /// `GHIDRA_DECOMPILATION.md` §3.14) tears down BLE on the `0x6C`
+  /// sub-byte before any response frame can be parsed. The host
+  /// treats the loss of the link as the success indicator.
+  void notifyDeviceRebootAccepted() {
+    _dispatcher.emitRestoreKey();
+  }
+
   /// Allocates a default ANCS client so a notification arriving before
   /// [enableAncs] still gets attributed somewhere. Mirrors the firmware's
   /// behaviour of always having at least one registered client.

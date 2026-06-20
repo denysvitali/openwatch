@@ -57,6 +57,15 @@ class Commands {
   static Uint8List restoreKey() =>
       Codec.buildChannelA(OpA.restoreKey, const [0x66]);
 
+  /// `DeviceRebootReq` (`0xc6`): inline-dispatched reboot trigger. The
+  /// sub-byte at pl[1] selects the reboot flavour; the firmware RE
+  /// defines `0x6C` as the "full reboot, no in-RAM state survives" path
+  /// (see `GHIDRA_DECOMPILATION.md` §3.14, `FUN_0082d2dc`). The BLE
+  /// stack is torn down before any response frame can be parsed, so
+  /// the host treats the loss of the link as the success indicator.
+  static Uint8List deviceReboot({int sub = 0x6c}) =>
+      Codec.buildChannelA(OpA.deviceReboot, [sub & 0xFF]);
+
   /// `BrightnessSettingsReq` (0x1b) write: `[0x02, level]`.
   static Uint8List setBrightness(int level) =>
       Codec.buildChannelA(OpA.brightness, [OpA.mixWrite, level & 0xFF]);

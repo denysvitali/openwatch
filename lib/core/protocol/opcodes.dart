@@ -27,6 +27,10 @@ class OpA {
   static const int camera = 0x02;
   static const int restoreKey =
       0x66; // RestoreKeyReq uses caller opcode; reset magic
+  static const int deviceReboot =
+      0xc6; // Device-reboot trigger (v14-only inline opcode — see
+  // GHIDRA_DECOMPILATION.md §3.14). Payload byte 0x6C = full reboot
+  // (BLE tears down, no response); other subs receive a 1-byte ack.
   static const int factoryReset =
       0xff; // Factory-reset trigger — payload `"fff"` (0x66 0x66 0x66);
   // see GHIDRA_DECOMPILATION.md §3.8 (FUN_0082cde8). The handler sends
