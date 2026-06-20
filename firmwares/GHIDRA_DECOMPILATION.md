@@ -263,7 +263,7 @@ Processes a circular queue of incoming 16-byte frames (`DAT_0082d440 + 0x14` rin
 | `0xa1` | — | `0x00827f5c` | Factory/test mode commands (`0x01`–`0x06`): reset, read logs, power off, etc. |
 | `0xc6` | `restoreKey` | special | Reboot sequence: clears state, resets BLE, restarts main task. |
 | `0xc7` | — | `0x00832ebc` | Vibration/motor pattern player — see §3.2. |
-| `0xff` | — | `0x0082cde8` | Factory reset: if payload is `"fff"`, wipes `0xa4` bytes of config. |
+| `0xff` | — | `0x0082cde8` | Factory reset — see §3.8. |
 
 ### Common response path
 
@@ -793,6 +793,70 @@ back unchanged** (the host treats it as a 16-byte ack). This is
 deliberate: the request is a self-describing ack payload, so the
 host can confirm exactly which `(enable, start, end)` triple the
 watch committed.
+
+### 3.8 Opcode `0xff` factory reset (`FUN_0082cde8`)
+
+The smallest handler in the Channel-A table: 35 bytes, no response
+frame, and a literal "magic word" payload guard.
+
+#### Trigger
+
+The handler accepts the request only when the first three payload
+bytes are the ASCII string `"fff"` (`0x66 0x66 0x66`):
+
+```c
+if (req[1] == 'f' && req[2] == 'f' && req[3] == 'f') {
+    FUN_008275d8();                        // full system reset
+    memset(DAT_0082cff0, 0, 0xa4);          // wipe 164 B user config
+}
+```
+
+Any other payload is a no-op (no response queued, no state change).
+The choice of the literal `"fff"` is unusual — it does not match
+any normal Oudmon opcodes (0x66 would be in the `0x62..0x67`
+"subData[0] sub-opcode set" bucket from `FIRMWARES/_re/FINDINGS.md`)
+— so the host can only invoke a factory reset by explicitly
+crafting the magic frame, never by accident.
+
+#### Reset sequence
+
+1. `FUN_008275d8()` — the "system reset / re-initialize" routine
+   listed in §6: it stops sensors and the motor, tears down and
+   re-initialises the BLE stack (`FUN_00827404`, `FUN_0082dfde`),
+   zeroes the per-task state, sets `*DAT_00827804 = 5` (a
+   re-init "state" sentinel), and arms a 1000 ms one-shot timer
+   via `FUN_0082f160(1000)` so the main task restarts cleanly.
+2. `memset(DAT_0082cff0, 0, 0xa4)` — wipe the 164-byte user-config
+   block at runtime address `0x00208c8c` (literal-pool value
+   `0x8c8c2000`).
+
+#### What gets wiped (and what doesn't)
+
+The 164-byte block at `0x00208c8c` is the user-visible config
+record (DND, alarm, sedentary, blood-oxygen, UV-touch, etc.).
+The factory reset *only* touches this block — it does **not**
+clear:
+
+* the BLE pairing table,
+* the OTA state machine (`DAT_00830120` / `DAT_00830124`),
+* the 0x2b mixture container at `0x00208c76`,
+* the RTC time (set by `0x01`),
+* the watch-face label at `DAT_0082cfec` (see §3.5).
+
+In other words `0xff "fff"` returns the watch to factory defaults
+for the *user-tunable* surface but leaves any committed pairings
+and the user's clock alone. This matches the typical "soft
+factory reset" semantics expected from a paired wearable.
+
+#### Why no response
+
+The handler is fire-and-forget: the system reset re-initialises the
+main task on the 1000 ms timer, so by the time the host would have
+parsed a response, the link layer may already be tearing down.
+A response frame queued just before the reset would be lost in the
+`FUN_0082ebdc` ring during the BLE re-init. The 16-byte request
+frame serves as the implicit ack — the host treats the absence of
+a follow-up as "reset accepted".
 
 ### Opcode `0xa1` factory/test mode (`FUN_00827f5c`)
 
