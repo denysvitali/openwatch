@@ -262,7 +262,7 @@ Processes a circular queue of incoming 16-byte frames (`DAT_0082d440 + 0x14` rin
 | `0x81` | — | `0x0082cdac` | Stores 6-byte config chunk and calls `FUN_00840568` (flash/config write). |
 | `0xa1` | — | `0x00827f5c` | Factory/test mode commands (`0x01`–`0x06`): reset, read logs, power off, etc. |
 | `0xc6` | `restoreKey` | special | Reboot sequence: clears state, resets BLE, restarts main task. |
-| `0xc7` | — | `0x00832ebc` | Vibration/motor pattern player (`#`/`D` branches). |
+| `0xc7` | — | `0x00832ebc` | Vibration/motor pattern player — see §3.2. |
 | `0xff` | — | `0x0082cde8` | Factory reset: if payload is `"fff"`, wipes `0xa4` bytes of config. |
 
 ### Common response path
@@ -292,6 +292,76 @@ Most handlers build a 16-byte response buffer, compute an additive checksum with
 | `0x05` | `FUN_0082ce96` | GPS/position delta: reads two 3-byte little-endian values from `subData[2..6]` and `subData[6..10]`, updates cumulative distance/step counters |
 
 The helper functions `FUN_00830c7e`, `FUN_00830cb2`, `FUN_00830cd4` live in the step-counter / sport-motion library (`vc_SportMotion_Int`).
+
+### 3.2 Opcode `0xc7` vibration / motor pattern player (`FUN_00832ebc`)
+
+A two-mode motor controller dispatched by the value of `*DAT_00833188`
+(default `'D'` = `0x44`; alternative `'#'` = `0x23`). The handler
+re-uses the same 12-byte payload that follows the first three bytes of
+the 16-byte request, passed through the caller's saved register slots
+(`push {r2,r3,r4,lr}`).
+
+#### Request layout
+
+| Byte | Field | Notes |
+|---:|---|---|
+| 0 | `presence` | `0` → stop; non-zero → play |
+| 1 | `pattern_id` | low 7 bits; ORed with `0x80` to mark "play" on the play path |
+| 2 | `duration` | clamped to 6 |
+| 3..14 | `pattern` | 12 bytes of pattern data (motor strength, rhythm, etc.) |
+| 15 | checksum | additive (per §3) |
+
+#### Behavior
+
+* If `presence == 0` (stop path):
+  * mode `'#'` → `FUN_00831fde(pattern_id, duration)` — stop pulse-pattern
+  * mode `'D'` → `FUN_00832044(pattern_id, duration)` — stop duration-pattern
+  * No response frame is sent.
+* If `presence != 0` (play path, `length = min(duration, 6)`):
+  * mode `'#'` → `FUN_00831faa(pattern_id | 0x80, &pattern, length)` — play pulse-pattern
+  * mode `'D'` → `FUN_00832010(pattern_id | 0x80, &pattern, length)` — play duration-pattern
+  * In both cases, the response is a **fragmented** `0xC7` frame sent
+    via `FUN_0082b938(0xC7, &pattern, length)`. The fragmentation
+    helper packs at most 14 payload bytes per 16-byte notify frame
+    with additive checksum.
+
+#### `FUN_0082b938` (fragmented response)
+
+```c
+void FUN_0082b938(byte cmd, int payload, uint length) {
+  do {
+    chunk = min(length, 0xe);     // 14 payload bytes per frame
+    frame[0] = cmd;
+    memcpy(&frame[1], payload, chunk);
+    frame[15] = FUN_0082b0c4(frame, 0xf);   // additive checksum
+    FUN_0082ebdc(frame);
+    payload += chunk;
+    length  -= chunk;
+  } while (length != 0);
+}
+```
+
+The fragmenter is shared with `0x18 displayClock`, `0xc1 0xFEE7 long`
+and any handler that needs to send a >14-byte response (e.g. the
+`0x40..0x42` file-list responses and the `0x27/0x3e` sleep records).
+
+#### `FUN_00831faa` (mode `#` play, returns success bool)
+
+```c
+uint FUN_00831faa(id, payload, length) {
+  if (func_0x000133f4(*DAT_0083230c, 100) == 0) return 0;  // mutex acquire
+  ok = (FUN_008336e8(0x1f, id, payload, length) == 0);     // 0x1F = "play pattern" motor cmd
+  func_0x0001341c(*DAT_0083230c);                          // mutex release
+  return ok;
+}
+```
+
+The `0x1F` value pushed to `FUN_008336e8` is the motor-driver
+sub-command for "play pattern"; `0x20` is its "stop" counterpart used
+by the no-presence path. The `*DAT_0083230c` mutex pointer is the same
+serialising lock used by all motor-handler routines (`FUN_00831fde`,
+`FUN_00832010`, `FUN_00832044`), so two patterns cannot be active at
+once.
 
 ### Opcode `0xa1` factory/test mode (`FUN_00827f5c`)
 
