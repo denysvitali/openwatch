@@ -12,6 +12,11 @@ The container header is `0x450` bytes. Unless stated otherwise, offsets below
 are offsets into the extracted `body.bin`. Add `0x450` to get the corresponding
 container-file offset.
 
+> **See also [`R2_ANALYSIS.md`](./R2_ANALYSIS.md)** — a verified, instruction-level
+> radare2 deep-dive that extends and *corrects* several claims in this file (notably:
+> no embedded JPEG, a 4th `0xfee7` GATT service, flash load base `0x00826400`,
+> Realtek RTL8762x "Bee" stack, and the `build_time`/opcode-bucket reinterpretations).
+
 Analysis used radare2 6.1.4 in raw Thumb mode:
 
 ```sh
