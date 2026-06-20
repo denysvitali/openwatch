@@ -240,7 +240,7 @@ Processes a circular queue of incoming 16-byte frames (`DAT_0082d440 + 0x14` rin
 | Opcode | Dart name (from `lib/core/protocol/opcodes.dart`) | Handler address | Handler summary |
 |---|---|---|---|
 | `0x01` | `setTime` | `0x0082bb4e` | Converts BCD date/time fields, updates RTC, sends `0x2f` packet-length notify, then a 14-byte `0x01` ack — see §3.4. |
-| `0x06` | `dnd` | `0x0082d298` | Sub-opcode `0x01` reads DND state, `0x02` sets it. Builds response and sends via `FUN_0082ebdc`. |
+| `0x06` | `dnd` | `0x0082d298` | Sub-opcode `0x01` reads DND state, `0x02` sets it — see §3.7. |
 | `0x08` | *(special)* | `0x00827516`, `0x008275b6`, `0x00827ba6`, `0x008280fe` | Camera/find-device/long-press branch: checks sub-byte and routes to motor/vibrate/screen routines. |
 | `0x0e` | `bpReadConform` | `0x0082cb28` | If sub-byte `0` → `FUN_00834410()` + `FUN_0082c0a4()`. |
 | `0x15` | `readHeartRate` | `0x0082cf48` | Reads heart-rate record by index; returns `0x15` multi-frame data or `0xff15` error. |
@@ -718,6 +718,81 @@ the header (count + flags) and then `count` consecutive `0x43`
 record frames. A trailing "no more data" sentinel is the *header's
 `byte 1 == 0xF0`* — the record frames themselves do not carry an
 EOM marker.
+
+### 3.7 Opcode `0x06` Do-Not-Disturb (`FUN_0082d298`)
+
+Reads and writes the per-device DND state (one enabled flag plus a
+start/end window). The handler is the smallest of the "config
+get/set" pair in the Channel-A table: a 6-byte DND record, stored
+in a private block anchored at `DAT_0082a830 + 0x0E`.
+
+#### Persistent state (6 bytes at `DAT_0082a830 + 0x0E`)
+
+| Off | Field | Notes |
+|---:|---|---|
+| 0 | `enable` | `0` = off, `1` = on |
+| 1..2 | `start_min` (u16 LE) | minute-of-day for the DND window start |
+| 3..4 | `end_min` (u16 LE) | minute-of-day for the DND window end |
+| 5 | `pad` | reserved; not compared on write |
+
+#### Sub-opcode dispatch (`FUN_0082d298`)
+
+`req[1]` selects read vs write:
+
+| Sub | Action | Helper used |
+|---:|---|---|
+| `0x01` (read) | Build a 16-byte response, populate bytes 2..6 with the state (1=enabled/2=disabled, then start hour/min, end hour/min), stamp additive checksum, queue via `FUN_0082ebdc`. | `FUN_0082a7e4` |
+| `0x02` (write) | Build the new 6-byte state from `req[2..6]`, `memcmp` against the existing 6-byte block, `memcpy` only if changed; queue `req` as the ack response. Calls `FUN_0082a6cc` (UI re-render) and `FUN_0082d4ce(9)` (event broadcast — `9` is the "DND changed" event id). | `FUN_0082a78e` |
+| other | no-op (no response queued) | — |
+
+#### Read-path details (`FUN_0082a7e4`)
+
+The read helper normalises the "disabled" flag to a non-boolean code:
+
+* `enable == 0` → emit `0x02` in byte 2 (firmware uses `1 = on`, `2 = off` to leave room for future "always-on" `0` value).
+* `enable == 1` → emit `0x01`.
+* `start_min` and `end_min` are split into hour/minute using
+  `FUN_0083dfba(_, 0x3c)` (returns hour in the low byte, minute in the
+  high byte via the `extraout_r1` return slot).
+
+#### Write-path details (`FUN_0082a78e`)
+
+The write helper packs the request into the 6-byte `local_10` block:
+
+```c
+local_10 = (u16)(req[3] * 60 + req[4]) |   // start_min  (high u16)
+           ((u16)(req[2] == 1) << 0);      // enable     (low u16)
+local_c  = (u16)(req[5] * 60 + req[6]);    // end_min    (low u16)
+```
+
+It then `memcmp`s the 6 bytes against `DAT_0082a830 + 0x0E` and only
+`memcpy`s the new value if anything changed. The two follow-up calls
+`FUN_0082a6cc()` and `FUN_0082d4ce(9)` then (a) repaint any DND
+indicator on the active face and (b) emit the "DND changed" event
+into the watch's internal event ring, where the `0x77` sport-motion
+handlers (see §3) pick it up to suppress buzz notifications.
+
+#### Response shapes
+
+For `0x06 0x01` (read):
+
+```
+byte  0: 0x06
+byte  1: 0x01   (sub-opcode echo)
+byte  2: 0x01 (on) | 0x02 (off)
+byte  3: start hour    (BCD-less raw u8)
+byte  4: start minute
+byte  5: end hour
+byte  6: end minute
+byte  7..14: 0
+byte 15: additive checksum
+```
+
+For `0x06 0x02` (write), the response is the **request frame echoed
+back unchanged** (the host treats it as a 16-byte ack). This is
+deliberate: the request is a self-describing ack payload, so the
+host can confirm exactly which `(enable, start, end)` triple the
+watch committed.
 
 ### Opcode `0xa1` factory/test mode (`FUN_00827f5c`)
 
