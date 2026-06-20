@@ -243,7 +243,7 @@ Processes a circular queue of incoming 16-byte frames (`DAT_0082d440 + 0x14` rin
 | `0x06` | `dnd` | `0x0082d298` | Sub-opcode `0x01` reads DND state, `0x02` sets it — see §3.7. |
 | `0x08` | *(special)* | `0x00827516`, `0x008275b6`, `0x00827ba6`, `0x008280fe` | Camera/find-device/long-press branch: checks sub-byte and routes to motor/vibrate/screen routines. |
 | `0x0e` | `bpReadConform` | `0x0082cb28` | If sub-byte `0` → `FUN_00834410()` + `FUN_0082c0a4()`. |
-| `0x15` | `readHeartRate` | `0x0082cf48` | Reads heart-rate record by index; returns `0x15` multi-frame data or `0xff15` error. |
+| `0x15` | `readHeartRate` | `0x0082cf48` | Reads heart-rate record by index; returns `0x15` multi-frame data or `0xff15` error — see §3.12. |
 | `0x18` | `displayClock` | `0x0082ccb6` | Sets watch-face / clock display — see §3.5. |
 | `0x1e` | `realTimeHeartRate` | `0x0082d20c` | Sub `0x01` starts 60s HR measurement, `0x02` stops, `0x03` resets timer. |
 | `0x25` | `setSitLong` | `0x0082d284` | Writes sedentary config — see §3.9. |
@@ -1131,6 +1131,123 @@ The slot data layout is currently unknown because
 0 of the data will identify the slot id (echo of `req[2]`)
 and bytes 1..48 will hold the per-slot prayer record
 (prayer name, time, offset, etc.).
+
+### 3.12 Opcode `0x15` readHeartRate (`FUN_0082cf48`)
+
+Heart-rate record read by *index* (not by timestamp). The handler
+takes a 4-byte index from the request, converts it to a record
+timestamp, and ships the matching 292-byte HR record back as a
+two-phase response (header + fragmented payload) using the same
+13-byte-chunk streamer shape as `0x7a` (§3.11), `0x37` and `0x39`.
+
+#### Request layout
+
+| Byte | Field | Notes |
+|---:|---|---|
+| 0 | `0x15` | cmd (consumed by dispatcher) |
+| 1..4 | `index` (u32 LE) | record index; `0` = "current/latest" sentinel |
+| 5..14 | unused | — |
+
+#### Index → timestamp conversion
+
+```c
+uint32_t local_13c = req[1] | (req[2] << 8) | (req[3] << 16) | (req[4] << 24);
+uint32_t timestamp;
+if (local_13c == 0) {
+    timestamp = 0;
+} else {
+    FUN_008279c4(local_13c, &timestamp);   // month-index → seconds
+}
+int found = FUN_00833c92(timestamp, data);
+```
+
+The conversion helper `FUN_008279c4` is the same month-index → epoch
+helper used by `FUN_00828390` (see §3.4 setTime). The 4-byte index
+therefore acts as a *date* packed in the same way the `0x01` setTime
+BCD date struct is decoded — typically `year_lo | (month << 8) | (day << 16) | (slot << 24)`, where `slot` picks the n-th HR record
+stored for that day.
+
+#### Phase 1 — header / error
+
+* If `FUN_00833c92` returns 0 (no record at that timestamp): send
+  a single 16-byte error frame
+
+  ```
+  byte  0: 0x15
+  byte  1: 0xFF              (error flag)
+  byte  2: 0x14              (status code 20)
+  byte  3..14: 0
+  byte 15: additive checksum
+  ```
+
+  The static dword `0x140000FF15` (little-endian) is the
+  watch's universal "no data at this index" ack.
+
+* If `FUN_00833c92` returns 1 (record exists): send a 16-byte
+  **header** frame first
+
+  ```
+  byte  0: 0x15
+  byte  1: 0x18              (24 — payload size lower byte)
+  byte  2: 0x80
+  byte  3: 0x05
+  byte  4..14: 0
+  byte 15: additive checksum
+  ```
+
+  The header is the literal dword `0x5180015` (LE) — same
+  "feature-bitmap-shape" reuse as the `0x7a`/`0x37`/`0x39` headers
+  (see §3.11). It tells the host "data follows, this many bytes
+  total".
+
+#### Phase 2 — fragmented payload (23 frames)
+
+The 292-byte record (73 × u32) is then fragmented into
+`ceil(292 / 13) = 23` 16-byte notify frames using the same
+inlined chunk loop as `FUN_0082c988`:
+
+```c
+char seq = 1;
+for (i = 0; i < 292; i += 13) {
+    frame[0] = 0x15;
+    frame[1] = seq++;
+    chunk = min(292 - i, 13);
+    memcpy(&frame[2], data + i, chunk);
+    frame[15] = FUN_0082b0c4(&frame, 0xf);
+    FUN_0082ebdc(&frame);
+}
+```
+
+The first u32 of the response data (`data[0]`) is **overwritten
+with the request index** before fragmentation (`local_138[0] =
+local_13c`), so the host sees its own `index` echoed back as the
+4-byte prefix of the payload. The remaining 72 u32s
+(`data[1..72]`) are the raw HR record: typically 24 hours × 3
+fields (HR value, RR-interval, motion flag) packed into u32s,
+but the producer side is owned by `FUN_00833c92` and not detailed
+in the firmware body.
+
+#### Frame layout per chunk
+
+```
+byte  0: 0x15              (cmd echo)
+byte  1: N                (sequence: 1..23)
+byte  2..14: 13 bytes of record data
+byte 15: additive checksum
+```
+
+The last frame is padded with zeros (the data buffer is 292 B but
+the last chunk only carries 292 - 22*13 = 6 real bytes followed by
+7 zero padding bytes).
+
+#### Host decode recipe
+
+1. Read the header frame; expect byte 0 = `0x15` and byte 1 = `0x18`.
+2. Collect follow-up frames with byte 0 = `0x15` and sequence
+   numbers `1, 2, …`. Concatenate bytes 2..14 of each frame in
+   order until 292 B are accumulated.
+3. The first 4 B of the concatenated buffer is the request index
+   (echo); bytes 4..291 are the HR record.
 
 ### Opcode `0xa1` factory/test mode (`FUN_00827f5c`)
 
