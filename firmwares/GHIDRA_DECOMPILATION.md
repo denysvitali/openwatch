@@ -2570,7 +2570,7 @@ polling the link does not bump the timer.
 | `0xc5` | If `param_1[1] == 1` → `DAT_0082caec[3] = 1`; else `DAT_0082caec[3] = 0` | inline |
 | `0xc8` | Same as `0xc5` but writes `DAT_0082caec[4]` | inline |
 | `0xc9` | `DAT_0082caec[5] = param_1[1]` | inline |
-| `0xcd` | (handler — alarm-like 16-bit setter) | `FUN_0082be12` |
+| `0xcd` | Byte-reverse echo of req[3..6] (link sanity test) | `FUN_0082be12` | see §8.9 |
 | `0xce` | Factory/test sub-commands (`0x01`, `0x02`, `' '`, `'!'`, `'"'`) | `FUN_0082bcde` |
 | `0xfe` | `FUN_00844214(*(u16*)(param_1 + 1))` — vibration pattern from a duration arg | inline |
 | other | Vendor NAK: `FUN_0082bcba(opcode)` | `FUN_0082bcba` |
@@ -2700,7 +2700,7 @@ Immediate / explicitly routed opcodes:
 | `0xc5` | — | Sets `DAT_0082caec[3]` from `param[1]` |
 | `0xc8` | — | Sets `DAT_0082caec[4]` from `param[1]` |
 | `0xc9` | — | Sets `DAT_0082caec[5] = param[1]` |
-| `0xcd` | `FUN_0082be12` | Stores a 16-bit value / alarm-like setting |
+| `0xcd` | `FUN_0082be12` | Byte-reverse echo of req[3..6] (link sanity test) — see §8.9 |
 | `0xce` | `FUN_0082bcde` | Factory/test sub-commands (`0x01`, `0x02`, `' '`, `'!'`, `'"'`) |
 | `0xfe` | `FUN_00844214` | Builds a vibration pattern from a duration argument |
 
@@ -3446,7 +3446,115 @@ flags, and vice-versa.
 | `DAT_0082f894` | Sleep data context pointer |
 | `DAT_0082f8a4` | Device info context pointer |
 
+### 8.9 0xcd byte-reverse echo / link-sanity test (`FUN_0082be12`)
+
+A vendor-service **byte-order sanity check**. When the host
+sends `0xcd 0x01 LEN B3 B4 B5 B6`, the watch responds with
+`0xcd B6 B5 B4 B3 0 0 ... LEN bytes total`. The handler
+**reverses the byte order of `req[3..6]`** in the response,
+so a host can verify its byte-order interpretation matches
+the firmware's by sending a known 4-byte value and checking
+the response.
+
+#### Behavior
+
+```c
+void FUN_0082be12(int param_1) {
+    rsp[0] = 0xcd;
+    if (req[1] == 1) {
+        uint8_t len = min(req[2], 0x0E);    // clamp to 14
+        uint32_t packed =
+              (req[3] << 24) |
+              (req[4] << 16) |
+              (req[5] <<  8) |
+              (req[6]      );   // req[3..6] in big-endian order
+        memcpy(rsp + 1, &packed, len);    // memcpy the low `len` bytes
+    }
+    rsp[15] = FUN_0082b0c4(rsp, 0xf);
+    FUN_0082ebdc(rsp);
+}
+```
+
+The disassembly uses the explicit `rev16` ARM instruction
+to byte-swap `(req[3] << 8) | req[4]` back to
+`(req[4] << 8) | req[3]` after a misleading initial
+`((req[4] << 8) | req[3])` build — the net effect is
+**big-endian pack** of `req[3..6]` into a 32-bit register,
+which the subsequent `memcpy` reads in little-endian order
+to produce the **byte-reverse echo**.
+
+#### Request layout
+
+| Byte | Field | Notes |
+|---:|---|---|
+| 0 | `0xcd` | cmd (consumed by dispatcher) |
+| 1 | `sub` | must be `0x01` — other values skip the echo and return an all-zeros response |
+| 2 | `len` | echo length; clamped to 14 (4-byte packed source only carries 4 bytes — values > 4 read uninitialised stack) |
+| 3..6 | `payload` | 4-byte payload; echoed in reverse byte order in the response |
+
+#### Response layout
+
+```
+byte  0: 0xCD                (cmd)
+byte  1: req[6]              (echo of byte 6 of payload)
+byte  2: req[5]              (echo of byte 5 of payload)
+byte  3: req[4]              (echo of byte 4 of payload)
+byte  4: req[3]              (echo of byte 3 of payload)
+byte  5..14: 0 / uninit     (clamp `req[2]` to 4 to be safe)
+byte 15: additive checksum
+```
+
+The host should send `req[2] == 4` to avoid reading
+uninitialised stack bytes into bytes 5..14.
+
+#### `sub != 0x01` behavior
+
+When `req[1] != 1`, the handler skips the echo entirely
+and sends an **all-zeros** response `[0xCD, 0, ..., 0, cksum]`.
+This is a cheap way for the host to confirm the watch is
+alive without committing a known payload to the echo path.
+
+#### Why a byte-reverse echo
+
+This is the **classic ARM-Thumb byte-order probe**. ARM
+instructions are little-endian-native, but Bluetooth L2CAP
+channels can carry data in either byte order depending on
+the host's stack. The `rev16` instruction + the
+big-endian pack give the host a way to verify the wire
+byte order without depending on its own internal byte
+order — if the watch returns `B6 B5 B4 B3`, the host knows
+its wire-side byte order matches the firmware's.
+
+A typical host-side check:
+
+```dart
+final probe = Uint8List.fromList([0xCD, 0x01, 0x04, 0xAA, 0xBB, 0xCC, 0xDD]);
+await transport.send(probe);
+final reply = await transport.receive();
+assert(reply[1] == 0xDD);
+assert(reply[2] == 0xCC);
+assert(reply[3] == 0xBB);
+assert(reply[4] == 0xAA);  // byte-reversed
+```
+
+If any of these asserts fail, the host should fall back to
+swapping its outgoing payload before retrying.
+
+#### Why `rev16` and not `bswap`
+
+`rev16` reverses byte order within a 16-bit halfword; the
+`lsl #16` that follows widens it to a 32-bit value with
+the original bytes in the *high* halfword. This avoids the
+need for a full 32-bit `rev` instruction and lets the
+subsequent ORs add bytes 5 and 6 in the *low* halfword
+without disturbing the high half. The end result is the
+same as `rev` + `lsl #0` would give, but `rev16` is a
+16-bit Thumb instruction and uses one fewer cycle than
+the 32-bit `rev`.
+
 ---
+
+## 10. Open Questions / Next Steps
 
 ## 10. Open Questions / Next Steps
 
