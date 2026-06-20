@@ -241,7 +241,7 @@ Processes a circular queue of incoming 16-byte frames (`DAT_0082d440 + 0x14` rin
 |---|---|---|---|
 | `0x01` | `setTime` | `0x0082bb4e` | Converts BCD date/time fields, updates RTC, sends `0x2f` packet-length notify, then a 14-byte `0x01` ack — see §3.4. |
 | `0x06` | `dnd` | `0x0082d298` | Sub-opcode `0x01` reads DND state, `0x02` sets it — see §3.7. |
-| `0x08` | *(special)* | `0x00827516`, `0x008275b6`, `0x00827ba6`, `0x008280fe` | Camera/find-device/long-press branch: checks sub-byte and routes to motor/vibrate/screen routines. |
+| `0x08` | *(special)* | `0x00827516`, `0x008275b6`, `0x00827ba6`, `0x008280fe` | Camera/find-device/long-press branch — see §3.15. |
 | `0x0e` | `bpReadConform` | `0x0082cb28` | If sub-byte `0` → `FUN_00834410()` + `FUN_0082c0a4()`. |
 | `0x15` | `readHeartRate` | `0x0082cf48` | Reads heart-rate record by index; returns `0x15` multi-frame data or `0xff15` error — see §3.12. |
 | `0x18` | `displayClock` | `0x0082ccb6` | Sets watch-face / clock display — see §3.5. |
@@ -1423,6 +1423,152 @@ pool slot `DAT_0082b0b8` (value `0x00208c7c`). Functions that touch the
 record refer to it via negative or positive byte offsets relative to that
 pointer; in the layout below **byte 0** of the record lives at
 `DAT_0082b0b8 - 6` (= `0x00208c76`).
+
+### 3.15 Opcode `0x08` findDevice / long-press branch (inline in `FUN_0082d2dc`)
+
+Like `0xc6` (see §3.14), the `0x08` opcode is *special-cased inline*
+in the main dispatcher `FUN_0082d2dc` rather than routed to a
+dedicated handler. It owns three distinct user-visible features
+on the H59MA: **find-device** (vibrate the watch to help the user
+locate it from the host), the **camera-shutter remote** path (a
+side-effect of the find-device sequence), and the **long-press**
+key sequence that powers off the watch.
+
+#### Sub-cmd dispatch
+
+```c
+if (opcode == 0x08) {
+    cVar2 = req[1];
+    if (cVar2 == 0)      FUN_008275b6();        // cancel find
+    else if (cVar2 == 1) FUN_00827516();        // start find
+    else if (cVar2 == 0xAB && req[2] == 0xDC) { // long-press magic
+        FUN_00827ba6(3);
+    } else {
+        if (FUN_008280fe() == 2) goto end;      // screen state guard
+        FUN_00827ba6(2);                         // set motor mode 2
+    }
+}
+```
+
+So `req[1]` selects the action and `req[2]` carries an extra
+"modifier" that only matters for the long-press case. Any sub-cmd
+other than `0x00`, `0x01`, or `0xAB` falls into the
+"set motor mode" branch, which is itself a no-op when
+`FUN_008280fe() == 2` (the screen-state byte at
+`DAT_0082810c - 0x3c` indicates the user is already in the
+target mode).
+
+#### `0x08 0x00` — cancel find / power-off (`FUN_008275b6`)
+
+```c
+void FUN_008275b6() {
+    FUN_00827404();   // reset BLE
+    FUN_0082dfde();   // re-initialise BLE
+    FUN_0082fd9c();   // reset some state
+    FUN_008274fa(2);  // motor: stop pattern
+    FUN_0082954a();   // reset UI
+    FUN_0082f160(2000);  // 2-second timer
+}
+```
+
+Cancels the find-device pattern, tears down and re-initialises the
+BLE stack, and arms a 2-second one-shot timer. The same body is
+also invoked by the long-press power-off path (`0x72` pushMsgUint
+helper `FUN_0082e42c` from §3.5), making `0x08 0x00` the canonical
+"stop everything and wait 2 s" entry point.
+
+#### `0x08 0x01` — start find (`FUN_00827516`)
+
+The most complex of the four branches. Drives the watch into
+find-device mode: vibrate + beep, then poll for a button press
+within 1 s.
+
+```c
+void FUN_00827516() {
+    if (FUN_00828af4() != 0) return;   // bail if HR step counter running
+    FUN_0082a460(1000);                // 1 s UI delay
+    *DAT_00827804 = 1;                 // state sentinel
+    FUN_00827432();                    // reset BLE TX
+    FUN_00827404();                    // reset BLE
+    func_0x00013146(100);              // 100 ms delay
+    FUN_0082994c(0xd2, 2, 3);          // alert (3 args — vendor profile)
+    FUN_0082954a();                    // reset UI
+    FUN_008274fa(1);                   // motor: pattern #1
+    uint32_t start = FUN_00827994();   // read RTC start
+    while (FUN_00829a4e() != 0) {      // while motor still running
+        if (FUN_00827994() - start > 1000) break;  // up to 1 s
+        func_0x00013146(100);
+    }
+    thunk_FUN_00837b42();              // stop motor
+    FUN_0082928c();                    // reset UI
+}
+```
+
+Key observations:
+
+* The `FUN_00828af4() != 0` early-out is the **HR step counter
+  guard**: if the user is currently recording a sport session,
+  the find-device sequence is silently dropped so the vibration
+  doesn't disturb the step-count reading.
+* The 1 s ceiling is enforced by polling the RTC (`FUN_00827994`)
+  every 100 ms (`func_0x00013146(100)`); the loop breaks on
+  either the motor naturally finishing (`FUN_00829a4e() == 0`)
+  or the 1 s timeout.
+* The `FUN_0082994c(0xd2, 2, 3)` is the *vendor* alert pattern
+  (`0xd2 = 210`), distinct from the `0x12` and `0x1F` patterns
+  used by `0x50 'P'` (§8) and `0xc7` (§3.2).
+* The end-of-pattern cleanup always runs even if the timeout
+  fired (`thunk_FUN_00837b42` + `FUN_0082928c`), so the motor
+  cannot be left running after find-device returns.
+
+#### `0x08 0xAB 0xDC` — long-press magic
+
+A 2-byte magic gate (`0xAB 0xDC` at `req[1..2]`) that selects the
+*power-off / shutdown* variant. The handler only sets the
+vibration/motor mode register to `3`:
+
+```c
+void FUN_00827ba6(int mode) {
+    if (*(int *)(DAT_00827e8c + 4) != mode) {
+        *(int *)(DAT_00827e8c + 4) = mode;
+        FUN_008294cc();        // commit config
+    }
+}
+```
+
+`DAT_00827e8c + 4` is the `vibration_mode` byte that the
+`FUN_008275b6` cancel-find sequence then *consumes* on the next
+0x08 0x00. Mode `3` is the "power-off" preset; the actual
+shutdown (BLE teardown, sensor stop) is the same `FUN_00827404` +
+`FUN_0082dfde` + 2 s timer sequence already documented above.
+
+#### Default branch — motor mode 2
+
+For any other sub-cmd (e.g. the host sends `0x08 0x02`, `0x08 0x03`,
+etc.) the dispatcher sets the motor mode to `2` ("normal alert"
+preset) provided the screen state isn't already in that mode.
+The guard `FUN_008280fe() == 2` reads the byte at
+`DAT_0082810c - 0x3c` — when that byte is `2` the call is
+skipped entirely (a host trying to set the mode it's already
+in is a no-op).
+
+#### Companion: the screen-state byte (`FUN_008280fe`)
+
+```c
+undefined1 FUN_008280fe() {
+    return *(undefined1 *)(DAT_0082810c - 0x3c);
+}
+```
+
+This 1-byte read is the watch's "current screen / app state"
+indicator. The `0x08` default branch uses it to suppress
+redundant motor-mode writes; the same byte is presumably
+referenced by other handlers in the camera-shutter and
+long-press sequences. The exact value-2 meaning ("motor-mode
+already in target state") is recovered by the dispatcher logic
+itself rather than from a string constant.
+
+#### Record layout (`mixture_state_t`, 16 bytes)
 
 #### Record layout (`mixture_state_t`, 16 bytes)
 
