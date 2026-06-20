@@ -2544,7 +2544,7 @@ polling the link does not bump the timer.
 | `0x36` | Heart-rate related read/set | `FUN_0082c112` — see §8.8 |
 | `0x39` | HRV setting | `FUN_0082c9da` |
 | `0x3c` | Fixed capability block `[0x3c,0,0x40,0xa0,0x20,…]` | `FUN_0082c50e` — see §8.12 |
-| `0x3e` | SpO2 / blood-oxygen related read/set | `FUN_0082c550` |
+| `0x3e` | Lipids read/set (bit 7 of shared config byte) | `FUN_0082c550` | see §8.15 |
 | `0x48 'H'` | Handshake — 15-byte device-info block | `FUN_0082bf40` — see §8.2 |
 | `0x50 'P'` | **Inline** alert: `FUN_0082994c(0x14,0x10,1,0x19)` + `FUN_0082a5c8(8)` (motor + UI) | inline |
 | `0x51 'Q'` | "Find phone" / alert trigger | `FUN_0082c5b8` — see §8.11 |
@@ -2750,7 +2750,7 @@ entries decoded from the two `switch8` tables:
 | `0x21` | `FUN_0082bfd8` | Daily target setting |
 | `0x36` | `FUN_0082c112` | Heart-rate related read/set — see §8.8 |
 | `0x3c` | `FUN_0082c50e` | Returns fixed capability block `[0x3c,0,0x40,0xa0,0x20,...]` — see §8.12 |
-| `0x3e` | `FUN_0082c550` | SpO2 / blood-oxygen related read/set |
+| `0x3e` | `FUN_0082c550` | Lipids read/set (bit 7 of shared config byte) — see §8.15 |
 | `0x48` `'H'` | `FUN_0082bf40` | Handshake response — sends 15-byte device-info block — see §8.2 |
 | `0x50` `'P'` | inline | Calls `FUN_0082994c(0x14,0x10,1,0x19)` + `FUN_0082a5c8(8)` (alert/motor) |
 | `0x51` `'Q'` | `FUN_0082c5b8` | "Find phone" / alert trigger; arms pattern when `payload[1]==1` — see §8.11 |
@@ -4243,3 +4243,96 @@ The host SDK should:
 1. ~~Recover the exact meaning of opcode `0x2b` mixture container fields.~~ **Resolved** — see §3.1. The 16-byte `mixture_state_t` is now fully decoded; remaining unknowns are semantic (BCD field interpretation, period-data byte meanings).
 2. Identify the 32-byte `image_digest` algorithm used for OTA and the container header digest at `0x1c4`. No SHA-256 constants were found in the body; it may be computed by the bootloader or host tool.
 3. ~~Determine whether the `0xFEE7` vendor service has any active protocol role in the firmware.~~ **Resolved** — see §8; it implements a second 16-byte command channel.
+
+### 8.15 0x3e lipids read/set (`FUN_0082c550`)
+
+The 0xFEE7 vendor-side **duplicate** of the `0x3a sub 0x04`
+lipids bit-toggle. The existing docstring for `0x3e`
+("SpO2 / blood-oxygen related read/set") is *wrong* —
+the helper functions it calls (`FUN_008277ce` and
+`FUN_008277d8`) read and write **bit 7** of the shared
+config byte at `DAT_008277f0 + 0x2D`, which is the
+**lipids** bit per the §3.22 / §8.8 bit map.
+
+#### Sub-opcode dispatch
+
+| `req[1]` | Action | Helper |
+|---:|---|---|
+| `0x01` (read) | `local_20[2] = FUN_008277ce()` — read bit 7 of `*(DAT_008277f0 + 0x2D)`, `>> 7` yields `0` or `1` | `FUN_008277ce` |
+| other (write) | `FUN_008277d8(req[2] == 1)` — if `req[2] == 1`, set bit 7; else clear it. Response echoes `req[2]` | `FUN_008277d8` |
+
+The handler is a *structural clone* of `0x36` (§8.8) and
+`0x38` (§3.17) — same 3-byte response shape, same
+"read 0x01 / write otherwise" sub-cmd pattern.
+
+#### Persistent state (1 bit)
+
+| Bit | Field | Owner |
+|---:|---|---|
+| 7 | `lipids` | `0x3e` (this handler) **and** `0x3a sub 0x04` (§3.22) |
+
+Yes — `0x3e` and `0x3a sub 0x04` both own **bit 7** of the
+same shared config byte. They are duplicates: the same
+lipids bit is reachable from both `0x3a sub 0x04` (via the
+`0x2C` §3.10 dispatcher) and `0x3e` (via the `0xFEE7` §8.1
+dispatcher). The masks `>> 7` and `<< 7` and the write
+guard `(... & 0x7F) | (param_1 << 7)` are identical, so
+writing through either opcode has identical effect.
+
+#### Response layout
+
+```
+byte  0: 0x3E                (cmd)
+byte  1: req[1]              (sub-opcode echo: 0x01 read / 0x02+ write)
+byte  2: 0x00 / 0x01         (lipids value on read; echoed req[2] on write)
+byte  3..14: 0
+byte 15: additive checksum
+```
+
+#### Why a duplicate?
+
+`0x3e` is one of the few *opcode duplicates* in the
+firmware. Two plausible reasons:
+
+1. **Backwards compatibility with older host SDKs** that
+   used `0x3e` directly. The newer `0x3a sub 0x04` is the
+   preferred path for new code, but the watch keeps `0x3e`
+   working so older apps don't break.
+2. **Vendor-table shortcut**: the OEM vendor tables (§8.10
+   `0xce` handler) reference `0x3e` directly because it's
+   a single-byte opcode without sub-cmd routing — easier to
+   emit from a fixed-purpose vendor test routine.
+
+The body code (`FUN_008277ce` / `FUN_008277d8`) is *shared*
+with `0x3a sub 0x04` — both handlers call the same pair of
+helpers, and the helpers themselves operate on the same
+shared bit. This is the second instance of "different opcode,
+same underlying bit" — the first being `0x36` (HR enable)
+vs the (absent) duplicate for SpO2, where the firmware
+chose to keep a single channel.
+
+#### Correcting the docstring
+
+The original §3 opcode table listed `0x3e` as "SpO2 /
+blood-oxygen related read/set" — this was incorrect. The
+correct semantic (per the decompiled `>> 7` shift and the
+shared-bit overlap with `0x3a sub 0x04`) is **lipids
+read/set**. The SpO2 bit-toggle lives at `0x2c` (§3.10)
+only; there is no 0xFEE7-side duplicate for SpO2.
+
+If the host SDK's `enableSpo2()` function sends `0x3e`, it
+will silently toggle the **lipids** bit instead, leaving
+SpO2 untouched. The correct opcode for SpO2 is `0x2c` (the
+Channel-A path) — which is *not* reachable from the 0xFEE7
+service. A host that wants SpO2 control must use the
+Channel-A path, not the 0xFEE7 path.
+
+#### Why a §8.15 if it's a duplicate of `0x3a sub 0x04`?
+
+The duplicate-opcode pattern is significant because it
+shows the firmware's *evolution*: the older `0x3e` opcode
+was kept for compatibility even after the more flexible
+`0x3a sub 0x04` was added. Future firmware revisions may
+remove `0x3e` once the vendor test routines stop using it,
+but the lipids bit (7) will remain in the shared config
+byte.
