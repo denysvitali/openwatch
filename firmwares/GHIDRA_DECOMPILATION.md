@@ -2537,31 +2537,30 @@ polling the link does not bump the timer.
 
 #### Opcode → handler map (reverse-engineered from `FUN_0082c944`)
 
-| Opcode(s) | Action | Helper |
+| Opcode(s) | Handler | Notes |
 |---|---|---|
-| `0x00..0x2a` | switch8 table at `0x82c61d` (43 entries) | per-entry thunk |
-| `0x2b, 0x37, 0x38, 0x3a, 0x3b, 0x43 'C', 0x48 'H', 0x72, 0x7a, 0x7d, 0x81, 0xa1, 0xc6, 0xc7 'D', 0xff` | Defer to the deferred-command ring | `FUN_0082be64` |
-| `0x36` | Heart-rate related read/set | `FUN_0082c112` | see §8.8 |
+| `0x00..0x2a` | Low-range `switch8` at `0x82c61c` (39 cases + default) | Per-entry thunk — detailed below |
+| `0x2b, 0x37, 0x38, 0x3a, 0x3b, 0x43 'C', 0x72, 0x77, 0x7a, 0x7d, 0x81, 0xa1, 0xc6, 0xc7 'D', 0xff` | Deferred-command ring | `FUN_0082be64` |
+| `0x36` | Heart-rate related read/set | `FUN_0082c112` — see §8.8 |
 | `0x39` | HRV setting | `FUN_0082c9da` |
-| `0x3c` | Fixed capability block `[0x3c,0,0x40,0xa0,0x20,…]` | `FUN_0082c50e` | see §8.12 |
+| `0x3c` | Fixed capability block `[0x3c,0,0x40,0xa0,0x20,…]` | `FUN_0082c50e` — see §8.12 |
 | `0x3e` | SpO2 / blood-oxygen related read/set | `FUN_0082c550` |
-| `0x48 'H'` | Handshake — 15-byte device-info block | `FUN_0082bf40` | see §8.2 |
-| `0x50 'P'` | **Inline** alert: `FUN_0082994c(0x14, 0x10, 1, 0x19)` + `FUN_0082a5c8(8)` (motor + UI) | inline |
-| `0x51 'Q'` | "Find phone" / alert trigger | `FUN_0082c5b8` | see §8.11 |
-| `0x60` | (handler) | `FUN_0082be90` |
-| `0x61 'a'` | Status response (battery / daily counters) | `FUN_0082bee6` | see §8.3 |
-| `0x69 'i'` | Multi-step mode control (start/stop/cancel) | `FUN_0082c2f4` | see §8.5 |
+| `0x48 'H'` | Handshake — 15-byte device-info block | `FUN_0082bf40` — see §8.2 |
+| `0x50 'P'` | **Inline** alert: `FUN_0082994c(0x14,0x10,1,0x19)` + `FUN_0082a5c8(8)` (motor + UI) | inline |
+| `0x51 'Q'` | "Find phone" / alert trigger | `FUN_0082c5b8` — see §8.11 |
+| `0x60` | ANCS/message-push related | `FUN_0082be90` |
+| `0x61 'a'` | Status response (battery / daily counters) | `FUN_0082bee6` — see §8.3 |
+| `0x69 'i'` | Multi-step mode control (start/stop/cancel) | `FUN_0082c2f4` — see §8.5 |
 | `0x6a 'j'` | Continuation of `0x69` mode control | `FUN_0082c1e2` |
 | `0x7b, 0xb0, 0xc2, 0xcc, 0xf0, 0xf1` | No-op (early return) | — |
-| `0x90` | Echo `[0x90]` (self-marker) | `FUN_00827ad2` | see §8.6 |
+| `0x90` | Echo `[0x90]` (self-marker) | `FUN_00827ad2` — see §8.6 |
 | `0x91` | Echo `[0x91]` | `FUN_00827aee` |
 | `0x92` | (handler) | `FUN_00827b14` |
 | `0x93` | (handler) | `FUN_00827c4a` |
 | `0x94` | (handler) | `FUN_00827b2e` |
 | `0x95` | (handler) | `FUN_00827b54` |
-| `0x96` | Sends `[0x96,0,0,0x96,…]` and resets state | `FUN_00827b7c` | see §8.4 |
-| `0x97..0x9f` | switch8 table at `0x82c6e1` (9 entries) | per-entry thunk |
-| `0xa0` | (handler — see also the `0x97..0x9f` switch8) | `FUN_00827b16` |
+| `0x96` | Sends `[0x96,0,0,0x96,…]` and resets state | `FUN_00827b7c` — see §8.4 |
+| `0x97..0xa0` | High-range `switch8` at `0x82c6e0` (10 cases + default) | Per-entry thunk — detailed below |
 | `0xbf` | (handler) | `FUN_0082ba94` |
 | `0xc0` | (handler) | `FUN_0082bb0c` |
 | `0xc1` | Sends a long/fragmented response: `FUN_008337fa(DAT_0082caf0)` + `FUN_0082b938(*param_1, DAT_0082caf0, 1)` | inline |
@@ -2570,36 +2569,54 @@ polling the link does not bump the timer.
 | `0xc5` | If `param_1[1] == 1` → `DAT_0082caec[3] = 1`; else `DAT_0082caec[3] = 0` | inline |
 | `0xc8` | Same as `0xc5` but writes `DAT_0082caec[4]` | inline |
 | `0xc9` | `DAT_0082caec[5] = param_1[1]` | inline |
-| `0xcd` | Byte-reverse echo of req[3..6] (link sanity test) | `FUN_0082be12` | see §8.9 |
-| `0xce` | Factory/test sub-commands (`0x01`, `0x02`, `' '`, `'!'`, `'"'`) | `FUN_0082bcde` | see §8.10 |
-| `0xfe` | `FUN_00844214(*(u16*)(param_1 + 1))` — vibration pattern from a duration arg | inline | see §8.13 |
+| `0xcd` | Byte-reverse echo of req[3..6] (link sanity test) | `FUN_0082be12` — see §8.9 |
+| `0xce` | Factory/test sub-commands (`0x01`, `0x02`, `' '`, `'!'`, `'"'`) | `FUN_0082bcde` — see §8.10 |
+| `0xfe` | `FUN_00844214(*(u16*)(param_1 + 1))` — vibration pattern from a duration arg | inline — see §8.13 |
 | other | Vendor NAK: `FUN_0082bcba(opcode)` | `FUN_0082bcba` |
 
 #### Deferred-command ring (`FUN_0082be64`)
 
-The 15 opcodes routed to `FUN_0082be64` (including all the
-Channel-A opcodes the watch knows about plus the
-0xFEE7-specific `0xC7 'D'` and `0xFF`) are **not** handled
-synchronously. Instead the dispatcher copies the 16-byte
-request into a 10-slot ring at `DAT_0082bfcc + 4`, increments
-the slot index, and calls `FUN_00827124(0, DAT_0082bfd0)` to
-schedule a worker that drains the ring at a later tick. This
-is how the watch avoids a single long 0xFEE7 frame from
-blocking the BLE link while a CPU-heavy handler (e.g.
-`0x77 phoneSport` or `0x43 readDetailSport`) runs.
-
-The decompiler text has the ring copied as
+The opcodes routed to `FUN_0082be64` (`0x2b`, `0x37`, `0x38`,
+`0x3a`, `0x3b`, `0x43 'C'`, `0x72`, `0x77`, `0x7a`, `0x7d`,
+`0x81`, `0xa1`, `0xc6`, `0xc7 'D'`, `0xff`) are **not** handled
+synchronously. Instead the dispatcher copies the 16-byte request
+into a 10-slot ring, increments the slot index, and wakes the
+`qc_app_task` loop. The ring base pointer is the literal value in
+`DAT_0082bfcc`:
 
 ```c
-memcpy(ring + 4 + (*(u16*)(ring + 2)) * 0x10, param_1, 0x10);
-*(u16*)(ring + 2) = (*(u16*)(ring + 2) + 1) % 10;
-FUN_00827124(0, ring_worker);
+// DAT_0082bfcc == 0x00209f54
+memcpy((void *)(DAT_0082bfcc + 4 + slot * 0x10), param_1, 0x10);
+slot = (slot + 1) % 10;
+FUN_00827124(0, DAT_0082bfd0);   // signal qc_app_task
 ```
 
-— i.e. a circular buffer of 10 frames with a single writer
-(the dispatcher) and a single reader (the worker). The 10-slot
-size is the same as the Channel-A dispatcher at
-`FUN_0082d2dc`.
+This is the same ring consumed by the Channel-A dispatcher
+`FUN_0082d2dc`. The consumer is the main app task `qc_app_task`
+(`FUN_0082724c`), whose loop waits on a message queue and then
+ calls `FUN_0082d2dc()`:
+
+```c
+void FUN_0082724c(void) {
+    // ... init ...
+    do {
+        do {
+            msg = os_message_get(*(void **)(DAT_0082732c + 4), 0xffffffff);
+        } while (msg == 0);
+        FUN_0082d2dc();   // drains the 0x00209f54 ring
+        FUN_0083304c();
+        FUN_0082fc0c();
+        // ...
+    } while (true);
+}
+```
+
+So `FUN_0082be64` does **not** have its own dedicated worker;
+the deferred FEE7 frames are simply queued into the Channel-A
+command ring and drained on the next `qc_app_task` tick. This is
+how the watch avoids a single long 0xFEE7 frame from blocking the
+BLE link while a CPU-heavy handler (e.g. `0x77 phoneSport` or
+`0x43 readDetailSport`) runs.
 
 #### Vendor NAK shape (`FUN_0082bcba`)
 
@@ -2620,28 +2637,81 @@ Channel-A 0xFF / 0xFE / 0x9F error variants).
 
 #### Switch8 tables
 
-The two `0x82c61d` and `0x82c6e1` switch8 tables route the
-"long tail" of opcodes that don't have explicit branches:
+Both tables use the shared `__ARM_common_switch8` helper at
+`0x008405fc`. The helper reads a count byte immediately after the
+`BL`, then a byte offset per case, and branches to
+`target = (return_address + 2 * offset) & ~1`. Offsets are
+**unsigned**.
 
-* `0x82c61d` (43 entries, base `0x82c61d`): covers opcodes
-  `0x00..0x2a`. Most entries are `0x99` (a single "no-op"
-  thunk); non-default entries route to small per-feature
-  thunks (e.g. `0x01`/`0x06`/`0x08`/`0x0e`/`0x10` all share
-  the same `0x23` slot → likely an "echo ack" path).
-* `0x82c6e1` (9 entries, base `0x82c6e1`): covers opcodes
-  `0x97..0x9f`. The default slot is `0x37` (→ default no-op),
-  so most of the 0x97..0x9f range is also a no-op; the
-  visible non-default entries handle vendor-only sub-cmds.
+##### Low-range table (`0x82c61c`) — opcodes `0x00..0x2a`
 
-A host should treat both ranges as *reserved* unless it can
-match a specific response shape from the watch.
+Count byte at `0x82c61c` is `0x27` (39 cases); cases
+`0x27..0x2a` fall through to the default offset and are treated as
+NAK.
+
+| Opcode | Target / action | Notes |
+|---|---|---|
+| `0x00` | Vendor NAK (`0x82c74e`) | |
+| `0x01` | Deferred (`0x82c662` → `FUN_0082be64`) | Channel-A `setTime` |
+| `0x02` | `FUN_0082c4d4` | Camera / motor-mode request |
+| `0x03` | `FUN_0082bc7e` | Battery response |
+| `0x04` | `FUN_0082c432` | ANCS bind |
+| `0x05` | Vendor NAK | |
+| `0x06` | Deferred | Channel-A `dnd` |
+| `0x07`–`0x09` | Vendor NAK | |
+| `0x0a` | `FUN_0082b9c6` | Time-format read/set |
+| `0x0b` | Vendor NAK | |
+| `0x0c` | `FUN_0082c0de` | BP setting |
+| `0x0d` | `FUN_00834252` + `FUN_0082c0a4` | Read BP records |
+| `0x0e` | Deferred | Channel-A `bpReadConform` |
+| `0x0f` | Vendor NAK | |
+| `0x10` | `FUN_0082b9a8` | Vibration / display trigger |
+| `0x11`–`0x13` | Vendor NAK | |
+| `0x14` | Early return (`0x82c752`) | No-op |
+| `0x15` | Deferred | Channel-A `readHeartRate` |
+| `0x16` | `FUN_0082c164` | Heart-rate setting |
+| `0x17` | Vendor NAK | |
+| `0x18` | Deferred | Channel-A `realTimeHeartRate` |
+| `0x19` | `FUN_0082c484` | Degree (°C/°F) switch |
+| `0x1a`–`0x1d` | Vendor NAK | |
+| `0x1e` | Deferred | |
+| `0x1f`–`0x20` | Vendor NAK | |
+| `0x21` | `FUN_0082bfd8` | Daily target setting |
+| `0x22`–`0x24` | Vendor NAK | |
+| `0x25`–`0x26` | Deferred | |
+| `0x27`–`0x2a` | Default → Vendor NAK | |
+
+The "deferred" entries in this range are the same opcodes handled
+by the Channel-A deferred path (`FUN_0082be64`), so the FEE7
+service can also be used to trigger them.
+
+##### High-range table (`0x82c6e0`) — opcodes `0x97..0xa0`
+
+Count byte at `0x82c6e0` is `0x0a` (10 cases); the default slot
+also points to the vendor-NAK path.
+
+| Opcode | Handler | Notes |
+|---|---|---|
+| `0x97` | `FUN_00827ba4` | No-op |
+| `0x98` | `FUN_00827be6` | Sets `DAT_00827e8c[4] = 1`, sends `[0x98]` |
+| `0x99` | `FUN_00827bea` | No-op |
+| `0x9a` | `FUN_00827bec` | Sets `DAT_00827e8c[4] = 2`, sends `[0x9a]` |
+| `0x9b` | `FUN_00827bf0` | Sends `[0x9b, state_byte]` where state byte is `0x77` if `DAT_00827e8c[4] != 2`, else `0x88` |
+| `0x9c` | `FUN_00827c1e` | Sends `[0x9c,0,0,0x9c]`, stops a timer and powers off related subsystems |
+| `0x9d` | Default → Vendor NAK | |
+| `0x9e` | `FUN_00827cc8` | Conditional 10-byte copy from `DAT_00827e8c + 0x7a` or the literal `"H59MA_V1.0"` |
+| `0x9f` | `FUN_00827b16` | No-op |
+| `0xa0` | `FUN_00827d1a` | Multi-byte status frame built from `FUN_008289bc`, `FUN_00828fae`, `FUN_00832bd2`, `FUN_00837b90`/`FUN_008289a2`, and fields from `DAT_00827e8c` |
+
+A host should treat both ranges as *reserved* unless it can match
+a specific response shape from the watch.
 
 #### Relationship to §8 opcode map
 
 The opcode → handler map **above** supersedes the original §8
 table (which only listed the *immediately-routed* opcodes).
-The §8 table is now strictly a subset: the "deferred"
-opcodes (`0x43`/`0x48`/`0x7a`/etc.) are still in the
+The §8 table is now strictly a subset: the deferred opcodes
+(`0x43`/`0x7a`/etc.) are still in the
 opcodes-routed-to-`FUN_0082be64` bucket, and the
 *handler-shorthand* in §8 is the per-deferred-frame handler
 that `FUN_0082be64`'s worker eventually invokes.
@@ -2662,17 +2732,29 @@ Responses are built with `FUN_0082b0c4` (additive checksum) and queued through `
 
 ### Opcode → handler map (from `FUN_0082c944`)
 
-Immediate / explicitly routed opcodes:
+Immediate / explicitly routed opcodes, including the non-default
+entries decoded from the two `switch8` tables:
 
 | Opcode | Handler | Notes |
 |---|---|---|
+| `0x02` | `FUN_0082c4d4` | Camera / motor-mode request |
+| `0x03` | `FUN_0082bc7e` | Battery response (`[0x03, percent, charging]`) |
+| `0x04` | `FUN_0082c432` | ANCS bind |
+| `0x0a` | `FUN_0082b9c6` | Time-format read/set |
+| `0x0c` | `FUN_0082c0de` | BP setting |
+| `0x0d` | `FUN_00834252` + `FUN_0082c0a4` | Read BP records |
+| `0x10` | `FUN_0082b9a8` | Vibration / display trigger |
+| `0x14` | — | Explicit no-op (early `pop {r4,pc}`) |
+| `0x16` | `FUN_0082c164` | Heart-rate setting |
+| `0x19` | `FUN_0082c484` | Degree (°C/°F) switch |
+| `0x21` | `FUN_0082bfd8` | Daily target setting |
 | `0x36` | `FUN_0082c112` | Heart-rate related read/set — see §8.8 |
 | `0x3c` | `FUN_0082c50e` | Returns fixed capability block `[0x3c,0,0x40,0xa0,0x20,...]` — see §8.12 |
 | `0x3e` | `FUN_0082c550` | SpO2 / blood-oxygen related read/set |
 | `0x48` `'H'` | `FUN_0082bf40` | Handshake response — sends 15-byte device-info block — see §8.2 |
 | `0x50` `'P'` | inline | Calls `FUN_0082994c(0x14,0x10,1,0x19)` + `FUN_0082a5c8(8)` (alert/motor) |
 | `0x51` `'Q'` | `FUN_0082c5b8` | "Find phone" / alert trigger; arms pattern when `payload[1]==1` — see §8.11 |
-| `0x60` | `FUN_0082be90` | |
+| `0x60` | `FUN_0082be90` | ANCS/message-push related |
 | `0x61` `'a'` | `FUN_0082bee6` | Status response (battery / daily counters) — see §8.3 |
 | `0x69` `'i'` | `FUN_0082c2f4` | Multi-step mode control (start/stop/cancel of a remote feature) — see §8.5 |
 | `0x6a` `'j'` | `FUN_0082c1e2` | Continuation of `0x69` mode control |
@@ -2683,15 +2765,16 @@ Immediate / explicitly routed opcodes:
 | `0x94` | `FUN_00827b2e` | |
 | `0x95` | `FUN_00827b54` | |
 | `0x96` | `FUN_00827b7c` | Sends `[0x96,0,0,0x96,...]` and resets state — see §8.4 |
-| `0x97` | `FUN_00827ba4` | |
-| `0x98` | `FUN_00827be6` | |
-| `0x99` | `FUN_00827bea` | |
-| `0x9a` | `FUN_00827bec` | |
-| `0x9b` | `FUN_00827bf0` | |
-| `0x9c` | `FUN_00827c1e` | |
-| `0x9e` | `FUN_00827cc8` | |
-| `0x9f` | `FUN_00827d1a` | |
-| `0xa0` | `FUN_00827b16` | |
+| `0x97` | `FUN_00827ba4` | No-op |
+| `0x98` | `FUN_00827be6` | Sets state to `1`, sends `[0x98]` |
+| `0x99` | `FUN_00827bea` | No-op |
+| `0x9a` | `FUN_00827bec` | Sets state to `2`, sends `[0x9a]` |
+| `0x9b` | `FUN_00827bf0` | Sends `[0x9b, state_byte]` |
+| `0x9c` | `FUN_00827c1e` | Sends `[0x9c,0,0,0x9c]`, stops timer / power-off related |
+| `0x9d` | — | Vendor NAK (default slot) |
+| `0x9e` | `FUN_00827cc8` | Conditional 10-byte copy from `DAT_00827e8c + 0x7a` |
+| `0x9f` | `FUN_00827b16` | No-op |
+| `0xa0` | `FUN_00827d1a` | Multi-byte status frame builder |
 | `0xbf` | `FUN_0082ba94` | |
 | `0xc0` | `FUN_0082bb0c` | |
 | `0xc1` | `FUN_008337fa` + `FUN_0082b938` | Sends a long/fragmented response |
@@ -2704,7 +2787,14 @@ Immediate / explicitly routed opcodes:
 | `0xce` | `FUN_0082bcde` | Factory/test sub-commands (`0x01`, `0x02`, `' '`, `'!'`, `'"'`) — see §8.10 |
 | `0xfe` | `FUN_00844214` | Builds a vibration pattern from a duration argument — see §8.13 |
 
-Opcodes `0x2b`, `0x37`, `0x38`, `0x3a`, `0x3b`, `0x43`, `0x72`, `0x77`, `0x7a`, `0x7d`, `0x81`, `0xa1`, `0xc6`, `0xc7`, `0xff` and most of the `0x00`–`0x2a` switch table are routed to `FUN_0082be64`, which copies the frame into a deferred 16-byte command ring. Opcodes `0x7b`, `0xb0`, `0xc2`, `0xcc`, `0xf0`, `0xf1` are explicit no-ops. Unrecognized opcodes fall through to `FUN_0082bcba`.
+Opcodes `0x2b`, `0x37`, `0x38`, `0x3a`, `0x3b`, `0x43`, `0x72`,
+`0x77`, `0x7a`, `0x7d`, `0x81`, `0xa1`, `0xc6`, `0xc7`, `0xff`
+are routed to `FUN_0082be64` (deferred). Within the `0x00`–`0x2a`
+`switch8` range, only `0x01`, `0x06`, `0x0e`, `0x15`, `0x18`,
+`0x1e`, `0x25`, `0x26` are deferred; the rest are either immediate
+thunks, the explicit no-op at `0x14`, or vendor NAK. Opcodes
+`0x7b`, `0xb0`, `0xc2`, `0xcc`, `0xf0`, `0xf1` are explicit no-ops.
+Unrecognized opcodes fall through to `FUN_0082bcba`.
 
 ### Take-away
 

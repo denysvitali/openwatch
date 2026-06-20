@@ -176,16 +176,33 @@ class Fee7 {
   static const int modeControl = 0x69; // 'i'
   static const int modeControlCont = 0x6a; // 'j'
 
+  // Low-range switch8 entries that mirror Channel-A features
+  static const int camera = 0x02; // FUN_0082c4d4
+  static const int battery = 0x03; // FUN_0082bc7e
+  static const int bindAncs = 0x04; // FUN_0082c432
+  static const int timeFormat = 0x0a; // FUN_0082b9c6
+  static const int bpSetting = 0x0c; // FUN_0082c0de
+  static const int bpData = 0x0d; // FUN_00834252 + FUN_0082c0a4
+  static const int heartRateSetting = 0x16; // FUN_0082c164
+  static const int degreeSwitch = 0x19; // FUN_0082c484
+  static const int targetSetting = 0x21; // FUN_0082bfd8
+
   // Echo / unary probes
   static const int echoBase = 0x90; // FUN_00827ad2
   static const int echoBase2 = 0x91; // FUN_00827aee
 
-  // Range 0x92..0x9f — vendor unary echoes / probes (one handler each).
+  // Range 0x92..0x96 — vendor unary echoes / probes (one handler each).
   static const int unaryRangeStart = 0x92;
-  static const int unaryRangeEnd = 0x9f;
+  static const int unaryRangeEnd = 0x96;
+
+  // 0x97..0x9c are stateful vendor probes (not simple unary echoes).
+  static const int probeRangeStart = 0x97;
+  static const int probeRangeEnd = 0x9c;
 
   // Out-of-range unary opcodes handled as standalone cases.
-  static const int unaryA0 = 0xa0;
+  static const int unary9e = 0x9e; // FUN_00827cc8
+  static const int unary9f = 0x9f; // FUN_00827b16
+  static const int statusFrame = 0xa0; // FUN_00827d1a
   static const int unaryBf = 0xbf;
   static const int unaryC0 = 0xc0;
   static const int unaryC4 = 0xc4;
@@ -203,11 +220,18 @@ class Fee7 {
   /// Whether [opcode] should be decoded as a `UnaryOpcode` (no payload decode).
   ///
   /// Note: [vibrationPattern] (0xfe) is excluded — it has structured decoding
-  /// and is surfaced on its own `onVibration` stream.
+  /// and is surfaced on its own `onVibration` stream. The stateful vendor
+  /// probe range `0x97..0x9c` is also excluded; it falls through to the
+  /// unknown stream until a dedicated decoder is added.
   static bool isUnary(int opcode) {
     if (opcode >= unaryRangeStart && opcode <= unaryRangeEnd) return true;
+    if (opcode >= probeRangeStart && opcode <= probeRangeEnd) return false;
     switch (opcode) {
-      case unaryA0:
+      case echoBase:
+      case echoBase2:
+      case unary9e:
+      case unary9f:
+      case statusFrame:
       case unaryBf:
       case unaryC0:
       case unaryC4:
