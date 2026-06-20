@@ -245,7 +245,7 @@ Processes a circular queue of incoming 16-byte frames (`DAT_0082d440 + 0x14` rin
 | `0x0e` | `bpReadConform` | `0x0082cb28` | If sub-byte `0` → `FUN_00834410()` + `FUN_0082c0a4()`. |
 | `0x15` | `readHeartRate` | `0x0082cf48` | Reads heart-rate record by index; returns `0x15` multi-frame data or `0xff15` error — see §3.12. |
 | `0x18` | `displayClock` | `0x0082ccb6` | Sets watch-face / clock display — see §3.5. |
-| `0x1e` | `realTimeHeartRate` | `0x0082d20c` | Sub `0x01` starts 60s HR measurement, `0x02` stops, `0x03` resets timer. |
+| `0x1e` | `realTimeHeartRate` | `0x0082d20c` | Sub `0x01` starts 60s HR measurement, `0x02` stops, `0x03` resets timer — see §3.13. |
 | `0x25` | `setSitLong` | `0x0082d284` | Writes sedentary config — see §3.9. |
 | `0x26` | `readSitLong` | `0x0082d258` | Reads sedentary config — see §3.9. |
 | `0x2b` | `menstruation` (mixture container) | `0x0082ba54` | Sub `0x01`/`0x02` read/write mixture data; cycle-phase detector + notification sender — see §3.1. |
@@ -1248,6 +1248,84 @@ the last chunk only carries 292 - 22*13 = 6 real bytes followed by
    order until 292 B are accumulated.
 3. The first 4 B of the concatenated buffer is the request index
    (echo); bytes 4..291 are the HR record.
+
+### 3.13 Opcode `0x1e` realTimeHeartRate (`FUN_0082d20c`)
+
+A 3-sub-opcode controller for the watch's *real-time* (continuous)
+heart-rate measurement. The "is running" flag and the 60-second
+countdown are packed into a single byte at `DAT_0082d43c + 8`
+(runtime `0x00208d30`).
+
+#### Sub-opcode dispatch
+
+| `req[1]` | Condition | Action |
+|---:|---|---|
+| `0x01` (start) | `cVar2 == 0` (idle) | `*(DAT_0082d43c + 8) = 0x3C` (60-second counter reload); `FUN_0083371e(0x2000)` (HR driver start in continuous mode); `func_0x00013694(DAT_0082d440, 1000)` (start 1 s tick timer) |
+| `0x02` (stop) | `cVar2 != 0` (running) | `*(DAT_0082d43c + 8) = 0` (counter to zero); `FUN_00833704()` (HR driver stop); `func_0x000136bc(DAT_0082d440)` (cancel 1 s tick timer) |
+| `0x03` (reset) | `cVar2 != 0` (running) | `*(DAT_0082d43c + 8) = 0x3C` (counter back to 60, but no driver re-start and no timer re-arm) |
+| other | any | no-op (handler does not branch) |
+
+The sub-opcode × condition gate prevents double-starts and
+double-stops; `0x01` on an already-running measurement is silently
+ignored, and `0x02` on an idle measurement is also a no-op. The
+handler never sends a response frame (it is one of the few
+*fire-and-forget* Channel-A commands).
+
+#### Persistent state
+
+A single byte at `DAT_0082d43c + 8` (runtime `0x00208d30 + 8`)
+doubles as both the "is running" flag and the 60-second countdown:
+
+| Value | Meaning |
+|---:|---|
+| `0` | measurement idle |
+| `0x3C` (60) | running, 60 s remaining (reloaded on start and on `0x03`) |
+| `1..0x3B` | running, that many seconds remaining (decremented by the 1 s tick) |
+
+The countdown is **not** decremented by the handler — the watch's
+1-second tick (`func_0x00013694` with 1000 ms period, anchored at
+`DAT_0082d440` runtime `0x00209f40`) calls into the HR driver
+each tick, and the driver itself is what writes the decremented
+value back to `*(DAT_0082d43c + 8)`. When the value reaches `0`
+the measurement is auto-stopped by the driver and the timer
+naturally falls out of its re-arm loop.
+
+#### HR driver calls
+
+`FUN_0083371e(mode = 0x2000)` (start) builds the 8-byte request
+`{cmd = 0x10003, mode = 0x2000}` and forwards it to the HR driver
+via `FUN_008273d0(&req, 0x17C)`. The `0x17C` is the HR driver
+sub-command id for "start measurement", and `0x2000` selects
+*continuous* mode (as opposed to `0x0800` used by the `0xa1`
+factory test mode for one-shot measurement).
+
+`FUN_00833704()` (stop) builds `{cmd = 0x20003, mode = 0x2000}`
+and forwards via `FUN_008273d0(&req, 0x174)`. The `0x174` is the HR
+driver sub-command id for "stop measurement". Both sub-commands
+live in the same driver wrapper `FUN_008273d0` and are part of the
+"VC_HRV_16Bit_integration_6.0_addRMSSD" library mentioned in
+`firmwares/_re/strings-mining/findings.txt`.
+
+#### Sub-opcode `0x03` semantics
+
+`0x03` is "reset the 60 s countdown back to 60 without
+re-starting the measurement". A host can use it to extend a
+measurement window indefinitely by sending `0x03` every 55 s.
+Unlike `0x01` it does **not** call the HR driver or arm the
+1 s tick — those are assumed to still be running — it just
+reloads the countdown byte. This makes `0x03` a no-op if the
+measurement has already auto-stopped (the `cVar2 != 0` guard
+suppresses the write in that case).
+
+#### Why no response
+
+The 1-second tick + HR driver are real-time; queuing a response
+frame in the `FUN_0082ebdc` ring would add a multi-ms latency
+to the very-fast feedback loop the host uses to update its
+live-HR UI. The watch treats the sub-opcode as a "set" command
+and lets the host poll the current HR value separately (the
+real-time HR notifications travel on the `0x2b`/`0x39` and
+related push paths, not through this opcode).
 
 ### Opcode `0xa1` factory/test mode (`FUN_00827f5c`)
 
