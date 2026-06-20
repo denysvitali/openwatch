@@ -105,29 +105,32 @@ void main() {
       expect(u.gpsDelta, isNull);
     });
 
-    test('phoneSport gpsDelta (sub 0x05) decodes u24 LE steps/meters', () async {
-      final t = _StubTransport();
-      final d = ChannelADispatcher(t);
-      d.bind();
-      final got = d.onPhoneSport.first;
-      // pl[0] = 0x05, pl[1] reserved, pl[2..4] = steps (u24 LE),
-      // pl[5] reserved, pl[6..8] = meters (u24 LE).
-      // steps  = 0x000ABC = 2748
-      // meters = 0x001234 = 4660
-      final f = Codec.buildChannelA(OpA.phoneSport, [
-        0x05,
-        0x00,
-        0xBC, 0x0A, 0x00, // steps u24 LE
-        0x00,
-        0x34, 0x12, 0x00, // meters u24 LE
-      ]);
-      t.inA.add(f);
-      final u = await got.timeout(const Duration(seconds: 1));
-      expect(u.sub, PhoneSportSub.gpsDelta);
-      expect(u.gpsDelta, isNotNull);
-      expect(u.gpsDelta!.steps, 0x000ABC);
-      expect(u.gpsDelta!.meters, 0x001234);
-    });
+    test(
+      'phoneSport gpsDelta (sub 0x05) decodes u24 LE steps/meters',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final got = d.onPhoneSport.first;
+        // pl[0] = 0x05, pl[1] reserved, pl[2..4] = steps (u24 LE),
+        // pl[5] reserved, pl[6..8] = meters (u24 LE).
+        // steps  = 0x000ABC = 2748
+        // meters = 0x001234 = 4660
+        final f = Codec.buildChannelA(OpA.phoneSport, [
+          0x05,
+          0x00,
+          0xBC, 0x0A, 0x00, // steps u24 LE
+          0x00,
+          0x34, 0x12, 0x00, // meters u24 LE
+        ]);
+        t.inA.add(f);
+        final u = await got.timeout(const Duration(seconds: 1));
+        expect(u.sub, PhoneSportSub.gpsDelta);
+        expect(u.gpsDelta, isNotNull);
+        expect(u.gpsDelta!.steps, 0x000ABC);
+        expect(u.gpsDelta!.meters, 0x001234);
+      },
+    );
 
     test('factory 0xa1 sub 0x01 decodes to fullReset', () async {
       final t = _StubTransport();
