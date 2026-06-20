@@ -244,7 +244,7 @@ Processes a circular queue of incoming 16-byte frames (`DAT_0082d440 + 0x14` rin
 | `0x08` | *(special)* | `0x00827516`, `0x008275b6`, `0x00827ba6`, `0x008280fe` | Camera/find-device/long-press branch: checks sub-byte and routes to motor/vibrate/screen routines. |
 | `0x0e` | `bpReadConform` | `0x0082cb28` | If sub-byte `0` → `FUN_00834410()` + `FUN_0082c0a4()`. |
 | `0x15` | `readHeartRate` | `0x0082cf48` | Reads heart-rate record by index; returns `0x15` multi-frame data or `0xff15` error. |
-| `0x18` | `displayClock` | `0x0082ccb6` | Sets watch-face / clock display; handles string labels and numbered styles. |
+| `0x18` | `displayClock` | `0x0082ccb6` | Sets watch-face / clock display — see §3.5. |
 | `0x1e` | `realTimeHeartRate` | `0x0082d20c` | Sub `0x01` starts 60s HR measurement, `0x02` stops, `0x03` resets timer. |
 | `0x25` | `setSitLong` | `0x0082d284` | Calls sedentary config routines, acks `0x25`. |
 | `0x26` | `readSitLong` | `0x0082d258` | Reads sedentary config, sends `0x26` response. |
@@ -549,6 +549,91 @@ The four little-endian dwords are a static capability shape used as
 "set OK" — the host should treat the 14-byte payload as opaque and
 parse the meaning only after the matching `0x5A 0x01` read of the
 device-info block (see §2.7).
+
+### 3.5 Opcode `0x18` displayClock / watch-face switcher (`FUN_0082ccb6`)
+
+Sets the active watch face and accepts both numeric ("go to face N")
+and string-labelled ("set face label to S") payloads. The handler
+echoes the request back in a 16-byte response and updates the
+display-render state via `FUN_0082e42c`.
+
+#### Request layout
+
+| Byte | Field | Notes |
+|---:|---|---|
+| 0 | `opcode` | `0x18` (consumed by dispatcher) |
+| 1 | `style` | sub-type selector — see below |
+| 2 | `length` | only meaningful for label styles; `0x00..0x0C` echo-in-response, `0x0D..0xFF` spill to `DAT_0082cfec` |
+| 3..14 | `payload` | label bytes (style 0x02/0x12/0x22/0x32) or ignored (other) |
+| 15 | checksum | additive (per §3) |
+
+#### `style` dispatch
+
+| `style` | Action |
+|---:|---|
+| `0x01` | Numeric face index — calculates the new face's "label length" using `strlen()` on a previously-cached face-name buffer (`acStack_39`), then echoes that length in `response[2]` and copies the matching tail into `response[3..]`. Two sub-cases: a previous face whose name starts with `"O_"` (3-char prefix, label = `strlen - 7`), or any other name (label = `strlen - 4`, with one extra character trimmed if the slice ends in `'_'`). |
+| `0x02`, `0x12`, `0x22`, `0x32` | Label style — the high nibble of `style` (`>> 4` = 0..3) is the *face-slot* index. The handler stores the label either inline (length < 13) or in a side buffer at `DAT_0082cfec` (length ≥ 13), then calls `FUN_0082e42c(payload, length, 0xa5 - slot)` to push it to the display renderer. |
+| other | Pass-through — `response[2]` is left at `0x00`, the rest of the response is zero. |
+
+#### Side-buffer spill (`style` 0x02/0x12/0x22/0x32, `length ≥ 13`)
+
+The handler re-uses a 24-byte config block at `DAT_0082cfec`:
+
+* If the byte at `req[length - 9]` is `0` (i.e. the request is the
+  *last* fragment of a multi-frame label): copy `length - 0x0C` bytes
+  from `req[3..]` to `DAT_0082cfec + 0x0D` (a 12-byte name slot at
+  the tail of the config block).
+* Otherwise (start of a fresh label): clear the 24-byte block, write
+  `0xA5 - slot` to `*DAT_0082cfec`, and copy the first 12 bytes of
+  `req[3..]` to `pcVar6 + 1`.
+
+In both cases the response echoes the truncated slice and signals
+`response[2] = length` so the host can correlate.
+
+#### Display update (`FUN_0082e42c`)
+
+```c
+void FUN_0082e42c(text, length, slot_id) {
+  if (length != 0) {
+    length = min(length, 0x14);
+    memset(DAT_0082e498 + 0x26, 0, 0x18);
+    *(DAT_0082e498 + 0x26) = slot_id;     // face-slot selector
+    memcpy(DAT_0082e498 + 0x27, text, length);
+  }
+  FUN_008294cc();      // commit config
+  FUN_0082e28c();      // render to display
+  FUN_008275b6();      // long-press handler (? — also used by 0x08 sub-cmd)
+}
+```
+
+`DAT_0082e498` is the on-screen face-state block. Writing the
+`slot_id` (0xA5..0xA2) selects which of the four face-slots to draw;
+the actual label string is at `DAT_0082e498 + 0x27` (20-byte cap).
+
+#### Companion opcode: `0x81` config-chunk write (`FUN_0082cdac`)
+
+The watch-face renderer is paired with a 6-byte config-chunk setter
+that persists label updates to flash:
+
+```c
+void FUN_0082cdac(param_1) {
+  if (memcmp(DAT_0082cfec - 6, param_1, 6) != 0) {  // value changed
+    memcpy(DAT_0082cfec - 6, param_1, 6);
+    *(DAT_0082cfec + 0x3a) = 1;        // "config dirty" flag
+    FUN_008294cc();
+    FUN_00840568(param_1);              // flash write
+    func_0x0000029c(1, 0xd0);           // 13-second one-shot
+  }
+}
+```
+
+The 6-byte chunk lives at `DAT_0082cfec - 6` (the 6 bytes immediately
+preceding the 24-byte `0x18` spill block). Together with the
+`FUN_0082cfec + 0x3a` "dirty" flag this forms a small
+**shadow-and-flush** persistence layer: the in-RAM `0x18` label is
+written immediately, while the 6-byte chunk is only committed to
+flash when the host sends a corresponding `0x81` and the value
+actually changed.
 
 ### Opcode `0xa1` factory/test mode (`FUN_00827f5c`)
 
