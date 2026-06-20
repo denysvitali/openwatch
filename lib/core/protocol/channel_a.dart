@@ -500,9 +500,18 @@ class ChannelADispatcher {
   /// `phoneSport` (0x77): jump-table dispatch on sub-byte (per decomp).
   ///
   /// The firmware's `FUN_0082ce0c` reads `subData[0]` and dispatches:
-  /// `0x00`/`0x06` default-ack, `0x01` start/finish session, `0x02` calls
-  /// `FUN_00830cb2`, `0x03` calls `FUN_00830cd4`, `0x04` cancels timer,
-  /// `0x05` GPS/position delta (two u24 LE values: steps, meters).
+  /// `0x00`/`0x06` default-ack, `0x01` start/finish session, `0x02`
+  /// pause bit, `0x03` lap bit, `0x04` cancel, `0x05` GPS/position
+  /// delta. See `GHIDRA_DECOMPILATION.md` §3.16.
+  ///
+  /// For `0x05` the two u24 LE values in the request are
+  /// *arbitrary bit-pattern encodings* of latitude and longitude,
+  /// NOT BCD degrees-minutes — the watch keeps a running sum of
+  /// per-tick deltas and surfaces the cumulative total in the
+  /// response. The field names [GpsDelta.steps] / [GpsDelta.meters]
+  /// are kept for backwards compatibility with the original
+  /// APK-derived PROTOCOL.md — see `GHIDRA_DECOMPILATION.md` §3.16
+  /// for the correct semantic.
   void _decodePhoneSport(Uint8List pl) {
     if (pl.isEmpty) return;
     final sub = pl[0];
@@ -916,10 +925,16 @@ class PhoneSportUpdate {
 class GpsDelta {
   const GpsDelta({required this.steps, required this.meters});
 
-  /// Cumulative step counter at the time of this GPS update (u24 LE).
+  /// First u24 LE value from the `0x77 0x05` request. Per
+  /// `GHIDRA_DECOMPILATION.md` §3.16 the firmware treats this as
+  /// an arbitrary latitude bit-pattern (NOT steps). The field name
+  /// is kept for backwards compatibility with the original
+  /// APK-derived `PROTOCOL.md`.
   final int steps;
 
-  /// Cumulative distance in meters at the time of this GPS update (u24 LE).
+  /// Second u24 LE value from the `0x77 0x05` request — arbitrary
+  /// longitude bit-pattern (NOT meters). Field name kept for
+  /// backwards compatibility.
   final int meters;
 }
 
