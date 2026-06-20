@@ -110,6 +110,46 @@ void main() {
       await svc.dispose();
     });
 
+    test(
+      '0x48 handshake decodes structured fields per FUN_0082bf40 RE',
+      () async {
+        final host = _StubHost();
+        final svc = Fee7Service.attach(host);
+        final d = Fee7Dispatcher(svc);
+        d.bind();
+
+        final got = d.onHandshake.first;
+        // Build a payload matching the byte order documented in
+        // GHIDRA_DECOMPILATION.md §8.2:
+        //   pl[0..2]   hw_ver bytes (>>16, >>8, &0xff)
+        //   pl[3..4]   pad
+        //   pl[5]      fw_ver >> 16
+        //   pl[6]      pad
+        //   pl[7..8]   fw_ver (&0xff, >>8)
+        //   pl[9..11]  batt_raw (mod 100 → percent)
+        //   pl[12..13] status (low, high)
+        // hw_ver = 0xAABBCC (>>16=0xAA, >>8=0xBB, &0xff=0xCC)
+        // fw_ver = 0x112233 (>>16=0x11, &0xff=0x33, >>8=0x22)
+        // batt_raw = 0x000064 (= 100, mod 100 = 0)
+        // status = 0xBEEF
+        final payload = <int>[
+          0xAA, 0xBB, 0xCC, 0x00, 0x00, // hw_ver
+          0x11, 0x00, 0x33, 0x22, // fw_ver
+          0x00, 0x00, 0x64, // batt_raw = 100
+          0xEF, 0xBE, // status
+        ];
+        final frame = Codec.buildChannelA(Fee7.handshakeResponse, payload);
+        host.inbound.add(frame);
+
+        final r = await got.timeout(const Duration(seconds: 1));
+        expect(r.hwVersion, 0xAABBCC);
+        expect(r.fwVersion, 0x112233);
+        expect(r.batteryPercent, 0);
+        expect(r.status, 0xBEEF);
+        await svc.dispose();
+      },
+    );
+
     test('routes 0x61 to StatusResponse stream with battery+steps', () async {
       final host = _StubHost();
       final svc = Fee7Service.attach(host);

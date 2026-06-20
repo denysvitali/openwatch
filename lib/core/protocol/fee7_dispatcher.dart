@@ -193,13 +193,48 @@ class Fee7Dispatcher {
   }
 
   HandshakeResponse _decodeHandshakeResponse(Uint8List frame, Uint8List pl) {
-    // Firmware sends a 15-byte device-info payload, surfaced as pl (14 bytes
-    // from frame[1..14]) plus the opcode at index 0 of `frame`. We surface
-    // the full 15 bytes so callers can see the opcode + payload together.
+    // Firmware sends a 15-byte device-info payload (see
+    // GHIDRA_DECOMPILATION.md §8.2 / FUN_0082bf40). The body
+    // interleaves four 4-byte fields in a vendor-specific byte
+    // order that does NOT match plain little-endian:
+    //   pl[0..2] = hw_ver (>>16, >>8, &0xff)
+    //   pl[3..4] = pad
+    //   pl[5..8] = fw_ver (&0xff, >>8, >>16 + pad)
+    //   pl[9..11] = batt_raw (mod-100 → percent)
+    //   pl[12..13] = tail (low, high)
+    //
+    // We surface the raw 14 bytes (pl) AND the structured view so
+    // callers can pick the level of detail they want without
+    // re-implementing the unpack.
     final payload = frame.length >= 15
         ? Uint8List.sublistView(frame, 0, 15)
         : Uint8List.fromList(frame);
-    return HandshakeResponse(payload: payload, raw: pl);
+    return HandshakeResponse(
+      payload: payload,
+      raw: pl,
+      hwVersion: _decodeHandshakeHwVersion(pl),
+      fwVersion: _decodeHandshakeFwVersion(pl),
+      batteryPercent: pl.length >= 12
+          ? (pl[9] | (pl[10] << 8) | (pl[11] << 16)) % 100
+          : null,
+      status: pl.length >= 14 ? (pl[12] | (pl[13] << 8)) & 0xFFFF : null,
+    );
+  }
+
+  /// Decode the hardware-version uint24 at pl[0..2] in the order
+  /// documented in `GHIDRA_DECOMPILATION.md` §8.2 — `>>16`, `>>8`,
+  /// `&0xff` (LE-like, high byte first).
+  static int _decodeHandshakeHwVersion(Uint8List pl) {
+    if (pl.length < 3) return 0;
+    return (pl[0] << 16) | (pl[1] << 8) | pl[2];
+  }
+
+  /// Decode the firmware-version uint32 at pl[5], pl[7], pl[8] —
+  /// the bytes are non-contiguous (pl[6] is a pad). Per §8.2:
+  /// `byte 6 = >>16`, `byte 8 = &0xff`, `byte 9 = >>8`.
+  static int _decodeHandshakeFwVersion(Uint8List pl) {
+    if (pl.length < 9) return 0;
+    return (pl[5] << 16) | (pl[8] << 8) | pl[7];
   }
 
   AlertTrigger _decodeAlertTrigger(Uint8List pl) {
@@ -299,10 +334,36 @@ class BloodOxygenUpdate {
 }
 
 /// `0x48` 'H' handshake response — 15-byte device-info payload.
+///
+/// Beyond the raw [payload] / [raw] byte views, the decoder also
+/// surfaces the four fields the firmware ships per
+/// `FUN_0082bf40` / `GHIDRA_DECOMPILATION.md` §8.2:
+///   * [hwVersion]  — hardware revision (e.g. `H59MA_V1.0`)
+///   * [fwVersion]  — firmware version (e.g. `1.00.14`)
+///   * [batteryPercent] — battery counter mod 100 (the firmware
+///     does the divmod 100 for the host)
+///   * [status]     — charge / status bits (low byte = flags,
+///     high byte = state)
 class HandshakeResponse {
-  const HandshakeResponse({required this.payload, required this.raw});
+  const HandshakeResponse({
+    required this.payload,
+    required this.raw,
+    this.hwVersion = 0,
+    this.fwVersion = 0,
+    this.batteryPercent,
+    this.status,
+  });
   final Uint8List payload;
   final Uint8List raw;
+  final int hwVersion;
+  final int fwVersion;
+
+  /// Battery percentage (0..99). `null` if the payload was too
+  /// short to decode.
+  final int? batteryPercent;
+
+  /// Charge / status bits. `null` if the payload was too short.
+  final int? status;
 }
 
 /// `0x50` 'P' alert trigger; payload bytes carry the alarm pattern.
