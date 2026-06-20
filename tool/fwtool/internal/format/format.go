@@ -5,6 +5,10 @@
 // cover every variant the vendor ships. Fields that did not decode
 // confidently are exposed as NamedField{Offset, Size, RawHex} so callers
 // can inspect them without forcing a guess into a typed struct.
+//
+// The field names exposed here were audited in firmwares/FIRMWARE_ANALYSIS.md §11.
+// The prior labels (BuildTime, Unknown32a/b, NonceOrKey, Nonce2, CRC2/3,
+// secondary_signature, embedded_jpeg sections) were known to be wrong.
 package format
 
 import (
@@ -18,19 +22,20 @@ import (
 	"io"
 	"os"
 	"strings"
-	"time"
 )
 
 // Magic is the 4-byte signature that starts every H59MA firmware image.
 var Magic = [4]byte{0xE5, 0xC3, 0xBD, 0x81}
 
 // Fixed offsets / sizes that the header uses regardless of firmware size.
+// All values verified against both v13 and v14 binaries. See
+// firmwares/FIRMWARE_ANALYSIS.md §1 for the corrected field table.
 const (
-	headerMagicOffset       = 0x00
-	headerMagicSize         = 4
-	headerLoadSizeOffset    = 0x04
-	headerFirmwareSizeOff   = 0x08
-	headerUnknown32aOffset  = 0x0C
+	headerMagicOffset     = 0x00
+	headerMagicSize       = 4
+	headerLoadSizeOffset  = 0x04
+	headerFirmwareSizeOff = 0x08
+	headerImageChkaOffset = 0x0C // image-checksum a: 24-bit additive byte-sum
 
 	headerVersionOffset = 0x10
 	headerVersionSize   = 24
@@ -38,20 +43,25 @@ const (
 	headerHWIDOffset = 0x30
 	headerHWIDSize   = 16
 
-	headerBlock2Offset = 0x50 // flags, sdk, build, sig, nonce
-	headerSigOffset    = 0x60
-	headerSigSize      = 16
+	headerBlock2Offset    = 0x50 // flags, sdk, body_size, const_5c
+	headerConst5COffset   = 0x5C
+	headerSignatureAOff   = 0x60
+	headerSignatureASize  = 12
+	headerFlashAppStart   = 0x6C // u32 LE
+	headerFlashAppStart2  = 0x70 // u32 LE (duplicate of 0x6C)
+	headerFlashBaseOffset = 0x78 // u32 LE; value is 0x00826000 in observed samples
 
-	headerBoardMarkerOffset = 0xB0
-	headerSDKStringOffset   = 0xB8 // ASCII "sdk#####"
+	headerConstB4Offset  = 0xB4 // u32 LE (constant)
+	headerBoardMarkerOff = 0xB0 // u32 LE
+	headerSDKStringOff   = 0xB8 // ASCII "sdk#####"
 
-	headerNonce2Offset = 0x1C0
-	headerNonce2Size   = 16
+	headerImageDigestOff  = 0x1C4 // 32 bytes — per-build signature/digest
+	headerImageDigestSize = 32
 
-	headerCRC2Offset = 0x220
-	headerCRC3Offset = 0x340
+	headerConst228Offset  = 0x228 // u32 LE (constant)
+	headerFlashAppEndOff  = 0x22C // u32 LE (per-build, follows body_size)
 
-	headerPayloadOffset = 0x450 // start of ARM-Thumb code (best-effort)
+	headerPayloadOffset = 0x450 // start of ARM-Thumb code
 )
 
 // MinSize is the smallest file size we'll attempt to parse.
@@ -59,28 +69,40 @@ const MinSize = headerPayloadOffset + 16
 
 // Header is the parsed view of the fixed H59MA header.
 type Header struct {
-	Magic         string `json:"magic"`
-	LoadSize      uint32 `json:"load_size"`
-	FirmwareSize  uint32 `json:"firmware_size"`
-	Unknown32a    uint32 `json:"unknown32a"`
+	Magic        string `json:"magic"`
+	LoadSize     uint32 `json:"load_size"`
+	FirmwareSize uint32 `json:"firmware_size"`
+	// ImageChkA is a 24-bit additive byte-sum (high byte always 0x00),
+	// NOT a CRC32 and not a build timestamp. See FIRMWARE_ANALYSIS.md §1.
+	ImageChkA uint32 `json:"image_chk_a"`
 
 	Version string `json:"version"` // e.g. "H59MA_1.00.13_251230"
 	HWID    string `json:"hw_id"`   // e.g. "H59MA_V1.0"
 
-	Flags         uint32 `json:"flags"`
-	SDKID         uint32 `json:"sdk_id"`
-	Unknown32b    uint32 `json:"unknown32b"`
-	BuildTime     uint32 `json:"build_time"`
-	CRCOrA        uint32 `json:"crc_or_a"`
-	Signature     string `json:"signature_hex"`      // 16 raw bytes hex
-	NonceOrKey    string `json:"nonce_or_key_hex"`   // 16 raw bytes hex
+	Flags uint32 `json:"flags"`
+	SDKID uint32 `json:"sdk_id"`
+	// BodySize is the exact size of body.bin = container - 0x450.
+	// Was previously mislabeled "unknown32_b".
+	BodySize  uint32 `json:"body_size"`
+	Const5C   uint32 `json:"const_5c"` // constant 0x7e6b4cf9 — NOT a timestamp
+	// SignatureA is the 12-byte constant blob at 0x60..0x6b.
+	// The prior 16-byte "signature" was 4 bytes too long and absorbed FlashAppStart.
+	SignatureA     string `json:"signature_a_hex"`
+	FlashAppStart  uint32 `json:"flash_app_start"`  // 0x6C — same as 0x70
+	FlashAppStart2 uint32 `json:"flash_app_start2"` // 0x70 — duplicate of 0x6C
+	FlashBase      uint32 `json:"flash_base"`       // 0x78
 
 	BoardMarker uint32 `json:"board_marker"`
 	SDKString   string `json:"sdk_string"`
+	ConstB4     uint32 `json:"const_b4"` // constant 0x1201a39e
 
-	Nonce2 string `json:"nonce2_hex"` // 16 raw bytes hex at 0x1C0
-	CRC2   uint32 `json:"crc2"`
-	CRC3   uint32 `json:"crc3"`
+	// ImageDigest is the real per-build 32-byte signature at 0x1c4.
+	// The prior "nonce2" read 16 bytes at 0x1c0 (4 bytes early) and
+	// absorbed the leading zero padding; it is not a nonce.
+	ImageDigest string `json:"image_digest_hex"`
+
+	Const228    uint32 `json:"const_228"`     // constant 0x0e85d101
+	FlashAppEnd uint32 `json:"flash_app_end"` // per-build upper bound
 
 	Fields []NamedField `json:"fields"`
 }
@@ -105,7 +127,7 @@ type Section struct {
 	Name   string `json:"name"`
 	Offset int64  `json:"offset"`
 	Size   int64  `json:"size"`
-	Kind   string `json:"kind"`           // header, signature, payload, embedded-asset, unknown
+	Kind   string `json:"kind"`            // header, signature, payload, embedded-asset, unknown
 	Format string `json:"format,omitempty"` // png, jpeg, riff, utf16le, ...
 	Note   string `json:"note,omitempty"`
 }
@@ -185,48 +207,67 @@ var notes = []string{
 	"Header layout is reverse-engineered from H59MA 1.00.13 / 1.00.14 binaries.",
 	"Body offset 0x450 begins an ARM-Thumb code region; payload is opaque.",
 	"No explicit section table was found; sections here are derived from marker bytes.",
+	"Field names audited in firmwares/FIRMWARE_ANALYSIS.md §11.",
 }
 
 func decodeHeader(buf []byte) (Header, []NamedField) {
 	h := Header{
-		Magic:        hex.EncodeToString(buf[headerMagicOffset:headerMagicOffset+headerMagicSize]),
+		Magic:        hex.EncodeToString(buf[headerMagicOffset : headerMagicOffset+headerMagicSize]),
 		LoadSize:     binary.LittleEndian.Uint32(buf[headerLoadSizeOffset:]),
 		FirmwareSize: binary.LittleEndian.Uint32(buf[headerFirmwareSizeOff:]),
-		Unknown32a:   binary.LittleEndian.Uint32(buf[headerUnknown32aOffset:]),
-		Version:      readCString(buf[headerVersionOffset : headerVersionOffset+headerVersionSize]),
-		HWID:         readCString(buf[headerHWIDOffset : headerHWIDOffset+headerHWIDSize]),
-		Flags:        binary.LittleEndian.Uint32(buf[headerBlock2Offset:]),
-		SDKID:        binary.LittleEndian.Uint32(buf[headerBlock2Offset+4:]),
-		Unknown32b:   binary.LittleEndian.Uint32(buf[headerBlock2Offset+8:]),
-		BuildTime:    binary.LittleEndian.Uint32(buf[headerBlock2Offset+12:]),
-		CRCOrA:       binary.LittleEndian.Uint32(buf[headerBlock2Offset+16:]),
-		Signature:    hex.EncodeToString(buf[headerSigOffset : headerSigOffset+headerSigSize]),
-		NonceOrKey:   hex.EncodeToString(buf[headerSigOffset+headerSigSize : headerSigOffset+headerSigSize+16]),
-		BoardMarker:  binary.LittleEndian.Uint32(buf[headerBoardMarkerOffset:]),
-		SDKString:    readCString(buf[headerSDKStringOffset : headerSDKStringOffset+8]),
-		Nonce2:       hex.EncodeToString(buf[headerNonce2Offset : headerNonce2Offset+headerNonce2Size]),
-		CRC2:         binary.LittleEndian.Uint32(buf[headerCRC2Offset:]),
-		CRC3:         binary.LittleEndian.Uint32(buf[headerCRC3Offset:]),
+		ImageChkA:    binary.LittleEndian.Uint32(buf[headerImageChkaOffset:]),
+
+		Version: readCString(buf[headerVersionOffset : headerVersionOffset+headerVersionSize]),
+		HWID:    readCString(buf[headerHWIDOffset : headerHWIDOffset+headerHWIDSize]),
+
+		Flags:          binary.LittleEndian.Uint32(buf[headerBlock2Offset:]),
+		SDKID:          binary.LittleEndian.Uint32(buf[headerBlock2Offset+4:]),
+		BodySize:       binary.LittleEndian.Uint32(buf[headerBlock2Offset+8:]),
+		Const5C:        binary.LittleEndian.Uint32(buf[headerConst5COffset:]),
+		SignatureA:     hex.EncodeToString(buf[headerSignatureAOff : headerSignatureAOff+headerSignatureASize]),
+		FlashAppStart:  binary.LittleEndian.Uint32(buf[headerFlashAppStart:]),
+		FlashAppStart2: binary.LittleEndian.Uint32(buf[headerFlashAppStart2:]),
+		FlashBase:      binary.LittleEndian.Uint32(buf[headerFlashBaseOffset:]),
+
+		BoardMarker: binary.LittleEndian.Uint32(buf[headerBoardMarkerOff:]),
+		SDKString:   readCString(buf[headerSDKStringOff : headerSDKStringOff+8]),
+		ConstB4:     binary.LittleEndian.Uint32(buf[headerConstB4Offset:]),
+
+		ImageDigest: hex.EncodeToString(buf[headerImageDigestOff : headerImageDigestOff+headerImageDigestSize]),
+
+		Const228:    binary.LittleEndian.Uint32(buf[headerConst228Offset:]),
+		FlashAppEnd: binary.LittleEndian.Uint32(buf[headerFlashAppEndOff:]),
 	}
 
 	fields := []NamedField{
-		{0x00, 4, "magic", h.Magic, hex.EncodeToString(buf[0x00:0x04]), "H59MA signature E5 C3 BD 81"},
-		{0x04, 4, "load_size", h.LoadSize, hex.EncodeToString(buf[0x04:0x08]), "bytes the bootloader copies to RAM"},
+		{0x00, headerMagicSize, "magic", h.Magic, hex.EncodeToString(buf[0x00:0x04]), "H59MA signature E5 C3 BD 81"},
+		{0x04, 4, "load_size", h.LoadSize, hex.EncodeToString(buf[0x04:0x08]), "bytes the bootloader copies to RAM (= body_size + 0x400)"},
 		{0x08, 4, "firmware_size", h.FirmwareSize, hex.EncodeToString(buf[0x08:0x0C]), "total image size on disk (little-endian u32)"},
-		{0x0C, 4, "unknown32_a", h.Unknown32a, hex.EncodeToString(buf[0x0C:0x10]), "always 0x00CE90EE in observed samples"},
+		{0x0C, 4, "image_chk_a", h.ImageChkA, hex.EncodeToString(buf[0x0C:0x10]), "24-bit additive byte-sum (high byte always 0x00); NOT CRC32, NOT a timestamp"},
 		{0x10, headerVersionSize, "version_string", h.Version, hex.EncodeToString(buf[0x10:0x10+headerVersionSize]), "ASCII, e.g. H59MA_1.00.13_251230"},
 		{0x30, headerHWIDSize, "hw_id", h.HWID, hex.EncodeToString(buf[0x30:0x30+headerHWIDSize]), "hardware identifier, e.g. H59MA_V1.0"},
-		{0x50, 4, "flags", h.Flags, hex.EncodeToString(buf[0x50:0x54]), "feature flags (semantics unknown)"},
+		{0x40, 16, "reserved", nil, hex.EncodeToString(buf[0x40:0x50]), "zero padding"},
+		{0x50, 4, "flags", h.Flags, hex.EncodeToString(buf[0x50:0x54]), "build/feature flags"},
 		{0x54, 4, "sdk_id", h.SDKID, hex.EncodeToString(buf[0x54:0x58]), "0x00092793 in observed samples"},
-		{0x58, 4, "unknown32_b", h.Unknown32b, hex.EncodeToString(buf[0x58:0x5C]), ""},
-		{0x5C, 4, "build_time_unix", time.Unix(int64(h.BuildTime), 0).UTC().Format(time.RFC3339), hex.EncodeToString(buf[0x5C:0x60]), "0x? - interpret as little-endian unix timestamp or counter"},
-		{0x60, headerSigSize, "signature_a", h.Signature, hex.EncodeToString(buf[0x60:0x60+headerSigSize]), "0x? - 16-byte signature-like block; algorithm unknown"},
-		{0x70, 16, "nonce_or_key", h.NonceOrKey, hex.EncodeToString(buf[0x70:0x80]), "0x? - looks like a key/nonce; do not interpret"},
+		{0x58, 4, "body_size", h.BodySize, hex.EncodeToString(buf[0x58:0x5C]), "exact size of body.bin (= container - 0x450)"},
+		{0x5C, 4, "const_5c", h.Const5C, hex.EncodeToString(buf[0x5C:0x60]), "constant 0x7e6b4cf9 (byte-identical across builds); first u32 of GUID 7e6b4cf9-c511-11eb-8282-f74a0c0cef5b; NOT a build timestamp"},
+		{0x60, headerSignatureASize, "signature_a", h.SignatureA, hex.EncodeToString(buf[0x60:0x60+headerSignatureASize]), "12-byte constant blob; algorithm unknown"},
+		{0x6C, 4, "flash_app_start", h.FlashAppStart, hex.EncodeToString(buf[0x6C:0x70]), "app region start = flash_base + 0x400"},
+		{0x70, 4, "flash_app_start2", h.FlashAppStart2, hex.EncodeToString(buf[0x70:0x74]), "duplicate of flash_app_start @ 0x6C"},
+		{0x74, 4, "reserved", nil, hex.EncodeToString(buf[0x74:0x78]), "zero"},
+		{0x78, 4, "flash_base", h.FlashBase, hex.EncodeToString(buf[0x78:0x7C]), "flash region base (= flash_app_start - 0x400)"},
 		{0xB0, 4, "board_marker", h.BoardMarker, hex.EncodeToString(buf[0xB0:0xB4]), "0x00001041 in observed samples"},
+		{0xB4, 4, "const_b4", h.ConstB4, hex.EncodeToString(buf[0xB4:0xB8]), "constant 0x1201a39e"},
 		{0xB8, 8, "sdk_string", h.SDKString, hex.EncodeToString(buf[0xB8:0xC0]), "ASCII, e.g. sdk#####"},
-		{0x1C0, headerNonce2Size, "nonce2", h.Nonce2, hex.EncodeToString(buf[0x1C0:0x1C0+headerNonce2Size]), "0x? - 16-byte block before payload start"},
-		{0x220, 4, "crc2", h.CRC2, hex.EncodeToString(buf[0x220:0x224]), "0x? - checksum slot"},
-		{0x340, 4, "crc3", h.CRC3, hex.EncodeToString(buf[0x340:0x344]), "0x? - checksum slot"},
+		{0x1C0, 4, "reserved", nil, hex.EncodeToString(buf[0x1C0:0x1C4]), "zero (leading zero padding of image_digest slot)"},
+		{0x1C4, headerImageDigestSize, "image_digest", h.ImageDigest, hex.EncodeToString(buf[0x1C4:0x1C4+headerImageDigestSize]), "per-build 32-byte digest (SHA-256-sized); the real signature; NOT sha256 of any contiguous window of the image"},
+		{0x1E4, 68, "reserved", nil, hex.EncodeToString(buf[0x1E4:0x228]), "zero padding"},
+		{0x228, 4, "const_228", h.Const228, hex.EncodeToString(buf[0x228:0x22C]), "constant 0x0e85d101"},
+		{0x22C, 4, "flash_app_end", h.FlashAppEnd, hex.EncodeToString(buf[0x22C:0x230]), "app region end (= flash_app_start + load_size)"},
+		{0x230, 256, "reserved", nil, hex.EncodeToString(buf[0x230:0x330]), "zero padding"},
+		{0x330, 16, "erase_marker1", nil, hex.EncodeToString(buf[0x330:0x340]), "all 0xFF"},
+		{0x340, 256, "reserved", nil, hex.EncodeToString(buf[0x340:0x440]), "zero padding"},
+		{0x440, 16, "erase_marker2", nil, hex.EncodeToString(buf[0x440:0x450]), "all 0xFF (immediately before the body trampoline at 0x450)"},
 	}
 
 	return h, fields
@@ -235,19 +276,6 @@ func decodeHeader(buf []byte) (Header, []NamedField) {
 func deriveSections(buf []byte, size int64) []Section {
 	sects := []Section{
 		{Name: "header", Offset: 0, Size: headerPayloadOffset, Kind: "header", Note: "decoded H59MA header"},
-	}
-
-	// Mark the secondary 16-byte signature-like block we noticed at 0x440
-	// (immediately before the body). Best-effort: only emit when it differs
-	// from the zero block, otherwise it's just padding.
-	if size > 0x460 {
-		candidate := buf[0x440:0x450]
-		if !bytes.Equal(candidate, make([]byte, 16)) {
-			sects = append(sects, Section{
-				Name: "secondary_signature", Offset: 0x440, Size: 16,
-				Kind: "signature", Note: "0x? — 16-byte block at body boundary",
-			})
-		}
 	}
 
 	// Body: anything from headerPayloadOffset to EOF.
@@ -268,6 +296,11 @@ func deriveSections(buf []byte, size int64) []Section {
 	return sects
 }
 
+// jpegSOI requires a full JPEG SOI marker (FFD8FF) followed by a plausible
+// APPn/JFIF/Exif identifier (E0/E1/DB/EE/etc.). Single-byte FFD8 is not enough
+// because the bytes FF D8 also occur as Thumb-2 instruction pairs.
+var jpegSOI = []byte{0xFF, 0xD8, 0xFF}
+
 func findEmbedded(buf []byte, size int64) []Section {
 	type marker struct {
 		needle  []byte
@@ -275,12 +308,15 @@ func findEmbedded(buf []byte, size int64) []Section {
 		kind    string
 		format  string
 		minSize int64
+		// requireStrongSOI forces a stricter check for formats (JPEG) where
+		// the magic bytes overlap with ARM-Thumb instruction pairs.
+		requireStrongSOI bool
 	}
 
 	markers := []marker{
-		{[]byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A}, "embedded_png", "embedded-asset", "png", 64},
-		{[]byte{'R', 'I', 'F', 'F'}, "embedded_riff", "embedded-asset", "riff", 32},
-		{[]byte{0xFF, 0xD8, 0xFF}, "embedded_jpeg", "embedded-asset", "jpeg", 64},
+		{[]byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A}, "embedded_png", "embedded-asset", "png", 64, false},
+		{[]byte{'R', 'I', 'F', 'F'}, "embedded_riff", "embedded-asset", "riff", 32, false},
+		{jpegSOI, "embedded_jpeg", "embedded-asset", "jpeg", 64, true},
 	}
 
 	var out []Section
@@ -296,6 +332,20 @@ func findEmbedded(buf []byte, size int64) []Section {
 			if abs >= size {
 				break
 			}
+			// Strong-SOI guard: for JPEG, the third byte must be a valid
+			// marker (E0..EF for APPn, DB for DQT, FE for COM, C0..CF for SOF,
+			// C4 for DHT, DA for SOS, 00 for stuffed byte in entropy data,
+			// EE for Adobe). The prior heuristic misidentified Thumb-2
+			// instruction pairs starting with 0xFF 0xD8 as JPEG SOI.
+			if m.requireStrongSOI {
+				if abs+3 > size {
+					continue
+				}
+				b3 := buf[abs+3]
+				if !isValidJpegMarker(b3) {
+					continue
+				}
+			}
 			end := guessAssetEnd(buf, abs, size, m.format)
 			if end-abs < m.minSize {
 				continue
@@ -310,6 +360,31 @@ func findEmbedded(buf []byte, size int64) []Section {
 		}
 	}
 	return out
+}
+
+// isValidJpegMarker returns true if b is a legal third byte of a JPEG SOI
+// sequence (FFD8FFxx). APPn markers are E0..EF, DQT is DB, DHT is C4, SOF
+// is C0..CF except C4/C8/CC, DRI is DD, RSTn are D0..D7, SOI is D8, EOI
+// is D9, SOS is DA, COM is FE, TEM is 01, and FF is fill. The byte after
+// FFD8FF in a real JPEG stream is always one of these.
+//
+// We accept anything in the set {00, 01, C0..C7, C9..CB, CD..CF, D0..D7,
+// D9, DA, DB, DD, DE, DF, E0..EF, FE} to allow APP0 (E0 = JFIF), APP1
+// (E1 = Exif), and the common SOF/SOS/SOST markers.
+func isValidJpegMarker(b byte) bool {
+	switch {
+	case b == 0x00, b == 0x01, b == 0xFE:
+		return true
+	case b >= 0xC0 && b <= 0xC3, b == 0xC5, b == 0xC6, b == 0xC7,
+		b == 0xC9, b == 0xCA, b == 0xCB, b == 0xCD, b == 0xCE, b == 0xCF:
+		return true
+	case b >= 0xD0 && b <= 0xD7, b == 0xD9, b == 0xDA, b == 0xDB,
+		b == 0xDD, b == 0xDE, b == 0xDF:
+		return true
+	case b >= 0xE0 && b <= 0xEF:
+		return true
+	}
+	return false
 }
 
 // guessAssetEnd returns the best-effort end offset for an asset that
@@ -349,7 +424,8 @@ func guessAssetEnd(buf []byte, start, size int64, format string) int64 {
 			return end
 		}
 	case "jpeg":
-		// Scan for FFD9 (EOI) within cap bytes.
+		// Scan for FFD9 (EOI) within cap bytes. We require a leading FF byte
+		// to avoid matching arbitrary 0xD9 bytes inside entropy-coded data.
 		limit := start + cap
 		if limit > size {
 			limit = size

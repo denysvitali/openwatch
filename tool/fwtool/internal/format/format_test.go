@@ -261,6 +261,159 @@ func TestParseRejectsTooSmall(t *testing.T) {
 	}
 }
 
+// TestHeaderFieldCorrections pins the field-level corrections from
+// firmwares/FIRMWARE_ANALYSIS.md §11. These assertions would have failed
+// against the prior BuildTime/Unknown32a/Nonce2/etc. mislabels.
+func TestHeaderFieldCorrections(t *testing.T) {
+	for _, name := range []string{"H59MA_1.00.13_251230.bin", "H59MA_1.00.14_260508.bin"} {
+		t.Run(name, func(t *testing.T) {
+			_, f := loadFirmware(t, name)
+
+			// (1) Const5C is a u32, not a parsed RFC3339 timestamp.
+			if f.Header.Const5C != 0x7e6b4cf9 {
+				t.Errorf("const_5c = %#x, want 0x7e6b4cf9", f.Header.Const5C)
+			}
+			// (2) ImageChkA is 24-bit additive, high byte 0x00, varies per build.
+			if f.Header.ImageChkA&0xFF000000 != 0 {
+				t.Errorf("image_chk_a high byte = %#x, want 0x00", f.Header.ImageChkA>>24)
+			}
+
+			// (3) SignatureA is 12 bytes hex (24 hex chars), not 16.
+			if got := len(f.Header.SignatureA); got != 24 {
+				t.Errorf("signature_a_hex length = %d, want 24 hex chars (12 bytes)", got)
+			}
+
+			// (4) Flash pointer cluster.
+			if f.Header.FlashBase != 0x00826000 {
+				t.Errorf("flash_base = %#x, want 0x00826000", f.Header.FlashBase)
+			}
+			if f.Header.FlashAppStart != 0x00826400 {
+				t.Errorf("flash_app_start = %#x, want 0x00826400", f.Header.FlashAppStart)
+			}
+			if f.Header.FlashAppStart != f.Header.FlashAppStart2 {
+				t.Errorf("flash_app_start (%#x) != flash_app_start2 (%#x)", f.Header.FlashAppStart, f.Header.FlashAppStart2)
+			}
+
+			// (5) ImageDigest is 32 bytes hex (64 chars), at 0x1c4, varies per build.
+			if got := len(f.Header.ImageDigest); got != 64 {
+				t.Errorf("image_digest_hex length = %d, want 64 hex chars (32 bytes)", got)
+			}
+
+			// (9) New fields exposed.
+			if f.Header.ConstB4 != 0x1201a39e {
+				t.Errorf("const_b4 = %#x, want 0x1201a39e", f.Header.ConstB4)
+			}
+			if f.Header.Const228 != 0x0e85d101 {
+				t.Errorf("const_228 = %#x, want 0x0e85d101", f.Header.Const228)
+			}
+			// flash_app_end varies per build. Pin the per-build values
+			// (no clean algebraic relationship to load_size — it is a
+			// per-build upper bound of the loaded image).
+			if name == "H59MA_1.00.13_251230.bin" && f.Header.FlashAppEnd != 0x00847860 {
+				t.Errorf("v13 flash_app_end = %#x, want 0x00847860", f.Header.FlashAppEnd)
+			}
+			if name == "H59MA_1.00.14_260508.bin" && f.Header.FlashAppEnd != 0x00845c14 {
+				t.Errorf("v14 flash_app_end = %#x, want 0x00845c14", f.Header.FlashAppEnd)
+			}
+
+			// (10) BodySize = container - 0x450.
+			if got, want := uint32(f.Size-0x450), f.Header.BodySize; got != want {
+				t.Errorf("body_size = %d, want %d (file_size - 0x450)", got, want)
+			}
+		})
+	}
+}
+
+// TestConst5CIsIdenticalAcrossBuilds pins the finding that 0x5c is a
+// fixed GUID, not a build timestamp.
+func TestConst5CIsIdenticalAcrossBuilds(t *testing.T) {
+	_, a := loadFirmware(t, "H59MA_1.00.13_251230.bin")
+	_, b := loadFirmware(t, "H59MA_1.00.14_260508.bin")
+	if a.Header.Const5C != b.Header.Const5C {
+		t.Errorf("const_5c differs: v13=%#x v14=%#x (should be byte-identical)", a.Header.Const5C, b.Header.Const5C)
+	}
+}
+
+// TestImageDigestVaries pins the finding that 0x1c4 is a per-build
+// signature.
+func TestImageDigestVaries(t *testing.T) {
+	_, a := loadFirmware(t, "H59MA_1.00.13_251230.bin")
+	_, b := loadFirmware(t, "H59MA_1.00.14_260508.bin")
+	if a.Header.ImageDigest == b.Header.ImageDigest {
+		t.Errorf("image_digest identical across v13 and v14 (should differ)")
+	}
+	// Pin the verified per-build values.
+	if got, want := a.Header.ImageDigest, "8d50aa228b80d953cbf616006c7954f46787f4f12deda09fcb0ca9a242178bb1"; got != want {
+		t.Errorf("v13 image_digest = %s, want %s", got, want)
+	}
+	if got, want := b.Header.ImageDigest, "47d3b81a34034731132ef839435d7ee791ec57e8c6d648daff094a4d0d354648"; got != want {
+		t.Errorf("v14 image_digest = %s, want %s", got, want)
+	}
+}
+
+// TestNoSpuriousJpegSection pins the fix for the embedded_jpeg false
+// positive at body 0x21EEF (v13) / 0x202A3 (v14). The bytes there are
+// const / string-table data, not a JPEG; the third byte of any genuine
+// JPEG SOI must be a valid marker (0x00/0x01/0xC0-0xCF/0xD0-0xD7/etc.).
+func TestNoSpuriousJpegSection(t *testing.T) {
+	for _, name := range []string{"H59MA_1.00.13_251230.bin", "H59MA_1.00.14_260508.bin"} {
+		t.Run(name, func(t *testing.T) {
+			_, f := loadFirmware(t, name)
+			for _, s := range f.Sections {
+				if s.Format == "jpeg" {
+					t.Errorf("unexpected jpeg section %s at %#x (no real JPEG exists in this firmware)", s.Name, s.Offset)
+				}
+			}
+		})
+	}
+}
+
+// TestNoSecondarySignatureSection pins the fix for the bogus
+// "secondary_signature" section that was being emitted for the all-0xFF
+// erase marker at 0x440..0x450. The corrected deriveSections only emits
+// real asset sections.
+func TestNoSecondarySignatureSection(t *testing.T) {
+	_, f := loadFirmware(t, "H59MA_1.00.13_251230.bin")
+	for _, s := range f.Sections {
+		if s.Name == "secondary_signature" {
+			t.Errorf("unexpected section %q at %#x (was mislabeling the 0x440 erase marker)", s.Name, s.Offset)
+		}
+	}
+}
+
+// TestNoLegacyFieldsInJSON pins that the renamed fields are gone and no
+// reference to the old names (BuildTime, Unknown32a, Nonce2, etc.) leaks
+// into the marshalled header.
+func TestNoLegacyFieldsInJSON(t *testing.T) {
+	_, f := loadFirmware(t, "H59MA_1.00.13_251230.bin")
+	jb, err := json.Marshal(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(jb)
+	legacy := []string{
+		`"build_time"`, `"unknown32a"`, `"unknown32_b"`,
+		`"nonce_or_key"`, `"nonce2"`, `"crc2"`, `"crc3"`,
+		`"crc_or_a"`,
+	}
+	for _, k := range legacy {
+		if strings.Contains(s, k) {
+			t.Errorf("JSON still contains legacy field %s", k)
+		}
+	}
+	// New fields must be present.
+	for _, k := range []string{
+		`"const_5c"`, `"const_b4"`, `"const_228"`,
+		`"body_size"`, `"image_chk_a"`, `"image_digest_hex"`,
+		`"flash_app_start"`, `"flash_app_end"`, `"flash_base"`,
+		`"signature_a_hex"`,
+	} {
+		if !strings.Contains(s, k) {
+			t.Errorf("JSON missing new field %s", k)
+		}
+	}
+}
+
 func hasRegionAt(rs []Region, off int64, status string) bool {
 	return hasRegionOverlapping(rs, off, off+1, status)
 }
