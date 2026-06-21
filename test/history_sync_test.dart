@@ -316,8 +316,37 @@ void main() {
         final d = ChannelADispatcher(t);
         d.bind();
         final sync = _testSync(t, d);
-        final records = <PressureRecord>[];
-        final sub = sync.pressureRecords.listen(records.add);
+
+        final producerHeader = [0xAA, 0xBB, 0xCC, 0xDD];
+        final body = List<int>.generate(45, (i) => 0x10 + i);
+        final all = [...producerHeader, ...body];
+        // Pad the 49-byte payload up to 56 = 4 frames × 14 bytes so
+        // the test assertions don't depend on trailing-zero behaviour.
+        final padded = [...all, ...List<int>.filled(56 - all.length, 0xEE)];
+        const chunkSize = 14;
+
+        // Start listening first so no chunk is lost, then await the
+        // single assembled record instead of polling a fixed delay.
+        // This removes the timing flakiness that failed on slower CI
+        // runners when the 250 ms quiet window hadn't quite fired.
+        final expectation = expectLater(
+          sync.pressureRecords,
+          emits(
+            isA<PressureRecord>()
+                .having((r) => r.slotId, 'slotId', 0x00)
+                .having((r) => r.header, 'header', producerHeader)
+                .having((r) => r.body, 'body', [
+                  ...body,
+                  0xEE,
+                  0xEE,
+                  0xEE,
+                  0xEE,
+                  0xEE,
+                  0xEE,
+                  0xEE,
+                ]),
+          ),
+        );
 
         // Header: pl[2] == 0x1E discriminator, pl[0] = slotId = 0
         t.inA.add(
@@ -327,23 +356,6 @@ void main() {
             0x1e, // discriminator
           ]),
         );
-        // 4 chunks — each carries up to 13 payload bytes; total
-        // payload = 4 (producer header) + 45 (body) = 49 bytes per
-        // §3.20 (`FUN_0082c988(0x37, buf, 0x31)`). Distributed
-        // across 4 frames: 13, 12, 12, 12 bytes (last frame is
-        // short). The wire helper `buildChannelA` zero-pads the
-        // trailing byte when subData < 14 bytes, so we always send
-        // 14-byte subData frames — anything shorter would inject
-        // a stray 0 into the assembled body and skew assertions.
-        // The dispatcher only emits the first 14 bytes regardless,
-        // so over-padding is harmless.
-        final producerHeader = [0xAA, 0xBB, 0xCC, 0xDD];
-        final body = List<int>.generate(45, (i) => 0x10 + i);
-        final all = [...producerHeader, ...body];
-        // Pad the 49-byte payload up to 56 = 4 frames × 14 bytes so
-        // the test assertions don't depend on trailing-zero behaviour.
-        final padded = [...all, ...List<int>.filled(56 - all.length, 0xEE)];
-        const chunkSize = 14;
         for (var i = 0; i < 4; i++) {
           t.inA.add(
             Codec.buildChannelA(
@@ -352,23 +364,8 @@ void main() {
             ),
           );
         }
-        // 250 ms quiet window + a little slack.
-        await Future<void>.delayed(const Duration(milliseconds: 250));
 
-        expect(records, hasLength(1));
-        final r = records.single;
-        expect(r.slotId, 0x00);
-        expect(r.header, producerHeader);
-        // The assembled payload is 4 × 14 = 56 bytes; body is
-        // payload[4..56] = 52 bytes (45 real + 7 sentinels).
-        expect(
-          r.body,
-          [...body, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE],
-          reason:
-              'producer header is 4 B, body is the remaining 52 B '
-              'from 4 × 14-byte frames',
-        );
-        await sub.cancel();
+        await expectation;
         sync.dispose();
         d.dispose();
       },
@@ -380,16 +377,34 @@ void main() {
       final d = ChannelADispatcher(t);
       d.bind();
       final sync = _testSync(t, d);
-      final records = <HrvRecord>[];
-      final sub = sync.hrvRecords.listen(records.add);
 
-      // Header: pl[2] == 0x1E discriminator, pl[0] = slotId = 0
-      t.inA.add(Codec.buildChannelA(OpA.hrv, [0x00, 0x05, 0x1e]));
       final producerHeader = [0x11, 0x22, 0x33, 0x44];
       final body = List<int>.generate(45, (i) => 0x40 + i);
       final all = [...producerHeader, ...body];
       final padded = [...all, ...List<int>.filled(56 - all.length, 0xEE)];
       const chunkSize = 14;
+
+      final expectation = expectLater(
+        sync.hrvRecords,
+        emits(
+          isA<HrvRecord>()
+              .having((r) => r.slotId, 'slotId', 0x00)
+              .having((r) => r.header, 'header', producerHeader)
+              .having((r) => r.body, 'body', [
+                ...body,
+                0xEE,
+                0xEE,
+                0xEE,
+                0xEE,
+                0xEE,
+                0xEE,
+                0xEE,
+              ]),
+        ),
+      );
+
+      // Header: pl[2] == 0x1E discriminator, pl[0] = slotId = 0
+      t.inA.add(Codec.buildChannelA(OpA.hrv, [0x00, 0x05, 0x1e]));
       for (var i = 0; i < 4; i++) {
         t.inA.add(
           Codec.buildChannelA(
@@ -398,15 +413,8 @@ void main() {
           ),
         );
       }
-      await Future<void>.delayed(const Duration(milliseconds: 250));
 
-      expect(records, hasLength(1));
-      final r = records.single;
-      expect(r.slotId, 0x00);
-      expect(r.header, producerHeader);
-      // Same shape as the pressure test — see comments above.
-      expect(r.body, [...body, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE]);
-      await sub.cancel();
+      await expectation;
       sync.dispose();
       d.dispose();
     });
