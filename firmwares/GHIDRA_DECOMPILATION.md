@@ -209,17 +209,144 @@ a parameter, not a separate dispatch.
 
 ### Key functions
 
-| Address | Function | Role |
-|---|---|---|
-| `0x0082efea` | `FUN_0082efea` | **Parser / fragment reassembly** |
-| `0x0082eee6` | `FUN_0082eee6` | **Dispatcher** after full frame received |
-| `0x0082fc0c` | `FUN_0082fc0c` | **Async command processor** (runs from state stored by `FUN_0082f4fa`) |
-| `0x0082f114` | `FUN_0082f114` | **CRC-16/MODBUS** (init `0xFFFF`, poly `0xA001`) |
-| `0x0082ece0` | `FUN_0082ece0` | **Frame builder / sender** (queues `0xBC` notifications) |
-| `0x0082ee00` | `FUN_0082ee00` | **ACK/NAK sender** |
-| `0x0082f098` | `FUN_0082f098` | Starts 2000 ms fragment timeout timer (`m_ble_packet_timer_id`) |
-| `0x0082f4fa` | `FUN_0082f4fa` | Stores parsed Channel B command for asynchronous consumption |
-| `0x0082fe52` | `FUN_0082fe52` | OTA state machine (DFU) |
+| Address | Function | Role | Detailed in |
+|---|---|---|---|
+| `0x0082efea` | `FUN_0082efea` | **Parser / fragment reassembly** | §2.0.1 |
+| `0x0082eee6` | `FUN_0082eee6` | **Dispatcher** after full frame received | §2.0.1 |
+| `0x0082fc0c` | `FUN_0082fc0c` | **Async command processor** (runs from state stored by `FUN_0082f4fa`) | §2.0.1 |
+| `0x0082f114` | `FUN_0082f114` | **CRC-16/MODBUS** (init `0xFFFF`, poly `0xA001`) | §2.0.1 (disassembly) |
+| `0x0082ece0` | `FUN_0082ece0` | **Frame builder / sender** (queues `0xBC` notifications) | §2.0.1 |
+| `0x0082ee00` | `FUN_0082ee00` | **ACK/NAK sender** | §2.0 (NAK packet) |
+| `0x0082f098` | `FUN_0082f098` | Starts 2000 ms fragment timeout timer (`m_ble_packet_timer_id`) | §2.0.1 |
+| `0x0082f4fa` | `FUN_0082f4fa` | Stores parsed Channel B command for asynchronous consumption | §2.0.1 |
+| `0x0082fe52` | `FUN_0082fe52` | OTA state machine (DFU) | §5.1 |
+
+#### 2.0.1 Channel-B internal helpers
+
+The 8 helpers listed above form the **Channel-B internal
+runtime**. They are small (most are <50 instructions of
+compiled code) but each plays a distinct role. This sub-
+section documents them in one place so a host SDK author
+who needs to understand the Channel-B packet flow can read
+all the helpers together.
+
+##### `FUN_0082efea` — parser / fragment reassembly
+
+The **per-frame state machine** for receiving Channel-B
+frames. Splits a frame into the *6-byte header* (magic + cmd +
+payload-length LE u16 + CRC-16 LE u16) and the *variable-
+length payload*. Handles fragment reassembly: if the host
+sends `frame_0 | frame_1 | frame_2`, the parser buffers the
+payloads until `frame_N` arrives with the expected total
+length, then dispatches via `FUN_0082eee6` (§2.0.1).
+
+The state byte at `DAT_0082f0f0 + 0xb` tracks the parser
+mode (0 = waiting for first fragment, 1 = continuing).
+The 2-second fragment timeout (`FUN_0082f098` §2.0.1) aborts
+if the host doesn't deliver all fragments in time.
+
+##### `FUN_0082eee6` — dispatcher
+
+Called when `FUN_0082efea` has assembled a complete frame.
+Runs the **opcode → handler** table that maps Channel-B
+cmd bytes to handler functions (the §2.1-§2.11 handlers).
+After dispatching, calls `FUN_0082f4fa` (§2.0.1) to store
+the parsed cmd in the async queue, then `FUN_0082fc0c`
+(§2.0.1) to consume it later.
+
+##### `FUN_0082fc0c` — async command processor
+
+The **worker that drains the deferred queue**. Pops the
+parsed cmd from `DAT_0082fcbc` (§2.1), runs the
+per-cmd handler (§2.1-§2.11), and emits the response via
+`FUN_0082ece0` (§2.0.1). The cmd dispatch in §2.0 is a
+**synchronous** parser/dispatcher pair; the cmd *handler*
+in §2.0 is an **async** worker — that's why we have two
+separate functions.
+
+##### `FUN_0082f4fa` — store parsed cmd
+
+The **queue-writer** for the async cmd path. Sets
+`DAT_0082f894 + 1 = cmd`, copies the payload ptr into
+`DAT_0082f894 + 4`, sets `DAT_0082f894 + 0xc = length`.
+The `FUN_0082fc0c` worker (§2.0.1) reads these back when it
+runs the async handler.
+
+##### `FUN_0082ece0` — frame builder / sender
+
+The **symmetric counterpart** of `FUN_0082efea`. Reads the
+cmd byte, the payload, and the payload length, computes
+the CRC-16/MODBUS over the payload via `FUN_0082f114`
+(§2.0.1), and writes the assembled 0xBC-magic frame into the
+notify ring at `DAT_0082edbc + 0xc + slot_idx * 0xb6`,
+then advances the slot index (wraps at 8 = 0x180 / 0xb6).
+Calls `FUN_0082eb8a` to kick BLE notify transmission
+after the frame is queued.
+
+##### `FUN_0082ee00` — ACK/NAK sender
+
+See §2.0 for the full NAK packet layout. The ACK/NAK sender
+is just a §2.0 NAK frame builder with `cmd = req_cmd,
+error_code = 1/2/0x10/0x14`. The §2.0 host-SDK recipe (§2.0)
+shows how to parse the returned NAK.
+
+##### `FUN_0082f098` — 2-second fragment timeout
+
+Starts the BLE packet timer with a 2000 ms timeout. The
+parser's state machine (§2.0.1) is reset if the timeout
+fires before all fragments arrive. The timer ID
+`m_ble_packet_timer_id` is a global in the BLE stack.
+
+##### `FUN_0082f114` — CRC-16/MODBUS
+
+See the disassembly below §2.0 for the algorithm. The CRC
+table at `DAT_0082f158` is a 512-byte lookup table of the
+precomputed reflected polynomial-0xA001 CRC for bytes 0..255.
+Each entry is a u16 LE; the function indexes by `2 *
+(byte ^ crc_lo)` to pick the table entry.
+
+The `DAT_0082f154` global holds the initial CRC value
+`0xFFFF` — the standard MODBUS CRC initial value. The
+`DAT_0082f158` global holds the table base.
+
+#### 2.0.2 The Channel-B `DAT_0082f894` async state structure
+
+The async cmd path uses a *single* state structure at
+`DAT_0082f894` (the same buffer the sleep context uses, but
+for a different purpose — the firmware reuses the buffer for
+the cmd state to save memory).
+
+| Off | Field | Notes |
+|---:|---|---|
+| `+1` | `cmd` (u8) | the parsed cmd byte |
+| `+4` | `payload_ptr` (u32) | pointer to the cmd payload in some buffer |
+| `+0xc` | `payload_len` (u16) | length of the payload in bytes |
+
+The cmd dispatcher writes these fields when `FUN_0082eee6`
+(§2.0.1) completes the frame; the async worker
+`FUN_0082fc0c` (§2.0.1) reads them back. The buffer is
+shared with the sleep data context (which uses the *same*
+`DAT_0082f894` pointer but different fields).
+
+#### Why this sub-section exists
+
+The §2.0 `Key functions` table at line 210 lists 8
+helpers that together form the Channel-B internal runtime,
+but the per-handler sections (§2.1-§2.11) only document the
+**handler** parts (the cmd bytes). Without §2.0.1-§2.0.2,
+a host SDK author who needs to understand the *internal*
+Channel-B pipeline (parser / dispatcher / state store /
+frame builder / notify / CRC) has to read the §2.0 table
+plus the disassembly at §2.0 line 491 and infer the
+relationships.
+
+This sub-section pulls the threads together: the 8
+helpers form a **6-step pipeline** (parse → store →
+dispatch → CRC → build frame → notify) that handles every
+Channel-B request/response cycle. The pipeline is *symmetric*
+(parse ↔ build, store ↔ consume) — the same `FUN_0082f4fa`
+that stores a parsed cmd also serves as the input buffer
+for `FUN_0082fc0c` which consumes it.
 
 ### Parser behavior (`FUN_0082efea`)
 
