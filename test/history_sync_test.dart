@@ -51,15 +51,20 @@ HistorySync _testSync(
   _StubTransport t,
   ChannelADispatcher d, {
   ChannelBParser? bParser,
-}) => HistorySync(
-  t,
-  (_) {},
-  dispatcher: d,
-  bParser: bParser,
-  drainDuration: const Duration(milliseconds: 50),
-  postCommandDelay: Duration.zero,
-  fragmentQuietWindow: const Duration(milliseconds: 50),
-);
+}) {
+  // Bind the Channel-B parser to the stub transport so test-injected
+  // Channel-B frames are actually reassembled and dispatched.
+  bParser?.bind();
+  return HistorySync(
+    t,
+    (_) {},
+    dispatcher: d,
+    bParser: bParser,
+    drainDuration: const Duration(milliseconds: 50),
+    postCommandDelay: Duration.zero,
+    fragmentQuietWindow: const Duration(milliseconds: 50),
+  );
+}
 
 void main() {
   group('HistorySync', () {
@@ -312,8 +317,9 @@ void main() {
       final sync = _testSync(t, d);
       final syncFuture = sync.syncAll(daysBack: 2);
 
-      // Wait for the first day (today) HR poll to be sent.
-      await Future<void>.delayed(const Duration(milliseconds: 150));
+      // Wait until today's HR poll is active (_currentSyncDay == today).
+      // drainDuration is 50 ms, so the first-day window is short.
+      await Future<void>.delayed(const Duration(milliseconds: 25));
 
       // Today: send a header + chunk 1 that will NOT flush yet (seq=2).
       // Day-start timestamp = 2026-06-19 00:00 UTC = 0x6A34F600 (LE).
@@ -321,25 +327,21 @@ void main() {
       t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x18, 0x80, 0x05]));
       t.inA.add(
         Codec.buildChannelA(OpA.readHeartRate, [
-          0x01, // seq=1 (need 2 chunks to flush)
+          0x02, // seq=2 (need 2 chunks to flush)
           ...dayStartBytes,
           0x60, 0x64, 0x66, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ]),
       );
 
-      // Let the drain for today run.
-      await Future<void>.delayed(const Duration(milliseconds: 150));
-
-      // Now the sync loop moves to yesterday (day 1). The chunk for
-      // today is still pending in _hrChunks because seq=2 was needed.
-      // Wait for yesterday's poll to be sent.
-      await Future<void>.delayed(const Duration(milliseconds: 150));
+      // Let today's drain finish and give yesterday's poll time to start
+      // so that _currentSyncDay has moved on.
+      await Future<void>.delayed(const Duration(milliseconds: 85));
 
       // Now inject the SECOND chunk for TODAY, but AFTER the sync loop
       // has moved _currentSyncDay to yesterday. In the old code this
       // would be mis-attributed to yesterday because _flushHrChunks read
-      // _currentSyncDay at flush time. With HS-8 fix, the day is
-      // captured in the _RxEntry when the frame arrives.
+      // _currentSyncDay at flush time. With HS-8 fix, the series day is
+      // captured when the 0x18 header arrives.
       t.inA.add(
         Codec.buildChannelA(OpA.readHeartRate, [
           0x02, // seq=2 (now count >= seq, so flush)
@@ -349,7 +351,7 @@ void main() {
       );
 
       // Wait for the drain to process the late frame.
-      await Future<void>.delayed(const Duration(milliseconds: 150));
+      await Future<void>.delayed(const Duration(milliseconds: 80));
 
       // Let sync finish.
       await syncFuture;

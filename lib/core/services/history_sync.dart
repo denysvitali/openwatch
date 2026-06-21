@@ -188,6 +188,12 @@ class HistorySync extends ChangeNotifier {
   final List<HrSample> _hr = [];
   final List<SleepSegment> _sleep = [];
   final List<ActivitySummaryRecord> _activity = [];
+
+  /// The day the current in-flight HR chunk series belongs to. Captured
+  /// when the 0x15 header (pl[0] == 0x18) arrives so that late chunks
+  /// are still attributed to the original poll day even after the sync
+  /// loop has moved on to another day (HS-8).
+  DateOnly? _hrChunkDay;
   final Set<int> _availableDays = {};
   final Map<DateOnly, DailyTotals> _sportDetailTotals = {};
 
@@ -410,6 +416,7 @@ class HistorySync extends ChangeNotifier {
     _watchDaysWithData.clear();
     _fetchedDays.clear();
     _hrChunks.clear();
+    _hrChunkDay = null;
     _days.clear();
     _progressCurrent = 0;
     _progressTotal = 0;
@@ -721,8 +728,13 @@ class HistorySync extends ChangeNotifier {
         final tag = pl[0];
         if (tag == 0x18) {
           _hrChunks.clear();
+          // Capture the day the header arrived for; subsequent chunks
+          // for this series will flush under that day even if they
+          // arrive after _currentSyncDay has moved on (HS-8).
+          _hrChunkDay = day;
         } else if (tag == 0xff) {
           _hrChunks.clear();
+          _hrChunkDay = null;
           // Persist the (possibly empty) record so the UI shows the
           // day even when the watch has no HR data for it.
           _commitCurrentDayHr(day);
@@ -730,7 +742,7 @@ class HistorySync extends ChangeNotifier {
           if (pl.length >= 1 + 13) {
             _hrChunks.add(Uint8List.fromList(pl.sublist(1, 1 + 13)));
             if (_hrChunks.length >= tag) {
-              _flushHrChunks(day);
+              _flushHrChunks(_hrChunkDay ?? day);
             }
           }
         }
@@ -938,6 +950,13 @@ class HistorySync extends ChangeNotifier {
     final rawSteps = Codec.readU24be(body, 0);
     final rawKcal = Codec.readU24be(body, 6);
     final rawMeters = Codec.readU24be(body, 9);
+    // An all-zero activity body means "the watch has no activity summary
+    // for this day yet" (e.g. freshly after midnight). Return null totals
+    // so the UI shows "no data" and _upsertTotals does not fall back to
+    // a previous day's values (HS-6).
+    if (rawSteps == 0 && rawKcal == 0 && rawMeters == 0) {
+      return const DailyTotals();
+    }
     return DailyTotals(
       steps: rawSteps > kMaxSaneSteps ? null : rawSteps,
       calories: rawKcal > kMaxSaneKcal ? null : rawKcal,
@@ -969,9 +988,12 @@ class HistorySync extends ChangeNotifier {
 
     final day = DateOnly(year, month, dayOfMonth);
     final previous = _sportDetailTotals[day] ?? const DailyTotals();
+    final existingDay = _days[day];
     final totals = DailyTotals(
       steps: (previous.steps ?? 0) + steps,
-      calories: previous.calories,
+      // Sport-detail frames do not carry calories; preserve the value
+      // from the activity summary if one has already been ingested.
+      calories: previous.calories ?? existingDay?.energyKcal,
       distanceMeters: (previous.distanceMeters ?? 0) + distance,
     );
     _sportDetailTotals[day] = totals;
@@ -980,16 +1002,13 @@ class HistorySync extends ChangeNotifier {
 
   void _upsertTotals(DateOnly day, DailyTotals totals) {
     final previous = _days[day] ?? DailyHistory(day: day);
-    final steps = totals.steps ?? previous.steps;
-    final calories = totals.calories ?? previous.energyKcal;
-    final distance = totals.distanceMeters ?? previous.distanceMeters;
     final updated = DailyHistory(
       day: day,
       hr: previous.hr,
       sleep: previous.sleep,
-      steps: steps,
-      energyKcal: calories,
-      distanceMeters: distance,
+      steps: totals.steps,
+      energyKcal: totals.calories,
+      distanceMeters: totals.distanceMeters,
       lastUpdated: DateTime.now(),
     );
     _days[day] = updated;
