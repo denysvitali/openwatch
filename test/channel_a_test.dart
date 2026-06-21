@@ -1065,13 +1065,16 @@ void main() {
       expect(seconds, expected);
     });
 
-    test('readHeartRateHistory uses calendar components, not instant UTC day', () {
-      final localDayWithTime = DateTime(2026, 6, 20, 23, 45);
-      final frame = Commands.readHeartRateHistory(day: localDayWithTime);
-      expect(
-        Codec.readU32le(frame, 1),
-        DateTime.utc(2026, 6, 20).millisecondsSinceEpoch ~/ 1000,
-      );
-    });
+    test(
+      'readHeartRateHistory uses calendar components, not instant UTC day',
+      () {
+        final localDayWithTime = DateTime(2026, 6, 20, 23, 45);
+        final frame = Commands.readHeartRateHistory(day: localDayWithTime);
+        expect(
+          Codec.readU32le(frame, 1),
+          DateTime.utc(2026, 6, 20).millisecondsSinceEpoch ~/ 1000,
+        );
+      },
+    );
   });
 }
