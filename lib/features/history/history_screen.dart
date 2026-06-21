@@ -1,7 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/ble/ble_transport.dart';
@@ -25,7 +24,7 @@ class HistoryScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Activity'),
+        title: const Text('History'),
         actions: [
           IconButton(
             icon: const Icon(CupertinoIcons.arrow_clockwise),
@@ -51,15 +50,12 @@ class HistoryScreen extends ConsumerWidget {
                 trailing: '${sync.days.length} days',
               ),
               const SizedBox(height: 6),
-              _DailyDetailTabs(days: sync.days.reversed.toList(), sync: sync),
+              _DailyDetailSelector(
+                days: sync.days.reversed.toList(),
+                sync: sync,
+              ),
             ] else
               const _EmptyState(),
-            const SizedBox(height: 20),
-            OutlinedButton.icon(
-              icon: const Icon(Icons.watch_rounded),
-              label: const Text('Back to Device'),
-              onPressed: () => context.go('/dashboard'),
-            ),
             if (store == null) ...[const SizedBox(height: 16), _StoreWarning()],
           ],
         ),
@@ -429,128 +425,102 @@ class _StoreWarning extends StatelessWidget {
   }
 }
 
-class _DailyDetailTabs extends StatefulWidget {
-  const _DailyDetailTabs({required this.days, required this.sync});
+class _DailyDetailSelector extends StatefulWidget {
+  const _DailyDetailSelector({required this.days, required this.sync});
 
   final List<DailyHistory> days;
   final HistorySync sync;
 
   @override
-  State<_DailyDetailTabs> createState() => _DailyDetailTabsState();
+  State<_DailyDetailSelector> createState() => _DailyDetailSelectorState();
 }
 
-class _DailyDetailTabsState extends State<_DailyDetailTabs>
-    with SingleTickerProviderStateMixin {
-  late TabController _controller;
+class _DailyDetailSelectorState extends State<_DailyDetailSelector> {
+  int _index = 0;
 
   @override
-  void initState() {
-    super.initState();
-    _controller = _buildController(initialIndex: 0);
-  }
-
-  @override
-  void didUpdateWidget(_DailyDetailTabs oldWidget) {
+  void didUpdateWidget(_DailyDetailSelector oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.days.length != widget.days.length ||
-        _controller.length != widget.days.length) {
-      final nextIndex = _controller.index.clamp(0, widget.days.length - 1);
-      _controller.dispose();
-      _controller = _buildController(initialIndex: nextIndex);
+    if (_index >= widget.days.length) {
+      _index = widget.days.length - 1;
     }
-  }
-
-  TabController _buildController({required int initialIndex}) {
-    final controller = TabController(
-      length: widget.days.length,
-      initialIndex: initialIndex,
-      vsync: this,
-    );
-    controller.addListener(() {
-      if (mounted) setState(() {});
-    });
-    return controller;
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final current =
-        widget.days[_controller.index.clamp(0, widget.days.length - 1)];
+    final current = widget.days[_index.clamp(0, widget.days.length - 1)];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        TabBar(
-          controller: _controller,
-          isScrollable: true,
-          tabAlignment: TabAlignment.start,
-          dividerColor: theme.colorScheme.outlineVariant,
-          labelColor: theme.colorScheme.primary,
-          unselectedLabelColor: theme.colorScheme.onSurfaceVariant,
-          indicatorSize: TabBarIndicatorSize.label,
-          tabs: [
-            for (final day in widget.days)
-              Tab(
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(_formatDayTab(day.day)),
-                    if (widget.sync.fetchedDays.contains(day.day)) ...[
-                      const SizedBox(width: 6),
-                      const _TabDot(),
-                    ],
+        Row(
+          children: [
+            IconButton(
+              tooltip: 'Newer day',
+              icon: const Icon(CupertinoIcons.chevron_left),
+              onPressed: _index > 0 ? () => setState(() => _index--) : null,
+            ),
+            Expanded(
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<int>(
+                  value: _index,
+                  isExpanded: true,
+                  borderRadius: BorderRadius.circular(8),
+                  items: [
+                    for (var i = 0; i < widget.days.length; i++)
+                      DropdownMenuItem(
+                        value: i,
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(_formatDayTab(widget.days[i].day)),
+                            ),
+                            if (widget.sync.fetchedDays.contains(
+                              widget.days[i].day,
+                            ))
+                              const _NewDot(),
+                          ],
+                        ),
+                      ),
                   ],
+                  onChanged: (value) {
+                    if (value == null) return;
+                    setState(() => _index = value);
+                  },
                 ),
               ),
+            ),
+            IconButton(
+              tooltip: 'Older day',
+              icon: const Icon(CupertinoIcons.chevron_right),
+              onPressed: _index < widget.days.length - 1
+                  ? () => setState(() => _index++)
+                  : null,
+            ),
           ],
         ),
+        Divider(color: theme.colorScheme.outlineVariant),
         AnimatedSize(
           duration: const Duration(milliseconds: 180),
           curve: Curves.easeOutCubic,
           alignment: Alignment.topCenter,
-          child: SizedBox(
-            height: _detailHeight(current),
-            child: TabBarView(
-              controller: _controller,
-              children: [
-                for (final day in widget.days)
-                  SingleChildScrollView(
-                    key: PageStorageKey('history-day-${day.day.iso}'),
-                    physics: const NeverScrollableScrollPhysics(),
-                    padding: const EdgeInsets.only(top: 14),
-                    child: _DayDetailPage(day: day, sync: widget.sync),
-                  ),
-              ],
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 160),
+            child: _DayDetailPage(
+              key: ValueKey(current.day.iso),
+              day: current,
+              sync: widget.sync,
             ),
           ),
         ),
       ],
     );
   }
-
-  double _detailHeight(DailyHistory day) {
-    if (_isEmpty(day)) return 120;
-    var height = 132.0;
-    if (day.hr.isNotEmpty) {
-      height += 246;
-    } else {
-      height += 92;
-    }
-    if (day.sleep.isNotEmpty) height += 180;
-    if (day.energyKcal != null || day.distanceMeters != null) height += 88;
-    return height.clamp(260.0, 720.0);
-  }
 }
 
-class _TabDot extends StatelessWidget {
-  const _TabDot();
+class _NewDot extends StatelessWidget {
+  const _NewDot();
 
   @override
   Widget build(BuildContext context) {
@@ -565,7 +535,7 @@ class _TabDot extends StatelessWidget {
 }
 
 class _DayDetailPage extends StatelessWidget {
-  const _DayDetailPage({required this.day, required this.sync});
+  const _DayDetailPage({super.key, required this.day, required this.sync});
 
   final DailyHistory day;
   final HistorySync sync;
@@ -666,31 +636,6 @@ class _DayDetailPage extends StatelessWidget {
               const SizedBox(height: 10),
               SleepTimeline(segments: day.sleep, height: 110),
             ],
-            if (day.energyKcal != null || day.distanceMeters != null) ...[
-              const SizedBox(height: 20),
-              _ChartHeader(title: 'Activity', detail: _activityDetail(day)),
-              const SizedBox(height: 10),
-              Wrap(
-                spacing: 10,
-                runSpacing: 8,
-                children: [
-                  _MetricPill(
-                    icon: CupertinoIcons.flame_fill,
-                    label: day.energyKcal == null
-                        ? '- kcal'
-                        : '${day.energyKcal} kcal',
-                    tint: const Color(0xFFFF9500),
-                  ),
-                  _MetricPill(
-                    icon: CupertinoIcons.location_fill,
-                    label: day.distanceMeters == null
-                        ? '- km'
-                        : '${(day.distanceMeters! / 1000).toStringAsFixed(2)} km',
-                    tint: const Color(0xFF34C759),
-                  ),
-                ],
-              ),
-            ],
           ],
         ],
       ),
@@ -751,15 +696,6 @@ String _sleepLongSummary(DailyHistory day) {
     final h = d.inMinutes ~/ 60;
     final m = d.inMinutes.remainder(60);
     parts.add('${_label(s)} ${h}h ${m}m');
-  }
-  return parts.join(' · ');
-}
-
-String _activityDetail(DailyHistory day) {
-  final parts = <String>[];
-  if (day.energyKcal != null) parts.add('${day.energyKcal} kcal');
-  if (day.distanceMeters != null) {
-    parts.add('${(day.distanceMeters! / 1000).toStringAsFixed(2)} km');
   }
   return parts.join(' · ');
 }
