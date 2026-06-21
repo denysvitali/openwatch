@@ -136,6 +136,9 @@ class HistorySync extends ChangeNotifier {
     ChannelADispatcher? dispatcher,
     ChannelBParser? bParser,
     HistoryStore? store,
+    this.drainDuration = const Duration(milliseconds: 600),
+    this.postCommandDelay = const Duration(milliseconds: 50),
+    this.fragmentQuietWindow = const Duration(milliseconds: 250),
   }) : _dispatcher = dispatcher,
        _bParser = bParser,
        _store = store {
@@ -149,6 +152,16 @@ class HistorySync extends ChangeNotifier {
       _bCmdSub = p.commands.listen(_onChannelBCommand);
     }
   }
+
+  /// Settle window used after each command before draining the RX queue.
+  /// Configurable so tests can run with short artificial delays.
+  final Duration drainDuration;
+
+  /// Short extra delay after draining before moving to the next command.
+  final Duration postCommandDelay;
+
+  /// Quiet window passed to the pressure/HRV fragment reassemblers.
+  final Duration fragmentQuietWindow;
   final BleTransport transport;
   final ChannelADispatcher? _dispatcher;
   final ChannelBParser? _bParser;
@@ -230,10 +243,7 @@ class HistorySync extends ChangeNotifier {
               payload.length,
             ),
           ),
-          // 250 ms quiet window — same as the helper default; long
-          // enough to coalesce the 4-chunk sequence the firmware
-          // emits via FUN_0082c988, short enough for responsive UI.
-          quietWindow: const Duration(milliseconds: 250),
+          quietWindow: fragmentQuietWindow,
         );
     _pressureReassembler = reassembler;
     return reassembler.assembled;
@@ -519,13 +529,13 @@ class HistorySync extends ChangeNotifier {
           await transport.sendA(
             Commands.readHeartRateHistory(day: day.midnight),
           );
-          await _drainRx(Duration(milliseconds: 600));
+          await _drainRx(drainDuration);
           _currentSyncDay = null;
           // Drain any sleep segments that came back on Channel B as
           // part of this day's poll. The parser may emit a few frames
           // after the per-day drain — [_onChannelBCommand] will
           // append them and notify.
-          await Future<void>.delayed(const Duration(milliseconds: 50));
+          await Future<void>.delayed(postCommandDelay);
           daySpan?.end();
         } catch (e, st) {
           daySpan?.recordError(e, st);
@@ -547,7 +557,7 @@ class HistorySync extends ChangeNotifier {
         await transport.sendB(
           Commands.readActivitySummary(dayOffset: maxOffset),
         );
-        await Future<void>.delayed(const Duration(milliseconds: 600));
+        await Future<void>.delayed(drainDuration);
 
         // Pair the summary with the per-hour detail command. The detail
         // frames are surfaced through ChannelADispatcher.onSportDetail* for
@@ -555,7 +565,7 @@ class HistorySync extends ChangeNotifier {
         // day totals today.
         for (final d in activityOffsets) {
           await transport.sendA(Commands.readDetailSport(dayOffset: d));
-          await _drainRx(const Duration(milliseconds: 600));
+          await _drainRx(drainDuration);
         }
       }
 
@@ -573,8 +583,8 @@ class HistorySync extends ChangeNotifier {
         _currentSyncDay = day;
         await transport.sendB(Commands.readSleepNewProtocol(dayOffset: d));
         await transport.sendB(Commands.readSleepLunchProtocol(dayOffset: d));
-        await _drainRx(Duration(milliseconds: 600));
-        await Future<void>.delayed(const Duration(milliseconds: 50));
+        await _drainRx(drainDuration);
+        await Future<void>.delayed(postCommandDelay);
         _currentSyncDay = null;
       }
 
