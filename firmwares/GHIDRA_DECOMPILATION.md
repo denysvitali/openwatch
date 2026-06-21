@@ -3541,7 +3541,44 @@ without needing an explicit factory-reset path.
 The watch implements an ANCS client so iOS notifications can be pushed
 to the screen via opcode `0x72`.
 
-### 4.1 ANCS client callback (`FUN_0083a116`)
+#### 4.0 ANCS state machine synthesis
+
+The four §4 sub-sections (§4.1-§4.4) document the
+**complete ANCS state machine**. This sub-section pulls them
+together as a single pipeline.
+
+The ANCS pipeline has 4 stages:
+
+1. **Client register** — `FUN_00839e4e` (`ancs_add_client`)
+   at startup allocates `0x114` bytes per client and registers
+   the callback at `FUN_0083a116` (§4.1).
+2. **Notification source** — when iOS pushes a notification,
+   `FUN_0083a116` calls `FUN_00839fee` (§4.2) to parse the
+   8-byte ATT header (event_id / flags / category / count /
+   uid) into the client's `state_base + 4..+0xE`.
+3. **Data source** — to retrieve the full notification text,
+   iOS responds to a GetAppAttributes read at `state_base + 0x10`.
+   `FUN_0083a036` (§4.3) writes the cached notification into
+   the read buffer and the host reads it back.
+4. **Push to §3.3** — once the host SDK decodes the
+   notification text, it pushes the rendered message to the
+   §3.3 `0x72 pushMsgUint` handler with the §3.3 chunked
+   flush mechanism.
+
+The §4.1 callback's `event_id 2` ("data") path is what
+triggers stage 3, so §4.1 and §4.3 are the **active** stages.
+§4.2 (parse) and §4.4 (disconnect) are the **passive**
+stages — they run when iOS sends a notification or
+disconnects, not when the host asks.
+
+The §4.1 callback's `event_id 1` ("notification") path is the
+**inbound** path — iOS pushes a notification, the watch
+parses it, and the host SDK queues it for display. The
+`event_id 0` ("connect") path runs once at startup and the
+`event_id 3` ("disconnect") path runs once at iOS-side BLE
+shutdown.
+
+#### 4.1 ANCS client callback (`FUN_0083a116`)
 
 Lifecycle dispatcher. Receives `(ctx, client_idx, event_ptr)` from the
 GATT stack and switches on the first byte of `event_ptr` (the
