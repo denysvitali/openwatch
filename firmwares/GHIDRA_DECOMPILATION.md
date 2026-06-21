@@ -5895,3 +5895,177 @@ section, a host SDK author reading the doc would have to
 combine those notes themselves to understand the *common*
 pattern. This section pulls the threads together so the
 synthesis is in one place.
+
+### 8.22 Cross-section wire-format synthesis
+
+A consolidated view of the **16-byte request / 16-byte
+response** wire format shared by **Channel-A** (§3),
+**Channel-B** (§2), **0xFEE7 vendor service** (§8),
+**ANCS** (§4), and **OTA** (§5). The format is identical
+across all five sections — the only differences are the
+command-byte position and the checksum / self-marker
+treatment.
+
+#### Common wire format
+
+```
+byte  0:    command opcode (channel-specific)
+byte  1:    sub-cmd / sub-byte
+byte  2..14: payload (channel-specific layout)
+byte 15:    additive checksum OR self-marker byte
+```
+
+The **16-byte length** matches the BLE ATT_MTU-1 (MTU 23
+minus 3-byte L2CAP header minus 3-byte ATT header minus 1-byte
+opcode). It's the maximum single-frame payload BLE supports.
+
+#### Command-byte position per section
+
+| Section | Opcode byte | Sub-byte byte |
+|---|---|---|
+| Channel-A (§3) | byte 2 | byte 1 |
+| Channel-B (§2) | byte 0 | byte 1 |
+| 0xFEE7 vendor (§8) | byte 0 | byte 1 |
+| ANCS (§4) | byte 0 (notification source) or byte 1 (data source / control point) | byte 1 (cmd id) |
+| OTA (§5) | byte 1 (within 4-byte CRC + cmd header) | byte 0 (OTA start/stop/etc.) |
+
+The §3 dispatcher (`FUN_0082d2dc`) is the **odd one out** —
+its command byte is at offset 2, not 0. The §3 frame
+*prefix* (bytes 0..1) is reserved for the queue / fragment
+metadata that the dispatcher reads first; the actual command
+opcode is at byte 2. All other sections use byte 0 as the
+opcode (matching the §2.0 frame builder).
+
+#### Response treatment
+
+| Section | Response opcode | Checksum treatment |
+|---|---|---|
+| Channel-A | echoes request cmd | additive checksum (FUN_0082b0c4) |
+| Channel-B | usually `req_cmd + 1` (e.g. 0x41 → 0x42, 0x6 → 0x6 + 1) | additive checksum |
+| 0xFEE7 vendor | echoes request cmd | additive checksum OR self-marker (§8.21) |
+| ANCS | n/a (notification source is read-only) | n/a |
+| OTA | echoes request cmd | CRC + length header (§5) |
+
+The §3 "Common response path" (§3 above) computes
+`rsp[15] = FUN_0082b0c4(rsp, 0xf)` — an additive checksum
+over bytes 0..14. Channel-A and Channel-B and most
+0xFEE7 opcodes use this same path. The 0xFEE7 self-marker
+handlers (§8.21) bypass it for state-transition opcodes.
+
+#### Sub-byte position (byte 1)
+
+All sections use **byte 1** as the sub-cmd selector:
+
+* **Channel-A** — `byte 1` is the sub-cmd for opcodes like
+  `0x18 0x01`, `0x18 0x02`, `0x39 0x03`, `0x39 0x04`,
+  `0x3a 0x01`, `0x3a 0x02`, `0x3a 0x03`, `0x3a 0x04`,
+  `0x3b 0x01`, `0x3b 0x02`, `0x69 0x01`, `0x69 0x02`,
+  `0x69 0x03`, etc.
+* **Channel-B** — `byte 1` is the sub-cmd for opcodes like
+  `0x11 day_offset`, `0x12 day_offset`, `0x29 (nop)`,
+  `0x2a day_offset`, `0x3b (nop)`, `0x41 file_index`,
+  `0x43 file_init_payload`, `0x46 file_delete_payload`,
+  `0x47 (nop)`, `0x4b (nop)`, `0x5a config_tlv`.
+* **0xFEE7 vendor** — `byte 1` is the sub-cmd for opcodes
+  like `0x60 0x00`, `0xce 0x01`, `0xce 0x02`,
+  `0xce ' '`, `0xce '!'`, `0xce '"'`, `0x94 (none)`,
+  `0x95 (none)`, etc.
+
+The **§3 exception** is byte 1 being the *first byte after
+the dispatcher reads bytes 0..1* — so for §3 opcodes
+`byte 1` is the *sub-cmd* AND the first byte of the cmd-byte
+field. The dispatcher reorders: it reads bytes 0..1 as
+queue/fragment metadata, then bytes 2..15 as the cmd.
+
+#### §2 / §8 vs §3 fragmentation
+
+§2 (Channel-B) and §8 (0xFEE7) opcodes can return
+**multi-frame** responses (the §3.6 `0x43 readDetailSport`
+multi-frame 292-byte response, the §3.11 `0x7a muslim`
+4-frame fragmented response, etc.). These are emitted via
+`FUN_0082b938` (§3.6) which fragments the body into 13-byte
+chunks with a sequence-number frame header.
+
+§3 opcodes use the §3.6 fragmentation pattern too, but
+their frames stay within the §3.6 dispatcher ring
+(`FUN_0082be64`, see §3.24) — the multi-frame response is
+queued for the worker to emit asynchronously.
+
+ANCS uses the **standard ATT notification** format (which is
+*not* the 16-byte firmware format — ANCS payloads are
+variable-length). The §4.1-§4.3 wrappers convert between
+the firmware format and the ANCS format.
+
+#### Shared state / data buffers
+
+All sections share **a common pool of state buffers** in
+the firmware's RAM:
+
+| Buffer | Section | Purpose |
+|---|---|---|
+| `DAT_0082bfcc` | §3.24 | deferred-ring (10 × 16 B) |
+| `DAT_0082bfd4 + 0x2C` | §8.3 / §8.16 | live status u32 |
+| `DAT_0082cff0` | §3.5 | user-config block (164 B) |
+| `DAT_0082caec[3..5]` | §8.1 | config-byte writes via 0xC5/0xC8/0xC9 |
+| `DAT_00827e88` | §8.19 | state-update mode + secondary flag |
+| `DAT_008277f0 + 0x2D` | §3.23 | sensor enable bitmap (8 bits) |
+
+The §3 / §4 / §8 / §2 handler sections each reference one
+or more of these buffers. This synthesis section is the
+**only place in the doc** that lists them all together so
+a host SDK author who needs to track which buffer is owned
+by which handler can find it in one location.
+
+#### Why this synthesis section exists
+
+The §3 / §4 / §8 / §2 / §5 sections each document the wire
+format for *their* handler family, but the **shared
+16-byte envelope** is described independently in each
+section. A host SDK author reading the doc top-to-bottom
+would have to cross-reference the multiple descriptions
+to understand the common envelope. This section pulls the
+threads together: the 16-byte envelope is the **single
+universal wire format** shared by all five sections, with
+§3 being the odd one out (cmd at byte 2 not byte 0) and
+§8.21 being the odd-one-out within the 0xFEE7 section (six
+handlers bypass the checksum via self-marker).
+
+#### Round-trip recipe (host SDK)
+
+A host SDK that wants to talk to the H59MA v14 firmware:
+
+1. Build a 16-byte frame:
+   - For §3 opcodes: bytes 0..1 = queue metadata,
+     byte 2 = cmd, byte 3 = sub-cmd, bytes 4..14 = payload,
+     byte 15 = additive checksum of bytes 0..14.
+   - For §2 / §8 opcodes: byte 0 = cmd, byte 1 = sub-cmd,
+     bytes 2..14 = payload, byte 15 = additive checksum of
+     bytes 0..14.
+   - For §8 self-marker opcodes: byte 0 = cmd, byte 1 = sub,
+     bytes 2..14 = payload, byte 15 = cmd (NOT checksum).
+2. Send via BLE GATT write (Channel-A or 0xFEE7) or via the
+   OTA image header (§5).
+3. Wait for the response frame(s). For §3 / §2 / §8:
+   - Single frame for state-transition opcodes.
+   - Multi-frame fragmented for data-rich reads (assemble
+     per the 13-byte-chunk streamer — see §3.11 / §3.20).
+4. Verify:
+   - For standard-checksum handlers: byte 15 ==
+     `FUN_0082b0c4(bytes 0..14)` mod 256.
+   - For §8 self-marker handlers: byte 0 == byte 15 == cmd
+     (or byte 0 == byte 12 == cmd for `0x93`).
+   - For §3 fragmented responses: `rsp[1] == 1..N` sequence
+     numbers and `rsp[15] == checksum` per frame.
+5. Parse the payload per the per-section handler spec.
+
+#### Why this is the *last* synthesis in the doc
+
+This is the **21st synthesis section** added to
+GHIDRA_DECOMPILATION.md. Each synthesis pulled together
+notes that were scattered across multiple per-handler
+sections. The remaining work (smaller handlers, the
+Channel-B async processor details, the OTA state machine,
+etc.) can be added as new per-handler sections without
+needing further synthesis — the per-section docs are
+sufficiently granular that the host SDK can read them
+directly.
