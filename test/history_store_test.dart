@@ -94,5 +94,77 @@ void main() {
       final parsed = DailyHistory.fromJson(j);
       expect(parsed.sleep.single.stage, SleepStage.light);
     });
+
+    test('absurd totals from older app versions are coerced to null on read '
+        '(regression for kcal=108543 surviving a sync upgrade)', () {
+      // 108543 was an actual user export from a pre-fd28b07 build
+      // where _activityTotalsFromBody had no clamp and the v13
+      // firmware's 0x2a body[6..8] decoded to wildly-wrong values.
+      // The fix in `fromJson` keeps the read surface honest even
+      // when older files are still on disk.
+      final j = {
+        'day': '2026-06-21',
+        'hr': const [],
+        'sleep': const [],
+        'steps': 3816,
+        'kcal': 108543, // obviously impossible
+        'dist': 2434,
+        'updated': 1782044197754,
+      };
+      final parsed = DailyHistory.fromJson(j);
+      expect(parsed.steps, 3816, reason: 'sane step value should survive');
+      expect(
+        parsed.energyKcal,
+        isNull,
+        reason: '108543 kcal is impossible — must be nulled on read',
+      );
+      expect(
+        parsed.distanceMeters,
+        2434,
+        reason: 'sane distance value should survive',
+      );
+    });
+
+    test('sane totals pass through the read clamp unchanged', () {
+      // 1800 kcal, 12000 steps, 8500 m are all within kMaxSane* so
+      // they must NOT be nulled — only absurd values are.
+      final j = {
+        'day': '2026-06-21',
+        'hr': const [],
+        'sleep': const [],
+        'steps': 12000,
+        'kcal': 1800,
+        'dist': 8500,
+        'updated': 1782044197754,
+      };
+      final parsed = DailyHistory.fromJson(j);
+      expect(parsed.steps, 12000);
+      expect(parsed.energyKcal, 1800);
+      expect(parsed.distanceMeters, 8500);
+    });
+
+    test('boundary at kMaxSaneKcal (20000) is the inclusive cap', () {
+      // Exactly at the cap must survive; one over must be nulled.
+      final atCap = DailyHistory.fromJson({
+        'day': '2026-06-21',
+        'hr': const [],
+        'sleep': const [],
+        'steps': null,
+        'kcal': 20000,
+        'dist': null,
+        'updated': null,
+      });
+      final overCap = DailyHistory.fromJson({
+        'day': '2026-06-21',
+        'hr': const [],
+        'sleep': const [],
+        'steps': null,
+        'kcal': 20001,
+        'dist': null,
+        'updated': null,
+      });
+      expect(atCap.energyKcal, 20000);
+      expect(overCap.energyKcal, isNull);
+    });
   });
 }

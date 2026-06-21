@@ -160,6 +160,22 @@ class DailyHistory {
     final hrRaw = (j['hr'] as List?) ?? const [];
     final sleepRaw = (j['sleep'] as List?) ?? const [];
     final updatedRaw = j['updated'];
+    // Sanitize the totals at the read boundary — old app versions
+    // (before commit fd28b07 added the WRITE-time clamp in
+    // `_activityTotalsFromBody`) may have persisted absurd values
+    // like 6,381,923 kcal from mis-reading body[6..8] as the
+    // calorie field on H59MA v13. `_upsertTotals` keeps
+    // `previous.energyKcal` when the new sync reads 0, so an
+    // absurd old value would survive forever otherwise. Same
+    // applies to steps + distance when the firmware repacks the
+    // body between builds. Out-of-range values are coerced to null
+    // (= "no data") rather than 0 so the UI can distinguish.
+    const kMaxSaneSteps = 200000;
+    const kMaxSaneKcal = 20000;
+    const kMaxSaneMeters = 200000;
+    final rawSteps = (j['steps'] as num?)?.toInt();
+    final rawKcal = (j['kcal'] as num?)?.toInt();
+    final rawDist = (j['dist'] as num?)?.toInt();
     return DailyHistory(
       day: parsed,
       hr: [
@@ -183,9 +199,11 @@ class DailyHistory {
             _stageFromName(s['stage'] as String?),
           ),
       ],
-      steps: (j['steps'] as num?)?.toInt(),
-      energyKcal: (j['kcal'] as num?)?.toInt(),
-      distanceMeters: (j['dist'] as num?)?.toInt(),
+      steps: (rawSteps != null && rawSteps > kMaxSaneSteps) ? null : rawSteps,
+      energyKcal: (rawKcal != null && rawKcal > kMaxSaneKcal) ? null : rawKcal,
+      distanceMeters: (rawDist != null && rawDist > kMaxSaneMeters)
+          ? null
+          : rawDist,
       lastUpdated: updatedRaw == null
           ? null
           : DateTime.fromMillisecondsSinceEpoch(
