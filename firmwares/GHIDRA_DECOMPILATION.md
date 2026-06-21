@@ -5759,8 +5759,26 @@ The host SDK should:
 ## 10. Open Questions / Next Steps
 
 1. ~~Recover the exact meaning of opcode `0x2b` mixture container fields.~~ **Resolved** — see §3.1. The 16-byte `mixture_state_t` is now fully decoded; remaining unknowns are semantic (BCD field interpretation, period-data byte meanings).
-2. Identify the 32-byte `image_digest` algorithm used for OTA and the container header digest at `0x1c4`. No SHA-256 constants were found in the body; it may be computed by the bootloader or host tool.
+2. ~~Identify the 32-byte `image_digest` algorithm used for OTA and the container header digest at `0x1c4`.~~ **Resolved** — see §5.2. The 32-byte digest is the **bootloader's responsibility**, not in `body.bin`. The H59MA v14 firmware only validates the **4-byte signature magic** at `DAT_00840744` (= `0x8721bee2`) via `FUN_00840724`. The per-block 32-byte digest lives in the bootloader image (a separate image not in `body.bin`).
 3. ~~Determine whether the `0xFEE7` vendor service has any active protocol role in the firmware.~~ **Resolved** — see §8; it implements a second 16-byte command channel.
+
+### 10.1 Doc structure note
+
+The §8 sub-sections §8.1-§8.8 are in the correct location
+(in §8, right after the §8 heading at line 4020). The
+later §8 sub-sections §8.9-§8.22 are appended *after* this
+§10 section because the doc was edited incrementally over
+many rounds and the §8.x content was added to the end of the
+file each time. The numbering is still correct (§8.x within
+the §8 group), but the physical order in the file is:
+§8 heading → §8.1-§8.8 → §9 → §10 → §8.9-§8.22.
+
+The reading-order (§0) treats §8.x as a single logical
+group regardless of physical order in the file. The
+sub-sections are still in synthesis order (§8.9 = first
+post-§8.8 synthesis, §8.22 = final wire-format synthesis),
+so reading them in §0's recommended order gives the right
+narrative arc.
 
 ### 8.15 0x3e lipids read/set (`FUN_0082c550`)
 
