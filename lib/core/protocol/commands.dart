@@ -95,6 +95,26 @@ class Commands {
   static Uint8List setBrightness(int level) =>
       Codec.buildChannelA(OpA.brightness, [OpA.mixWrite, level & 0xFF]);
 
+  /// `HeartRateSettingReq` (0x16) read: `[0x01]`.
+  static Uint8List readHeartRateSetting() =>
+      Codec.buildChannelA(OpA.heartRateSetting, [OpA.mixRead]);
+
+  /// `HeartRateSettingReq` (0x16) write: `[0x02, en?1:2, interval, startInterval, tooLow, tooHigh]`.
+  static Uint8List setHeartRateSetting({
+    required bool enabled,
+    required int interval,
+    int startInterval = 0,
+    int tooLow = 50,
+    int tooHigh = 180,
+  }) => Codec.buildChannelA(OpA.heartRateSetting, [
+    OpA.mixWrite,
+    enabled ? 1 : 2,
+    interval & 0xFF,
+    startInterval & 0xFF,
+    tooLow & 0xFF,
+    tooHigh & 0xFF,
+  ]);
+
   /// `BpReadConformReq` (0x0e): advance the BP record queue and
   /// emit the next record on `0x0d`. Per `GHIDRA_DECOMPILATION.md`
   /// §3.19, the handler ignores any `sub != 0` (no advance, no

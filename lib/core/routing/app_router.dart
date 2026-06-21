@@ -10,6 +10,7 @@ import '../../features/home/home_shell.dart';
 import '../../features/logs/logs_screen.dart';
 import '../../features/notifications/notifications_screen.dart';
 import '../../features/scan/scan_screen.dart';
+import '../../features/settings/sensor_settings_screen.dart';
 import '../../features/settings/settings_screen.dart';
 import '../services/opentelemetry_service.dart';
 
@@ -49,6 +50,12 @@ final appRouterProvider = Provider<GoRouter>(
         name: 'history',
         parentNavigatorKey: _rootNavigatorKey,
         builder: (context, state) => const HistoryScreen(),
+      ),
+      GoRoute(
+        path: '/sensor-settings',
+        name: 'sensor-settings',
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) => const SensorSettingsScreen(),
       ),
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) =>

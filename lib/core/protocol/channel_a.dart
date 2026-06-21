@@ -30,6 +30,7 @@ class ChannelADispatcher {
   final _heartRateHeader = StreamController<void>.broadcast();
   final _heartRateChunk = StreamController<HeartRateChunk>.broadcast();
   final _heartRateError = StreamController<void>.broadcast();
+  final _heartRateSetting = StreamController<HeartRateSetting>.broadcast();
   final _bloodOxygen = StreamController<BloodOxygenSetting>.broadcast();
   final _bpRecord = StreamController<BpRecordChunk>.broadcast();
   int _bpRecordSeq = 0;
@@ -86,6 +87,9 @@ class ChannelADispatcher {
   /// (`0x15` with `pl[0] == 0xFF`). Fires once when the requested index
   /// resolves to an empty record slot.
   Stream<void> get onHeartRateError => _heartRateError.stream;
+
+  /// Heart-rate setting read/write (`0x16`).
+  Stream<HeartRateSetting> get onHeartRateSetting => _heartRateSetting.stream;
 
   /// SpO2 setting (`0x2c`).
   Stream<BloodOxygenSetting> get onBloodOxygen => _bloodOxygen.stream;
@@ -241,6 +245,8 @@ class ChannelADispatcher {
         _decodeRealtimeHr(pl);
       case OpA.bloodOxygenSetting:
         _decodeBloodOxygen(pl);
+      case OpA.heartRateSetting:
+        _decodeHeartRateSetting(pl);
       case OpA.bpData:
         _decodeBpRecord(pl);
       case OpA.pressure:
@@ -423,6 +429,51 @@ class ChannelADispatcher {
     if (pl.isEmpty) return;
     final bpm = pl[0] & 0xFF;
     if (bpm >= 30 && bpm <= 240) _realtimeHr.add(bpm);
+  }
+
+  /// `heartRateSetting` (0x16): read/write HR auto-measure config.
+  ///
+  /// Per `PROTOCOL.md` §4.3 the read response is:
+  ///   `pl[0] = 0x01` (sub-opcode echo)
+  ///   `pl[1] = enabled` (1 = on, 2 = off)
+  ///   `pl[2] = interval` (minutes between auto-measures)
+  ///   `pl[3] = startInterval` (minutes after midnight to start)
+  ///   `pl[4] = tooLow` (bpm threshold for low alarm)
+  ///   `pl[5] = tooHigh` (bpm threshold for high alarm)
+  ///
+  /// The write ack (`0x16 0x02`) echoes the request — same layout.
+  void _decodeHeartRateSetting(Uint8List pl) {
+    if (pl.length < 3) return;
+    final sub = pl[0];
+    int enabledVal;
+    int interval;
+    int startInterval;
+    int tooLow;
+    int tooHigh;
+    if (sub == 0x01 && pl.length >= 6) {
+      enabledVal = pl[1];
+      interval = pl[2];
+      startInterval = pl[3];
+      tooLow = pl[4];
+      tooHigh = pl[5];
+    } else if (sub == 0x02 && pl.length >= 6) {
+      enabledVal = pl[2];
+      interval = pl[3];
+      startInterval = pl[4];
+      tooLow = pl[5];
+      tooHigh = pl.length > 6 ? pl[6] : 180;
+    } else {
+      return;
+    }
+    _heartRateSetting.add(
+      HeartRateSetting(
+        enabled: enabledVal == 1,
+        interval: interval,
+        startInterval: startInterval,
+        tooLow: tooLow,
+        tooHigh: tooHigh,
+      ),
+    );
   }
 
   /// `bloodOxygenSetting` (0x2c): sub `0x01` reads, `0x02` writes.
@@ -855,6 +906,7 @@ class ChannelADispatcher {
       _heartRateHeader,
       _heartRateChunk,
       _heartRateError,
+      _heartRateSetting,
       _bloodOxygen,
       _bpRecord,
       _pressureSettingHeader,
@@ -996,6 +1048,30 @@ class HrvSetting {
   const HrvSetting({required this.enabled, required this.intervalMinutes});
   final bool enabled;
   final int intervalMinutes;
+}
+
+/// Heart-rate auto-measure config (`0x16`).
+///
+/// Per `PROTOCOL.md` §4.3 the read response carries:
+///   `pl[1]` = enabled (1 = on, 2 = off)
+///   `pl[2]` = interval (minutes between auto-measures)
+///   `pl[3]` = startInterval (minutes after midnight to start)
+///   `pl[4]` = tooLow (bpm threshold for low alarm)
+///   `pl[5]` = tooHigh (bpm threshold for high alarm)
+class HeartRateSetting {
+  const HeartRateSetting({
+    required this.enabled,
+    required this.interval,
+    this.startInterval = 0,
+    this.tooLow = 50,
+    this.tooHigh = 180,
+  });
+
+  final bool enabled;
+  final int interval;
+  final int startInterval;
+  final int tooLow;
+  final int tooHigh;
 }
 
 /// Header frame of a `0x39` hrvSetting read (`pl[2] == 0x1E`).

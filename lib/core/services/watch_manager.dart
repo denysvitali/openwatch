@@ -287,6 +287,26 @@ class WatchManager extends ChangeNotifier {
   Future<void> setBrightness(int level) =>
       _transport.sendA(Commands.setBrightness(level));
 
+  /// Apply the user's configured HR auto-measure settings to the watch.
+  /// Sends `HeartRateSettingReq` (0x16) with the stored interval and
+  /// alarm thresholds. The watch echoes the request frame on success.
+  Future<void> applyHeartRateSettings({
+    required bool enabled,
+    required int interval,
+    int tooLow = 50,
+    int tooHigh = 120,
+  }) => _withActionSpan(
+    'apply_hr_settings',
+    () => _transport.sendA(
+      Commands.setHeartRateSetting(
+        enabled: enabled,
+        interval: interval,
+        tooLow: tooLow,
+        tooHigh: tooHigh,
+      ),
+    ),
+  );
+
   /// Start a heart-rate measurement.
   ///
   /// Sends both the explicit session start (`0x69` type=heartRate=1) AND the

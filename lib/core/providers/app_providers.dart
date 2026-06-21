@@ -55,6 +55,18 @@ class SettingsNotifier extends Notifier<AppSettings> {
 
   Future<void> setAutoSyncHistory(bool enabled) =>
       update(state.copyWith(autoSyncHistoryOnConnect: enabled));
+
+  Future<void> setHrAutoMeasure(bool enabled) =>
+      update(state.copyWith(hrAutoMeasureEnabled: enabled));
+
+  Future<void> setHrInterval(int minutes) =>
+      update(state.copyWith(hrIntervalMinutes: minutes));
+
+  Future<void> setHrLowAlarm(int bpm) =>
+      update(state.copyWith(hrLowAlarm: bpm));
+
+  Future<void> setHrHighAlarm(int bpm) =>
+      update(state.copyWith(hrHighAlarm: bpm));
 }
 
 // --- BLE transport + watch manager ------------------------------------------

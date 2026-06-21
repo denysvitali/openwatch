@@ -59,6 +59,13 @@ class SettingsScreen extends ConsumerWidget {
             onTap: () => context.push('/firmware'),
           ),
           ListTile(
+            leading: const Icon(Icons.sensors),
+            title: const Text('Sensor settings'),
+            subtitle: const Text('HR interval, alarms'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => context.push('/sensor-settings'),
+          ),
+          ListTile(
             leading: const Icon(Icons.restart_alt, color: Colors.redAccent),
             title: const Text('Factory reset watch'),
             enabled: ready,
