@@ -741,6 +741,52 @@ void main() {
       },
     );
 
+    test('syncAll clears persisted sleep for re-fetched wake window', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      final bParser = ChannelBParser(t);
+      d.bind();
+      final sync = _testSync(t, d, bParser: bParser);
+
+      final today = DateOnly.today();
+      final yesterday = today.addDays(-1);
+      final staleSleep = SleepSegment(
+        yesterday.midnight.add(const Duration(hours: 21)),
+        const Duration(minutes: 45),
+        SleepStage.deep,
+      );
+      final fakeStore = _FakeHistoryStore(
+        seed: {
+          yesterday: DailyHistory(
+            day: yesterday,
+            hr: [
+              HrSample(yesterday.midnight.add(const Duration(hours: 8)), 62),
+            ],
+            sleep: [staleSleep],
+            steps: 4321,
+            energyKcal: 210,
+            distanceMeters: 3100,
+          ),
+        },
+      );
+      await sync.bindStore(fakeStore);
+
+      // No 0x27/0x3e responses are injected. The re-fetch still covers
+      // wake offset 0, whose bedtime bucket is yesterday, so stale sleep
+      // from older parser versions must be removed instead of preserved.
+      await sync.syncAll(daysBack: 1);
+
+      final restored = sync.dayOf(yesterday);
+      expect(restored, isNotNull);
+      expect(restored!.sleep, isEmpty);
+      expect(restored.hr, hasLength(1));
+      expect(restored.steps, 4321);
+      expect((await fakeStore.readDay(yesterday)).sleep, isEmpty);
+
+      sync.dispose();
+      d.dispose();
+    });
+
     test('activity summary 0x2a terminator with non-zero padding stops at '
         'first dayOffset==0 (HS-7)', () async {
       final t = _StubTransport();

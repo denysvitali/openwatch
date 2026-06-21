@@ -606,8 +606,11 @@ class HistorySync extends ChangeNotifier {
       // each. Re-fetching is safe because the merge logic deduplicates
       // by start timestamp, so we always poll every requested day to
       // catch new sleep sessions that may have arrived after a prior
-      // sync (HS-3).
+      // sync (HS-3). Before polling, clear the affected sleep buckets
+      // so parser fixes and empty watch replies can remove bad data
+      // already persisted by older app versions.
       if (_bParser != null) {
+        await _clearSleepForWakeOffsets(todayD, wantsDays);
         for (final d in wantsDays) {
           final day = todayD.addDays(-d);
           _currentSyncDay = day;
@@ -643,6 +646,43 @@ class HistorySync extends ChangeNotifier {
       _syncing = false;
       notifyListeners();
     }
+  }
+
+  Future<void> _clearSleepForWakeOffsets(
+    DateOnly today,
+    Iterable<int> wakeOffsets,
+  ) async {
+    final affected = <DateOnly>{};
+    for (final offset in wakeOffsets) {
+      final wakeDay = today.addDays(-offset);
+      affected
+        ..add(wakeDay)
+        ..add(wakeDay.addDays(-1));
+    }
+
+    var changed = false;
+    for (final day in affected) {
+      final previous = _days[day];
+      if (previous == null || previous.sleep.isEmpty) continue;
+      final updated = DailyHistory(
+        day: day,
+        hr: previous.hr,
+        sleep: const [],
+        steps: previous.steps,
+        energyKcal: previous.energyKcal,
+        distanceMeters: previous.distanceMeters,
+        lastUpdated: DateTime.now(),
+      );
+      _days[day] = updated;
+      changed = true;
+      await _store?.writeDay(updated);
+    }
+    if (!changed) return;
+    _sleep
+      ..clear()
+      ..addAll(_days.values.expand((d) => d.sleep));
+    _sleep.sort((a, b) => a.start.compareTo(b.start));
+    notifyListeners();
   }
 
   void _collectRx(Uint8List frame) {
