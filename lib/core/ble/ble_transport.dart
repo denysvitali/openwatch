@@ -4,7 +4,7 @@ import 'dart:collection';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart' hide LogLevel;
 import 'package:flutterrific_opentelemetry/flutterrific_opentelemetry.dart'
-    hide Logger;
+    show SpanKind;
 
 import '../protocol/codec.dart';
 import '../protocol/opcodes.dart';
@@ -106,96 +106,96 @@ class BleTransport implements Fee7Host {
       _device = device;
       _state.value = LinkState.connecting;
 
-    _subs.add(
-      device.connectionState.listen((s) {
-        if (s == BluetoothConnectionState.disconnected) {
-          _onDisconnected();
-        }
-      }),
-    );
+      _subs.add(
+        device.connectionState.listen((s) {
+          if (s == BluetoothConnectionState.disconnected) {
+            _onDisconnected();
+          }
+        }),
+      );
 
-    _log.info(
-      'ble',
-      'Connecting to ${device.remoteId.str} '
-          '(${device.platformName.isEmpty ? "?" : device.platformName})',
-    );
-    await device.connect(timeout: timeout, autoConnect: false);
-    _log.info('ble', 'Connected; discovering services');
+      _log.info(
+        'ble',
+        'Connecting to ${device.remoteId.str} '
+            '(${device.platformName.isEmpty ? "?" : device.platformName})',
+      );
+      await device.connect(timeout: timeout, autoConnect: false);
+      _log.info('ble', 'Connected; discovering services');
 
-    _state.value = LinkState.discovering;
-    final services = await device.discoverServices();
-    _log.debug(
-      'ble',
-      'Services: ${services.map((s) => s.uuid.str).join(", ")}',
-    );
+      _state.value = LinkState.discovering;
+      final services = await device.discoverServices();
+      _log.debug(
+        'ble',
+        'Services: ${services.map((s) => s.uuid.str).join(", ")}',
+      );
 
-    for (final svc in services) {
-      if (svc.uuid == BleUuids.serviceA) {
-        for (final c in svc.characteristics) {
-          if (c.uuid == BleUuids.writeA) _writeA = c;
-          if (c.uuid == BleUuids.notifyA) _notifyA = c;
-        }
-      } else if (svc.uuid == BleUuids.serviceB) {
-        for (final c in svc.characteristics) {
-          if (c.uuid == BleUuids.writeB) _writeB = c;
-          if (c.uuid == BleUuids.notifyB) _notifyB = c;
-        }
-      } else if (svc.uuid == BleUuids.serviceFee7) {
-        // Vendor 0xfee7 service: probe-only. Logging which characteristics the
-        // firmware actually declared lets us detect future OEM-specific OTA or
-        // command paths without breaking the canonical Channel-A/B flow.
-        for (final c in svc.characteristics) {
-          if (c.uuid == BleUuids.fee7Write) _fee7Write = c;
-          if (c.uuid == BleUuids.fee7Read) _fee7Read = c;
-          if (c.uuid == BleUuids.fee7Notify) _fee7Notify = c;
-          if (c.uuid == BleUuids.deviceName) _deviceName = c;
-        }
-      } else if (svc.uuid == BleUuids.deviceInfo) {
-        for (final c in svc.characteristics) {
-          if (c.uuid == BleUuids.deviceName) _deviceName = c;
+      for (final svc in services) {
+        if (svc.uuid == BleUuids.serviceA) {
+          for (final c in svc.characteristics) {
+            if (c.uuid == BleUuids.writeA) _writeA = c;
+            if (c.uuid == BleUuids.notifyA) _notifyA = c;
+          }
+        } else if (svc.uuid == BleUuids.serviceB) {
+          for (final c in svc.characteristics) {
+            if (c.uuid == BleUuids.writeB) _writeB = c;
+            if (c.uuid == BleUuids.notifyB) _notifyB = c;
+          }
+        } else if (svc.uuid == BleUuids.serviceFee7) {
+          // Vendor 0xfee7 service: probe-only. Logging which characteristics the
+          // firmware actually declared lets us detect future OEM-specific OTA or
+          // command paths without breaking the canonical Channel-A/B flow.
+          for (final c in svc.characteristics) {
+            if (c.uuid == BleUuids.fee7Write) _fee7Write = c;
+            if (c.uuid == BleUuids.fee7Read) _fee7Read = c;
+            if (c.uuid == BleUuids.fee7Notify) _fee7Notify = c;
+            if (c.uuid == BleUuids.deviceName) _deviceName = c;
+          }
+        } else if (svc.uuid == BleUuids.deviceInfo) {
+          for (final c in svc.characteristics) {
+            if (c.uuid == BleUuids.deviceName) _deviceName = c;
+          }
         }
       }
-    }
-    _log.info(
-      'ble',
-      'Chars: writeA=${_writeA != null} notifyA=${_notifyA != null} '
-          'writeB=${_writeB != null} notifyB=${_notifyB != null} '
-          'fee7=${_fee7Write != null || _fee7Read != null || _fee7Notify != null} '
-          'devName=${_deviceName != null}',
-    );
-    if (_writeA == null || _notifyA == null) {
-      throw const BleTransportException(
-        'Channel-A command characteristics not found',
+      _log.info(
+        'ble',
+        'Chars: writeA=${_writeA != null} notifyA=${_notifyA != null} '
+            'writeB=${_writeB != null} notifyB=${_notifyB != null} '
+            'fee7=${_fee7Write != null || _fee7Read != null || _fee7Notify != null} '
+            'devName=${_deviceName != null}',
       );
-    }
-    _log.debug(
-      'ble',
-      'writeA props: wr=${_writeA!.properties.write} '
-          'wrNoResp=${_writeA!.properties.writeWithoutResponse} '
-          'notify=${_notifyA!.properties.notify} indicate=${_notifyA!.properties.indicate}',
-    );
+      if (_writeA == null || _notifyA == null) {
+        throw const BleTransportException(
+          'Channel-A command characteristics not found',
+        );
+      }
+      _log.debug(
+        'ble',
+        'writeA props: wr=${_writeA!.properties.write} '
+            'wrNoResp=${_writeA!.properties.writeWithoutResponse} '
+            'notify=${_notifyA!.properties.notify} indicate=${_notifyA!.properties.indicate}',
+      );
 
-    await _notifyA!.setNotifyValue(true);
-    _subs.add(_notifyA!.onValueReceived.listen(_onChannelA));
-    if (_notifyB != null) {
-      await _notifyB!.setNotifyValue(true);
-      _subs.add(_notifyB!.onValueReceived.listen(_onChannelB));
-    }
-    if (_fee7Notify != null) {
-      await _fee7Notify!.setNotifyValue(true);
-      _subs.add(_fee7Notify!.onValueReceived.listen(_onFee7));
-    }
-    _log.info('ble', 'Notifications enabled');
+      await _notifyA!.setNotifyValue(true);
+      _subs.add(_notifyA!.onValueReceived.listen(_onChannelA));
+      if (_notifyB != null) {
+        await _notifyB!.setNotifyValue(true);
+        _subs.add(_notifyB!.onValueReceived.listen(_onChannelB));
+      }
+      if (_fee7Notify != null) {
+        await _fee7Notify!.setNotifyValue(true);
+        _subs.add(_fee7Notify!.onValueReceived.listen(_onFee7));
+      }
+      _log.info('ble', 'Notifications enabled');
 
-    // Handshake: read hardware then firmware revision; ready once both return.
-    _state.value = LinkState.readingDeviceInfo;
-    await _readDeviceInfo(services);
-    _state.value = LinkState.ready;
-    _log.info(
-      'ble',
-      'Link READY (hw="$hardwareRevision" fw="$firmwareRevision")',
-    );
-    ok = true;
+      // Handshake: read hardware then firmware revision; ready once both return.
+      _state.value = LinkState.readingDeviceInfo;
+      await _readDeviceInfo(services);
+      _state.value = LinkState.ready;
+      _log.info(
+        'ble',
+        'Link READY (hw="$hardwareRevision" fw="$firmwareRevision")',
+      );
+      ok = true;
     } finally {
       span?.end(ok: ok);
     }
@@ -209,8 +209,9 @@ class BleTransport implements Fee7Host {
       kind: SpanKind.internal,
     );
     try {
-      final info =
-          services.where((s) => s.uuid == BleUuids.deviceInfo).toList();
+      final info = services
+          .where((s) => s.uuid == BleUuids.deviceInfo)
+          .toList();
       if (info.isEmpty) return;
       for (final c in info.first.characteristics) {
         try {
@@ -235,10 +236,7 @@ class BleTransport implements Fee7Host {
     final span = OpenTelemetryService().startTrace(
       'ble.rx',
       kind: SpanKind.consumer,
-      attributes: {
-        'ble.channel': 'A',
-        'ble.frame.length': data.length,
-      },
+      attributes: {'ble.channel': 'A', 'ble.frame.length': data.length},
     );
     try {
       _onChannelATraced(data, span);
@@ -295,10 +293,7 @@ class BleTransport implements Fee7Host {
     final span = OpenTelemetryService().startTrace(
       'ble.rx',
       kind: SpanKind.consumer,
-      attributes: {
-        'ble.channel': 'B',
-        'ble.frame.length': data.length,
-      },
+      attributes: {'ble.channel': 'B', 'ble.frame.length': data.length},
     );
     try {
       _log.frame('rx', 'RX-B', data);
@@ -314,10 +309,7 @@ class BleTransport implements Fee7Host {
     final span = OpenTelemetryService().startTrace(
       'ble.rx',
       kind: SpanKind.consumer,
-      attributes: {
-        'ble.channel': 'fee7',
-        'ble.frame.length': data.length,
-      },
+      attributes: {'ble.channel': 'fee7', 'ble.frame.length': data.length},
     );
     try {
       final frame = Uint8List.fromList(data);
@@ -414,9 +406,7 @@ class BleTransport implements Fee7Host {
     final span = OpenTelemetryService().startTrace(
       'ble.sendB',
       kind: SpanKind.client,
-      attributes: {
-        'ble.frame.length': framed.length,
-      },
+      attributes: {'ble.frame.length': framed.length},
     );
     var ok = false;
     try {
