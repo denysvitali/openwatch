@@ -46,6 +46,21 @@ Uint8List _channelAErrorFrame(int op, List<int> payload) {
   return f;
 }
 
+HistorySync _testSync(
+  _StubTransport t,
+  ChannelADispatcher d, {
+  ChannelBParser? bParser,
+}) =>
+    HistorySync(
+      t,
+      (_) {},
+      dispatcher: d,
+      bParser: bParser,
+      drainDuration: const Duration(milliseconds: 50),
+      postCommandDelay: Duration.zero,
+      fragmentQuietWindow: const Duration(milliseconds: 50),
+    );
+
 void main() {
   group('HistorySync', () {
     test('syncAll never sends 0x46 (it is a watch→phone notify-only opcode '
@@ -53,9 +68,9 @@ void main() {
       final t = _StubTransport();
       final d = ChannelADispatcher(t);
       d.bind();
-      final sync = HistorySync(t, (_) {}, dispatcher: d);
+      final sync = _testSync(t, d);
       final future = sync.syncAll(daysBack: 1);
-      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await Future<void>.delayed(const Duration(milliseconds: 20));
       // No 0x46 frame should ever appear on the wire — the previous
       // implementation sent a bare 0x46 and the firmware replied with
       // `0xC6 ERR 0xee`, forcing the `_distributionFailed` fallback.
@@ -75,9 +90,9 @@ void main() {
         final t = _StubTransport();
         final d = ChannelADispatcher(t);
         d.bind();
-        final sync = HistorySync(t, (_) {}, dispatcher: d);
+        final sync = _testSync(t, d);
         final future = sync.syncAll(daysBack: 2);
-        await Future<void>.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 20));
         await future;
 
         // Per-day HR reads fire for both day 0 (today) and day 1.
@@ -100,9 +115,9 @@ void main() {
         final t = _StubTransport();
         final d = ChannelADispatcher(t);
         d.bind();
-        final sync = HistorySync(t, (_) {}, dispatcher: d);
+        final sync = _testSync(t, d);
         final future = sync.syncAll(daysBack: 1);
-        await Future<void>.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 20));
         // Some firmware builds push 0x46 unsolicited — the decoder
         // must NOT throw and the sync must complete cleanly.
         t.inA.add(
@@ -124,12 +139,12 @@ void main() {
       final t = _StubTransport();
       final d = ChannelADispatcher(t);
       d.bind();
-      final sync = HistorySync(t, (_) {}, dispatcher: d);
+      final sync = _testSync(t, d);
       final syncFuture = sync.syncAll();
       // syncAll no longer sends 0x46 — it blind-polls day 0 directly.
       // Wait long enough for the per-day 0x15 poll + drain
-      // (0x15 send at T+0 + 600ms drain at T+600).
-      await Future<void>.delayed(const Duration(milliseconds: 800));
+      // (0x15 send at T+0 + 50ms drain at T+50).
+      await Future<void>.delayed(const Duration(milliseconds: 150));
       // Header
       t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x18, 0x80, 0x05]));
       // First 4 bytes of the reassembled record = the day
@@ -155,7 +170,7 @@ void main() {
       ]);
       t.inA.add(Codec.buildChannelA(OpA.readHeartRate, chunk1));
       // Let the drain run.
-      await Future<void>.delayed(const Duration(milliseconds: 1000));
+      await Future<void>.delayed(const Duration(milliseconds: 150));
       // The first chunk should have flushed because
       // count (1) >= seq (1).
       final bpms = sync.hr.map((s) => s.bpm).toList();
@@ -176,7 +191,7 @@ void main() {
         final t = _StubTransport();
         final d = ChannelADispatcher(t);
         d.bind();
-        final sync = HistorySync(t, (_) {}, dispatcher: d);
+        final sync = _testSync(t, d);
         // Compute the expected packed bytes from `DateTime.now()` so
         // the test is timezone-independent (host TZ can be +00..+12
         // and the day part still matches).
@@ -189,8 +204,8 @@ void main() {
         ]);
         final future = sync.syncAll();
         // syncAll no longer sends 0x46 — it blind-polls day 0 directly.
-        await Future<void>.delayed(const Duration(milliseconds: 50));
-        await Future<void>.delayed(const Duration(milliseconds: 800));
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        await Future<void>.delayed(const Duration(milliseconds: 150));
         // The wire bytes for the 0x15 request must be the packed
         // BCD date index, NOT a unix timestamp.
         final sent = t.sent.firstWhere(
@@ -216,7 +231,7 @@ void main() {
               'request was a packed date (small u32), not unix seconds '
               '(>1.7e9)',
         );
-        await Future<void>.delayed(const Duration(milliseconds: 1500));
+        await Future<void>.delayed(const Duration(milliseconds: 1200));
         await future;
         sync.dispose();
         d.dispose();
@@ -229,11 +244,11 @@ void main() {
         final t = _StubTransport();
         final d = ChannelADispatcher(t);
         d.bind();
-        final sync = HistorySync(t, (_) {}, dispatcher: d);
+        final sync = _testSync(t, d);
         final syncFuture = sync.syncAll();
         // syncAll no longer sends 0x46 — it blind-polls day 0 directly.
         // Wait for the per-day poll window.
-        await Future<void>.delayed(const Duration(milliseconds: 800));
+        await Future<void>.delayed(const Duration(milliseconds: 150));
         t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x18, 0x80, 0x05]));
         // seq=1, dayStart=0x6A34F600 (LE), 9 sample bytes (96, 100, 102)
         t.inA.add(
@@ -246,7 +261,7 @@ void main() {
         );
         t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0xff]));
         // Wait for the drain.
-        await Future<void>.delayed(const Duration(milliseconds: 1000));
+        await Future<void>.delayed(const Duration(milliseconds: 150));
         // The error frame shouldn't crash the parser. After a
         // complete record has been flushed, _hrChunks is reset, so
         // a subsequent 0xff is a no-op.
@@ -301,7 +316,7 @@ void main() {
         final t = _StubTransport();
         final d = ChannelADispatcher(t);
         d.bind();
-        final sync = HistorySync(t, (_) {}, dispatcher: d);
+        final sync = _testSync(t, d);
         final records = <PressureRecord>[];
         final sub = sync.pressureRecords.listen(records.add);
 
@@ -339,7 +354,7 @@ void main() {
           );
         }
         // 250 ms quiet window + a little slack.
-        await Future<void>.delayed(const Duration(milliseconds: 350));
+        await Future<void>.delayed(const Duration(milliseconds: 120));
 
         expect(records, hasLength(1));
         final r = records.single;
@@ -365,7 +380,7 @@ void main() {
       final t = _StubTransport();
       final d = ChannelADispatcher(t);
       d.bind();
-      final sync = HistorySync(t, (_) {}, dispatcher: d);
+      final sync = _testSync(t, d);
       final records = <HrvRecord>[];
       final sub = sync.hrvRecords.listen(records.add);
 
@@ -384,7 +399,7 @@ void main() {
           ),
         );
       }
-      await Future<void>.delayed(const Duration(milliseconds: 350));
+      await Future<void>.delayed(const Duration(milliseconds: 120));
 
       expect(records, hasLength(1));
       final r = records.single;
@@ -403,7 +418,7 @@ void main() {
       final t = _StubTransport();
       final d = ChannelADispatcher(t);
       d.bind();
-      final sync = HistorySync(t, (_) {}, dispatcher: d);
+      final sync = _testSync(t, d);
       final records = <PressureRecord>[];
       final sub = sync.pressureRecords.listen(records.add);
 
@@ -433,7 +448,7 @@ void main() {
         );
       }
       // Wait past the quiet window so #1 fires.
-      await Future<void>.delayed(const Duration(milliseconds: 350));
+      await Future<void>.delayed(const Duration(milliseconds: 120));
       expect(records, hasLength(1));
 
       // Record #2 — different slotId so we can verify it carried.
@@ -510,7 +525,7 @@ void main() {
           ),
         );
       }
-      await Future<void>.delayed(const Duration(milliseconds: 350));
+      await Future<void>.delayed(const Duration(milliseconds: 120));
 
       expect(records, hasLength(2));
       expect(records[0].slotId, 0x00);
@@ -528,7 +543,7 @@ void main() {
       final t = _StubTransport();
       final d = ChannelADispatcher(t);
       d.bind();
-      final sync = HistorySync(t, (_) {}, dispatcher: d);
+      final sync = _testSync(t, d);
       final records = <PressureRecord>[];
       final sub = sync.pressureRecords.listen(records.add);
 
@@ -557,7 +572,7 @@ void main() {
       );
       // Nothing else. The reassembler's 250 ms quiet timer should
       // fire and surface the partial record.
-      await Future<void>.delayed(const Duration(milliseconds: 350));
+      await Future<void>.delayed(const Duration(milliseconds: 120));
 
       expect(records, hasLength(1));
       expect(records.single.slotId, 0x00);
@@ -590,7 +605,7 @@ void main() {
       d.bind();
       final b = ChannelBParser(t);
       b.bind();
-      final sync = HistorySync(t, (_) {}, dispatcher: d, bParser: b);
+      final sync = _testSync(t, d, bParser: b);
 
       // Build a single-block night payload: dayOffset=1,
       // endMin=450 (07:30) BE, three (stage, durMin) pairs.
@@ -631,7 +646,7 @@ void main() {
         d.bind();
         final b = ChannelBParser(t);
         b.bind();
-        final sync = HistorySync(t, (_) {}, dispatcher: d, bParser: b);
+        final sync = _testSync(t, d, bParser: b);
 
         final lunchPayload = Uint8List.fromList([
           0x00, 0x3C, // endMin BE = 60 (01:00) — lunch has no dayOffset prefix
@@ -656,7 +671,7 @@ void main() {
       d.bind();
       final b = ChannelBParser(t);
       b.bind();
-      final sync = HistorySync(t, (_) {}, dispatcher: d, bParser: b);
+      final sync = _testSync(t, d, bParser: b);
 
       final body = List<int>.filled(48, 0);
       body[0] = 0x00;
@@ -690,7 +705,7 @@ void main() {
       final t = _StubTransport();
       final d = ChannelADispatcher(t);
       d.bind();
-      final sync = HistorySync(t, (_) {}, dispatcher: d);
+      final sync = _testSync(t, d);
       final today = DateOnly.today();
       final dateBytes = [
         Codec.toBcd(today.year % 100),
@@ -700,7 +715,7 @@ void main() {
 
       final future = sync.syncAll(daysBack: 1);
       // syncAll no longer sends 0x46 — it blind-polls day 0 directly.
-      await Future<void>.delayed(const Duration(milliseconds: 2200));
+      await Future<void>.delayed(const Duration(milliseconds: 400));
       t.inA.add(Codec.buildChannelA(OpA.readDetailSport, [0xf0, 0x02, 0x01]));
       t.inA.add(
         Codec.buildChannelA(OpA.readDetailSport, [
@@ -741,7 +756,7 @@ void main() {
       final t = _StubTransport();
       final d = ChannelADispatcher(t);
       d.bind();
-      final sync = HistorySync(t, (_) {}, dispatcher: d);
+      final sync = _testSync(t, d);
 
       // Drive syncAll; the device doesn't need a 0x46 query anymore —
       // the per-day loop always polls {0} as part of the bounded
@@ -749,7 +764,7 @@ void main() {
       // sleep commands are issued.
       final future = sync.syncAll(daysBack: 1);
       // The Channel-B writes happen after the per-day loop.
-      await Future<void>.delayed(const Duration(milliseconds: 1800));
+      await Future<void>.delayed(const Duration(milliseconds: 400));
       await future;
       expect(
         t.sentB.map(Codec.rxChannelBCmd),
@@ -769,7 +784,7 @@ void main() {
       final t = _StubTransport();
       final d = ChannelADispatcher(t);
       d.bind();
-      final sync = HistorySync(t, (_) {}, dispatcher: d);
+      final sync = _testSync(t, d);
       expect(sync.days, isEmpty);
       expect(sync.watchDaysWithData, isEmpty);
       expect(sync.fetchedDays, isEmpty);
