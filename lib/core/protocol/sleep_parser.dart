@@ -24,16 +24,23 @@ class SleepSegment {
 ///   * Ch-B `[BC,27,len,crc,dayOffset, …]`
 ///     dayOffset = first byte of the *payload* (relative to the BC
 ///     container), i.e. the byte at index 0 of the parser input.
-///     After that the frame carries one or more chained day blocks.
-///     Each block:
-///       bytes 0..1   endMinuteOfDay (u16 LE) — wake-up minute-of-day
+///     Always present — see `firmwares/GHIDRA_DECOMPILATION.md`
+///     §2.3 (H59MA v13/v14 firmware) which packs the day-of-record as
+///     the first byte of every record. After that the frame carries
+///     one or more chained day blocks. Each block:
+///       bytes 0..1   endMinuteOfDay (u16 **big-endian**) — wake-up
+///                    minute-of-day. The Oudmon convention is BE; LE
+///                    produces out-of-range values (e.g. `0x00 0x34`
+///                    → 13312 instead of 52) for every observed
+///                    H59MA trace.
 ///       bytes 2..N   alternating (stageByte, durMin) pairs
 ///     The block's start minute is derived: st = end - Σ(durMin).
 ///     `stageByte` is the Oudmon stage id; the mapping is documented
 ///     in [stageFor] below. Stages are emitted as [SleepStage]; pair
 ///     durations are minutes.
-///   * Ch-B `[BC,3e,len,crc, …]`
-///     Lunch/nap payload follows the same alternating shape: a u16 LE
+///   * Ch-B `[BC,3e,len,crc,payload]`
+///     Lunch/nap payload **does not** carry the dayOffset prefix (only
+///     `0x27` does). It is just the alternating shape: u16 **BE**
 ///     end-minute-of-day followed by (stage, durMin) pairs. We treat
 ///     it identically to the night shape for display purposes.
 ///   * Empty payload (the [OpB] byte is set but the body is empty)
@@ -92,12 +99,22 @@ class SleepParser {
   /// responsible for picking the right anchor; the parser only uses
   /// it to attach absolute timestamps to the segments.
   ///
+  /// The night frame carries a 1-byte `dayOffset` prefix at
+  /// `pl[0]` (per `PROTOCOL.md` §4.4 + H59MA v13/v14 RE — see
+  /// `firmwares/GHIDRA_DECOMPILATION.md` §2.3). It is always
+  /// present on H59MA firmware and is unconditionally stripped
+  /// here so the chained-block walker sees a pure
+  /// `(endMin, pairs…)` stream.
+  ///
   /// Returns an empty list when [pl] is empty or shorter than the
-  /// minimum block (2 B end-minute + 2 B one pair).
+  /// minimum block (1 B dayOffset + 2 B end-minute + 2 B one pair).
   static List<SleepSegment> parseNightSleepSegments(
     Uint8List pl, {
     required DateTime anchor,
-  }) => _parseChained(pl, anchor: anchor);
+  }) {
+    if (pl.isEmpty) return const [];
+    return _parseChained(pl.sublist(1), anchor: anchor);
+  }
 
   /// Parses a `0x3e` lunch/nap-sleep payload. Same wire shape as the
   /// night variant; the only difference is the channel-B cmd id.
@@ -107,17 +124,16 @@ class SleepParser {
   }) => _parseChained(pl, anchor: anchor);
 
   /// Walks [pl] as a sequence of chained day blocks; each block is
-  /// `u16 LE endMin` + `(stageByte, durMin)*`. The first block may
-  /// be preceded by a single day-offset byte (per PROTOCOL.md §4.4
-  /// for the night frame) — we detect that heuristically by
-  /// attempting to align the cursor on a `endMin ∈ 0..1439` bound.
+  /// `u16 BE endMin` + `(stageByte, durMin)*`.
   ///
-  /// Alignment rule (defensive): if the very first byte would
-  /// produce an out-of-range `endMin` when interpreted as u16 LE,
-  /// we treat it as a day-offset prefix and skip one byte. This
-  /// matches the v14 firmware behaviour (which DOES emit the
-  /// leading dayOffset byte) without breaking older firmwares that
-  /// omit it.
+  /// For the night frame (`0x27`) the very first byte of [pl] is the
+  /// `dayOffset` prefix from `PROTOCOL.md` §4.4 (always present on
+  /// H59MA v13/v14 — see `firmwares/GHIDRA_DECOMPILATION.md` §2.3)
+  /// and is unconditionally skipped. The lunch frame (`0x3e`) has
+  /// **no** dayOffset prefix, so the caller (`parseNightSleepSegments`)
+  /// must NOT strip the leading byte — `parseLunchSleepSegments`
+  /// therefore just delegates here with the byte still in place
+  /// (its payload is a pure endMin+pairs blob).
   static List<SleepSegment> _parseChained(
     Uint8List pl, {
     required DateTime anchor,
@@ -127,18 +143,12 @@ class SleepParser {
 
     var i = 0;
 
-    // Heuristic dayOffset skip: if reading a u16 LE at offset 0
-    // produces an endMin outside the day window, treat the first
-    // byte as a day-offset prefix and start at offset 1. We bound
-    // the skip at 1 byte because the dayOffset field is exactly
-    // 1 byte per PROTOCOL.md §4.4.
-    final firstEnd = pl[0] | (pl[1] << 8);
-    if (firstEnd > 24 * 60 - 1) {
-      i = 1;
-    }
-
     while (i + 2 <= pl.length) {
-      final endMin = pl[i] | (pl[i + 1] << 8);
+      // u16 big-endian: high byte first. The Oudmon SDK and the
+      // H59MA firmware both pack the wake-up minute-of-day in BE;
+      // reading LE here produces nonsense values (e.g. `0x00 0x34`
+      // would decode to 13312 instead of the valid 52).
+      final endMin = (pl[i] << 8) | pl[i + 1];
       i += 2;
       if (endMin > 24 * 60 - 1) {
         // Malformed end-minute — bail out cleanly so we don't

@@ -8,11 +8,12 @@ void main() {
     final anchor = DateTime(2026, 6, 20);
 
     test('parses a single block of 3 (stage, durMin) pairs', () {
-      // Block: u16 LE endMin = 7:30 = 450 = 0x01C2
+      // Block: dayOffset=1, u16 BE endMin = 7:30 = 450 = 0x01C2
       // Pairs: (light=1, 30min), (deep=2, 90min), (rem=3, 60min)
       // Total = 180 min ⇒ startMin = 450 - 180 = 270 = 04:30
       final pl = Uint8List.fromList([
-        0xC2, 0x01, // endMinOfDay LE
+        0x01, // dayOffset
+        0x01, 0xC2, // endMinOfDay BE
         0x01, 0x1E, // light, 30 min
         0x02, 0x5A, // deep,  90 min
         0x03, 0x3C, // rem,   60 min
@@ -35,11 +36,11 @@ void main() {
 
     test('skips the leading dayOffset byte (PROTOCOL.md §4.4 night)', () {
       // First byte = dayOffset = 0; the rest is the same block as
-      // the previous test. The parser must detect the bad alignment
-      // and skip exactly one byte.
+      // the previous test. The parser unconditionally strips the
+      // leading dayOffset byte before reading endMin.
       final pl = Uint8List.fromList([
         0x00, // dayOffset
-        0xC2, 0x01, // endMinOfDay LE 450
+        0x01, 0xC2, // endMinOfDay BE 450
         0x01, 0x1E, // light 30
         0x02, 0x5A, // deep 90
         0x03, 0x3C, // rem 60
@@ -56,11 +57,12 @@ void main() {
     test('treats a (0,0) pair as a chain terminator', () {
       // Two blocks separated by a NUL pair.
       final pl = Uint8List.fromList([
-        0xC2, 0x01, // endMin 450
+        0x01, // dayOffset
+        0x01, 0xC2, // endMin 450 BE
         0x01, 0x1E, // light 30
         0x02, 0x5A, // deep 90
         0x00, 0x00, // terminator
-        0xF0, 0x00, // endMin 240 = 04:00
+        0x00, 0xF0, // endMin 240 BE = 04:00
         0x03, 0x3C, // rem 60
       ]);
       final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
@@ -95,6 +97,47 @@ void main() {
       expect(SleepParser.parseNightSleepSegments(pl, anchor: anchor), isEmpty);
     });
 
+    test('parses a real-frame-shape payload (dayOffset=1 + BE endMin 52)', () {
+      // Regression for the user's reported export anomaly. The
+      // exact first 9 bytes of one of the live H59MA frames:
+      //   pl[0]    = 0x01 (dayOffset = 1 = "yesterday")
+      //   pl[1..2] = 0x00 0x34 (BE endMin = 52 = 00:52 wake)
+      //   pl[3..]  = alternating (stage, durMin) pairs
+      // Under the OLD parser (LE endMin, heuristic day-offset),
+      // pl[0] was misread as the low byte of a LE u16:
+      //   firstEnd = 0x01 | (0x00 << 8) = 1 → NOT > 1439, so the
+      //   heuristic kept pl[0] and read 0x01 0x34 as endMin = 0x3401
+      //   = 13313 → bail out, returning []. The parser effectively
+      //   dropped every H59MA night-sleep frame on the floor.
+      // The fix: always skip pl[0] as dayOffset, then read
+      // pl[1..2] as a u16 BE endMin.
+      final pl = Uint8List.fromList([
+        0x01, // dayOffset (now ALWAYS skipped)
+        0x00, 0x34, // endMin BE = 52 (00:52)
+        0x75, 0x05, // awake  5
+        0x0E, 0x02, // light  2
+        0x02, 0x13, // deep  19
+        0x03, 0x10, // rem   16
+      ]);
+      final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
+      expect(segs, hasLength(4));
+      expect(segs.first.duration.inMinutes, 5);
+      expect(segs.last.duration.inMinutes, 16);
+    });
+
+    test('returns an empty list when BE endMin > 1439 (malformed)', () {
+      // After the dayOffset byte is unconditionally stripped, the
+      // first two bytes of the remaining payload are read as a
+      // u16 BE endMin. `0xFF 0xFF` = 65535 is garbage, so the
+      // parser must bail out cleanly and return [].
+      final pl = Uint8List.fromList([
+        0x02, // dayOffset (stripped)
+        0xFF, 0xFF, // BE 65535 → invalid
+        0x01, 0x1E,
+      ]);
+      expect(SleepParser.parseNightSleepSegments(pl, anchor: anchor), isEmpty);
+    });
+
     test('maps H59MA-style score bytes (0x05..0x0f) to SleepStage.deep', () {
       // The H59MA v13 firmware emits stage bytes in the range
       // 0x05..0xff instead of the canonical Oudmon 0x01..0x04
@@ -103,7 +146,8 @@ void main() {
       // sleep chart solid red. The mapping now interprets the byte
       // as a coarse sleep-quality score.
       final pl = Uint8List.fromList([
-        0x2A, 0x00, // endMin = 42
+        0x01, // dayOffset = 1
+        0x00, 0x2A, // endMin BE = 42
         0x09, 0x14, // score 9 → deep, 20 min
       ]);
       final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
@@ -113,7 +157,8 @@ void main() {
 
     test('H59MA score range 0x10..0x1f maps to SleepStage.light', () {
       final pl = Uint8List.fromList([
-        0x2A, 0x00,
+        0x01, // dayOffset
+        0x00, 0x2A,
         0x15, 0x05, // score 0x15=21 → light, 5 min
       ]);
       final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
@@ -122,7 +167,8 @@ void main() {
 
     test('H59MA score range 0x20..0x2f maps to SleepStage.rem', () {
       final pl = Uint8List.fromList([
-        0x2A, 0x00,
+        0x01, // dayOffset
+        0x00, 0x2A,
         0x25, 0x05, // score 0x25=37 → rem, 5 min
       ]);
       final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
@@ -133,7 +179,8 @@ void main() {
       // The high end of the range is genuinely "lots of movement"
       // and stays awake — only the low/mid ranges got demoted.
       final pl = Uint8List.fromList([
-        0x2A, 0x00,
+        0x01, // dayOffset
+        0x00, 0x2A,
         0x35, 0x05, // score 0x35=53 → awake, 5 min
       ]);
       final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
@@ -142,7 +189,8 @@ void main() {
 
     test('0x00 stays mapped to SleepStage.awake (no-data sentinel)', () {
       final pl = Uint8List.fromList([
-        0x2A, 0x00,
+        0x01, // dayOffset
+        0x00, 0x2A,
         0x00, 0x05, // 0x00 → awake, 5 min
       ]);
       final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
@@ -161,7 +209,8 @@ void main() {
       // sleep starting at 20:21 the previous evening belongs to
       // the bedtime day for as long as it stays on that day.
       final pl = Uint8List.fromList([
-        0x53, 0x00, // endMinOfDay LE = 83 (01:23)
+        0x01, // dayOffset
+        0x00, 0x53, // endMinOfDay BE = 83 (01:23)
         0x04, 0x75, // awake 117 min
         0x01, 0x0F, // light 15 min
         0x02, 0x78, // deep 120 min
@@ -206,7 +255,8 @@ void main() {
       // endMin = 480 (08:00), total = 240 min ⇒ startMin = 240
       // (04:00) — no wrap. All segments on the anchor day.
       final pl = Uint8List.fromList([
-        0xE0, 0x01, // endMinOfDay LE = 480
+        0x01, // dayOffset
+        0x01, 0xE0, // endMinOfDay BE = 480
         0x01, 0x78, // light 120 min
         0x02, 0x3C, // deep  60 min
         0x03, 0x3C, // rem   60 min
@@ -228,14 +278,31 @@ void main() {
     final anchor = DateTime(2026, 6, 20);
 
     test('parses a single nap block identically to the night shape', () {
-      // Lunch/nap is wire-compatible with night — same parser.
+      // Lunch/nap payload has NO dayOffset prefix (only 0x27 does,
+      // see PROTOCOL.md §4.4). It is just `u16 BE endMin + pairs`.
       final pl = Uint8List.fromList([
-        0x0C, 0x03, // endMin 780 (13:00)
+        0x03, 0x0C, // endMin BE 780 (13:00)
         0x01, 0x3C, // light 60 min
       ]);
       final segs = SleepParser.parseLunchSleepSegments(pl, anchor: anchor);
       expect(segs.single.stage, SleepStage.light);
       expect(segs.single.duration.inMinutes, 60);
+      expect(segs.single.start, DateTime(2026, 6, 20, 12, 0));
+    });
+
+    test('lunch (0x3e) payload has NO dayOffset prefix (regression)', () {
+      // Pre-fix, the night parser's heuristic accidentally
+      // applied to lunch too. The lunch wire format is just
+      // `(endMin, pairs…)` from byte 0 — no leading dayOffset.
+      // If a leading byte were eaten as dayOffset here, we'd
+      // read 0x42 0x03 as endMin = 0x4203 = 16899 > 1439 and
+      // bail out, returning [].
+      final pl = Uint8List.fromList([
+        0x03, 0x0C, // endMin BE 780 (13:00) — byte 0 IS endMin high
+        0x01, 0x3C, // light 60 min
+      ]);
+      final segs = SleepParser.parseLunchSleepSegments(pl, anchor: anchor);
+      expect(segs, hasLength(1));
       expect(segs.single.start, DateTime(2026, 6, 20, 12, 0));
     });
 

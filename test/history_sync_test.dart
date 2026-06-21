@@ -592,10 +592,13 @@ void main() {
       b.bind();
       final sync = HistorySync(t, (_) {}, dispatcher: d, bParser: b);
 
-      // Build a single-block night payload: endMin=450 (07:30),
-      // three (stage, durMin) pairs.
+      // Build a single-block night payload: dayOffset=1,
+      // endMin=450 (07:30) BE, three (stage, durMin) pairs.
+      // Wire format (PROTOCOL.md §4.4 + GHIDRA §2.3):
+      //   [dayOffset, endMinBE, pairs…]
       final nightPayload = Uint8List.fromList([
-        0xC2, 0x01, // endMin LE
+        0x01, // dayOffset = 1 ("yesterday")
+        0x01, 0xC2, // endMin BE = 450 (07:30)
         0x01, 0x1E, // light 30
         0x02, 0x5A, // deep 90
         0x03, 0x3C, // rem 60
@@ -631,7 +634,7 @@ void main() {
         final sync = HistorySync(t, (_) {}, dispatcher: d, bParser: b);
 
         final lunchPayload = Uint8List.fromList([
-          0x3C, 0x00, // endMin 60 (13:00)
+          0x00, 0x3C, // endMin BE = 60 (01:00) — lunch has no dayOffset prefix
           0x01, 0x3C, // light 60
         ]);
         t.inB.add(Codec.buildChannelB(OpB.sleepLunchNew, lunchPayload));
