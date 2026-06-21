@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openwatch/core/protocol/capabilities.dart';
+import 'package:openwatch/core/protocol/codec.dart';
 
 void main() {
   // Builds a 14-byte SetTimeRsp payload with the bits at the byte offsets
@@ -62,6 +63,11 @@ void main() {
       expect(
         DeviceCapabilities.fromSetTime(setTimePayload({8: 1})).newSleepProtocol,
         isTrue,
+      );
+      expect(
+        DeviceCapabilities.fromSetTime(setTimePayload({8: 1})).sleep,
+        isTrue,
+        reason: 'new-sleep watches must be represented as sleep-capable',
       );
     });
 
@@ -233,5 +239,65 @@ void main() {
       expect(merged.screenWidth, 240);
       expect(merged.screenHeight, 240);
     });
+
+    test('H59MA live handshake maps fixed 0x3c block to app capabilities', () {
+      final setTimeFrame = _hex(
+        '01 00 00 01 16 00 00 00 00 01 00 20 00 00 30 69',
+      );
+      final supportFrame = _hex(
+        '3c 00 40 00 80 00 00 00 20 00 00 00 00 00 00 1c',
+      );
+      expect(Codec.isValidChannelA(setTimeFrame), isTrue);
+      expect(Codec.isValidChannelA(supportFrame), isTrue);
+
+      final caps = DeviceCapabilities.fromSetTime(
+        Codec.rxPayload(setTimeFrame),
+      ).mergeSupport(Codec.rxPayload(supportFrame));
+
+      expect(caps.heart, isTrue);
+      expect(caps.sleep, isTrue);
+      expect(caps.newSleepProtocol, isTrue);
+      expect(caps.bloodOxygen, isTrue);
+      expect(caps.bloodPressure, isTrue);
+      expect(caps.stress, isTrue);
+      expect(caps.hrv, isTrue);
+      expect(caps.realTimeHr, isTrue);
+    });
+
+    test('H59MA v14 documented fixed 0x3c layout maps to app capabilities', () {
+      final merged = DeviceCapabilities().mergeSupport(
+        Uint8List.fromList([
+          0x00,
+          0x40,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0xa0,
+          0x00,
+          0x00,
+          0x00,
+          0x20,
+          0x00,
+          0x00,
+          0x00,
+        ]),
+      );
+
+      expect(merged.heart, isTrue);
+      expect(merged.sleep, isTrue);
+      expect(merged.bloodOxygen, isTrue);
+      expect(merged.bloodPressure, isTrue);
+      expect(merged.newSleepProtocol, isTrue);
+      expect(merged.realTimeHr, isTrue);
+    });
   });
 }
+
+Uint8List _hex(String bytes) => Uint8List.fromList(
+  bytes
+      .split(RegExp(r'\s+'))
+      .where((part) => part.isNotEmpty)
+      .map((part) => int.parse(part, radix: 16))
+      .toList(growable: false),
+);

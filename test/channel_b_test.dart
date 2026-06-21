@@ -268,5 +268,52 @@ void main() {
         reason: 'cmd differs even though payload bytes match',
       );
     });
+
+    test('H59MA live Channel-B capture frames validate and emit', () async {
+      final t = _StubTransport();
+      final p = ChannelBParser(t);
+      p.bind();
+      final emitted = <ChannelBCommand>[];
+      final sub = p.commands.listen(emitted.add);
+
+      final activity = _hex(
+        'bc 2a 62 00 4c 6a 01 00 00 00 00 00 00 00 00 00 00 '
+        '63 63 61 61 63 63 61 61 61 61 61 61 63 63 63 63 60 '
+        '60 61 61 60 60 62 62 63 63 60 60 61 61 63 63 62 62 '
+        '63 63 61 61 00 62 62 63 63 63 63 61 61 63 63 62 62 '
+        '60 60 63 63 60 60 62 62 62 62 63 63 62 62 63 63 61 '
+        '61 63 63 61 61 60 60 63 63 62 62 63 63 63 63 00 00 '
+        '00 00',
+      );
+      final sleep = _hex(
+        'bc 27 37 00 bf d6 01 00 34 75 05 0e 02 02 13 03 10 '
+        '04 0e 02 22 04 0f 02 19 03 1d 02 15 04 0b 03 1f 02 '
+        '0a 03 2e 04 02 05 07 02 15 04 15 02 2a 03 26 04 0e '
+        '03 35 04 0f 03 1e 02 32 02 05',
+      );
+      final shortLunch = _hex('bc 3e 01 00 bf 40 00');
+
+      expect(Codec.rxChannelBPayload(activity), hasLength(98));
+      expect(Codec.rxChannelBPayload(sleep), hasLength(55));
+      expect(Codec.rxChannelBPayload(shortLunch), hasLength(1));
+
+      t.inB.add(activity);
+      t.inB.add(sleep);
+      t.inB.add(shortLunch);
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      await sub.cancel();
+
+      expect(emitted.map((c) => c.cmd).toList(), [0x2a, 0x27, 0x3e]);
+      expect(emitted.map((c) => c.payload.length).toList(), [98, 55, 1]);
+      expect(t.sentA, isEmpty);
+    });
   });
 }
+
+Uint8List _hex(String bytes) => Uint8List.fromList(
+  bytes
+      .split(RegExp(r'\s+'))
+      .where((part) => part.isNotEmpty)
+      .map((part) => int.parse(part, radix: 16))
+      .toList(growable: false),
+);

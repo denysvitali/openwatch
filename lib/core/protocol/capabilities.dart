@@ -105,10 +105,11 @@ class DeviceCapabilities {
   factory DeviceCapabilities.fromSetTime(Uint8List pl) {
     if (pl.length < 14) return const DeviceCapabilities();
     final contactsByte = pl[0x0c];
+    final supportsSleep = _bit(pl[1], 7) || pl[8] == 1;
     return DeviceCapabilities(
       temperature: pl[0] == 1,
       heart: _bit(pl[1], 6),
-      sleep: _bit(pl[1], 7),
+      sleep: supportsSleep,
       menstruation: _bit(pl[2], 0),
       customWallpaper: _bit(pl[3], 0),
       bloodOxygen: _bit(pl[3], 1),
@@ -141,16 +142,17 @@ class DeviceCapabilities {
   /// Merges in the flags from `DeviceSupportFunctionRsp` (payload-relative).
   DeviceCapabilities mergeSupport(Uint8List pl) {
     if (pl.length < 9) return this;
+    final h59maBlock = _isH59maCapabilityBlock(pl);
     return DeviceCapabilities(
       screenWidth: screenWidth,
       screenHeight: screenHeight,
       maxWatchFaces: maxWatchFaces,
       maxContacts: maxContacts,
       // §4.2.1 flags: only override when the device actually tells us so.
-      heart: heart,
-      sleep: sleep,
-      bloodOxygen: bloodOxygen,
-      bloodPressure: bloodPressure,
+      heart: heart || h59maBlock,
+      sleep: sleep || h59maBlock || newSleepProtocol,
+      bloodOxygen: bloodOxygen || h59maBlock,
+      bloodPressure: bloodPressure || h59maBlock,
       weather: weather,
       menstruation: menstruation,
       hrv: hrv,
@@ -165,7 +167,7 @@ class DeviceCapabilities {
       record: record,
       bpSetting: bpSetting,
       fourG: fourG,
-      newSleepProtocol: newSleepProtocol,
+      newSleepProtocol: newSleepProtocol || h59maBlock,
       avatar: avatar,
       wechat: wechat,
       musicSupport: musicSupport,
@@ -176,7 +178,7 @@ class DeviceCapabilities {
       stress: stress || _bit(pl[7], 7),
       ultraviolet: ultraviolet || _bit(pl[7], 0),
       // pl[7] b3 RealTimeHr, b4 RealTimeHrRemind, b5 Friends (untouched).
-      realTimeHr: realTimeHr || _bit(pl[7], 3),
+      realTimeHr: realTimeHr || h59maBlock || _bit(pl[7], 3),
       alarm: _bit(pl[6], 6),
       dnd: _bit(pl[6], 7),
       // pl[1] b1 Moslin; pl[5] b7 is the Moslin overwrite — honor either.
@@ -199,4 +201,32 @@ class DeviceCapabilities {
 
   static bool _temperature200Celsius(Uint8List pl) =>
       pl.length > 0x0a && _bit(pl[0x0a], 1);
+
+  /// H59MA firmware routes Channel-A/FEE7 `0x3c` to a fixed capability block
+  /// instead of the APK-era `DeviceSupportFunctionRsp` bitmap. The block uses
+  /// opaque product feature IDs, so match only the static layouts observed in
+  /// H59MA v13 live captures and the v14 Ghidra notes before mapping it to the
+  /// app-level feature model.
+  static bool _isH59maCapabilityBlock(Uint8List pl) {
+    final liveV13 =
+        pl.length >= 14 &&
+        pl[1] == 0x40 &&
+        pl[3] == 0x80 &&
+        pl[7] == 0x20 &&
+        _onlyNonZero(pl, const {1, 3, 7});
+    final ghidraV14 =
+        pl.length >= 14 &&
+        pl[1] == 0x40 &&
+        (pl[6] == 0x80 || pl[6] == 0xa0) &&
+        pl[10] == 0x20 &&
+        _onlyNonZero(pl, const {1, 6, 10});
+    return liveV13 || ghidraV14;
+  }
+
+  static bool _onlyNonZero(Uint8List pl, Set<int> allowed) {
+    for (var i = 0; i < pl.length; i++) {
+      if (pl[i] != 0 && !allowed.contains(i)) return false;
+    }
+    return true;
+  }
 }

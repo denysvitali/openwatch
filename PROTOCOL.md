@@ -335,6 +335,15 @@ Year = `BCD(byte) + 2000` (`0x7d0`).
 
 #### 4.2.2 DeviceSupportFunctionRsp bitmap (payload-relative)
 
+Most APK-era devices return the bitmap below. H59MA firmware is a special case:
+the same Channel-A `0x3c` opcode falls through to the FEE7 capability handler
+(`FUN_0082c50e`) and returns a fixed product capability block instead of this
+bitmap. Live H59MA_V1.0 v13 capture:
+`3c 00 40 00 80 00 00 00 20 00 00 00 00 00 00 1c`; v14 RE notes show the
+same opaque feature-ID shape with IDs at bytes 2/7/11. Treat those fixed blocks
+as the H59MA app-level feature set (HR, SpO2, pressure/BP, new sleep), not as
+the generic bitmap below.
+
 | Byte | Bits → flags |
 |---|---|
 | `pl[1]` | b0 Touch, b1 Moslin, b2 APPRevision, b3 BlePair, b4 WatchTheme, b6 deviceNoScreen |
