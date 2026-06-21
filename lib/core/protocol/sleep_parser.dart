@@ -145,20 +145,28 @@ class SleepParser {
     required String source,
   }) {
     final out = <SleepSegment>[];
-    if (pl.length < 4) {
-      // Distinguish "no data" (length 0 or 2 for lunch, length 1 or 3 for night
-      // after dayOffset strip) from "corrupted data" (any other short length).
+    if (pl.length < 2) {
+      // The shortest possible block is just a u16 endMinute with no
+      // pairs. Anything shorter cannot even contain the header.
       // Log at warn so telemetry can detect firmware sending unexpectedly
       // short sleep payloads (SP-4).
       AppLog.instance.warn(
         'sleep',
         '$source payload too short for chained block '
-            '(len=${pl.length}, need>=4)',
+            '(len=${pl.length}, need>=2)',
       );
       return out;
     }
 
     var i = 0;
+
+    // Track the most recent non-empty block so we can detect a stale
+    // echo that has been concatenated without a terminator. The H59MA
+    // v13 firmware sometimes appends yesterday's record to today's
+    // response; the bogus block starts with an endMin that is earlier
+    // than the genuine block's endMin and is not preceded by NUL/NUL.
+    int? lastBlockEndMin;
+    var lastBlockWasTerminated = false;
 
     while (i + 2 <= pl.length) {
       // u16 big-endian: high byte first. The Oudmon SDK and the
@@ -172,37 +180,86 @@ class SleepParser {
         // emit a garbage segment.
         break;
       }
+
+      // Detect concatenated stale echoes: a new block that starts
+      // without a terminator and has an endMin earlier than the
+      // previous real block is almost certainly leaked data.
+      final prevEndMin = lastBlockEndMin;
+      if (prevEndMin != null &&
+          endMin < prevEndMin &&
+          !lastBlockWasTerminated) {
+        // Skip the stale block entirely, but still consume its bytes
+        // so the loop terminates.
+        final consumed = _skipStaleBlock(pl, i);
+        if (consumed == null) {
+          // Could not determine where the stale block ends — stop
+          // parsing to avoid emitting garbage.
+          break;
+        }
+        i += consumed;
+        continue;
+      }
+
       final pairs = <_SleepPair>[];
       var terminated = false;
       while (i + 2 <= pl.length) {
         final stage = pl[i] & 0xFF;
         final dur = pl[i + 1] & 0xFF;
-        i += 2;
+
         // A zero/zero pair is the natural terminator — older
         // firmwares pad the tail with NULs.
         if (stage == 0 && dur == 0) {
           terminated = true;
+          i += 2;
           break;
         }
-        pairs.add(_SleepPair(stage, dur));
-      }
-      // If we ran out of bytes before reading any pairs (and did not
-      // hit a zero/zero terminator), the remaining bytes are trailing
-      // garbage — do NOT continue and re-align on them, which would
-      // misinterpret pair bytes as a new endMin. (SP-1)
-      //
-      // Special case: endMin == 0 with no pairs is a firmware "no data"
-      // sentinel (similar to the 0xFF empty-day marker in HR history).
-      // Skip it cleanly so the next block in a chained frame is still
-      // parsed. (SP-5)
-      if (pairs.isEmpty) {
-        if (!terminated) {
-          if (endMin == 0) {
-            // No-data sentinel — keep walking the chain.
-            continue;
+
+        final candidateEndMin = (stage << 8) | dur;
+        if (candidateEndMin <= 24 * 60 - 1) {
+          // The next two bytes could be a pair, or they could be the
+          // start of a new day block. Decide based on context:
+          //
+          //  * If we have not read any pairs yet, this current "block"
+          //    is empty. Treat the bytes as the next block only when
+          //    their endMin is later than ours — otherwise a block
+          //    that legitimately starts with a short awake segment
+          //    would be swallowed. (SP-1 / SP-5)
+          //
+          //  * If we have already read pairs, treat the bytes as a
+          //    new block only when their endMin is earlier than ours.
+          //    That is the signature of a stale echo concatenated
+          //    onto a genuine block. (SP-2)
+          if (pairs.isEmpty) {
+            // Empty-block re-alignment: the next two bytes could be a
+            // pair (stage=0..N, dur) or the header of the next block.
+            // We only treat them as a header when the high byte is 0
+            // (so the value is a small endMinute) and the value is
+            // later than the current block's endMin. This avoids
+            // swallowing legitimate blocks whose first pair happens
+            // to decode to a u16 > endMin.
+            if (pl[i] == 0 && candidateEndMin > endMin) {
+              // Empty block followed by a later block — skip the empty
+              // one and re-align on the next header.
+              break;
+            }
+          } else if (candidateEndMin < endMin) {
+            // Genuine block followed by an earlier endMin without a
+            // terminator — stale echo. Stop the current block here.
+            break;
           }
-          break;
         }
+
+        pairs.add(_SleepPair(stage, dur));
+        i += 2;
+      }
+
+      // Empty block: either a no-data sentinel (endMin == 0) or a
+      // malformed block with no pairs. Skip it and keep walking the
+      // chain so a subsequent valid block is still parsed. (SP-1, SP-5)
+      if (pairs.isEmpty) {
+        lastBlockWasTerminated = terminated;
+        // lastBlockEndMin is intentionally left unchanged — an empty
+        // block should not influence stale-echo detection.
         continue;
       }
 
@@ -221,7 +278,9 @@ class SleepParser {
       // 20 hours is well above normal human sleep and catches the
       // observed echo without clipping legitimate long sleeps.
       const kMaxSleepSessionMinutes = 20 * 60;
-      if (totalMin > kMaxSleepSessionMinutes) {
+      if (totalMin >= kMaxSleepSessionMinutes) {
+        lastBlockEndMin = endMin;
+        lastBlockWasTerminated = terminated;
         continue;
       }
       var stMin = endMin - totalMin;
@@ -235,10 +294,10 @@ class SleepParser {
       // belongs to the previous calendar date.
       //
       // All sleep timestamps are in local wall-clock time.  When
-      // wrapping midnight we must account for DST transitions: a day
-      // can be 23 h or 25 h long, so we compute the actual minute
-      // count of the previous calendar day instead of assuming a
-      // fixed 1440-minute day.
+      // wrapping midnight we account for DST transitions by computing
+      // the actual minute count of the previous calendar day instead
+      // of assuming a fixed 1440-minute day. On hosts without DST
+      // (e.g. CI) this naturally falls back to 1440.
       var dayBase = DateTime(anchor.year, anchor.month, anchor.day);
       if (stMin < 0) {
         final prevDay = dayBase.subtract(const Duration(days: 1));
@@ -258,13 +317,52 @@ class SleepParser {
         stMin += p.durMin;
       }
 
-      // Chained-block terminator: if we exited the pair loop on a
-      // zero/zero terminator, advance past it. Otherwise the
-      // outer while will re-attempt alignment with the next
-      // two-byte window — which works as long as the firmware
-      // actually emits the (stage, dur) tuples contiguously.
+      lastBlockEndMin = endMin;
+      lastBlockWasTerminated = terminated;
     }
     return out;
+  }
+
+  /// Consumes a stale-echo block starting at [offset] in [pl].
+  ///
+  /// Returns the number of bytes to advance past the stale block, or
+  /// `null` if the block cannot be bounded safely. The stale block is
+  /// parsed like a normal block: it runs until the next plausible
+  /// block header that is earlier than the current one, a terminator,
+  /// or the end of the payload.
+  static int? _skipStaleBlock(Uint8List pl, int offset) {
+    var i = offset;
+    var lastEndMin = -1;
+    while (i + 2 <= pl.length) {
+      final endMin = (pl[i] << 8) | pl[i + 1];
+      if (endMin > 24 * 60 - 1) return null;
+      if (lastEndMin >= 0 && endMin < lastEndMin) {
+        // Next stale block starts here; stop before it.
+        return i - offset;
+      }
+      lastEndMin = endMin;
+      i += 2;
+
+      var terminated = false;
+      while (i + 2 <= pl.length) {
+        final stage = pl[i] & 0xFF;
+        final dur = pl[i + 1] & 0xFF;
+        if (stage == 0 && dur == 0) {
+          terminated = true;
+          i += 2;
+          break;
+        }
+        final candidate = (stage << 8) | dur;
+        if (candidate <= 24 * 60 - 1 && candidate < endMin) {
+          break;
+        }
+        i += 2;
+      }
+      if (terminated) return i - offset;
+      // If we did not see a terminator, keep walking — the stale echo
+      // may itself contain nested echoes.
+    }
+    return i - offset;
   }
 
   static SleepStage _toStage(int typeByte) {

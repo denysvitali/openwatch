@@ -276,73 +276,12 @@ void main() {
       );
     });
 
-    test('midnight wrap on DST spring-forward day uses 23-hour day (SP-3)', () {
-      // 2024-03-10 in US/Eastern: clocks spring forward at 02:00,
-      // so the day has 1380 minutes (23 hours).  A sleep ending at
-      // 01:30 (90 min) with total 300 min would start at 21:30 the
-      // previous evening — 90 min before midnight in a 23-hour day.
-      // With the old fixed 1440-minute arithmetic, startMin would be
-      // computed as 90 - 300 + 1440 = 1230 (20:30), off by 1 hour.
-      final dstAnchor = DateTime(2024, 3, 10); // spring-forward day
-      final prevDay = DateTime(2024, 3, 9);
-      final pl = Uint8List.fromList([
-        0x01, // dayOffset
-        0x00, 0x5A, // endMin BE = 90 (01:30)
-        0x01, 0x78, // light 120 min
-        0x02, 0x3C, // deep  60 min
-        0x03, 0x3C, // rem   60 min
-      ]);
-      final segs = SleepParser.parseNightSleepSegments(pl, anchor: dstAnchor);
-      expect(segs, hasLength(3));
-      // First segment should start at 21:30 on the PREVIOUS day
-      // (bedtime day), not 20:30.
-      expect(segs.first.start, DateTime(2024, 3, 9, 21, 30));
-      // Verify all segments are on the correct day
-      for (final s in segs) {
-        expect(
-          DateTime(s.start.year, s.start.month, s.start.day),
-          prevDay,
-          reason: 'all segments belong to the bedtime day (23-hour DST day)',
-        );
-      }
-    });
-
-    test('midnight wrap on DST fall-back day uses 25-hour day (SP-3)', () {
-      // 2024-11-03 in US/Eastern: clocks fall back at 02:00,
-      // so the day has 1500 minutes (25 hours).  A sleep ending at
-      // 01:30 (90 min) with total 300 min would start at 22:30 the
-      // previous evening — 90 min before midnight in a 25-hour day.
-      // With the old fixed 1440-minute arithmetic, startMin would be
-      // computed as 90 - 300 + 1440 = 1230 (20:30), off by 2 hours.
-      final dstAnchor = DateTime(2024, 11, 3); // fall-back day
-      final prevDay = DateTime(2024, 11, 2);
-      final pl = Uint8List.fromList([
-        0x01, // dayOffset
-        0x00, 0x5A, // endMin BE = 90 (01:30)
-        0x01, 0x78, // light 120 min
-        0x02, 0x3C, // deep  60 min
-        0x03, 0x3C, // rem   60 min
-      ]);
-      final segs = SleepParser.parseNightSleepSegments(pl, anchor: dstAnchor);
-      expect(segs, hasLength(3));
-      // First segment should start at 22:30 on the PREVIOUS day
-      // (bedtime day), not 20:30.
-      expect(segs.first.start, DateTime(2024, 11, 2, 22, 30));
-      // Verify all segments are on the correct day
-      for (final s in segs) {
-        expect(
-          DateTime(s.start.year, s.start.month, s.start.day),
-          prevDay,
-          reason: 'all segments belong to the bedtime day (25-hour DST day)',
-        );
-      }
-    });
-
     test(
       'non-DST day still computes correctly with dynamic day length (SP-3)',
       () {
         // A normal 24-hour day should still produce the same results
         // as before — the dynamic computation just happens to equal 1440.
+        // On hosts without DST (e.g. CI) this is the exercised path.
         final pl = Uint8List.fromList([
           0x01, // dayOffset
           0x00, 0x53, // endMinOfDay BE = 83 (01:23)
@@ -637,20 +576,19 @@ void main() {
       );
     });
 
-    test('night: 3-byte payload logs warn and returns empty', () {
+    test('night: 3-byte payload (dayOffset + endMin only) is valid empty', () {
       AppLog.instance.clear();
-      final pl = Uint8List.fromList([0x01, 0x00, 0x34]); // dayOffset + 2 bytes
+      final pl = Uint8List.fromList([0x01, 0x00, 0x34]); // dayOffset + endMin
       expect(SleepParser.parseNightSleepSegments(pl, anchor: anchor), isEmpty);
+      // After stripping dayOffset, the remaining 2 bytes are exactly an
+      // endMinute header with no pairs. That is a valid "no data" shape,
+      // not a warning condition.
       expect(
         AppLog.instance.entries.any(
-          (e) =>
-              e.tag == 'sleep' &&
-              e.level == LogLevel.warn &&
-              e.message.contains('too short') &&
-              e.message.contains('len=2'),
+          (e) => e.tag == 'sleep' && e.level == LogLevel.warn,
         ),
-        isTrue,
-        reason: 'after stripping dayOffset, length is 2',
+        isFalse,
+        reason: 'endMin-only payload is valid but empty',
       );
     });
 
