@@ -5,6 +5,39 @@
 
 ---
 
+## 0. Reading order
+
+This document is structured for a host SDK author who needs to
+understand the H59MA v14 firmware protocol. The 28+ detailed
+sub-sections plus multiple syntheses can be read in any order,
+but the recommended reading path is:
+
+1. **§8.22 (cross-section wire format synthesis)** — the 16-byte
+   envelope shared by §2 / §3 / §8, with the cmd-position table
+   that shows §3 is the odd one out.
+2. **§2 (Channel-B) + §3 (Channel-A)** — the two main GATT
+   transports. Start with §2's wire format + NAK packet (§2.0),
+   then §2.1-§2.11 for the per-opcode details. Move to §3's
+   dispatcher table, then §3.1-§3.24 for the Channel-A handlers.
+3. **§8 (0xFEE7 vendor service)** — the parallel vendor protocol.
+   §8.1 is the dispatcher table; §8.2-§8.22 are the per-opcode
+   details and syntheses.
+4. **§4 (ANCS)** — the Apple Notification Center Service glue.
+   §4.1-§4.3 cover the three callbacks.
+5. **§5 (OTA) + §6 (Power Management) + §7 (Sensors)** —
+   support subsystems. §5.1 has the OTA state machine, §6.1-§6.2
+   cover the power-management paths, §7.1-§7.2 cover the HR and
+   accelerometer dispatchers.
+6. **§9 (Notable Data & Globals) + §10 (Open Questions)** —
+   reference material.
+
+Within each section, read the *syntheses* (the `§x.y` sub-sections
+ending in "synthesis") before the *per-handler* sections — the
+syntheses pull together patterns that the per-handler sections
+cover in isolation.
+
+---
+
 ## 1. Entry Point & Boot
 
 | Address | Function | Notes |
