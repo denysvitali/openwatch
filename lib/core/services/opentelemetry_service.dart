@@ -237,9 +237,18 @@ class OpenTelemetryService {
   }) {
     if (!_initialized) return null;
     try {
+      // Auto-parent to the current active span when one is set. This
+      // turns the natural call stack (e.g. `sync.history` →
+      // `ble.request` → `ble.gatt.write` → `ble.rx`) into a single
+      // connected trace in Jaeger instead of N independent roots.
+      // When no active span is set, this becomes a new root trace.
+      final parent = _currentSpanStack.isEmpty
+          ? null
+          : _currentSpanStack.last._span;
       final span = OTel.tracer().startSpan(
         name,
         context: Context.root,
+        parentSpan: parent,
         kind: kind,
         attributes: OTel.attributesFromMap(_safeAttributes(attributes)),
       );
@@ -260,10 +269,17 @@ class OpenTelemetryService {
   }) {
     if (!_initialized) return null;
     try {
+      // Explicit parent wins. If the caller passes `parent: null` but
+      // there's an active span on the stack, fall back to that —
+      // otherwise we'd accidentally create a sibling root trace when
+      // the caller just forgot to pass `parent: currentSpan`.
+      final effectiveParent =
+          parent?._span ??
+          (_currentSpanStack.isEmpty ? null : _currentSpanStack.last._span);
       final span = OTel.tracer().startSpan(
         name,
         context: Context.root,
-        parentSpan: parent?._span,
+        parentSpan: effectiveParent,
         kind: kind,
         attributes: OTel.attributesFromMap(_safeAttributes(attributes)),
       );
