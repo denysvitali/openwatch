@@ -239,9 +239,14 @@ class OpenTelemetryService {
     try {
       // Auto-parent to the current active span when one is set. This
       // turns the natural call stack (e.g. `sync.history` →
-      // `ble.request` → `ble.gatt.write` → `ble.rx`) into a single
-      // connected trace in Jaeger instead of N independent roots.
-      // When no active span is set, this becomes a new root trace.
+      // `sync.history.day` → `ble.gatt.write` → `ble.rx`) into a
+      // single connected trace in Jaeger instead of N independent
+      // roots. When no active span is set, this becomes a new root
+      // trace.
+      //
+      // The span is also auto-pushed onto the active-span stack so
+      // child spans created during its lifetime are correctly
+      // parented. The push is undone by `OTelSpan.end()`.
       final parent = _currentSpanStack.isEmpty
           ? null
           : _currentSpanStack.last._span;
@@ -252,7 +257,9 @@ class OpenTelemetryService {
         kind: kind,
         attributes: OTel.attributesFromMap(_safeAttributes(attributes)),
       );
-      return OTelSpan._(span);
+      final otelSpan = OTelSpan._(span);
+      _currentSpanStack.add(otelSpan);
+      return otelSpan;
     } catch (e, stack) {
       // Span start failures are also at error level so a malformed
       // attribute or missing tracer shows up in the Logs screen.
@@ -283,7 +290,9 @@ class OpenTelemetryService {
         kind: kind,
         attributes: OTel.attributesFromMap(_safeAttributes(attributes)),
       );
-      return OTelSpan._(span);
+      final otelSpan = OTelSpan._(span);
+      _currentSpanStack.add(otelSpan);
+      return otelSpan;
     } catch (e, stack) {
       AppLog.instance.error(
         'otel',
@@ -379,8 +388,18 @@ class OTelSpan {
 
   /// End the span. Pass `ok: false` to mark it as error without supplying
   /// an exception object.
+  ///
+  /// If this span is currently the top of the active-span stack, it is
+  /// auto-popped so the next span created reverts to the previous
+  /// parent. Spans that ended out-of-order (e.g. the caller popped
+  /// manually) leave the stack alone.
   void end({bool ok = true}) {
     if (_span.isEnded) return;
+    final svc = OpenTelemetryService();
+    if (svc._currentSpanStack.isNotEmpty &&
+        identical(svc._currentSpanStack.last, this)) {
+      svc._currentSpanStack.removeLast();
+    }
     _span.end(spanStatus: ok ? SpanStatusCode.Ok : SpanStatusCode.Error);
   }
 }
