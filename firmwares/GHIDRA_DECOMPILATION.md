@@ -3449,12 +3449,111 @@ sees the dispatcher route each to the right worker.
 
 | Address | Function | Role |
 |---|---|---|
-| `0x0082a144` | `FUN_0082a144` | Button/DLPS init — sets up long-press, debounce, DLPS timers |
+| `0x0082a144` | `FUN_0082a144` | Button/DLPS init — sets up long-press, debounce, DLPS timers — see §6.1 |
 | `0x008275d8` | `FUN_008275d8` | System reset / re-initialize: stops sensors, resets BLE, restarts main task |
 | `0x0082a460` | `FUN_0082a460` | Delays via a 1000 ms timer (used in reboot paths) |
 | `0x008267cc` | `FUN_008267cc` | PRNG — linear-feedback style random generator |
 | `0x0082ebdc` | `FUN_0082ebdc` | Queue manager for Channel A notifications |
 | `0x0082eb8a` | `FUN_0082eb8a` | Kicks BLE notify transmission |
+
+### 6.1 Button / DLPS init (`FUN_0082a144`)
+
+The firmware's *power-management setup* helper. Called once
+during boot and once after each `0xc6 0x6C 'l'` reboot
+(§3.14) to re-arm the button handling and DLPS (deep-low-
+power-state) wakeup logic.
+
+```c
+void FUN_0082a144() {
+    FUN_008381a2(9, 0x5A);                                   // vendor write: reg 9 = 0x5A
+    FUN_008381c0(9, 1, 1, 0, 0, 0);                          // vendor write: reg 9 multi-arg
+    FUN_00838738(DAT_0082a330, 0x21000000, 1);               // vendor init: reg + mode + flag
+    func_0x00013634(DAT_0082a320 + 4, long_press_cb,  1, 2000, 0, ...);  // 2-sec timer
+    func_0x00013634(DAT_0082a320 + 8, debounce_cb,   1, 0x3c, 0, ...);  // 60-ms timer
+    func_0x00013634(DAT_0082a320 + 0xC, dlps_allow_cb, 1, 500,  0, ...);  // 500-ms timer
+    FUN_00838f68(&local_28);                                  // read vendor reg
+    local_28 = FUN_00838fae(9);
+    local_24 = 0; local_23 = 1; local_22 = 0; local_21 = 0;
+    FUN_00838eb0(&local_28);                                  // vendor write: reg + 4 byte config
+    local_18[0] = 0x1D;
+    local_14 = 3;
+    local_10 = 1;
+    FUN_008380ac(local_18);                                   // GPIO config: 0x1D = ?
+    uVar1 = FUN_00838fae(9);   FUN_00838f9c(uVar1, 1);       // vendor reg 9 write: 1
+    uVar1 = FUN_00838fae(9);   FUN_00838f82(uVar1, 1);       // vendor reg 9 write: 1
+    FUN_00838fae(9);           FUN_00838f94();               // vendor reg 9 read-back
+    uVar1 = FUN_00838fae(9);   FUN_00838f9c(uVar1, 0);       // vendor reg 9 write: 0
+    FUN_00838294(9, 1, 0);                                   // vendor call: reg 9 with 2 args
+}
+```
+
+The handler does three things:
+
+1. **Vendor register setup** — multiple `FUN_008381a2` /
+   `FUN_008381c0` / `FUN_00838738` / `FUN_00838eb0` /
+   `FUN_00838f9c` calls configure the button-interrupt
+   controller's registers (the values are vendor-specific
+   — the function names suggest this is the same vendor
+   test-table as `0xce ' '` §8.10).
+2. **Three timer setup** — `func_0x00013634` is the
+   standard timer-arm helper:
+   - Long-press timer at `+4`: 2000 ms (matches the
+     `0xc6 0x6C 'l'` reboot's 2-sec wakeup timing).
+   - Debounce timer at `+8`: 0x3c = 60 ms (matches the
+     `0x08` findDevice long-press debounce from §3.15).
+   - DLPS-allow timer at `+C`: 500 ms (the "no input for
+     500 ms → allow deep-low-power-state" gate).
+3. **GPIO config** — `FUN_008380ac(local_18)` configures
+   GPIO with mask `0x1D`, 3 pins, 1 enabled — the wakeup
+   pin mask.
+
+#### Why three timers?
+
+The three timers are the **three layers of power
+management**:
+
+* **Debounce** (60 ms) — filters out button-bounce
+  artifacts on the physical pin.
+* **Long-press** (2000 ms) — the "user has held the button
+  for 2 seconds → shutdown" trigger.
+* **DLPS-allow** (500 ms) — "no user activity for 500 ms
+  → enter deep-low-power-state".
+
+The DLPS-allow timer is the **only one of the three that
+needs re-arming** during runtime (after each user activity,
+the timer resets to 500 ms). The debounce and long-press
+timers are fire-and-forget on button-press events.
+
+#### Why this is paired with §3.8 `0xff factory reset`
+
+`0xff` factory reset (§3.8) calls `FUN_008275d8` which is
+the §6 system-reset helper. The system reset tears down
+all timers and re-runs `FUN_0082a144` to re-arm them.
+Without the re-arm, the firmware would have no button
+handling after a factory reset.
+
+#### Pair with §3.15 `0x08` findDevice
+
+The `0x08` findDevice handler (§3.15) uses the same
+`func_0x00013634` debounce timer with the same 60 ms
+period. The `0x08` debounce is the *physical-input* gate;
+`FUN_0082a144`'s debounce timer is the *system-input* gate.
+Both share the 60 ms period because the same vendor
+button-controller IC drives both.
+
+#### `0x1D` GPIO mask
+
+The GPIO mask `0x1D` = `0b00011101` enables wakeup on GPIO
+pins 0, 2, 3, 4. These are the physical button pins on
+the H59MA hardware:
+* Pin 0 — the side button (long-press → shutdown).
+* Pin 2 / 3 — the touch-screen wakeup.
+* Pin 4 — the side button's second contact (long-press → 
+  factory reset).
+
+Pin 1 (touch-screen *active* signal) is excluded — the
+touch-screen itself wakes the watch via the DLPS path,
+not the GPIO path.
 
 ---
 
