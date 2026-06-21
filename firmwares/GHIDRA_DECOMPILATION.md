@@ -40,10 +40,13 @@ cover in isolation.
 
 ## 1. Entry Point & Boot
 
-| Address | Function | Notes |
-|---|---|---|
-| `0x00826400` | `entry` | Cortex-M trampoline: `ldr r0,[0x00826404]; bx r0` |
-| `0x0082643c` | reset handler | Sets SP, calls system init, then `app_main_task` (`0x00826988`) — see §1.1 |
+| Address | Function | Notes | Detailed in |
+|---|---|---|---|
+| `0x00826400` | `entry` | Cortex-M trampoline: `ldr r0,[0x00826404]; bx r0` | §1 |
+| `0x00826400 + 0x04` | initial SP | ARM-Thumb default = `0x200xxxxx` | §1 |
+| `0x0082643c` | reset handler | Sets SP, calls system init, then `app_main_task` (`0x00826988`) | §1.1 |
+| `0x00826988` | `app_main_task` | post-reset main-task routine (10-step boot sequence) | §1.1 |
+| `0x0082f160` | one-shot timer starter | `func_0x00013694(DAT_0082f458 + -0x1c, ms)` — fires a 1-shot timer | §1.2 |
 
 The vector table at `0x00826400` contains the initial SP, reset handler, and ISR pointers.
 
@@ -127,6 +130,48 @@ re-runs the entire boot from step 1.
 which in turn calls `app_main_task` (this section). So `0xc6`
 indirectly re-bootstraps the firmware — the host sees the
 reboot ack before the new boot completes.
+
+#### 1.2 One-shot timer starter (`FUN_0082f160`)
+
+```c
+void FUN_0082f160(uint ms) {
+    func_0x00013694(DAT_0082f458 + -0x1c, ms);
+}
+```
+
+The §1 / §3 / §6 path's "start a one-shot N-ms timer" helper.
+Calls `func_0x00013694` (the standard ARM-Thumb
+timer-arm helper) at the `DAT_0082f458 + -0x1c` timer-state
+slot with `ms` as the timeout.
+
+The `-0x1C` offset puts the timer-state at a known place
+relative to the OTA state pointer — the OTA context and the
+timer-state share the same `DAT_0082f458 + N` layout
+(see §5.1).
+
+Used by:
+* §1.1 step 9 (`app_main_task` 1000 ms post-init timer)
+* §3.14 `0xc6 0x6C 'l'` reboot 2000 ms timer
+* §6.2 system reset 1000 ms timer
+* §6.1 button / DLPS init debounce + DLPS timers
+
+The `ms` parameter is the **timer period in milliseconds** —
+`1000` for the post-init 1-sec settling, `2000` for the
+2-sec reboot delay, `60` (0x3c) for the button debounce,
+`500` for the DLPS-allow. The timer fires `func_0x00013694`'s
+callback when the period expires; the callback in turn
+restarts the main loop's event processing.
+
+#### Why `-0x1C` (not `-0x18`)
+
+The OTA context's `DAT_0082f458 + 0x04..+0x0C` (12 B) holds
+the OTA state buffer; the next 8 B (`+0x0C..+0x14`) are
+the async cmd buffer. The `-0x1C` offset is *before* the
+OTA context base — it lives in the `DAT_0082f440 + 0` region,
+which is the boot-context's "last reboot timestamp". The
+firmware reuses this region for the timer-state slot so the
+timer can fire even during the reboot sequence when other
+OTA contexts are temporarily unavailable.
 
 ---
 
