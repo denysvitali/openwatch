@@ -11,16 +11,17 @@ import '../../../core/services/history_store.dart';
 /// Days without a recorded step count render as a 1-px placeholder bar
 /// so the spacing stays uniform (an empty bar reads better than a gap).
 class StepsBarChart extends StatelessWidget {
-  const StepsBarChart({super.key, required this.days});
+  const StepsBarChart({super.key, required this.days, this.height = 120});
 
   /// Days in display order — first entry = leftmost bar. Typically
   /// `today.subDays(N)..today` so the right-most bar is today.
   final List<DailyHistory> days;
+  final double height;
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 120,
+      height: height,
       child: CustomPaint(
         painter: _StepsPainter(
           days: days,
@@ -50,16 +51,17 @@ class _StepsPainter extends CustomPainter {
   final Color axisColor;
   final Color textColor;
 
-  static const double _bottomAxisHeight = 22;
+  static const double _topLabelHeight = 18;
+  static const double _bottomAxisHeight = 24;
 
   @override
   void paint(Canvas canvas, Size size) {
     if (days.isEmpty) return;
     final chartRect = Rect.fromLTWH(
       0,
-      4,
+      _topLabelHeight,
       size.width,
-      size.height - _bottomAxisHeight - 4,
+      size.height - _bottomAxisHeight - _topLabelHeight,
     );
 
     // Y-axis: max of (steps, 1000) so a brand-new user with no data
@@ -74,11 +76,11 @@ class _StepsPainter extends CustomPainter {
     final barW = (slot * 0.6).clamp(2.0, 24.0);
     final paint = Paint()..style = PaintingStyle.fill;
     final gridPaint = Paint()
-      ..color = axisColor
+      ..color = axisColor.withValues(alpha: 0.64)
       ..strokeWidth = 0.5;
 
-    // Y-axis: 3 horizontal gridlines at 25 / 50 / 100% of maxSteps.
-    for (final frac in [0.25, 0.5, 1.0]) {
+    // Y-axis: a minimal Apple-style grid: enough scale without clutter.
+    for (final frac in [0.5, 1.0]) {
       final y = chartRect.bottom - frac * chartRect.height;
       canvas.drawLine(
         Offset(chartRect.left, y),
@@ -88,8 +90,8 @@ class _StepsPainter extends CustomPainter {
       _paintText(
         canvas,
         _formatSteps((maxSteps * frac).round()),
-        Offset(2, y - 12),
-        color: textColor,
+        Offset(0, y - 13),
+        color: textColor.withValues(alpha: 0.72),
         size: 10,
       );
     }
@@ -109,18 +111,42 @@ class _StepsPainter extends CustomPainter {
       paint.color = d.day == today ? todayColor : barColor;
       final rect = RRect.fromRectAndRadius(
         Rect.fromLTWH(centerX - barW / 2, chartRect.bottom - h, barW, h),
-        const Radius.circular(2),
+        Radius.circular(barW / 2),
       );
       canvas.drawRRect(rect, paint);
+      if (steps > 0 && barCount <= 7) {
+        final label = _formatSteps(steps);
+        final labelWidth = _measureText(label, size: 9);
+        _paintText(
+          canvas,
+          label,
+          Offset(centerX - labelWidth / 2, chartRect.bottom - h - 16),
+          color: textColor.withValues(alpha: 0.72),
+          size: 9,
+        );
+      }
       // Day-of-week label below the bar.
+      final weekday = _weekdayShort(d.day);
+      final labelWidth = _measureText(weekday, size: 10);
       _paintText(
         canvas,
-        _weekdayShort(d.day),
-        Offset(centerX - 6, chartRect.bottom + 4),
+        weekday,
+        Offset(centerX - labelWidth / 2, chartRect.bottom + 7),
         color: textColor,
-        size: 9,
+        size: 10,
       );
     }
+  }
+
+  double _measureText(String text, {double size = 11}) {
+    final tp = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: TextStyle(fontSize: size),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    return tp.width;
   }
 
   void _paintText(

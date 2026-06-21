@@ -52,6 +52,7 @@ class _SleepPainter extends CustomPainter {
   final Color axisColor;
   final Color textColor;
 
+  static const double _leftLabelWidth = 44;
   static const double _bottomAxisHeight = 18;
 
   @override
@@ -62,9 +63,9 @@ class _SleepPainter extends CustomPainter {
     }
 
     final chartRect = Rect.fromLTWH(
-      0,
+      _leftLabelWidth,
       4,
-      size.width,
+      size.width - _leftLabelWidth,
       size.height - _bottomAxisHeight - 4,
     );
     final first = segments.first.start;
@@ -97,7 +98,7 @@ class _SleepPainter extends CustomPainter {
       paint.color = colors[s.stage] ?? Colors.blueGrey;
       final rect = RRect.fromRectAndRadius(
         Rect.fromLTRB(x0, y, x1, y + laneH - 4),
-        const Radius.circular(2),
+        const Radius.circular(5),
       );
       canvas.drawRRect(rect, paint);
     }
@@ -112,24 +113,30 @@ class _SleepPainter extends CustomPainter {
       // Background swatch + label, anchored to the lane top.
       final y = chartRect.top + i * laneH + 2;
       final swatchPaint = Paint()..color = colors[lanes[i]] ?? Colors.blueGrey;
-      canvas.drawRect(Rect.fromLTWH(0, y, 3, laneH - 4), swatchPaint);
-      tp.paint(canvas, Offset(6, y + (laneH - 4 - tp.height) / 2));
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(0, y + (laneH - 10) / 2, 6, 6),
+          const Radius.circular(3),
+        ),
+        swatchPaint,
+      );
+      tp.paint(canvas, Offset(10, y + (laneH - 4 - tp.height) / 2));
     }
 
     // Hour ticks.
     final gridPaint = Paint()
-      ..color = axisColor
+      ..color = axisColor.withValues(alpha: 0.64)
       ..strokeWidth = 0.5;
     canvas.drawLine(
       Offset(chartRect.left, chartRect.bottom),
       Offset(chartRect.right, chartRect.bottom),
       gridPaint,
     );
-    for (final hour in [0, 3, 6, 9, 12, 15, 18, 21, 24]) {
+    for (final hour in [0, 6, 12, 18, 24]) {
       final x = chartRect.left + (hour / 24) * chartRect.width;
       _paintText(
         canvas,
-        '$hour',
+        hour == 0 || hour == 24 ? '$hour' : '${hour}h',
         Offset(x - 6, chartRect.bottom + 4),
         size: 10,
         color: textColor,

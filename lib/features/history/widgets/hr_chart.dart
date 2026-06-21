@@ -118,12 +118,12 @@ class _HrPainter extends CustomPainter {
 
     final linePaint = Paint()
       ..color = color
-      ..strokeWidth = 1.6
+      ..strokeWidth = showAxes ? 2.2 : 1.8
       ..style = PaintingStyle.stroke
       ..strokeJoin = StrokeJoin.round
       ..strokeCap = StrokeCap.round;
     final fillPaint = Paint()
-      ..color = color.withValues(alpha: 0.15)
+      ..color = color.withValues(alpha: showAxes ? 0.12 : 0.10)
       ..style = PaintingStyle.fill;
 
     // The day boundary is whichever midnight the first sample falls
@@ -140,6 +140,7 @@ class _HrPainter extends CustomPainter {
     final path = Path();
     final fillPath = Path();
     bool started = false;
+    Offset? lastPoint;
 
     for (var i = 0; i < samples.length; i++) {
       final s = samples[i];
@@ -161,12 +162,21 @@ class _HrPainter extends CustomPainter {
         path.lineTo(x, y);
         fillPath.lineTo(x, y);
       }
+      lastPoint = Offset(x, y);
     }
     if (started) {
       fillPath.lineTo(chartRect.right, chartRect.bottom);
       fillPath.close();
       canvas.drawPath(fillPath, fillPaint);
       canvas.drawPath(path, linePaint);
+      if (showAxes && lastPoint != null) {
+        canvas.drawCircle(lastPoint, 4.5, Paint()..color = color);
+        canvas.drawCircle(
+          lastPoint,
+          2.2,
+          Paint()..color = const Color(0xFFFFFFFF),
+        );
+      }
     }
   }
 
@@ -187,11 +197,11 @@ class _HrPainter extends CustomPainter {
 
   void _paintAxes(Canvas canvas, Size size, Rect chartRect) {
     final gridPaint = Paint()
-      ..color = axisColor
+      ..color = axisColor.withValues(alpha: 0.64)
       ..strokeWidth = 0.5;
 
-    // Horizontal BPM gridlines at 60, 100, 140, 180.
-    for (final bpm in [60.0, 100.0, 140.0, 180.0]) {
+    // Horizontal BPM gridlines at calm, readable intervals.
+    for (final bpm in [60.0, 100.0, 140.0]) {
       final yNorm = (bpm - minBpm) / (maxBpm - minBpm);
       final y = chartRect.bottom - yNorm * chartRect.height;
       canvas.drawLine(
@@ -212,7 +222,7 @@ class _HrPainter extends CustomPainter {
       final x = chartRect.left + (hour / 24) * chartRect.width;
       _paintText(
         canvas,
-        '$hour',
+        hour == 0 || hour == 24 ? '$hour' : '${hour}h',
         Offset(x - 6, chartRect.bottom + 4),
         size: 10,
       );

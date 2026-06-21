@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -9,36 +10,58 @@ class HomeShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Scaffold(
       body: navigationShell,
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: navigationShell.currentIndex,
-        onDestinationSelected: (i) => navigationShell.goBranch(
-          i,
-          initialLocation: i == navigationShell.currentIndex,
+      bottomNavigationBar: DecoratedBox(
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface.withValues(alpha: 0.94),
+          border: Border(
+            top: BorderSide(
+              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.6),
+              width: 0.6,
+            ),
+          ),
         ),
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.watch_outlined),
-            selectedIcon: Icon(Icons.watch),
-            label: 'Device',
+        child: BottomNavigationBar(
+          type: BottomNavigationBarType.fixed,
+          elevation: 0,
+          backgroundColor: Colors.transparent,
+          selectedItemColor: theme.colorScheme.primary,
+          unselectedItemColor: theme.colorScheme.onSurfaceVariant,
+          selectedLabelStyle: theme.textTheme.labelSmall?.copyWith(
+            fontWeight: FontWeight.w700,
           ),
-          NavigationDestination(
-            icon: Icon(Icons.favorite_outline),
-            selectedIcon: Icon(Icons.favorite),
-            label: 'Health',
+          unselectedLabelStyle: theme.textTheme.labelSmall,
+          showUnselectedLabels: true,
+          currentIndex: navigationShell.currentIndex,
+          onTap: (i) => navigationShell.goBranch(
+            i,
+            initialLocation: i == navigationShell.currentIndex,
           ),
-          NavigationDestination(
-            icon: Icon(Icons.notifications_outlined),
-            selectedIcon: Icon(Icons.notifications),
-            label: 'Alerts',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.settings_outlined),
-            selectedIcon: Icon(Icons.settings),
-            label: 'Settings',
-          ),
-        ],
+          items: const [
+            BottomNavigationBarItem(
+              icon: Icon(Icons.watch_outlined),
+              activeIcon: Icon(Icons.watch_rounded),
+              label: 'Device',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(CupertinoIcons.heart),
+              activeIcon: Icon(CupertinoIcons.heart_fill),
+              label: 'Health',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(CupertinoIcons.bell),
+              activeIcon: Icon(CupertinoIcons.bell_fill),
+              label: 'Alerts',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(CupertinoIcons.gear_alt),
+              activeIcon: Icon(CupertinoIcons.gear_alt_fill),
+              label: 'Settings',
+            ),
+          ],
+        ),
       ),
     );
   }

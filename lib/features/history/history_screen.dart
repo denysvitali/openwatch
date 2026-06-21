@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -11,12 +12,6 @@ import 'widgets/sleep_chart.dart';
 import 'widgets/steps_chart.dart';
 
 /// Local-first history view.
-///
-/// Shows every day we have stored on the phone (HR + sleep + steps) with
-/// a small per-day summary card and a detail expansion that renders
-/// the full chart. The "Sync now" button is incremental: it only
-/// re-fetches days the watch says have new data AND we don't already
-/// have on disk.
 class HistoryScreen extends ConsumerWidget {
   const HistoryScreen({super.key});
 
@@ -26,17 +21,14 @@ class HistoryScreen extends ConsumerWidget {
     final sync = ref.watch(historySyncProvider);
     final store = ref.watch(historyStoreProvider).asData?.value;
 
-    // Listen for changes so the chart rebuilds when samples land.
-    ref.listen<HistorySync>(historySyncProvider, (prev, next) {
-      // No-op — the ConsumerWidget already rebuilds via watch.
-    });
+    ref.listen<HistorySync>(historySyncProvider, (prev, next) {});
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('History'),
+        title: const Text('Activity'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(CupertinoIcons.arrow_clockwise),
             tooltip: 'Sync now',
             onPressed: (ready && !sync.syncing) ? () => sync.syncAll() : null,
           ),
@@ -45,62 +37,48 @@ class HistoryScreen extends ConsumerWidget {
       body: RefreshIndicator(
         onRefresh: () => sync.syncAll(),
         child: ListView(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
           children: [
             _SyncStatusCard(sync: sync),
             const SizedBox(height: 12),
-            _Legend(),
-            const SizedBox(height: 16),
-            if (sync.days.any((d) => d.steps != null)) ...[
+            if (sync.days.isNotEmpty) ...[
+              _SummaryStrip(days: sync.days),
+              const SizedBox(height: 12),
               _StepsOverviewCard(days: sync.days),
               const SizedBox(height: 16),
-            ],
-            if (sync.days.isEmpty)
-              const _EmptyState()
-            else
-              ..._buildDayList(context, sync),
-            const SizedBox(height: 24),
+              _SectionTitle(
+                title: 'Daily detail',
+                trailing: '${sync.days.length} days',
+              ),
+              const SizedBox(height: 8),
+              ..._buildDayList(sync),
+            ] else
+              const _EmptyState(),
+            const SizedBox(height: 20),
             OutlinedButton.icon(
-              icon: const Icon(Icons.watch),
-              label: const Text('Back to device'),
+              icon: const Icon(Icons.watch_rounded),
+              label: const Text('Back to Device'),
               onPressed: () => context.go('/dashboard'),
             ),
-            if (store == null) ...[
-              const SizedBox(height: 16),
-              const Card(
-                color: Color(0xFFFFF3E0),
-                child: ListTile(
-                  leading: Icon(Icons.storage, color: Colors.orange),
-                  title: Text('Local store unavailable'),
-                  subtitle: Text(
-                    'History will be kept in memory only until the storage '
-                    'layer finishes initialising. Pull to refresh once it '
-                    'does.',
-                  ),
-                ),
-              ),
-            ],
+            if (store == null) ...[const SizedBox(height: 16), _StoreWarning()],
           ],
         ),
       ),
     );
   }
 
-  List<Widget> _buildDayList(BuildContext context, HistorySync sync) {
-    final reversed = sync.days.reversed.toList(); // newest first
+  List<Widget> _buildDayList(HistorySync sync) {
+    final reversed = sync.days.reversed.toList();
     return [
       for (var i = 0; i < reversed.length; i++)
-        _DayCard(
-          day: reversed[i],
-          isExpanded: i == 0, // today expanded by default
-          sync: sync,
+        Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: _DayCard(day: reversed[i], isExpanded: i == 0, sync: sync),
         ),
     ];
   }
 }
 
-/// "Last sync X ago" + status pill. Visible at the top of the history
-/// screen — the most important affordance for the local-first model.
 class _SyncStatusCard extends StatelessWidget {
   const _SyncStatusCard({required this.sync});
   final HistorySync sync;
@@ -111,89 +89,93 @@ class _SyncStatusCard extends StatelessWidget {
     final last = sync.lastSyncedAt;
     final error = sync.lastSyncError;
 
-    final (label, color, icon) = switch ((sync.syncing, last, error)) {
-      (true, _, _) => ('Syncing…', theme.colorScheme.primary, Icons.sync),
+    final (title, detail, color, icon) = switch ((sync.syncing, last, error)) {
+      (true, _, _) => (
+        'Syncing',
+        _progressLine(),
+        theme.colorScheme.primary,
+        CupertinoIcons.arrow_2_circlepath,
+      ),
       (false, _, String e) => (
-        'Sync failed: $e',
+        'Sync failed',
+        e,
         theme.colorScheme.error,
-        Icons.error_outline,
+        CupertinoIcons.exclamationmark_circle,
       ),
       (false, null, _) => (
         'Never synced',
+        'Pull from the watch to build local history',
         theme.colorScheme.outline,
-        Icons.cloud_off,
+        Icons.cloud_off_rounded,
       ),
       (false, DateTime l, _) => (
-        'Up to date — last sync ${_formatRelative(l)}',
-        Colors.green,
-        Icons.check_circle,
+        'Up to date',
+        'Last sync ${_formatRelative(l)}',
+        theme.colorScheme.secondary,
+        CupertinoIcons.checkmark_circle_fill,
       ),
     };
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                if (sync.syncing)
-                  const SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: CircularProgressIndicator(strokeWidth: 2.4),
-                  )
-                else
-                  Icon(icon, color: color),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(label, style: theme.textTheme.bodyMedium),
-                      const SizedBox(height: 2),
-                      Text(
-                        _detailLine(),
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
+    return _InsetCard(
+      child: Column(
+        children: [
+          Row(
+            children: [
+              if (sync.syncing)
+                const SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(strokeWidth: 2.4),
+                )
+              else
+                Icon(icon, color: color),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: theme.textTheme.titleMedium),
+                    const SizedBox(height: 2),
+                    Text(
+                      detail,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            if (sync.syncing && sync.progressTotal > 0) ...[
-              const SizedBox(height: 12),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: LinearProgressIndicator(
-                  value: sync.progressCurrent / sync.progressTotal,
-                  minHeight: 6,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
                 ),
               ),
+              Text(
+                '${sync.days.length}d',
+                style: theme.textTheme.titleMedium?.copyWith(color: color),
+              ),
             ],
+          ),
+          if (sync.syncing && sync.progressTotal > 0) ...[
+            const SizedBox(height: 12),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: LinearProgressIndicator(
+                value: sync.progressCurrent / sync.progressTotal,
+                minHeight: 7,
+              ),
+            ),
           ],
-        ),
+        ],
       ),
     );
   }
 
-  String _detailLine() {
-    final count = sync.days.length;
-    final fetched = sync.fetchedDays.length;
-    if (sync.syncing) {
-      final total = sync.progressTotal;
-      if (total > 0) {
-        return 'Fetching day ${sync.progressCurrent} of $total '
-            '($fetched pulled this session)…';
-      }
-      return 'Fetching $fetched new day(s)…';
+  String _progressLine() {
+    if (sync.progressTotal > 0) {
+      return 'Fetching day ${sync.progressCurrent} of ${sync.progressTotal}';
     }
-    if (count == 0) return 'No data yet — tap sync to pull from the watch.';
-    final hours = sync.days.expand((d) => d.hr).where((h) => h.bpm > 0).length;
-    return '$count day(s) stored · $hours HR sample(s) on disk';
+    if (sync.fetchedDays.isNotEmpty) {
+      return '${sync.fetchedDays.length} new days pulled';
+    }
+    return 'Checking the watch';
   }
 
   String _formatRelative(DateTime when) {
@@ -206,67 +188,125 @@ class _SyncStatusCard extends StatelessWidget {
   }
 }
 
-class _Legend extends StatelessWidget {
+class _SummaryStrip extends StatelessWidget {
+  const _SummaryStrip({required this.days});
+
+  final List<DailyHistory> days;
+
   @override
   Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 12,
-      runSpacing: 6,
-      children: const [
-        _LegendChip(color: Color(0xFF1E88E5), label: 'Deep'),
-        _LegendChip(color: Color(0xFF64B5F6), label: 'Light'),
-        _LegendChip(color: Color(0xFF7E57C2), label: 'REM'),
-        _LegendChip(color: Color(0xFFE57373), label: 'Awake'),
-      ],
+    final week = days.length <= 7 ? days : days.sublist(days.length - 7);
+    final stepsTotal = week.fold<int>(0, (sum, d) => sum + (d.steps ?? 0));
+    final hrSamples = week.expand((d) => d.hr).toList();
+    final avgHr = hrSamples.isEmpty
+        ? null
+        : (hrSamples.fold<int>(0, (sum, h) => sum + h.bpm) / hrSamples.length)
+              .round();
+    final sleep = days.last.sleep.fold<Duration>(
+      Duration.zero,
+      (sum, s) => sum + s.duration,
     );
-  }
-}
 
-class _LegendChip extends StatelessWidget {
-  const _LegendChip({required this.color, required this.label});
-  final Color color;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
     return Row(
-      mainAxisSize: MainAxisSize.min,
       children: [
-        Container(
-          width: 10,
-          height: 10,
-          decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.circular(2),
+        Expanded(
+          child: _SummaryTile(
+            icon: CupertinoIcons.arrow_up_right,
+            label: '7-day steps',
+            value: NumberFormat.compact().format(stepsTotal),
+            tint: Theme.of(context).colorScheme.primary,
           ),
         ),
-        const SizedBox(width: 6),
-        Text(label, style: Theme.of(context).textTheme.bodySmall),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _SummaryTile(
+            icon: CupertinoIcons.heart_fill,
+            label: 'Avg heart',
+            value: avgHr == null ? '-' : '$avgHr',
+            unit: avgHr == null ? null : 'bpm',
+            tint: const Color(0xFFFF3B30),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _SummaryTile(
+            icon: CupertinoIcons.moon_fill,
+            label: 'Sleep',
+            value: sleep == Duration.zero
+                ? '-'
+                : '${sleep.inHours}h ${sleep.inMinutes.remainder(60)}m',
+            tint: const Color(0xFF5856D6),
+          ),
+        ),
       ],
     );
   }
 }
 
-class _EmptyState extends StatelessWidget {
-  const _EmptyState();
+class _SummaryTile extends StatelessWidget {
+  const _SummaryTile({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.tint,
+    this.unit,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+  final String? unit;
+  final Color tint;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 32),
-      child: Column(
-        children: [
-          Icon(
-            Icons.timeline,
-            size: 64,
-            color: Theme.of(context).colorScheme.outline,
-          ),
-          const SizedBox(height: 12),
-          const Text(
-            'No history yet.\nTap Sync to pull from the watch.',
-            textAlign: TextAlign.center,
-          ),
-        ],
+    final theme = Theme.of(context);
+    return _InsetCard(
+      padding: const EdgeInsets.all(12),
+      child: SizedBox(
+        height: 84,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: tint, size: 18),
+            const Spacer(),
+            FittedBox(
+              alignment: Alignment.centerLeft,
+              fit: BoxFit.scaleDown,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    value,
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  if (unit != null) ...[
+                    const SizedBox(width: 3),
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 3),
+                      child: Text(
+                        unit!,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            Text(
+              label,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -279,25 +319,127 @@ class _StepsOverviewCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final recent = days.length <= 7 ? days : days.sublist(days.length - 7);
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Steps', style: Theme.of(context).textTheme.titleSmall),
-            const SizedBox(height: 12),
-            StepsBarChart(days: recent),
-          ],
-        ),
+    final best = recent.fold<int>(0, (max, d) {
+      final steps = d.steps ?? 0;
+      return steps > max ? steps : max;
+    });
+
+    return _InsetCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(child: Text('Steps', style: theme.textTheme.titleLarge)),
+              Text(
+                best == 0
+                    ? 'No peak'
+                    : 'Best ${NumberFormat.compact().format(best)}',
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          StepsBarChart(days: recent, height: 156),
+        ],
       ),
     );
   }
 }
 
-/// Per-day summary card with HR spark + sleep mini-timeline + steps.
-/// Tap the card to expand the full charts for that day.
+class _SectionTitle extends StatelessWidget {
+  const _SectionTitle({required this.title, required this.trailing});
+
+  final String title;
+  final String trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            title,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+        Text(
+          trailing,
+          style: theme.textTheme.labelLarge?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _EmptyState extends StatelessWidget {
+  const _EmptyState();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 56),
+      child: Column(
+        children: [
+          Container(
+            width: 72,
+            height: 72,
+            decoration: BoxDecoration(
+              color: theme.colorScheme.primary.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(
+              CupertinoIcons.chart_bar,
+              size: 34,
+              color: theme.colorScheme.primary,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text('No history yet', style: theme.textTheme.titleMedium),
+          const SizedBox(height: 4),
+          Text(
+            'Tap sync after connecting your watch.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StoreWarning extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return _InsetCard(
+      child: Row(
+        children: [
+          Icon(Icons.storage_rounded, color: theme.colorScheme.tertiary),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              'Local store unavailable. History will stay in memory until storage finishes initialising.',
+              style: theme.textTheme.bodySmall,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _DayCard extends StatefulWidget {
   const _DayCard({
     required this.day,
@@ -329,11 +471,11 @@ class _DayCardState extends State<_DayCard> {
     final isToday = day.day == DateOnly.today();
     final isEmpty = day.hr.isEmpty && day.sleep.isEmpty && day.steps == null;
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
+    return _InsetCard(
+      padding: EdgeInsets.zero,
       child: InkWell(
         onTap: () => setState(() => _expanded = !_expanded),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(8),
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
@@ -347,7 +489,9 @@ class _DayCardState extends State<_DayCard> {
                       children: [
                         Text(
                           _formatDayHeader(day.day),
-                          style: theme.textTheme.titleMedium,
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                         if (day.lastUpdated != null)
                           Text(
@@ -359,115 +503,103 @@ class _DayCardState extends State<_DayCard> {
                       ],
                     ),
                   ),
-                  if (widget.sync.fetchedDays.contains(day.day))
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.primaryContainer,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text(
-                        'new',
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: theme.colorScheme.onPrimaryContainer,
-                        ),
-                      ),
-                    ),
+                  if (widget.sync.fetchedDays.contains(day.day)) _NewBadge(),
                   Icon(
-                    _expanded ? Icons.expand_less : Icons.expand_more,
+                    _expanded
+                        ? CupertinoIcons.chevron_up
+                        : CupertinoIcons.chevron_down,
                     color: theme.colorScheme.onSurfaceVariant,
+                    size: 18,
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 14),
               if (isEmpty)
                 Text(
-                  isToday ? 'No data yet today' : 'No data on watch',
+                  isToday ? 'No data today' : 'No watch data',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
                 )
               else ...[
                 if (day.hr.isNotEmpty)
-                  MiniHrSpark(samples: day.hr, height: 44)
+                  MiniHrSpark(samples: day.hr, height: 46)
                 else
-                  Container(
-                    height: 44,
-                    alignment: Alignment.center,
-                    child: Text(
-                      'No HR samples',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
+                  SizedBox(
+                    height: 46,
+                    child: Center(
+                      child: Text(
+                        'No heart-rate samples',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
                       ),
                     ),
                   ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 12),
                 Wrap(
-                  spacing: 16,
-                  runSpacing: 4,
+                  spacing: 10,
+                  runSpacing: 8,
                   children: [
-                    _DayMetric(
-                      icon: Icons.favorite,
-                      label: 'HR',
-                      value: day.hr.isEmpty
-                          ? '—'
-                          : '${_avgBpm(day.hr)} avg bpm',
+                    _MetricPill(
+                      icon: CupertinoIcons.heart_fill,
+                      label: day.hr.isEmpty ? '-' : '${_avgBpm(day.hr)} bpm',
+                      tint: const Color(0xFFFF3B30),
                     ),
-                    _DayMetric(
-                      icon: Icons.bedtime,
-                      label: 'Sleep',
-                      value: _sleepSummary(day),
+                    _MetricPill(
+                      icon: CupertinoIcons.moon_fill,
+                      label: _sleepSummary(day),
+                      tint: const Color(0xFF5856D6),
                     ),
-                    _DayMetric(
-                      icon: Icons.directions_walk,
-                      label: 'Steps',
-                      value: day.steps?.toString() ?? '—',
+                    _MetricPill(
+                      icon: CupertinoIcons.arrow_up_right,
+                      label: day.steps == null
+                          ? '-'
+                          : NumberFormat.compact().format(day.steps),
+                      tint: theme.colorScheme.primary,
                     ),
                   ],
                 ),
               ],
               if (_expanded && !isEmpty) ...[
-                const Divider(height: 24),
+                const SizedBox(height: 18),
+                Divider(color: theme.colorScheme.outlineVariant),
                 if (day.hr.isNotEmpty) ...[
-                  Text('Heart rate', style: theme.textTheme.titleSmall),
-                  const SizedBox(height: 8),
-                  SizedBox(height: 180, child: HrLineChart(samples: day.hr)),
                   const SizedBox(height: 16),
+                  _ChartHeader(
+                    title: 'Heart rate',
+                    detail: '${_avgBpm(day.hr)} bpm avg',
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(height: 184, child: HrLineChart(samples: day.hr)),
                 ],
                 if (day.sleep.isNotEmpty) ...[
-                  Text('Sleep stages', style: theme.textTheme.titleSmall),
-                  const SizedBox(height: 8),
-                  SleepTimeline(segments: day.sleep, height: 96),
-                  const SizedBox(height: 8),
-                  Text(
-                    _sleepLongSummary(day),
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 18),
+                  _ChartHeader(title: 'Sleep', detail: _sleepLongSummary(day)),
+                  const SizedBox(height: 10),
+                  SleepTimeline(segments: day.sleep, height: 110),
                 ],
                 if (day.energyKcal != null || day.distanceMeters != null) ...[
-                  Text('Activity', style: theme.textTheme.titleSmall),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 18),
+                  _ChartHeader(title: 'Activity', detail: _activityDetail(day)),
+                  const SizedBox(height: 10),
                   Wrap(
-                    spacing: 16,
-                    runSpacing: 4,
+                    spacing: 10,
+                    runSpacing: 8,
                     children: [
-                      _DayMetric(
-                        icon: Icons.local_fire_department,
-                        label: 'Calories',
-                        value: day.energyKcal?.toString() ?? '—',
+                      _MetricPill(
+                        icon: CupertinoIcons.flame_fill,
+                        label: day.energyKcal == null
+                            ? '- kcal'
+                            : '${day.energyKcal} kcal',
+                        tint: const Color(0xFFFF9500),
                       ),
-                      _DayMetric(
-                        icon: Icons.straighten,
-                        label: 'Distance',
-                        value: day.distanceMeters == null
-                            ? '—'
+                      _MetricPill(
+                        icon: CupertinoIcons.location_fill,
+                        label: day.distanceMeters == null
+                            ? '- km'
                             : '${(day.distanceMeters! / 1000).toStringAsFixed(2)} km',
+                        tint: const Color(0xFF34C759),
                       ),
                     ],
                   ),
@@ -496,7 +628,7 @@ class _DayCardState extends State<_DayCard> {
   }
 
   static String _sleepSummary(DailyHistory day) {
-    if (day.sleep.isEmpty) return '—';
+    if (day.sleep.isEmpty) return '-';
     final total = day.sleep.fold<Duration>(
       Duration.zero,
       (a, s) => a + s.duration,
@@ -527,6 +659,15 @@ class _DayCardState extends State<_DayCard> {
     return parts.join(' · ');
   }
 
+  static String _activityDetail(DailyHistory day) {
+    final parts = <String>[];
+    if (day.energyKcal != null) parts.add('${day.energyKcal} kcal');
+    if (day.distanceMeters != null) {
+      parts.add('${(day.distanceMeters! / 1000).toStringAsFixed(2)} km');
+    }
+    return parts.join(' · ');
+  }
+
   static String _label(SleepStage s) => switch (s) {
     SleepStage.awake => 'Awake',
     SleepStage.rem => 'REM',
@@ -535,32 +676,103 @@ class _DayCardState extends State<_DayCard> {
   };
 }
 
-class _DayMetric extends StatelessWidget {
-  const _DayMetric({
-    required this.icon,
-    required this.label,
-    required this.value,
-  });
-  final IconData icon;
-  final String label;
-  final String value;
+class _ChartHeader extends StatelessWidget {
+  const _ChartHeader({required this.title, required this.detail});
+
+  final String title;
+  final String detail;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Row(
-      mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 16, color: theme.colorScheme.onSurfaceVariant),
-        const SizedBox(width: 4),
-        Text(
-          '$label: ',
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
+        Expanded(child: Text(title, style: theme.textTheme.titleSmall)),
+        Flexible(
+          child: Text(
+            detail,
+            textAlign: TextAlign.end,
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
         ),
-        Text(value, style: theme.textTheme.bodyMedium),
       ],
+    );
+  }
+}
+
+class _MetricPill extends StatelessWidget {
+  const _MetricPill({
+    required this.icon,
+    required this.label,
+    required this.tint,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color tint;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: tint.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 15, color: tint),
+          const SizedBox(width: 6),
+          Text(label, style: theme.textTheme.labelMedium),
+        ],
+      ),
+    );
+  }
+}
+
+class _NewBadge extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.primary.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(
+          'New',
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: theme.colorScheme.primary,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _InsetCard extends StatelessWidget {
+  const _InsetCard({
+    required this.child,
+    this.padding = const EdgeInsets.all(16),
+  });
+
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(padding: padding, child: child),
     );
   }
 }

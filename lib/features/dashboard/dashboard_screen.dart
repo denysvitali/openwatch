@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -22,13 +23,15 @@ class DashboardScreen extends ConsumerWidget {
     final name = device?.platformName.isNotEmpty == true
         ? device!.platformName
         : 'Watch';
+    final today = sync.days.isEmpty ? null : sync.days.last;
+    final heartRate = manager.lastHeartRate ?? _avgBpm(today?.hr ?? const []);
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Device'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(CupertinoIcons.arrow_clockwise),
             tooltip: 'Refresh',
             onPressed: link == LinkState.ready
                 ? () {
@@ -38,7 +41,7 @@ class DashboardScreen extends ConsumerWidget {
                 : null,
           ),
           IconButton(
-            icon: const Icon(Icons.link_off),
+            icon: const Icon(CupertinoIcons.xmark_circle),
             tooltip: 'Disconnect',
             onPressed: () async {
               await ref.read(bleTransportProvider).disconnect();
@@ -48,76 +51,31 @@ class DashboardScreen extends ConsumerWidget {
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
         children: [
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.watch, size: 36),
-              title: Text(name),
-              subtitle: Text(_describe(link)),
-              trailing: Icon(
-                link == LinkState.ready ? Icons.check_circle : Icons.sync,
-                color: link == LinkState.ready ? Colors.green : null,
-              ),
-            ),
+          _DeviceHeroCard(
+            name: name,
+            status: _describe(link),
+            connected: link == LinkState.ready,
+            batteryPercent: manager.batteryPercent,
+            charging: manager.charging,
+            firmware: manager.firmwareRevision,
+            hardware: manager.hardwareRevision,
           ),
-          const SizedBox(height: 8),
-          _MetricCard(
-            icon: manager.charging
-                ? Icons.battery_charging_full
-                : Icons.battery_full,
-            title: 'Battery',
-            value: manager.batteryPercent != null
-                ? '${manager.batteryPercent}%${manager.charging ? " ⚡" : ""}'
-                : '—',
+          const SizedBox(height: 12),
+          _MetricGrid(
+            steps: manager.todaySteps ?? today?.steps,
+            calories: manager.todayCalories ?? today?.energyKcal,
+            heartRate: heartRate == 0 ? null : heartRate,
+            distanceMeters: today?.distanceMeters,
           ),
-          _MetricCard(
-            icon: Icons.memory,
-            title: 'Firmware',
-            value: manager.firmwareRevision.isNotEmpty
-                ? manager.firmwareRevision
-                : '—',
-          ),
-          _MetricCard(
-            icon: Icons.developer_board,
-            title: 'Hardware',
-            value: manager.hardwareRevision.isNotEmpty
-                ? manager.hardwareRevision
-                : '—',
-          ),
-          _MetricCard(
-            icon: Icons.directions_walk,
-            title: 'Steps today',
-            value: manager.todaySteps?.toString() ?? '—',
-          ),
-          _MetricCard(
-            icon: Icons.local_fire_department,
-            title: 'Calories',
-            value: manager.todayCalories?.toString() ?? '—',
-          ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           _RecentActivityCard(sync: sync),
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: [
-              FilledButton.tonalIcon(
-                onPressed: link == LinkState.ready ? manager.findDevice : null,
-                icon: const Icon(Icons.vibration),
-                label: const Text('Find watch'),
-              ),
-              FilledButton.tonalIcon(
-                onPressed: link == LinkState.ready ? manager.syncTime : null,
-                icon: const Icon(Icons.access_time),
-                label: const Text('Sync time'),
-              ),
-              FilledButton.tonalIcon(
-                onPressed: () => context.push('/history'),
-                icon: const Icon(Icons.timeline),
-                label: const Text('History'),
-              ),
-            ],
+          const SizedBox(height: 12),
+          _QuickActions(
+            ready: link == LinkState.ready,
+            findDevice: manager.findDevice,
+            syncTime: manager.syncTime,
           ),
         ],
       ),
@@ -126,38 +84,291 @@ class DashboardScreen extends ConsumerWidget {
 
   String _describe(LinkState s) => switch (s) {
     LinkState.ready => 'Connected',
-    LinkState.connecting => 'Connecting…',
+    LinkState.connecting => 'Connecting',
     LinkState.disconnected => 'Disconnected',
-    LinkState.discovering => 'Discovering services…',
-    LinkState.readingDeviceInfo => 'Reading device info…',
+    LinkState.discovering => 'Discovering services',
+    LinkState.readingDeviceInfo => 'Reading device info',
   };
+
+  static int _avgBpm(List<HrSample> samples) {
+    if (samples.isEmpty) return 0;
+    final sum = samples.fold<int>(0, (a, s) => a + s.bpm);
+    return (sum / samples.length).round();
+  }
 }
 
-class _MetricCard extends StatelessWidget {
-  const _MetricCard({
-    required this.icon,
-    required this.title,
-    required this.value,
+class _DeviceHeroCard extends StatelessWidget {
+  const _DeviceHeroCard({
+    required this.name,
+    required this.status,
+    required this.connected,
+    required this.batteryPercent,
+    required this.charging,
+    required this.firmware,
+    required this.hardware,
   });
-  final IconData icon;
-  final String title;
-  final String value;
+
+  final String name;
+  final String status;
+  final bool connected;
+  final int? batteryPercent;
+  final bool charging;
+  final String firmware;
+  final String hardware;
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: ListTile(
-        leading: Icon(icon),
-        title: Text(title),
-        trailing: Text(value, style: Theme.of(context).textTheme.titleMedium),
+    final theme = Theme.of(context);
+    final statusColor = connected
+        ? theme.colorScheme.secondary
+        : theme.colorScheme.onSurfaceVariant;
+
+    return _InsetCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.primary.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  Icons.watch_rounded,
+                  color: theme.colorScheme.primary,
+                  size: 34,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(name, style: theme.textTheme.headlineSmall),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: statusColor,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          status,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              _BatteryBadge(percent: batteryPercent, charging: charging),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _InfoPill(
+                icon: CupertinoIcons.square_stack_3d_up,
+                label: firmware.isEmpty ? 'Firmware -' : 'Firmware $firmware',
+              ),
+              _InfoPill(
+                icon: Icons.memory_rounded,
+                label: hardware.isEmpty ? 'Hardware -' : 'Hardware $hardware',
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BatteryBadge extends StatelessWidget {
+  const _BatteryBadge({required this.percent, required this.charging});
+
+  final int? percent;
+  final bool charging;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = charging
+        ? theme.colorScheme.secondary
+        : theme.colorScheme.onSurface;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            charging
+                ? CupertinoIcons.battery_charging
+                : CupertinoIcons.battery_100,
+            size: 18,
+            color: color,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            percent == null ? '-' : '$percent%',
+            style: theme.textTheme.labelLarge?.copyWith(color: color),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MetricGrid extends StatelessWidget {
+  const _MetricGrid({
+    required this.steps,
+    required this.calories,
+    required this.heartRate,
+    required this.distanceMeters,
+  });
+
+  final int? steps;
+  final int? calories;
+  final int? heartRate;
+  final int? distanceMeters;
+
+  @override
+  Widget build(BuildContext context) {
+    return GridView.count(
+      crossAxisCount: 2,
+      crossAxisSpacing: 12,
+      mainAxisSpacing: 12,
+      childAspectRatio: 1.52,
+      physics: const NeverScrollableScrollPhysics(),
+      shrinkWrap: true,
+      children: [
+        _MetricTile(
+          icon: CupertinoIcons.arrow_up_right,
+          label: 'Steps',
+          value: _formatInt(steps),
+          tint: Theme.of(context).colorScheme.primary,
+        ),
+        _MetricTile(
+          icon: CupertinoIcons.heart_fill,
+          label: 'Heart',
+          value: heartRate == null ? '-' : '$heartRate',
+          unit: heartRate == null ? null : 'bpm',
+          tint: const Color(0xFFFF3B30),
+        ),
+        _MetricTile(
+          icon: CupertinoIcons.flame_fill,
+          label: 'Energy',
+          value: _formatInt(calories),
+          unit: calories == null ? null : 'kcal',
+          tint: const Color(0xFFFF9500),
+        ),
+        _MetricTile(
+          icon: CupertinoIcons.location_fill,
+          label: 'Distance',
+          value: distanceMeters == null
+              ? '-'
+              : (distanceMeters! / 1000).toStringAsFixed(2),
+          unit: distanceMeters == null ? null : 'km',
+          tint: const Color(0xFF34C759),
+        ),
+      ],
+    );
+  }
+
+  static String _formatInt(int? value) {
+    if (value == null) return '-';
+    return NumberFormat.compact().format(value);
+  }
+}
+
+class _MetricTile extends StatelessWidget {
+  const _MetricTile({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.tint,
+    this.unit,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+  final String? unit;
+  final Color tint;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return _InsetCard(
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: tint, size: 18),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+          FittedBox(
+            alignment: Alignment.centerLeft,
+            fit: BoxFit.scaleDown,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  value,
+                  style: theme.textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                if (unit != null) ...[
+                  const SizedBox(width: 4),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Text(
+                      unit!,
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
 /// Surfaces the most-recent locally-stored activity without forcing the
-/// user to navigate to `/history`. Renders a friendly placeholder until
-/// the first sync lands any samples — better than faking one.
+/// user to navigate to `/history`.
 class _RecentActivityCard extends StatelessWidget {
   const _RecentActivityCard({required this.sync});
   final HistorySync sync;
@@ -166,20 +377,24 @@ class _RecentActivityCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     if (sync.days.isEmpty) {
-      return Card(
-        child: ListTile(
-          leading: const Icon(Icons.timeline),
-          title: const Text('Recent activity'),
-          subtitle: Text(
-            sync.syncing
-                ? 'Syncing…'
-                : 'Connect to your watch to start collecting history.',
-            style: theme.textTheme.bodySmall,
-          ),
-          trailing: TextButton(
-            onPressed: () => Navigator.of(context).maybePop(),
-            child: const Text('Open history'),
-          ),
+      return _InsetCard(
+        child: Row(
+          children: [
+            Icon(CupertinoIcons.chart_bar, color: theme.colorScheme.primary),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                sync.syncing
+                    ? 'Syncing history'
+                    : 'No history stored on this phone yet',
+                style: theme.textTheme.bodyMedium,
+              ),
+            ),
+            TextButton(
+              onPressed: () => context.push('/history'),
+              child: const Text('History'),
+            ),
+          ],
         ),
       );
     }
@@ -189,38 +404,32 @@ class _RecentActivityCard extends StatelessWidget {
         : sync.days.sublist(sync.days.length - 7);
     final today = sync.days.last;
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Recent activity',
-                    style: theme.textTheme.titleMedium,
-                  ),
-                ),
-                _SyncPill(sync: sync),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Text(
-              _subtitle(today),
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
+    return _InsetCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text('Activity', style: theme.textTheme.titleLarge),
               ),
-            ),
-            const SizedBox(height: 12),
-            if (today.hr.isNotEmpty) ...[
-              MiniHrSpark(samples: today.hr, height: 56),
-              const SizedBox(height: 12),
+              _SyncPill(sync: sync),
             ],
-            StepsBarChart(days: recent),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            _subtitle(today),
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 16),
+          if (today.hr.isNotEmpty) ...[
+            MiniHrSpark(samples: today.hr, height: 58),
+            const SizedBox(height: 14),
           ],
-        ),
+          StepsBarChart(days: recent),
+        ],
       ),
     );
   }
@@ -228,8 +437,10 @@ class _RecentActivityCard extends StatelessWidget {
   String _subtitle(DailyHistory today) {
     final parts = <String>[];
     final avg = _avgBpm(today.hr);
-    if (avg > 0) parts.add('HR avg ${avg}bpm today');
-    if (today.steps != null) parts.add('${today.steps} steps today');
+    if (avg > 0) parts.add('$avg bpm avg');
+    if (today.steps != null) {
+      parts.add('${NumberFormat.decimalPattern().format(today.steps)} steps');
+    }
     if (today.sleep.isNotEmpty) {
       final total = today.sleep.fold<Duration>(
         Duration.zero,
@@ -249,6 +460,76 @@ class _RecentActivityCard extends StatelessWidget {
   }
 }
 
+class _QuickActions extends StatelessWidget {
+  const _QuickActions({
+    required this.ready,
+    required this.findDevice,
+    required this.syncTime,
+  });
+
+  final bool ready;
+  final VoidCallback findDevice;
+  final VoidCallback syncTime;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: FilledButton.tonalIcon(
+            onPressed: ready ? findDevice : null,
+            icon: const Icon(CupertinoIcons.waveform),
+            label: const Text('Find'),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: FilledButton.tonalIcon(
+            onPressed: ready ? syncTime : null,
+            icon: const Icon(CupertinoIcons.clock),
+            label: const Text('Time'),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: FilledButton.tonalIcon(
+            onPressed: () => context.push('/history'),
+            icon: const Icon(CupertinoIcons.chart_bar),
+            label: const Text('History'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _InfoPill extends StatelessWidget {
+  const _InfoPill({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 15, color: theme.colorScheme.onSurfaceVariant),
+          const SizedBox(width: 6),
+          Text(label, style: theme.textTheme.labelMedium),
+        ],
+      ),
+    );
+  }
+}
+
 class _SyncPill extends StatelessWidget {
   const _SyncPill({required this.sync});
   final HistorySync sync;
@@ -265,24 +546,24 @@ class _SyncPill extends StatelessWidget {
       (false, _, String e) => (
         'Error',
         theme.colorScheme.error,
-        Icons.error_outline,
+        CupertinoIcons.exclamationmark_circle,
       ),
       (false, null, _) => (
         'No sync',
         theme.colorScheme.outline,
-        Icons.cloud_off,
+        Icons.cloud_off_rounded,
       ),
       (false, DateTime l, _) => (
         _formatRelative(l),
-        Colors.green,
-        Icons.check_circle,
+        theme.colorScheme.secondary,
+        CupertinoIcons.checkmark_circle_fill,
       ),
     };
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -304,5 +585,22 @@ class _SyncPill extends StatelessWidget {
     if (delta.inMinutes < 60) return '${delta.inMinutes}m ago';
     if (delta.inHours < 24) return '${delta.inHours}h ago';
     return DateFormat.MMMd().format(when);
+  }
+}
+
+class _InsetCard extends StatelessWidget {
+  const _InsetCard({
+    required this.child,
+    this.padding = const EdgeInsets.all(16),
+  });
+
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(padding: padding, child: child),
+    );
   }
 }

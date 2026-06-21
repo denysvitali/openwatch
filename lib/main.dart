@@ -66,18 +66,100 @@ class OpenWatchApp extends ConsumerWidget {
     return MaterialApp.router(
       title: 'OpenWatch',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1565C0)),
-        useMaterial3: true,
-      ),
-      darkTheme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF1565C0),
-          brightness: Brightness.dark,
-        ),
-        useMaterial3: true,
-      ),
+      theme: _buildTheme(Brightness.light),
+      darkTheme: _buildTheme(Brightness.dark),
       routerConfig: router,
     );
   }
+}
+
+ThemeData _buildTheme(Brightness brightness) {
+  const accent = Color(0xFF007AFF);
+  final isDark = brightness == Brightness.dark;
+  final scheme = ColorScheme.fromSeed(seedColor: accent, brightness: brightness)
+      .copyWith(
+        primary: accent,
+        secondary: const Color(0xFF34C759),
+        tertiary: const Color(0xFFFF9500),
+        surface: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+        surfaceContainerHighest: isDark
+            ? const Color(0xFF2C2C2E)
+            : const Color(0xFFF2F2F7),
+      );
+
+  final base = ThemeData(
+    colorScheme: scheme,
+    useMaterial3: true,
+    brightness: brightness,
+    scaffoldBackgroundColor: isDark
+        ? const Color(0xFF000000)
+        : const Color(0xFFF5F5F7),
+    fontFamily: 'Roboto',
+  );
+
+  return base.copyWith(
+    appBarTheme: AppBarTheme(
+      elevation: 0,
+      scrolledUnderElevation: 0,
+      centerTitle: false,
+      backgroundColor: isDark
+          ? const Color(0xFF000000)
+          : const Color(0xFFF5F5F7),
+      foregroundColor: scheme.onSurface,
+      titleTextStyle: base.textTheme.headlineSmall?.copyWith(
+        color: scheme.onSurface,
+        fontWeight: FontWeight.w700,
+      ),
+    ),
+    cardTheme: CardThemeData(
+      elevation: 0,
+      margin: EdgeInsets.zero,
+      color: scheme.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+    ),
+    dividerTheme: DividerThemeData(
+      color: scheme.outlineVariant.withValues(alpha: 0.65),
+      thickness: 0.6,
+      space: 1,
+    ),
+    filledButtonTheme: FilledButtonThemeData(
+      style: FilledButton.styleFrom(
+        minimumSize: const Size(44, 44),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        textStyle: const TextStyle(fontWeight: FontWeight.w600),
+      ),
+    ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size(44, 44),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        side: BorderSide(color: scheme.outlineVariant),
+        textStyle: const TextStyle(fontWeight: FontWeight.w600),
+      ),
+    ),
+    textButtonTheme: TextButtonThemeData(
+      style: TextButton.styleFrom(
+        minimumSize: const Size(44, 44),
+        textStyle: const TextStyle(fontWeight: FontWeight.w600),
+      ),
+    ),
+    iconButtonTheme: IconButtonThemeData(
+      style: IconButton.styleFrom(
+        minimumSize: const Size(44, 44),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      ),
+    ),
+    listTileTheme: ListTileThemeData(
+      iconColor: scheme.primary,
+      minLeadingWidth: 28,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      titleTextStyle: base.textTheme.bodyLarge?.copyWith(
+        color: scheme.onSurface,
+        fontWeight: FontWeight.w600,
+      ),
+      subtitleTextStyle: base.textTheme.bodySmall?.copyWith(
+        color: scheme.onSurfaceVariant,
+      ),
+    ),
+  );
 }
