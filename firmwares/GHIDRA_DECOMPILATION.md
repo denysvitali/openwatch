@@ -3557,6 +3557,119 @@ not the GPIO path.
 
 ---
 
+### 6.2 System reset / re-initialize (`FUN_008275d8`)
+
+The firmware's *big-reset* routine. Called by `0xff 'fff'`
+factory reset (§3.8) and by `0xc6 0x6C 'l'` reboot (§3.14)
+to bring the watch back to a clean runtime state.
+
+```c
+void FUN_008275d8() {
+    FUN_0082a460(1000);      // 1-second delay
+    FUN_00827404();          // stop BLE peripheral
+    FUN_0082dfde();          // reset BLE stack
+    FUN_0082fd9c();          // reset some state
+    FUN_00829560();          // reset more state
+    FUN_0082949c();          // reset more state
+    *DAT_00827804 = 5;       // set state byte = 5
+    int iVar1 = DAT_0082780c;
+    *(u32*)(iVar1 + 4) = 0;   // zero 12 bytes of state
+    *(u32*)(iVar1 + 8) = 0;
+    *(u8*) (iVar1 + 0xd) = 0;
+    FUN_0082954a();          // reset UI
+    FUN_00833e86();          // reset (next-state setup)
+    FUN_00831b90();          // reset (task spawn)
+    thunk_FUN_00831230();    // task reset
+    FUN_00827940();          // reset motor
+    FUN_0082f160(1000);     // start 1-sec timer
+}
+```
+
+The reset is a **14-step sequence** that takes ~1 second to
+complete (the two `1000`-ms timers bracket it):
+
+1. **Delay 1 sec** (`FUN_0082a460(1000)`) — wait for any
+   pending user-action ack to drain.
+2. **Stop BLE peripheral** (`FUN_00827404`) and **reset BLE
+   stack** (`FUN_0082dfde`) — tear down the radio.
+3. **Reset state** (`FUN_0082fd9c`, `FUN_00829560`,
+   `FUN_0082949c`) — clear three different state buffers.
+4. **Set state byte = 5** at `DAT_00827804` — the "reset in
+   progress" sentinel.
+5. **Zero 12 bytes** of state at `DAT_0082780c + 4..+0xd`
+   — clear the deferred-ring state.
+6. **Reset UI** (`FUN_0082954a`) — clear the screen.
+7. **Spawn** the post-reset task (`FUN_00833e86` /
+   `FUN_00831b90` / `thunk_FUN_00831230`) — restart the main
+   loop.
+8. **Reset motor** (`FUN_00827940`) — stop any vibration.
+9. **Start 1-sec timer** (`FUN_0082f160(1000)`) — the
+   post-reset boot delay.
+
+The `*DAT_00827804 = 5` state byte is the "watch is being
+reset" sentinel — the main loop checks this byte before
+processing new requests. While the byte is `5`, the watch
+ignores all incoming BLE traffic.
+
+#### Why 14 steps?
+
+Each step is a *separate subsystem*:
+
+| Step | Subsystem |
+|---|---|
+| 1, 14 | Timing |
+| 2 | BLE peripheral (radio IC) |
+| 3 | BLE stack (firmware GATT / L2CAP) |
+| 4, 5 | Per-task state (HR / sport / sleep buffers) |
+| 6, 9 | Sensor-task state (`DAT_00827804`) |
+| 7 | Deferred-ring state (`DAT_0082780c`) |
+| 8 | UI / display |
+| 10, 11, 12 | Task scheduler |
+| 13 | Vibration motor |
+
+A factory-reset must clean *all* of these because each
+subsystem has its own state buffer that the firmware
+otherwise relies on. If any one step is skipped, the
+firmware can deadlock or emit garbage after the reset.
+
+#### Why `*DAT_00827804 = 5`
+
+The state byte `5` is the "fresh-boot" sentinel. After the
+reset completes, the post-reset task sets the byte to a
+different value (probably `1` for "ready") to signal that
+the watch is accepting requests. The §6.2 step 6 writes `5`
+to indicate "in progress" — the main loop polls this byte
+and ignores new requests while it's `5`.
+
+#### Pair with §3.8 `0xff factory reset`
+
+`0xff factory reset` (§3.8) is the **only** public entry
+point into `FUN_008275d8`. The §3.14 `0xc6 0x6C 'l'` reboot
+calls `FUN_008275d8` *internally* as part of the full-reboot
+sequence — the public `0xc6` API returns to the host before
+the reset runs (the host sees the implicit ack).
+
+#### Pair with §3.14 `0xc6 0x6C 'l'` reboot
+
+`0xc6 0x6L` calls `FUN_008275d8` *plus* several additional
+helpers (the §3.14 sequence is "soft reset → stop BLE →
+reset state → re-arm timer → reset"). The `0xff` path goes
+through `FUN_008275d8` directly, while the `0xc6` path goes
+through a higher-level wrapper that calls `FUN_008275d8`
+after stopping user-visible subsystems.
+
+#### Why this is in §6 (Power Management)
+
+`FUN_008275d8` is the firmware's *power-management reset*
+helper — it tears down the BLE radio, the deferred ring, the
+sensor tasks, and the UI to bring the watch back to a
+minimal-power "bootstrapping" state. The §6 Power Management
+section is the right place for it because the reset's primary
+goal is to *recover the watch from a stuck state* (similar to
+a "force reboot" on a desktop OS).
+
+---
+
 ## 7. Health / Sensor Modules
 
 | Address | Function | Role |
