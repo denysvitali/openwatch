@@ -605,9 +605,10 @@ class ChannelADispatcher {
   /// the record count, `pl[2]` echoes the unit_flag from the request
   /// (durations are 10-second units when 0, 1-second units when 1).
   /// Phase 2 (record frames) — `pl[0..2]` are BCD year/month/day for
-  /// the day's "month index", `pl[3..4]` pack `(record_idx)|(slot_idx<<2)`,
-  /// `pl[8..14]` carry the duration u16 split across three byte ranges
-  /// plus the two aux u16s. See `GHIDRA_DECOMPILATION.md` §3.6.
+  /// the day's "month index", `pl[3]` packs the hour slot (`slot << 2`),
+  /// `pl[4]` is the record index, `pl[5]` echoes the header count, and
+  /// `pl[6..11]` carry duration + two aux u16s. See
+  /// `GHIDRA_DECOMPILATION.md` §3.6 and live H59MA_V1.0 captures.
   void _decodeSportDetail(Uint8List pl) {
     if (pl.length < 4) return;
     final endFlag = pl[0];
@@ -628,19 +629,11 @@ class ChannelADispatcher {
     final year = Codec.fromBcd(pl[0]);
     final month = Codec.fromBcd(pl[1]);
     final day = Codec.fromBcd(pl[2]);
-    final packed = pl[3] | (pl[4] << 8);
-    // RE wire: packed = (record_idx) | (slot_idx << 2). record_idx is
-    // bounded by `0..count`, slot_idx by `0..23`, so 2 bits for idx and
-    // 6 bits for slot.
-    final recordIdx = packed & 0x3;
-    final slotIdx = (packed >> 2) & 0x3f;
-    // Frame bytes 8..9 = pl[7..8] = duration_lo; frame byte 14 = pl[13]
-    // = duration_hi. Reassemble into a 24-bit value.
-    final duration = pl[7] | (pl[8] << 8) | (pl[13] << 16);
-    // Frame bytes 10..11 = pl[9..10] = aux_lo; frame bytes 12..13 =
-    // pl[11..12] = aux_hi.
-    final auxLo = pl[9] | (pl[10] << 8);
-    final auxHi = pl[11] | (pl[12] << 8);
+    final slotIdx = (pl[3] >> 2) & 0x3f;
+    final recordIdx = pl[4];
+    final duration = pl[6] | (pl[7] << 8);
+    final auxLo = pl[8] | (pl[9] << 8);
+    final auxHi = pl[10] | (pl[11] << 8);
     _sportDetailRecord.add(
       SportDetailRecord(
         year: year,

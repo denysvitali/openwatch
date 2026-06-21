@@ -11,6 +11,7 @@ import '../../features/logs/logs_screen.dart';
 import '../../features/notifications/notifications_screen.dart';
 import '../../features/scan/scan_screen.dart';
 import '../../features/settings/settings_screen.dart';
+import '../services/opentelemetry_service.dart';
 
 final _rootNavigatorKey = GlobalKey<NavigatorState>();
 
@@ -18,20 +19,34 @@ final appRouterProvider = Provider<GoRouter>(
   (ref) => GoRouter(
     navigatorKey: _rootNavigatorKey,
     initialLocation: '/scan',
+    observers: [
+      // Attach the OTel route observer at the GoRouter level so the
+      // navigator it owns emits route-change spans. MaterialApp.router's
+      // own navigatorObservers only sees the outer Navigator, which
+      // misses the go_router-driven pushes.
+      OpenTelemetryService().routeObserver,
+    ],
     routes: [
-      GoRoute(path: '/scan', builder: (context, state) => const ScanScreen()),
+      GoRoute(
+        path: '/scan',
+        name: 'scan',
+        builder: (context, state) => const ScanScreen(),
+      ),
       GoRoute(
         path: '/firmware',
+        name: 'firmware',
         parentNavigatorKey: _rootNavigatorKey,
         builder: (context, state) => const FirmwareScreen(),
       ),
       GoRoute(
         path: '/logs',
+        name: 'logs',
         parentNavigatorKey: _rootNavigatorKey,
         builder: (context, state) => const LogsScreen(),
       ),
       GoRoute(
         path: '/history',
+        name: 'history',
         parentNavigatorKey: _rootNavigatorKey,
         builder: (context, state) => const HistoryScreen(),
       ),
@@ -43,6 +58,7 @@ final appRouterProvider = Provider<GoRouter>(
             routes: [
               GoRoute(
                 path: '/dashboard',
+                name: 'dashboard',
                 builder: (context, state) => const DashboardScreen(),
               ),
             ],
@@ -51,6 +67,7 @@ final appRouterProvider = Provider<GoRouter>(
             routes: [
               GoRoute(
                 path: '/health',
+                name: 'health',
                 builder: (context, state) => const HealthScreen(),
               ),
             ],
@@ -59,6 +76,7 @@ final appRouterProvider = Provider<GoRouter>(
             routes: [
               GoRoute(
                 path: '/notifications',
+                name: 'notifications',
                 builder: (context, state) => const NotificationsScreen(),
               ),
             ],
@@ -67,6 +85,7 @@ final appRouterProvider = Provider<GoRouter>(
             routes: [
               GoRoute(
                 path: '/settings',
+                name: 'settings',
                 builder: (context, state) => const SettingsScreen(),
               ),
             ],

@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutterrific_opentelemetry/flutterrific_opentelemetry.dart'
+    show SpanKind;
 
 import '../ble/ble_transport.dart';
 import '../protocol/capabilities.dart';
@@ -10,6 +12,7 @@ import '../protocol/commands.dart';
 import '../protocol/hr_parser.dart';
 import '../protocol/opcodes.dart';
 import 'app_log.dart';
+import 'opentelemetry_service.dart';
 import 'protocol_hub.dart';
 
 /// High-level device manager: runs the post-connect handshake (time sync +
@@ -84,12 +87,31 @@ class WatchManager extends ChangeNotifier {
       'watch',
       'Handshake start (autoSyncTime=$autoSyncTime)',
     );
+    // Top-level span for the post-connect handshake — the BLE link
+    // is treated as a client span because we're the initiator.
+    final span = OpenTelemetryService().startTrace(
+      'watch.handshake',
+      kind: SpanKind.client,
+      attributes: {
+        'watch.auto_sync_time': autoSyncTime,
+        'watch.capabilities.hr': false,
+        'watch.capabilities.spo2': false,
+        'watch.capabilities.bp': false,
+        'watch.capabilities.sleep': false,
+        'watch.capabilities.alarm': false,
+      },
+    );
     try {
       if (autoSyncTime) {
         await _transport.sendA(Commands.setTime(DateTime.now()));
       }
       final support = await _transport.requestA(Commands.deviceSupport());
       capabilities = capabilities.mergeSupport(Codec.rxPayload(support));
+      span?.setAttribute('watch.capabilities.hr', capabilities.heart);
+      span?.setAttribute('watch.capabilities.spo2', capabilities.bloodOxygen);
+      span?.setAttribute('watch.capabilities.bp', capabilities.bloodPressure);
+      span?.setAttribute('watch.capabilities.sleep', capabilities.sleep);
+      span?.setAttribute('watch.capabilities.alarm', capabilities.alarm);
       AppLog.instance.info(
         'watch',
         'Capabilities: hr=${capabilities.heart} spo2=${capabilities.bloodOxygen} '
@@ -113,8 +135,11 @@ class WatchManager extends ChangeNotifier {
       initialized = true;
       notifyListeners();
       AppLog.instance.info('watch', 'Handshake complete');
-    } catch (e) {
+      span?.end();
+    } catch (e, st) {
       AppLog.instance.error('watch', 'Handshake failed: $e');
+      span?.recordError(e, st);
+      span?.end(ok: false);
     } finally {
       _handshaking = false;
     }
@@ -195,13 +220,43 @@ class WatchManager extends ChangeNotifier {
 
   // --- Actions ---
 
-  Future<void> syncTime() => _transport.sendA(Commands.setTime(DateTime.now()));
+  /// Wrap a single BLE action in a `watch.action.<name>` span so we
+  /// can measure fire-and-forget calls and time-to-error consistently.
+  Future<T> _withActionSpan<T>(String name, Future<T> Function() body) async {
+    final span = OpenTelemetryService().startChildSpan(
+      'watch.action.$name',
+      attributes: {'watch.action': name},
+    );
+    try {
+      final result = await body();
+      span?.end();
+      return result;
+    } catch (e, st) {
+      span?.recordError(e, st);
+      span?.end(ok: false);
+      rethrow;
+    }
+  }
 
-  Future<void> findDevice() => _transport.sendA(Commands.findDevice());
+  Future<void> syncTime() => _withActionSpan(
+    'sync_time',
+    () => _transport.sendA(Commands.setTime(DateTime.now())),
+  );
 
-  Future<void> refreshSteps() => _transport.sendA(Commands.readTodaySport());
+  Future<void> findDevice() => _withActionSpan(
+    'find_device',
+    () => _transport.sendA(Commands.findDevice()),
+  );
 
-  Future<void> refreshBattery() => _transport.sendA(Commands.readBattery());
+  Future<void> refreshSteps() => _withActionSpan(
+    'refresh_steps',
+    () => _transport.sendA(Commands.readTodaySport()),
+  );
+
+  Future<void> refreshBattery() => _withActionSpan(
+    'refresh_battery',
+    () => _transport.sendA(Commands.readBattery()),
+  );
 
   /// Waits until the [BleTransport] has received a frame for each opcode in
   /// [opcodes], or [timeout] elapses. Used during the handshake to avoid
@@ -239,28 +294,32 @@ class WatchManager extends ChangeNotifier {
   /// variants honor one or the other — sending both means the device picks
   /// whichever path it actually implements. Replies from either path feed
   /// into `_onFrame` and update `lastHeartRate`.
-  Future<void> startHeartRate() async {
-    AppLog.instance.info('hr', 'Starting HR (0x69 session + 0x1e realtime)');
-    await _transport.sendA(Commands.startMeasure(MeasureType.heartRate));
-    await _transport.sendA(
-      Commands.startContinuousHr(MeasureType.realtimeHeartRate),
-    );
-  }
+  Future<void> startHeartRate() => _withActionSpan(
+    'start_heart_rate',
+    () async {
+      AppLog.instance.info('hr', 'Starting HR (0x69 session + 0x1e realtime)');
+      await _transport.sendA(Commands.startMeasure(MeasureType.heartRate));
+      await _transport.sendA(
+        Commands.startContinuousHr(MeasureType.realtimeHeartRate),
+      );
+    },
+  );
 
   /// Stop every HR measurement path that [startHeartRate] may have started.
-  Future<void> stopHeartRate() async {
+  Future<void> stopHeartRate() => _withActionSpan('stop_heart_rate', () async {
     AppLog.instance.info('hr', 'Stopping HR (0x6a session + 0x1e stop)');
     await _transport.sendA(Commands.stopMeasure(MeasureType.heartRate));
     await _transport.sendA(Commands.stopContinuousHr());
-  }
+  });
 
-  Future<void> enableNotifications(String phoneModel) async {
-    await _transport.sendA(Commands.bindAncs(phoneModel));
-    await _transport.sendA(Commands.enableAncs());
-    _hub.enableAncs(name: 'phone:$phoneModel');
-  }
+  Future<void> enableNotifications(String phoneModel) =>
+      _withActionSpan('enable_notifications', () async {
+        await _transport.sendA(Commands.bindAncs(phoneModel));
+        await _transport.sendA(Commands.enableAncs());
+        _hub.enableAncs(name: 'phone:$phoneModel');
+      });
 
-  Future<void> factoryReset() async {
+  Future<void> factoryReset() => _withActionSpan('factory_reset', () async {
     // Per GHIDRA_DECOMPILATION.md §3.8 (FUN_0082cde8), the firmware does
     // NOT queue a response frame — the BLE re-init tears down the link
     // before any reply could be parsed. Treat the send completing
@@ -270,7 +329,7 @@ class WatchManager extends ChangeNotifier {
     // reflection-free accessor on ProtocolHub so we don't expose the
     // StreamController itself.
     _hub.notifyFactoryResetAccepted();
-  }
+  });
 
   /// Direct accessor for the underlying typed-streams hub. Exposed so a
   /// diagnostic UI can observe everything the firmware emits without having

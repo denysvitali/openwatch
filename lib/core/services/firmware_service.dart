@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 
 import 'cloud_api.dart';
+import 'opentelemetry_service.dart';
 
 /// A firmware image stored on the local filesystem.
 class LocalFirmware {
@@ -67,29 +68,50 @@ class FirmwareService {
     String? mac,
     void Function(int received, int total)? onProgress,
   }) async {
-    final info = await cloud.getLatestFirmware(
-      model: model,
-      currentVersion: currentVersion,
-      mac: mac,
+    // Spans the full cloud-lookup + download + write-as-bytes pass
+    // for one on-demand firmware pull. The two CloudApi calls will
+    // be visible as child spans (cloud.firmware.lookup / .download).
+    final span = OpenTelemetryService().startChildSpan(
+      'firmware.fetch_latest',
+      attributes: {
+        'firmware.model': model,
+        'firmware.current_version': currentVersion,
+      },
     );
-    if (info == null) return null;
+    try {
+      final info = await cloud.getLatestFirmware(
+        model: model,
+        currentVersion: currentVersion,
+        mac: mac,
+      );
+      if (info == null) {
+        span?.setAttribute('firmware.up_to_date', true);
+        return null;
+      }
+      span?.setAttribute('firmware.latest_version', info.version);
 
-    final bytes = await cloud.download(info.url, onProgress: onProgress);
-    if (bytes.isEmpty) {
-      throw const FirmwareException('Downloaded firmware was empty');
+      final bytes = await cloud.download(info.url, onProgress: onProgress);
+      if (bytes.isEmpty) {
+        throw const FirmwareException('Downloaded firmware was empty');
+      }
+
+      final dir = await _dir();
+      final safeModel = model.replaceAll(RegExp(r'[^A-Za-z0-9_.-]'), '_');
+      final safeVer = info.version.replaceAll(RegExp(r'[^A-Za-z0-9_.-]'), '_');
+      final file = File('${dir.path}/${safeModel}_$safeVer.bin');
+      await file.writeAsBytes(bytes, flush: true);
+
+      return LocalFirmware(
+        name: file.uri.pathSegments.last,
+        path: file.path,
+        sizeBytes: bytes.length,
+      );
+    } catch (e, st) {
+      span?.recordError(e, st);
+      rethrow;
+    } finally {
+      span?.end();
     }
-
-    final dir = await _dir();
-    final safeModel = model.replaceAll(RegExp(r'[^A-Za-z0-9_.-]'), '_');
-    final safeVer = info.version.replaceAll(RegExp(r'[^A-Za-z0-9_.-]'), '_');
-    final file = File('${dir.path}/${safeModel}_$safeVer.bin');
-    await file.writeAsBytes(bytes, flush: true);
-
-    return LocalFirmware(
-      name: file.uri.pathSegments.last,
-      path: file.path,
-      sizeBytes: bytes.length,
-    );
   }
 }
 

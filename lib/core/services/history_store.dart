@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../protocol/sleep_parser.dart';
 import 'app_log.dart';
 import 'history_sync.dart' show HrSample;
+import 'opentelemetry_service.dart';
 
 /// One calendar day, normalised to local midnight.
 ///
@@ -273,19 +274,32 @@ class HistoryStore {
   /// doesn't exist or fails to parse — sync code can then safely merge
   /// fresh samples into it.
   Future<DailyHistory> readDay(DateOnly day) async {
-    final f = _fileFor(day);
-    if (!await f.exists()) return DailyHistory(day: day);
+    // Spans the disk read + parse so we can spot slow file IO or a
+    // bad JSON file from a trace alone.
+    final span = OpenTelemetryService().startChildSpan(
+      'store.history.read_day',
+      attributes: {'store.day.iso': day.iso, 'store.op': 'read_day'},
+    );
     try {
-      final raw = await f.readAsString();
-      if (raw.isEmpty) return DailyHistory(day: day);
-      final j = jsonDecode(raw) as Map<String, dynamic>;
-      return DailyHistory.fromJson(j);
-    } catch (e) {
-      AppLog.instance.warn(
-        'history',
-        'readDay(${day.iso}) failed: $e — treating as empty',
-      );
-      return DailyHistory(day: day);
+      final f = _fileFor(day);
+      if (!await f.exists()) return DailyHistory(day: day);
+      try {
+        final raw = await f.readAsString();
+        if (raw.isEmpty) return DailyHistory(day: day);
+        final j = jsonDecode(raw) as Map<String, dynamic>;
+        return DailyHistory.fromJson(j);
+      } catch (e) {
+        AppLog.instance.warn(
+          'history',
+          'readDay(${day.iso}) failed: $e — treating as empty',
+        );
+        return DailyHistory(day: day);
+      }
+    } catch (e, st) {
+      span?.recordError(e, st);
+      rethrow;
+    } finally {
+      span?.end();
     }
   }
 
@@ -323,17 +337,29 @@ class HistoryStore {
 
   /// Persists [history]. Uses [lastUpdated] = now when omitted.
   Future<void> writeDay(DailyHistory history, {DateTime? lastUpdated}) async {
-    final stamped = DailyHistory(
-      day: history.day,
-      hr: history.hr,
-      sleep: history.sleep,
-      steps: history.steps,
-      energyKcal: history.energyKcal,
-      distanceMeters: history.distanceMeters,
-      lastUpdated: lastUpdated ?? DateTime.now(),
+    // Spans the encode + writeAsString for a single day file.
+    final span = OpenTelemetryService().startChildSpan(
+      'store.history.write_day',
+      attributes: {'store.day.iso': history.day.iso, 'store.op': 'write_day'},
     );
-    final raw = jsonEncode(stamped.toJson());
-    await _fileFor(history.day).writeAsString(raw, flush: true);
+    try {
+      final stamped = DailyHistory(
+        day: history.day,
+        hr: history.hr,
+        sleep: history.sleep,
+        steps: history.steps,
+        energyKcal: history.energyKcal,
+        distanceMeters: history.distanceMeters,
+        lastUpdated: lastUpdated ?? DateTime.now(),
+      );
+      final raw = jsonEncode(stamped.toJson());
+      await _fileFor(history.day).writeAsString(raw, flush: true);
+    } catch (e, st) {
+      span?.recordError(e, st);
+      rethrow;
+    } finally {
+      span?.end();
+    }
   }
 
   /// Merges [hrSamples] into the existing HR list for [day], dedupes by
@@ -344,26 +370,38 @@ class HistoryStore {
     DateOnly day,
     Iterable<HrSample> hrSamples,
   ) async {
-    final current = await readDay(day);
-    final byTs = <int, HrSample>{
-      for (final h in current.hr) h.timestamp.millisecondsSinceEpoch: h,
-    };
-    for (final h in hrSamples) {
-      byTs[h.timestamp.millisecondsSinceEpoch] = h;
-    }
-    final merged = byTs.values.toList()
-      ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
-    final next = DailyHistory(
-      day: day,
-      hr: merged,
-      sleep: current.sleep,
-      steps: current.steps,
-      energyKcal: current.energyKcal,
-      distanceMeters: current.distanceMeters,
-      lastUpdated: current.lastUpdated,
+    // Spans the read + dedupe + write pass for HR.
+    final span = OpenTelemetryService().startChildSpan(
+      'store.history.merge_hr',
+      attributes: {'store.day.iso': day.iso, 'store.op': 'merge_hr'},
     );
-    await writeDay(next);
-    return next;
+    try {
+      final current = await readDay(day);
+      final byTs = <int, HrSample>{
+        for (final h in current.hr) h.timestamp.millisecondsSinceEpoch: h,
+      };
+      for (final h in hrSamples) {
+        byTs[h.timestamp.millisecondsSinceEpoch] = h;
+      }
+      final merged = byTs.values.toList()
+        ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+      final next = DailyHistory(
+        day: day,
+        hr: merged,
+        sleep: current.sleep,
+        steps: current.steps,
+        energyKcal: current.energyKcal,
+        distanceMeters: current.distanceMeters,
+        lastUpdated: current.lastUpdated,
+      );
+      await writeDay(next);
+      return next;
+    } catch (e, st) {
+      span?.recordError(e, st);
+      rethrow;
+    } finally {
+      span?.end();
+    }
   }
 
   /// Merges [segments] into the existing sleep list for [day] and writes
@@ -373,26 +411,38 @@ class HistoryStore {
     DateOnly day,
     Iterable<SleepSegment> segments,
   ) async {
-    final current = await readDay(day);
-    final byStart = <int, SleepSegment>{
-      for (final s in current.sleep) s.start.millisecondsSinceEpoch: s,
-    };
-    for (final s in segments) {
-      byStart[s.start.millisecondsSinceEpoch] = s;
-    }
-    final merged = byStart.values.toList()
-      ..sort((a, b) => a.start.compareTo(b.start));
-    final next = DailyHistory(
-      day: day,
-      hr: current.hr,
-      sleep: merged,
-      steps: current.steps,
-      energyKcal: current.energyKcal,
-      distanceMeters: current.distanceMeters,
-      lastUpdated: current.lastUpdated,
+    // Spans the read + dedupe + write pass for sleep.
+    final span = OpenTelemetryService().startChildSpan(
+      'store.history.merge_sleep',
+      attributes: {'store.day.iso': day.iso, 'store.op': 'merge_sleep'},
     );
-    await writeDay(next);
-    return next;
+    try {
+      final current = await readDay(day);
+      final byStart = <int, SleepSegment>{
+        for (final s in current.sleep) s.start.millisecondsSinceEpoch: s,
+      };
+      for (final s in segments) {
+        byStart[s.start.millisecondsSinceEpoch] = s;
+      }
+      final merged = byStart.values.toList()
+        ..sort((a, b) => a.start.compareTo(b.start));
+      final next = DailyHistory(
+        day: day,
+        hr: current.hr,
+        sleep: merged,
+        steps: current.steps,
+        energyKcal: current.energyKcal,
+        distanceMeters: current.distanceMeters,
+        lastUpdated: current.lastUpdated,
+      );
+      await writeDay(next);
+      return next;
+    } catch (e, st) {
+      span?.recordError(e, st);
+      rethrow;
+    } finally {
+      span?.end();
+    }
   }
 
   /// Records today's totals from `0x48 todaySport` onto [day]. Overwrites
@@ -404,23 +454,52 @@ class HistoryStore {
     required int energyKcal,
     required int distanceMeters,
   }) async {
-    final current = await readDay(day);
-    final next = DailyHistory(
-      day: day,
-      hr: current.hr,
-      sleep: current.sleep,
-      steps: steps,
-      energyKcal: energyKcal,
-      distanceMeters: distanceMeters,
-      lastUpdated: current.lastUpdated,
+    // Spans the read + overwrite pass when the watch pushes a new
+    // today-sport total.
+    final span = OpenTelemetryService().startChildSpan(
+      'store.history.record_totals',
+      attributes: {'store.day.iso': day.iso, 'store.op': 'record_totals'},
     );
-    await writeDay(next);
-    return next;
+    try {
+      final current = await readDay(day);
+      final next = DailyHistory(
+        day: day,
+        hr: current.hr,
+        sleep: current.sleep,
+        steps: steps,
+        energyKcal: energyKcal,
+        distanceMeters: distanceMeters,
+        lastUpdated: current.lastUpdated,
+      );
+      await writeDay(next);
+      return next;
+    } catch (e, st) {
+      span?.recordError(e, st);
+      rethrow;
+    } finally {
+      span?.end();
+    }
   }
 
   /// Updates the sync watermark. Called by [HistorySync] only after a
   /// complete pass (or after a definitive "no data on any day" probe).
-  Future<void> markSynced(DateTime at) => _writeWatermark(at: at);
+  Future<void> markSynced(DateTime at) async {
+    // Spans the SharedPreferences write so we can correlate a slow
+    // "sync complete" with a lagging watermark flush.
+    final day = DateOnly.fromDateTime(at);
+    final span = OpenTelemetryService().startChildSpan(
+      'store.history.mark_synced',
+      attributes: {'store.day.iso': day.iso, 'store.op': 'mark_synced'},
+    );
+    try {
+      await _writeWatermark(at: at);
+    } catch (e, st) {
+      span?.recordError(e, st);
+      rethrow;
+    } finally {
+      span?.end();
+    }
+  }
 
   /// Wipes all stored history. Not currently wired into the UI — left
   /// here so a future "Reset app data" affordance can call it without

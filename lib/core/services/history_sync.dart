@@ -13,6 +13,7 @@ import '../protocol/opcodes.dart';
 import '../protocol/sleep_parser.dart';
 import 'app_log.dart';
 import 'history_store.dart';
+import 'opentelemetry_service.dart';
 
 // Re-export sleep model types so existing consumers can keep importing
 // them from `history_sync.dart` after the move to `sleep_parser.dart`.
@@ -164,6 +165,7 @@ class HistorySync extends ChangeNotifier {
   final List<SleepSegment> _sleep = [];
   final List<ActivitySummaryRecord> _activity = [];
   final Set<int> _availableDays = {};
+  final Map<DateOnly, DailyTotals> _sportDetailTotals = {};
   bool _distributionAnswered = false;
   bool _distributionFailed = false;
 
@@ -379,6 +381,7 @@ class HistorySync extends ChangeNotifier {
     _sleep.clear();
     _activity.clear();
     _availableDays.clear();
+    _sportDetailTotals.clear();
     _distributionAnswered = false;
     _distributionFailed = false;
     _watchDaysWithData.clear();
@@ -389,12 +392,57 @@ class HistorySync extends ChangeNotifier {
     _progressTotal = 0;
     notifyListeners();
 
-    final effectiveDaysBack = daysBack.clamp(1, 32);
-    AppLog.instance.info(
-      'history',
-      'Sync start (last $effectiveDaysBack days, store=${_store != null})',
+    final effectiveDaysBack = daysBack.clamp(1, 32).toInt();
+    // Top-level span covering the full sync pass — distribution bitmask,
+    // per-day HR + sleep polls, and the watermark bump. Ends in finally
+    // so partial failures still flush.
+    final syncSpan = OpenTelemetryService().startTrace(
+      'sync.history',
+      attributes: {'sync.days_back': effectiveDaysBack},
     );
+    var fetched = 0;
+    Object? caughtError;
+    StackTrace? caughtTrace;
+    try {
+      AppLog.instance.info(
+        'history',
+        'Sync start (last $effectiveDaysBack days, store=${_store != null})',
+      );
+      Future<void> runBody() =>
+          _syncAllBody(effectiveDaysBack, onFetched: (i) => fetched = i);
+      if (syncSpan == null) {
+        await runBody();
+      } else {
+        await OpenTelemetryService().withActiveSpan(syncSpan, () async {
+          await runBody();
+        });
+      }
+    } catch (e, st) {
+      // Mirror the legacy swallow — the original method never threw,
+      // it surfaced failures via [lastSyncError] only.
+      lastSyncError = e.toString();
+      AppLog.instance.error('history', 'Sync failed: $e');
+      caughtError = e;
+      caughtTrace = st;
+    } finally {
+      syncSpan?.setAttribute('sync.days_fetched', fetched);
+      syncSpan?.setAttribute('sync.days_total', _fetchedDays.length);
+      if (caughtError != null) {
+        syncSpan?.recordError(caughtError, caughtTrace);
+        syncSpan?.end(ok: false);
+      } else {
+        syncSpan?.end();
+      }
+    }
+  }
 
+  /// Inner body of [syncAll] — split out so the OTel span can be
+  /// active around the full try/catch without polluting the public
+  /// method signature.
+  Future<void> _syncAllBody(
+    int effectiveDaysBack, {
+    required void Function(int) onFetched,
+  }) async {
     try {
       // Hydrate from disk so we don't drop already-stored data even
       // if the watch drops the link halfway through a re-fetch.
@@ -458,23 +506,40 @@ class HistorySync extends ChangeNotifier {
 
       var fetched = 0;
       for (final d in toFetch) {
-        final day = todayD.addDays(-d);
-        _fetchedDays.add(day);
-        fetched++;
-        // Stage an empty record so the UI sees the day even if the
-        // watch has nothing in it (error frame).
-        _days.putIfAbsent(day, () => DailyHistory(day: day));
-        _currentSyncDay = day;
-        _progressCurrent = fetched;
-        notifyListeners();
-        await transport.sendA(Commands.readHeartRateHistory(day: day.midnight));
-        await _drainRx(Duration(milliseconds: 600));
-        _currentSyncDay = null;
-        // Drain any sleep segments that came back on Channel B as
-        // part of this day's poll. The parser may emit a few frames
-        // after the per-day drain — [_onChannelBCommand] will
-        // append them and notify.
-        await Future<void>.delayed(const Duration(milliseconds: 50));
+        // Per-day child span — one full HR poll per day. Parent
+        // (sync.history) is auto-inherited via currentSpan.
+        final daySpan = OpenTelemetryService().startChildSpan(
+          'sync.history.day',
+          attributes: {'sync.day_offset': d},
+        );
+        try {
+          final day = todayD.addDays(-d);
+          daySpan?.setAttribute('sync.day.iso', day.iso);
+          _fetchedDays.add(day);
+          fetched++;
+          onFetched(fetched);
+          // Stage an empty record so the UI sees the day even if the
+          // watch has nothing in it (error frame).
+          _days.putIfAbsent(day, () => DailyHistory(day: day));
+          _currentSyncDay = day;
+          _progressCurrent = fetched;
+          notifyListeners();
+          await transport.sendA(
+            Commands.readHeartRateHistory(day: day.midnight),
+          );
+          await _drainRx(Duration(milliseconds: 600));
+          _currentSyncDay = null;
+          // Drain any sleep segments that came back on Channel B as
+          // part of this day's poll. The parser may emit a few frames
+          // after the per-day drain — [_onChannelBCommand] will
+          // append them and notify.
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+          daySpan?.end();
+        } catch (e, st) {
+          daySpan?.recordError(e, st);
+          daySpan?.end(ok: false);
+          rethrow;
+        }
       }
 
       // Activity summary is the cheap v14 sport-motion probe (Channel-B
@@ -546,13 +611,26 @@ class HistorySync extends ChangeNotifier {
   }
 
   Future<void> _drainRx(Duration settle) async {
-    await Future<void>.delayed(settle);
-    final frames = _rxQueue.toList();
-    _rxQueue.clear();
-    for (final f in frames) {
-      _parse(f);
+    // Spans the per-call settle window so we can measure queue
+    // processing latency independently from the surrounding poll.
+    final span = OpenTelemetryService().startChildSpan(
+      'sync.history.drain_rx',
+      attributes: {'sync.settle_ms': settle.inMilliseconds},
+    );
+    try {
+      await Future<void>.delayed(settle);
+      final frames = _rxQueue.toList();
+      _rxQueue.clear();
+      for (final f in frames) {
+        _parse(f);
+      }
+      notifyListeners();
+      span?.end();
+    } catch (e, st) {
+      span?.recordError(e, st);
+      span?.end(ok: false);
+      rethrow;
     }
-    notifyListeners();
   }
 
   void _parse(Uint8List frame) {
@@ -625,64 +703,86 @@ class HistorySync extends ChangeNotifier {
           _upsertTotals(DateOnly.today(), totals);
           onTotals(totals);
         }
+      case OpA.readDetailSport:
+        _decodeSportDetailTotals(pl);
     }
   }
 
   final List<Uint8List> _hrChunks = [];
 
   void _flushHrChunks() {
-    // Stitch the 13-byte chunks into a flat record, then walk 5-min
-    // BPM slots. 288 slots * 1 byte (BPM) = 288 bytes; the first
-    // 4 bytes of the assembled record are the day timestamp (LE
-    // u32) and the rest is the 5-min sample series. 0xFF = no
-    // sample.
-    final buf = BytesBuilder();
-    for (final c in _hrChunks) {
-      buf.add(c);
-    }
-    final rec = buf.toBytes();
-    if (rec.length < 5) {
+    final day = _currentSyncDay;
+    // Spans the assembly + merge step for one day's HR series; tagged
+    // with the target day so flame graphs show which day is slow.
+    final span = OpenTelemetryService().startChildSpan(
+      'sync.history.flush_hr',
+      attributes: {'sync.day.iso': day?.iso ?? '', 'sync.hr_samples': 0},
+    );
+    try {
+      // Stitch the 13-byte chunks into a flat record, then walk 5-min
+      // BPM slots. 288 slots * 1 byte (BPM) = 288 bytes; the first
+      // 4 bytes of the assembled record are the day timestamp (LE
+      // u32) and the rest is the 5-min sample series. 0xFF = no
+      // sample.
+      final buf = BytesBuilder();
+      for (final c in _hrChunks) {
+        buf.add(c);
+      }
+      final rec = buf.toBytes();
+      if (rec.length < 5) {
+        _hrChunks.clear();
+        return;
+      }
+      final dayStart = DateTime.fromMillisecondsSinceEpoch(
+        Codec.readU32le(rec, 0) * 1000,
+      );
+      final samples = <HrSample>[];
+      for (var i = 4; i < rec.length; i++) {
+        final bpm = rec[i];
+        if (bpm == 0xff || bpm == 0x00) continue;
+        if (bpm < 30 || bpm > 240) continue;
+        samples.add(
+          HrSample(dayStart.add(Duration(minutes: (i - 4) * 5)), bpm),
+        );
+      }
       _hrChunks.clear();
-      return;
-    }
-    final dayStart = DateTime.fromMillisecondsSinceEpoch(
-      Codec.readU32le(rec, 0) * 1000,
-    );
-    final samples = <HrSample>[];
-    for (var i = 4; i < rec.length; i++) {
-      final bpm = rec[i];
-      if (bpm == 0xff || bpm == 0x00) continue;
-      if (bpm < 30 || bpm > 240) continue;
-      samples.add(HrSample(dayStart.add(Duration(minutes: (i - 4) * 5)), bpm));
-    }
-    _hrChunks.clear();
 
-    // Attribute to the day we asked for, not whatever the device
-    // echoed back — the firmware's BCD date echo may differ by a
-    // timezone near midnight, but we already know what we asked for.
-    final day = _currentSyncDay ?? DateOnly.fromDateTime(dayStart);
-    final previous = _days[day] ?? DailyHistory(day: day);
-    final mergedByTs = <int, HrSample>{
-      for (final h in previous.hr) h.timestamp.millisecondsSinceEpoch: h,
-      for (final h in samples) h.timestamp.millisecondsSinceEpoch: h,
-    };
-    final mergedHr = mergedByTs.values.toList()
-      ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
-    final updated = DailyHistory(
-      day: day,
-      hr: mergedHr,
-      sleep: previous.sleep,
-      steps: previous.steps,
-      energyKcal: previous.energyKcal,
-      distanceMeters: previous.distanceMeters,
-      lastUpdated: DateTime.now(),
-    );
-    _days[day] = updated;
-    _hr
-      ..clear()
-      ..addAll(_days.values.expand((d) => d.hr));
-    _hr.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-    unawaited(_store?.mergeHr(day, mergedHr));
+      // Attribute to the day we asked for, not whatever the device
+      // echoed back — the firmware's BCD date echo may differ by a
+      // timezone near midnight, but we already know what we asked for.
+      final resolvedDay = _currentSyncDay ?? DateOnly.fromDateTime(dayStart);
+      final previous = _days[resolvedDay] ?? DailyHistory(day: resolvedDay);
+      final mergedByTs = <int, HrSample>{
+        for (final h in previous.hr) h.timestamp.millisecondsSinceEpoch: h,
+        for (final h in samples) h.timestamp.millisecondsSinceEpoch: h,
+      };
+      final mergedHr = mergedByTs.values.toList()
+        ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+      final updated = DailyHistory(
+        day: resolvedDay,
+        hr: mergedHr,
+        sleep: previous.sleep,
+        steps: previous.steps,
+        energyKcal: previous.energyKcal,
+        distanceMeters: previous.distanceMeters,
+        lastUpdated: DateTime.now(),
+      );
+      _days[resolvedDay] = updated;
+      _hr
+        ..clear()
+        ..addAll(_days.values.expand((d) => d.hr));
+      _hr.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+      span?.setAttribute('sync.hr_samples', mergedHr.length);
+      unawaited(_store?.mergeHr(resolvedDay, mergedHr));
+    } catch (e, st) {
+      span?.recordError(e, st);
+      span?.end(ok: false);
+      rethrow;
+    } finally {
+      // The wrapper short-circuits when the span is already ended, so
+      // this also covers the early-return-on-rec.length<5 path.
+      span?.end();
+    }
   }
 
   /// Persist the currently-attributed day as an empty HR record. Called
@@ -777,15 +877,55 @@ class HistorySync extends ChangeNotifier {
     );
   }
 
+  void _decodeSportDetailTotals(Uint8List pl) {
+    if (pl.length < 12) return;
+    if (pl[0] == 0xf0 || pl[0] == 0xff) return; // header / empty day
+
+    final year = 2000 + Codec.fromBcd(pl[0]);
+    final month = Codec.fromBcd(pl[1]);
+    final dayOfMonth = Codec.fromBcd(pl[2]);
+    if (month < 1 || month > 12 || dayOfMonth < 1 || dayOfMonth > 31) {
+      return;
+    }
+
+    // Live H59MA_V1.0 captures show the detail record body as:
+    //   pl[3]    = slot << 2
+    //   pl[4]    = record index
+    //   pl[5]    = header record count
+    //   pl[6..7] = duration seconds, LE
+    //   pl[8..9] = per-slot steps, LE
+    //   pl[10..11] = per-slot distance meters, LE
+    final steps = pl[8] | (pl[9] << 8);
+    final distance = pl[10] | (pl[11] << 8);
+    if (steps == 0 && distance == 0) return;
+
+    final day = DateOnly(year, month, dayOfMonth);
+    final previous = _sportDetailTotals[day] ?? const DailyTotals();
+    final totals = DailyTotals(
+      steps: previous.steps + steps,
+      calories: previous.calories,
+      distanceMeters: previous.distanceMeters + distance,
+    );
+    _sportDetailTotals[day] = totals;
+    _upsertTotals(day, totals);
+  }
+
   void _upsertTotals(DateOnly day, DailyTotals totals) {
     final previous = _days[day] ?? DailyHistory(day: day);
+    final steps = totals.steps != 0 ? totals.steps : previous.steps;
+    final calories = totals.calories != 0
+        ? totals.calories
+        : previous.energyKcal;
+    final distance = totals.distanceMeters != 0
+        ? totals.distanceMeters
+        : previous.distanceMeters;
     final updated = DailyHistory(
       day: day,
       hr: previous.hr,
       sleep: previous.sleep,
-      steps: totals.steps,
-      energyKcal: totals.calories,
-      distanceMeters: totals.distanceMeters,
+      steps: steps,
+      energyKcal: calories,
+      distanceMeters: distance,
       lastUpdated: DateTime.now(),
     );
     _days[day] = updated;
@@ -807,62 +947,95 @@ class HistorySync extends ChangeNotifier {
   }
 
   int _decodeSleepNew(Uint8List payload) {
-    final day = _dayFromSleepPayload(payload);
-    final anchor = day.midnight;
-    final added = SleepParser.parseNightSleepSegments(payload, anchor: anchor);
-    if (added.isEmpty) return 0;
-    final previous = _days[day] ?? DailyHistory(day: day);
-    final mergedByStart = <int, SleepSegment>{
-      for (final s in previous.sleep) s.start.millisecondsSinceEpoch: s,
-      for (final s in added) s.start.millisecondsSinceEpoch: s,
-    };
-    final merged = mergedByStart.values.toList()
-      ..sort((a, b) => a.start.compareTo(b.start));
-    final updated = DailyHistory(
-      day: day,
-      hr: previous.hr,
-      sleep: merged,
-      steps: previous.steps,
-      energyKcal: previous.energyKcal,
-      distanceMeters: previous.distanceMeters,
-      lastUpdated: DateTime.now(),
+    // Spans the night-sleep decode + merge step so we can spot a
+    // slow parse or failed mergeSleep in the trace timeline.
+    final span = OpenTelemetryService().startChildSpan(
+      'sync.history.decode_sleep',
+      attributes: {'sync.sleep.kind': 'night'},
     );
-    _days[day] = updated;
-    _sleep
-      ..clear()
-      ..addAll(_days.values.expand((d) => d.sleep));
-    _sleep.sort((a, b) => a.start.compareTo(b.start));
-    unawaited(_store?.mergeSleep(day, merged));
-    return added.length;
+    try {
+      final day = _dayFromSleepPayload(payload);
+      final anchor = day.midnight;
+      final added = SleepParser.parseNightSleepSegments(
+        payload,
+        anchor: anchor,
+      );
+      if (added.isEmpty) return 0;
+      final previous = _days[day] ?? DailyHistory(day: day);
+      final mergedByStart = <int, SleepSegment>{
+        for (final s in previous.sleep) s.start.millisecondsSinceEpoch: s,
+        for (final s in added) s.start.millisecondsSinceEpoch: s,
+      };
+      final merged = mergedByStart.values.toList()
+        ..sort((a, b) => a.start.compareTo(b.start));
+      final updated = DailyHistory(
+        day: day,
+        hr: previous.hr,
+        sleep: merged,
+        steps: previous.steps,
+        energyKcal: previous.energyKcal,
+        distanceMeters: previous.distanceMeters,
+        lastUpdated: DateTime.now(),
+      );
+      _days[day] = updated;
+      _sleep
+        ..clear()
+        ..addAll(_days.values.expand((d) => d.sleep));
+      _sleep.sort((a, b) => a.start.compareTo(b.start));
+      unawaited(_store?.mergeSleep(day, merged));
+      return added.length;
+    } catch (e, st) {
+      span?.recordError(e, st);
+      rethrow;
+    } finally {
+      span?.end();
+    }
   }
 
   int _decodeSleepLunch(Uint8List payload) {
-    final day = _dayFromSleepPayload(payload);
-    final anchor = day.midnight;
-    final added = SleepParser.parseLunchSleepSegments(payload, anchor: anchor);
-    if (added.isEmpty) return 0;
-    final previous = _days[day] ?? DailyHistory(day: day);
-    final mergedByStart = <int, SleepSegment>{
-      for (final s in previous.sleep) s.start.millisecondsSinceEpoch: s,
-      for (final s in added) s.start.millisecondsSinceEpoch: s,
-    };
-    final merged = mergedByStart.values.toList()
-      ..sort((a, b) => a.start.compareTo(b.start));
-    final updated = DailyHistory(
-      day: day,
-      hr: previous.hr,
-      sleep: merged,
-      steps: previous.steps,
-      energyKcal: previous.energyKcal,
-      distanceMeters: previous.distanceMeters,
-      lastUpdated: DateTime.now(),
+    // Same shape as _decodeSleepNew but for the lunch/nap channel
+    // (0x3e) — emitted as a sibling span so trace queries can
+    // filter on sync.sleep.kind.
+    final span = OpenTelemetryService().startChildSpan(
+      'sync.history.decode_sleep',
+      attributes: {'sync.sleep.kind': 'lunch'},
     );
-    _days[day] = updated;
-    _sleep
-      ..clear()
-      ..addAll(_days.values.expand((d) => d.sleep));
-    _sleep.sort((a, b) => a.start.compareTo(b.start));
-    unawaited(_store?.mergeSleep(day, merged));
-    return added.length;
+    try {
+      final day = _dayFromSleepPayload(payload);
+      final anchor = day.midnight;
+      final added = SleepParser.parseLunchSleepSegments(
+        payload,
+        anchor: anchor,
+      );
+      if (added.isEmpty) return 0;
+      final previous = _days[day] ?? DailyHistory(day: day);
+      final mergedByStart = <int, SleepSegment>{
+        for (final s in previous.sleep) s.start.millisecondsSinceEpoch: s,
+        for (final s in added) s.start.millisecondsSinceEpoch: s,
+      };
+      final merged = mergedByStart.values.toList()
+        ..sort((a, b) => a.start.compareTo(b.start));
+      final updated = DailyHistory(
+        day: day,
+        hr: previous.hr,
+        sleep: merged,
+        steps: previous.steps,
+        energyKcal: previous.energyKcal,
+        distanceMeters: previous.distanceMeters,
+        lastUpdated: DateTime.now(),
+      );
+      _days[day] = updated;
+      _sleep
+        ..clear()
+        ..addAll(_days.values.expand((d) => d.sleep));
+      _sleep.sort((a, b) => a.start.compareTo(b.start));
+      unawaited(_store?.mergeSleep(day, merged));
+      return added.length;
+    } catch (e, st) {
+      span?.recordError(e, st);
+      rethrow;
+    } finally {
+      span?.end();
+    }
   }
 }

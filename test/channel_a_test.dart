@@ -885,21 +885,20 @@ void main() {
         final d = ChannelADispatcher(t);
         d.bind();
         final got = d.onSportDetailRecord.first;
-        // BCD 0x26/0x06/0x14 + packed (record=2, slot=10 -> (2)|(10<<2)=0x2a)
-        // + duration lo u16 LE (0x1234) at pl[7..8] + auxLo (0x5678) at
-        // pl[9..10] + auxHi (0x9a 0x00) at pl[11..12] + duration hi (0x00)
-        // at pl[13].
+        // BCD 0x26/0x06/0x14 + slot byte (slot=10 -> 10<<2=0x28)
+        // + record index/count + duration/aux pairs matching live
+        // H59MA_V1.0 0x43 captures.
         final payload = <int>[
           0x26, // year BCD
           0x06, // month BCD
           0x14, // day BCD
-          0x2a, // packed low
-          0x00, // packed high
-          0x00, 0x00, // reserved
-          0x34, 0x12, // duration lo u16 LE
+          0x28, // slot << 2
+          0x02, // record index
+          0x0e, // header record count echo
+          0x34, 0x12, // duration u16 LE
           0x78, 0x56, // auxLo u16 LE
           0x9a, 0x00, // auxHi u16 LE
-          0x00, // duration hi
+          0x00, 0x00, // reserved
         ];
         t.inA.add(Codec.buildChannelA(OpA.readDetailSport, payload));
         final r = await got.timeout(const Duration(seconds: 1));

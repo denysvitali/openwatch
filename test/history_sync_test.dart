@@ -692,6 +692,65 @@ void main() {
       b.dispose();
     });
 
+    test('readDetailSport 0x43 records aggregate day steps', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final sync = HistorySync(t, (_) {}, dispatcher: d);
+      final today = DateOnly.today();
+      final dateBytes = [
+        Codec.toBcd(today.year % 100),
+        Codec.toBcd(today.month),
+        Codec.toBcd(today.day),
+      ];
+
+      final future = sync.syncAll(daysBack: 1);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      t.inA.add(
+        Codec.buildChannelA(OpA.queryDataDistribution, [
+          0x00,
+          0x00,
+          0x00,
+          0x01,
+        ]),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 2200));
+      t.inA.add(Codec.buildChannelA(OpA.readDetailSport, [0xf0, 0x02, 0x01]));
+      t.inA.add(
+        Codec.buildChannelA(OpA.readDetailSport, [
+          ...dateBytes,
+          0x20, // slot 8
+          0x00, // record index
+          0x02, // count echo
+          0x0b, 0x01, // duration 267 s
+          0x65, 0x00, // steps 101
+          0x3c, 0x00, // distance 60 m
+          0x00, 0x00,
+        ]),
+      );
+      t.inA.add(
+        Codec.buildChannelA(OpA.readDetailSport, [
+          ...dateBytes,
+          0x24, // slot 9
+          0x01, // record index
+          0x02, // count echo
+          0x71, 0x06, // duration 1649 s
+          0x5f, 0x02, // steps 607
+          0x72, 0x01, // distance 370 m
+          0x00, 0x00,
+        ]),
+      );
+
+      await future;
+
+      final stored = sync.dayOf(today);
+      expect(stored, isNotNull);
+      expect(stored!.steps, 708);
+      expect(stored.distanceMeters, 430);
+      sync.dispose();
+      d.dispose();
+    });
+
     test('syncAll sends both 0x27 night and 0x3e lunch on Channel-B', () async {
       final t = _StubTransport();
       final d = ChannelADispatcher(t);

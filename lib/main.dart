@@ -1,12 +1,21 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/routing/app_router.dart';
+import 'core/services/opentelemetry_service.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   FlutterBluePlus.setLogLevel(LogLevel.warning);
+
+  // OpenTelemetry init runs in parallel with runApp so the first frame
+  // isn't blocked on OTLP handshake. Sync + BLE operations await
+  // `waitUntilReady()` if they need an active parent span.
+  unawaited(OpenTelemetryService().initialize());
+
   runApp(const ProviderScope(child: OpenWatchApp()));
 }
 
