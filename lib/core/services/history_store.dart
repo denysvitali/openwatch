@@ -261,11 +261,12 @@ class HistoryStore {
         // Surface the error in the trace layer without breaking the
         // queue for subsequent writes — the caller may still be able
         // to retry the same operation.
-        OpenTelemetryService()
-            .startChildSpan('store.history.write_task_error',
-                attributes: {'store.day.iso': dayKey})
-            ?..recordError(e, st)
-            ..end();
+        OpenTelemetryService().startChildSpan(
+            'store.history.write_task_error',
+            attributes: {'store.day.iso': dayKey},
+          )
+          ?..recordError(e, st)
+          ..end();
       }
     });
     _writeQueue[dayKey] = next;

@@ -389,17 +389,17 @@ class OTelSpan {
   /// End the span. Pass `ok: false` to mark it as error without supplying
   /// an exception object.
   ///
-  /// If this span is currently the top of the active-span stack, it is
-  /// auto-popped so the next span created reverts to the previous
-  /// parent. Spans that ended out-of-order (e.g. the caller popped
-  /// manually) leave the stack alone.
+  /// Removes this span from anywhere in the active-span stack (not
+  /// just the top) so the next span created reverts to the correct
+  /// previous parent. We can't safely use a "pop only if top" rule:
+  /// if a concurrent startTrace pushes a new span between this span's
+  /// start and end (e.g. a `ble.rx` arriving while `ble.gatt.write`
+  /// is still completing its finally block), the old span would stay
+  /// on the stack as a stale parent, corrupting the tree.
   void end({bool ok = true}) {
     if (_span.isEnded) return;
     final svc = OpenTelemetryService();
-    if (svc._currentSpanStack.isNotEmpty &&
-        identical(svc._currentSpanStack.last, this)) {
-      svc._currentSpanStack.removeLast();
-    }
+    svc._currentSpanStack.remove(this);
     _span.end(spanStatus: ok ? SpanStatusCode.Ok : SpanStatusCode.Error);
   }
 }
