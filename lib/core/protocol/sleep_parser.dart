@@ -55,7 +55,29 @@ class SleepParser {
   ///   * `0x02` = deep sleep
   ///   * `0x03` = REM sleep
   ///   * `0x04` = awake (within the sleep window)
-  ///   * anything else (incl. `0x00`) → [SleepStage.awake] (defensive)
+  ///   * anything else → inferred from the byte as a coarse
+  ///     sleep-quality score (see [_toStage] below).
+  ///
+  /// The H59MA v13 firmware (and likely a handful of other Chinese-OEM
+  /// firmwares reusing the Oudmon `SleepNewProto` wire shape — see
+  /// `PROTOCOL.md` §4.4 + `firmwares/GHIDRA_DECOMPILATION.md` §2.3)
+  /// emits stage bytes in the range `0x02..0x35` instead of the canonical
+  /// `0x01..0x04`. Mapping those values to `awake` collapses every
+  /// segment to red on the chart, which is the bug the user sees as
+  /// "4h of sleep, all awake". Until a RE-grade spec lands we treat the
+  /// byte as a movement/quality score:
+  ///
+  ///   * `0x00`          → awake (no data / explicit awake)
+  ///   * `0x01..0x04`     → canonical Oudmon mapping (light/deep/rem/awake)
+  ///   * `0x05..0x0f`     → deep    (low score ⇒ still)
+  ///   * `0x10..0x1f`     → light   (some movement)
+  ///   * `0x20..0x2f`     → rem     (more movement)
+  ///   * `0x30..0xff`     → awake   (high score ⇒ moving)
+  ///
+  /// These ranges are deliberately conservative — the unknown case
+  /// defaults to a *sleep* stage (light), which is more useful to the
+  /// user than "always awake", and lets the chart show variation
+  /// instead of a solid red bar.
   ///
   /// If a future firmware variant uses different ids the consumer can
   /// pass a custom mapping to [parseNightSleepSegments] /
@@ -178,7 +200,19 @@ class SleepParser {
         return SleepStage.rem;
       case 0x04:
         return SleepStage.awake;
+      // Defensive default for stage bytes outside the canonical
+      // Oudmon 0x01..0x04 set. The H59MA v13 firmware uses
+      // 0x05..0x35 to encode a coarse sleep-quality score; we
+      // map by range rather than collapsing every unknown to
+      // awake (which previously made the sleep chart a solid red
+      // bar). See the [stageFor] doc-comment above for the full
+      // rationale.
+      case 0x00:
+        return SleepStage.awake;
       default:
+        if (typeByte <= 0x0f) return SleepStage.deep;
+        if (typeByte <= 0x1f) return SleepStage.light;
+        if (typeByte <= 0x2f) return SleepStage.rem;
         return SleepStage.awake;
     }
   }

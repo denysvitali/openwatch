@@ -870,10 +870,26 @@ class HistorySync extends ChangeNotifier {
 
   DailyTotals _activityTotalsFromBody(Uint8List body) {
     if (body.length < 12) return const DailyTotals();
+    // Steps (u24 BE @ 0), calories (u24 BE @ 6), distance (u24 BE @ 9).
+    //
+    // Defensive clamping: H59MA v13 firmware emits the activity body
+    // with field semantics "owned by the producer" (see
+    // `firmwares/GHIDRA_DECOMPILATION.md` §2.8). On v13 the calorie
+    // field at body[6..8] can decode to values like 6,381,923 kcal,
+    // which is impossible for a human in a day. Until we have a
+    // RE-pinned offset for that build we clamp any value past
+    // [kMaxSaneKcalPerDay] to 0 so the UI doesn't show absurd numbers
+    // — the steps/distance fields are usually correct and are kept.
+    const kMaxSaneSteps = 200000; // ~2 steps/sec for 24h straight
+    const kMaxSaneKcal = 20000; // ~10x elite-athlete ceiling
+    const kMaxSaneMeters = 200000; // 200 km in a day
+    final rawSteps = Codec.readU24be(body, 0);
+    final rawKcal = Codec.readU24be(body, 6);
+    final rawMeters = Codec.readU24be(body, 9);
     return DailyTotals(
-      steps: Codec.readU24be(body, 0),
-      calories: Codec.readU24be(body, 6),
-      distanceMeters: Codec.readU24be(body, 9),
+      steps: rawSteps > kMaxSaneSteps ? 0 : rawSteps,
+      calories: rawKcal > kMaxSaneKcal ? 0 : rawKcal,
+      distanceMeters: rawMeters > kMaxSaneMeters ? 0 : rawMeters,
     );
   }
 

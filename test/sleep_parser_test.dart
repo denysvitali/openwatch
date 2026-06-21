@@ -95,16 +95,58 @@ void main() {
       expect(SleepParser.parseNightSleepSegments(pl, anchor: anchor), isEmpty);
     });
 
-    test('maps unknown stage bytes to SleepStage.awake', () {
-      // stageByte = 0x09 is not in our mapping → falls through to
-      // `awake` rather than throwing.
+    test('maps H59MA-style score bytes (0x05..0x0f) to SleepStage.deep', () {
+      // The H59MA v13 firmware emits stage bytes in the range
+      // 0x05..0xff instead of the canonical Oudmon 0x01..0x04
+      // (see `firmwares/GHIDRA_DECOMPILATION.md` §2.3). Previously
+      // these collapsed every segment to `awake`, painting the
+      // sleep chart solid red. The mapping now interprets the byte
+      // as a coarse sleep-quality score.
       final pl = Uint8List.fromList([
         0x2A, 0x00, // endMin = 42
-        0x09, 0x14, // unknown 0x09 → awake, 20 min
+        0x09, 0x14, // score 9 → deep, 20 min
+      ]);
+      final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
+      expect(segs.single.stage, SleepStage.deep);
+      expect(segs.single.duration.inMinutes, 20);
+    });
+
+    test('H59MA score range 0x10..0x1f maps to SleepStage.light', () {
+      final pl = Uint8List.fromList([
+        0x2A, 0x00,
+        0x15, 0x05, // score 0x15=21 → light, 5 min
+      ]);
+      final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
+      expect(segs.single.stage, SleepStage.light);
+    });
+
+    test('H59MA score range 0x20..0x2f maps to SleepStage.rem', () {
+      final pl = Uint8List.fromList([
+        0x2A, 0x00,
+        0x25, 0x05, // score 0x25=37 → rem, 5 min
+      ]);
+      final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
+      expect(segs.single.stage, SleepStage.rem);
+    });
+
+    test('H59MA score 0x30+ falls through to SleepStage.awake', () {
+      // The high end of the range is genuinely "lots of movement"
+      // and stays awake — only the low/mid ranges got demoted.
+      final pl = Uint8List.fromList([
+        0x2A, 0x00,
+        0x35, 0x05, // score 0x35=53 → awake, 5 min
       ]);
       final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
       expect(segs.single.stage, SleepStage.awake);
-      expect(segs.single.duration.inMinutes, 20);
+    });
+
+    test('0x00 stays mapped to SleepStage.awake (no-data sentinel)', () {
+      final pl = Uint8List.fromList([
+        0x2A, 0x00,
+        0x00, 0x05, // 0x00 → awake, 5 min
+      ]);
+      final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
+      expect(segs.single.stage, SleepStage.awake);
     });
   });
 

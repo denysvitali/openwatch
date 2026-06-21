@@ -231,6 +231,82 @@ class HistoryStore {
   static const _kLastSync = 'history.lastSyncedAt';
   static const _kLastSyncDay = 'history.lastSyncedDay';
 
+  /// Per-day serialization queue. Without this, two concurrent
+  /// `writeAsString(flush: true)` calls on the same `<day>.json` race at
+  /// the OS level — the second writer truncates the first mid-write and
+  /// the resulting file has torn JSON (e.g. `..."updated":<ts>}64}` with
+  /// a stray byte from the second writer past the close brace). The
+  /// next `readDay` then throws `FormatException` on the bad JSON.
+  ///
+  /// Each day-keyed task chains onto the previous future for that day
+  /// so they run strictly sequentially while still allowing different
+  /// days to interleave. A failed task is swallowed (logged) so a
+  /// transient disk error doesn't poison the queue for every
+  /// subsequent write on the same day.
+  final Map<String, Future<void>> _writeQueue = {};
+
+  /// Run [task] sequentially after the previously-enqueued task for
+  /// the same [dayKey] completes. The returned future resolves when
+  /// [task] finishes (success or logged failure).
+  Future<void> _enqueueForDay(String dayKey, Future<void> Function() task) {
+    final previous = _writeQueue[dayKey] ?? Future<void>.value();
+    final next = previous.then((_) async {
+      try {
+        await task();
+      } catch (e, st) {
+        AppLog.instance.warn(
+          'history',
+          '_enqueueForDay($dayKey) task failed: $e',
+        );
+        // Surface the error in the trace layer without breaking the
+        // queue for subsequent writes — the caller may still be able
+        // to retry the same operation.
+        OpenTelemetryService()
+            .startChildSpan('store.history.write_task_error',
+                attributes: {'store.day.iso': dayKey})
+            ?..recordError(e, st)
+            ..end();
+      }
+    });
+    _writeQueue[dayKey] = next;
+    // Drop the slot once the chain drains so the map doesn't grow
+    // unbounded for users who sync hundreds of distinct days.
+    next.whenComplete(() {
+      if (identical(_writeQueue[dayKey], next)) {
+        _writeQueue.remove(dayKey);
+      }
+    });
+    return next;
+  }
+
+  /// Same as [_enqueueForDay] but propagates [task]'s return value and
+  /// any exception through to the caller. Use this for read-modify-write
+  /// helpers (`mergeHr`, `mergeSleep`) that need the resulting
+  /// [DailyHistory] back so the in-memory state can mirror disk.
+  Future<T> _enqueueForDayReturning<T>(
+    String dayKey,
+    Future<T> Function() task,
+  ) async {
+    final previous = _writeQueue[dayKey] ?? Future<void>.value();
+    // Build a completer so we can hand the caller the task's return
+    // value once the chain reaches it.
+    final completer = Completer<T>();
+    final next = previous.then((_) async {
+      try {
+        completer.complete(await task());
+      } catch (e, st) {
+        completer.completeError(e, st);
+      }
+    });
+    _writeQueue[dayKey] = next;
+    next.whenComplete(() {
+      if (identical(_writeQueue[dayKey], next)) {
+        _writeQueue.remove(dayKey);
+      }
+    });
+    return completer.future;
+  }
+
   /// Open the store. Resolves `<app docs>/history/` and ensures it exists.
   static Future<HistoryStore> open() async {
     final prefs = await SharedPreferences.getInstance();
@@ -353,7 +429,13 @@ class HistoryStore {
         lastUpdated: lastUpdated ?? DateTime.now(),
       );
       final raw = jsonEncode(stamped.toJson());
-      await _fileFor(history.day).writeAsString(raw, flush: true);
+      // Serialize the file write per day so concurrent callers
+      // (e.g. `_upsertTotals` for the 0x2a activity summary and
+      // `_flushHrChunks` for the 0x15 HR history) don't truncate
+      // each other's JSON mid-flush. See [_enqueueForDay].
+      await _enqueueForDay(history.day.iso, () async {
+        await _fileFor(history.day).writeAsString(raw, flush: true);
+      });
     } catch (e, st) {
       span?.recordError(e, st);
       rethrow;
@@ -376,26 +458,33 @@ class HistoryStore {
       attributes: {'store.day.iso': day.iso, 'store.op': 'merge_hr'},
     );
     try {
-      final current = await readDay(day);
-      final byTs = <int, HrSample>{
-        for (final h in current.hr) h.timestamp.millisecondsSinceEpoch: h,
-      };
-      for (final h in hrSamples) {
-        byTs[h.timestamp.millisecondsSinceEpoch] = h;
-      }
-      final merged = byTs.values.toList()
-        ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
-      final next = DailyHistory(
-        day: day,
-        hr: merged,
-        sleep: current.sleep,
-        steps: current.steps,
-        energyKcal: current.energyKcal,
-        distanceMeters: current.distanceMeters,
-        lastUpdated: current.lastUpdated,
-      );
-      await writeDay(next);
-      return next;
+      // Read-modify-write must be atomic per-day; otherwise a parallel
+      // mergeSleep/mergeHr can interleave a write between our read and
+      // our write, losing the parallel call's updates. See the
+      // [_writeQueue] rationale.
+      return await _enqueueForDayReturning<DailyHistory>(day.iso, () async {
+        final current = await readDay(day);
+        final byTs = <int, HrSample>{
+          for (final h in current.hr) h.timestamp.millisecondsSinceEpoch: h,
+        };
+        for (final h in hrSamples) {
+          byTs[h.timestamp.millisecondsSinceEpoch] = h;
+        }
+        final merged = byTs.values.toList()
+          ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+        final stamped = DailyHistory(
+          day: day,
+          hr: merged,
+          sleep: current.sleep,
+          steps: current.steps,
+          energyKcal: current.energyKcal,
+          distanceMeters: current.distanceMeters,
+          lastUpdated: DateTime.now(),
+        );
+        final raw = jsonEncode(stamped.toJson());
+        await _fileFor(day).writeAsString(raw, flush: true);
+        return stamped;
+      });
     } catch (e, st) {
       span?.recordError(e, st);
       rethrow;
@@ -417,26 +506,29 @@ class HistoryStore {
       attributes: {'store.day.iso': day.iso, 'store.op': 'merge_sleep'},
     );
     try {
-      final current = await readDay(day);
-      final byStart = <int, SleepSegment>{
-        for (final s in current.sleep) s.start.millisecondsSinceEpoch: s,
-      };
-      for (final s in segments) {
-        byStart[s.start.millisecondsSinceEpoch] = s;
-      }
-      final merged = byStart.values.toList()
-        ..sort((a, b) => a.start.compareTo(b.start));
-      final next = DailyHistory(
-        day: day,
-        hr: current.hr,
-        sleep: merged,
-        steps: current.steps,
-        energyKcal: current.energyKcal,
-        distanceMeters: current.distanceMeters,
-        lastUpdated: current.lastUpdated,
-      );
-      await writeDay(next);
-      return next;
+      return await _enqueueForDayReturning<DailyHistory>(day.iso, () async {
+        final current = await readDay(day);
+        final byStart = <int, SleepSegment>{
+          for (final s in current.sleep) s.start.millisecondsSinceEpoch: s,
+        };
+        for (final s in segments) {
+          byStart[s.start.millisecondsSinceEpoch] = s;
+        }
+        final merged = byStart.values.toList()
+          ..sort((a, b) => a.start.compareTo(b.start));
+        final stamped = DailyHistory(
+          day: day,
+          hr: current.hr,
+          sleep: merged,
+          steps: current.steps,
+          energyKcal: current.energyKcal,
+          distanceMeters: current.distanceMeters,
+          lastUpdated: DateTime.now(),
+        );
+        final raw = jsonEncode(stamped.toJson());
+        await _fileFor(day).writeAsString(raw, flush: true);
+        return stamped;
+      });
     } catch (e, st) {
       span?.recordError(e, st);
       rethrow;
@@ -461,18 +553,21 @@ class HistoryStore {
       attributes: {'store.day.iso': day.iso, 'store.op': 'record_totals'},
     );
     try {
-      final current = await readDay(day);
-      final next = DailyHistory(
-        day: day,
-        hr: current.hr,
-        sleep: current.sleep,
-        steps: steps,
-        energyKcal: energyKcal,
-        distanceMeters: distanceMeters,
-        lastUpdated: current.lastUpdated,
-      );
-      await writeDay(next);
-      return next;
+      return await _enqueueForDayReturning<DailyHistory>(day.iso, () async {
+        final current = await readDay(day);
+        final stamped = DailyHistory(
+          day: day,
+          hr: current.hr,
+          sleep: current.sleep,
+          steps: steps,
+          energyKcal: energyKcal,
+          distanceMeters: distanceMeters,
+          lastUpdated: current.lastUpdated,
+        );
+        final raw = jsonEncode(stamped.toJson());
+        await _fileFor(day).writeAsString(raw, flush: true);
+        return stamped;
+      });
     } catch (e, st) {
       span?.recordError(e, st);
       rethrow;
