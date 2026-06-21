@@ -3561,12 +3561,97 @@ not the GPIO path.
 
 | Address | Function | Role |
 |---|---|---|
-| `0x00833770` | `FUN_00833770` | HR module dispatcher (refers to `hr_module.c`); branches on sub-command 0–3 |
+| `0x00833770` | `FUN_00833770` | HR module dispatcher (refers to `hr_module.c`); branches on sub-command 0–3 — see §7.1 |
 | `0x00833334` | `FUN_00833334` | Accelerometer / LIS3DH SPI dispatcher |
 
 Strings confirm additional algorithm libraries: `VC_HRV_16Bit_integration_6.0_addRMSSD`, `spo2_VC30F_S_int_limit_ed01`, `lib_BIODetect_V14_1`, `vc_SportMotion_Int`.
 
+### 7.1 HR module dispatcher (`FUN_00833770`)
+
+The `hr_module.c` front-end that dispatches HR-related work
+to the underlying algorithm libraries. Takes the sub-cmd in
+the **upper 16 bits** of `param_1` and a u16 mode parameter
+in `param_2`.
+
+```c
+void FUN_00833770(u32 param1, u16 param2) {
+    u16 sub = (u16)(param1 >> 16);
+    if (sub == 0) {
+        FUN_0083376e();                 // reset
+    } else if (sub == 1) {
+        FUN_00837b96(param2);           // start mode 1
+    } else if (sub == 2) {
+        FUN_00837c4e(param2);           // start mode 2
+    } else if (sub == 3) {
+        FUN_0083376c();                 // read/stop
+    } else {
+        // unexpected sub-cmd — assertion-fail log
+        uVar1 = func_0x00005e6a(0x23400000, "qc_code_app_module.h");
+        func_0x00005aa8(DAT_00833898, DAT_00833894, 2, uVar1, 0x1ac);
+    }
+}
+```
+
+The four sub-cmd branches map to the four lifecycle stages of
+a heart-rate measurement:
+
+* **`sub 0` reset** — `FUN_0083376e` stops any running
+  measurement and clears the per-task state.
+* **`sub 1` start mode 1** — `FUN_00837b96(param2)` starts
+  the measurement with `param2` as the mode parameter
+  (the same `param2` value the §8.5 / §8.7 0x69 / 0x6a
+  mode-control opcodes pass).
+* **`sub 2` start mode 2** — `FUN_00837c4e(param2)` is the
+  second mode-start variant (probably the one-shot vs
+  continuous split from §3.13 0x1e realTimeHeartRate).
+* **`sub 3` read/stop** — `FUN_0083376c` reads the latest
+  measurement (or stops if `param2 != 0`).
+
+The `else` branch is the **assertion-fail path** — the
+firmware logs a hard-coded module header (`0x23400000`,
+the debug-output ID for `qc_code_app_module.h`) via the
+standard `func_0x00005e6a` / `func_0x00005aa8` debug helpers.
+A host SDK that sends an unknown sub-cmd will see the watch
+*log an assertion* but otherwise no-op — the firmware doesn't
+NAK or send an error frame for this path.
+
+#### Why sub-cmd in upper 16 bits of param1
+
+The `param1` argument is a `u32` where the upper 16 bits
+encode the sub-cmd and (presumably) the lower 16 bits
+encode the *handler-id* (which HR sensor — internal vs
+external). The decompiler shows `local_a = (short)((uint)param1 >> 0x10)`
+— the `>> 0x10` shifts the high half-word down for the
+switch.
+
+This packing is the firmware's standard way of carrying
+two u16 fields in a single u32 parameter without using a
+struct. The `param2` u16 is the *per-sub-cmd* parameter
+(the mode value for `sub 1` / `sub 2`).
+
+#### Pair with §3.13 `0x1e realTimeHeartRate`
+
+`0x1e` is the Channel-A opcode that calls into the same
+`hr_module.c` functions. The §3.13 doc shows `0x1e` calling
+`FUN_0083371e(0x2000)` for "start continuous" mode — that
+`0x2000` is the `param2` value the §7.1 dispatcher passes
+into `FUN_00837b96` / `FUN_00837c4e`. The `0x1e` opcode is
+the *Channel-A entry point*; the §7.1 dispatcher is the
+*internal firmware entry point*. They share the same
+underlying worker.
+
+#### Pair with §7 sensors
+
+The §7 accelerometer dispatcher `FUN_00833334` follows the
+same sub-cmd convention (0..3 lifecycle), so the host SDK
+can use a single dispatcher pattern for both HR and
+accelerometer modules. The "four-stage lifecycle"
+(reset / start-1 / start-2 / read-or-stop) is a *vendor
+convention* shared across the H59MA firmware.
+
 ---
+
+## 8. Vendor `0xFEE7` GATT Service — Active Protocol Role
 
 ## 8. Vendor `0xFEE7` GATT Service — Active Protocol Role
 
