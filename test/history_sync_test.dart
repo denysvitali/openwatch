@@ -35,6 +35,17 @@ class _StubTransport implements BleTransport {
   dynamic noSuchMethod(Invocation invocation) => null;
 }
 
+Uint8List _channelAErrorFrame(int op, List<int> payload) {
+  final f = Codec.buildChannelA(op, payload);
+  f[0] = f[0] | 0x80;
+  var sum = 0;
+  for (var i = 0; i < 15; i++) {
+    sum = (sum + f[i]) & 0xFF;
+  }
+  f[15] = sum;
+  return f;
+}
+
 void main() {
   group('HistorySync', () {
     test(
@@ -63,6 +74,34 @@ void main() {
         await syncFuture;
         expect(sync.availableDays, containsAll([0, 2]));
         expect(sync.availableDays.contains(1), isFalse);
+        sync.dispose();
+        d.dispose();
+      },
+    );
+
+    test(
+      'queryDataDistribution error falls back to blind recent-day polling',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final sync = HistorySync(t, (_) {}, dispatcher: d);
+
+        final future = sync.syncAll(daysBack: 2);
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        t.inA.add(_channelAErrorFrame(OpA.queryDataDistribution, [0xee]));
+
+        await future;
+
+        final today = DateOnly.today();
+        expect(sync.availableDays, isEmpty);
+        expect(sync.fetchedDays, containsAll([today, today.addDays(-1)]));
+        expect(sync.fetchedDays.length, 2);
+        expect(
+          t.sent.where((f) => f.isNotEmpty && f[0] == OpA.readHeartRate),
+          hasLength(2),
+        );
+        expect(t.sentB.map(Codec.rxChannelBCmd), contains(OpB.activitySummary));
         sync.dispose();
         d.dispose();
       },
@@ -244,18 +283,12 @@ void main() {
         // opcode 0x46. The buildChannelA helper doesn't expose the
         // top bit, so OR it in after construction AND recompute the
         // checksum so the dispatcher's isValidChannelA() check passes.
-        final f = Codec.buildChannelA(OpA.queryDataDistribution, [
+        final f = _channelAErrorFrame(OpA.queryDataDistribution, [
           0xee,
           0x00,
           0x00,
           0x00,
         ]);
-        f[0] = f[0] | 0x80; // 0x46 -> 0xC6
-        var sum = 0;
-        for (var i = 0; i < 15; i++) {
-          sum = (sum + f[i]) & 0xFF;
-        }
-        f[15] = sum;
         t.inA.add(f);
         await Future<void>.delayed(const Duration(milliseconds: 20));
         expect(errorEvents.length, 1);
@@ -671,9 +704,9 @@ void main() {
       // commands are issued — `t.sent` accumulates Channel-A
       // writes; Channel-B writes aren't captured here, so we
       // confirm the call doesn't throw and completes.
-      final future = sync.syncAll();
+      final future = sync.syncAll(daysBack: 1);
       await Future<void>.delayed(const Duration(milliseconds: 50));
-      // Empty bitmask → day 0 polled → 0x15 fired → settle.
+      // Missing bitmask → one-day blind poll → 0x15 fired → settle.
       // The Channel-B writes happen after the per-day loop.
       await Future<void>.delayed(const Duration(milliseconds: 1800));
       await future;

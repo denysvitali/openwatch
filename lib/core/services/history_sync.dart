@@ -164,6 +164,8 @@ class HistorySync extends ChangeNotifier {
   final List<SleepSegment> _sleep = [];
   final List<ActivitySummaryRecord> _activity = [];
   final Set<int> _availableDays = {};
+  bool _distributionAnswered = false;
+  bool _distributionFailed = false;
 
   /// Days for which the watch reported data during the most recent
   /// [syncAll] — used by the UI to render the availability ribbon.
@@ -377,6 +379,8 @@ class HistorySync extends ChangeNotifier {
     _sleep.clear();
     _activity.clear();
     _availableDays.clear();
+    _distributionAnswered = false;
+    _distributionFailed = false;
     _watchDaysWithData.clear();
     _fetchedDays.clear();
     _hrChunks.clear();
@@ -416,9 +420,17 @@ class HistorySync extends ChangeNotifier {
       // The watch bitmask is 0-indexed from today; day 0 = today,
       // day 1 = yesterday, etc. Combine with what we already have
       // on disk to decide which days to fetch.
+      final blindScan = _distributionFailed || !_distributionAnswered;
+      if (blindScan) {
+        AppLog.instance.warn(
+          'history',
+          '0x46 data-distribution unavailable; blind polling last '
+              '$effectiveDaysBack day(s)',
+        );
+      }
       final wantsDays = <int>{
-        if (_availableDays.isEmpty)
-          0
+        if (blindScan)
+          for (var d = 0; d < effectiveDaysBack; d++) d
         else
           for (final d in _availableDays)
             if (d < effectiveDaysBack) d,
@@ -549,17 +561,34 @@ class HistorySync extends ChangeNotifier {
     final pl = Codec.rxPayload(frame);
     switch (op) {
       case OpA.queryDataDistribution:
+        _distributionAnswered = true;
+        if (Codec.rxIsError(frame)) {
+          _distributionFailed = true;
+          final code = pl.isEmpty ? -1 : pl[0];
+          AppLog.instance.warn(
+            'history',
+            '0x46 data-distribution error response '
+                '(code=0x${code.toRadixString(16)})',
+          );
+          return;
+        }
         // 4-byte BE bitmask: bit d = day d has data (PROTOCOL.md §4.6).
         // The high 4 bytes of the 14-byte payload are reserved; the
         // watch normally only fills the first 4.
-        if (pl.length >= 4) {
-          final v = Codec.readU32be(pl, 0);
-          final today = DateOnly.today();
-          for (var d = 0; d < 32; d++) {
-            if ((v & (1 << d)) != 0) {
-              _availableDays.add(d);
-              _watchDaysWithData.add(today.addDays(-d));
-            }
+        if (pl.length < 4) {
+          _distributionFailed = true;
+          AppLog.instance.warn(
+            'history',
+            '0x46 data-distribution response too short (${pl.length} B)',
+          );
+          return;
+        }
+        final v = Codec.readU32be(pl, 0);
+        final today = DateOnly.today();
+        for (var d = 0; d < 32; d++) {
+          if ((v & (1 << d)) != 0) {
+            _availableDays.add(d);
+            _watchDaysWithData.add(today.addDays(-d));
           }
         }
       case OpA.readHeartRate:
