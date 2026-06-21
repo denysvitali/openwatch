@@ -148,6 +148,80 @@ void main() {
       final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
       expect(segs.single.stage, SleepStage.awake);
     });
+
+    test('blocks that wrap midnight re-key to bedtime day (regression for '
+        '"night sleep stored under wake-up day" complaint)', () {
+      // Block: endMin = 83 (01:23) with total duration 302 min
+      // ⇒ startMin = -219 → wraps to 1221 (20:21). The 5
+      // segments are emitted in time order: the first 3 finish
+      // before midnight (bedtime day 2026-06-19) and the last 2
+      // land after midnight on the wake-up day (2026-06-20).
+      // The OLD parser stamped them all onto the wake-up day with
+      // start times on the wake-up day, which is wrong: a 4h50m
+      // sleep starting at 20:21 the previous evening belongs to
+      // the bedtime day for as long as it stays on that day.
+      final pl = Uint8List.fromList([
+        0x53, 0x00, // endMinOfDay LE = 83 (01:23)
+        0x04, 0x75, // awake 117 min
+        0x01, 0x0F, // light 15 min
+        0x02, 0x78, // deep 120 min
+        0x03, 0x14, // rem  20 min
+        0x01, 0x1E, // light 30 min
+      ]);
+      final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
+      expect(segs, hasLength(5));
+      final bedtime = DateTime(2026, 6, 19);
+      final wakeDay = DateTime(2026, 6, 20);
+      // First segment lands at 20:21 on bedtime day — NOT at
+      // 20:21 on the wake-up day (which would be 44h after
+      // the anchor's local midnight and clearly nonsensical).
+      expect(segs.first.start, DateTime(2026, 6, 19, 20, 21));
+      // Pre-midnight segments stay on the bedtime day.
+      expect(
+        DateTime(segs[0].start.year, segs[0].start.month, segs[0].start.day),
+        bedtime,
+      );
+      expect(
+        DateTime(segs[1].start.year, segs[1].start.month, segs[1].start.day),
+        bedtime,
+      );
+      expect(
+        DateTime(segs[2].start.year, segs[2].start.month, segs[2].start.day),
+        bedtime,
+      );
+      // Post-midnight segments roll over to the wake-up day
+      // (the session crossed midnight again naturally).
+      expect(
+        DateTime(segs[3].start.year, segs[3].start.month, segs[3].start.day),
+        wakeDay,
+        reason: 'segments after midnight roll over to the wake-up day',
+      );
+      expect(
+        DateTime(segs[4].start.year, segs[4].start.month, segs[4].start.day),
+        wakeDay,
+      );
+    });
+
+    test('blocks that do NOT wrap midnight stay on the wake-up day', () {
+      // endMin = 480 (08:00), total = 240 min ⇒ startMin = 240
+      // (04:00) — no wrap. All segments on the anchor day.
+      final pl = Uint8List.fromList([
+        0xE0, 0x01, // endMinOfDay LE = 480
+        0x01, 0x78, // light 120 min
+        0x02, 0x3C, // deep  60 min
+        0x03, 0x3C, // rem   60 min
+      ]);
+      final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
+      expect(segs, hasLength(3));
+      for (final s in segs) {
+        expect(
+          DateTime(s.start.year, s.start.month, s.start.day),
+          anchor,
+          reason: 'non-wrap segments stay on the wake-up day',
+        );
+      }
+      expect(segs.first.start, DateTime(2026, 6, 20, 4, 0));
+    });
   });
 
   group('SleepParser — parseLunchSleepSegments (0x3e Ch-B)', () {

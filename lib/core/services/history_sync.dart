@@ -667,7 +667,14 @@ class HistorySync extends ChangeNotifier {
       case OpA.readHeartRate:
         // 0x15 multi-pkt reassembly per FUN_0082cf48 (GHIDRA §3.12).
         //   * pl[0] == 0x18 → header — fire _hrHeader
-        //   * pl[0] == 0xFF → error (no data at this index)
+        //   * pl[0] == 0xFF → empty-day answer (watch has no HR for
+        //     this date). This is a WATCH-SIDE answer, not a decoder
+        //     error — the watch only stores HR samples when continuous
+        //     measurement is enabled (see `OpA.realTimeHeartRate`).
+        //     A user who never started a continuous session will see
+        //     `0xFF` for every queried day; that is correct behaviour.
+        //     `HistorySync` persists the (empty) record so the day
+        //     surfaces in the UI rather than being silently dropped.
         //   * pl[0] ∈ 1..23 → chunk with seq byte, 13 payload bytes
         //     follow (samples at 5-min intervals)
         if (pl.isEmpty) return;
@@ -865,16 +872,22 @@ class HistorySync extends ChangeNotifier {
 
   DailyTotals _activityTotalsFromBody(Uint8List body) {
     if (body.length < 12) return const DailyTotals();
-    // Steps (u24 BE @ 0), calories (u24 BE @ 6), distance (u24 BE @ 9).
+    // Best-effort field layout: steps (u24 BE @ 0), calories (u24 BE
+    // @ 6), distance (u24 BE @ 9). The H59MA v13 firmware emits the
+    // activity body with field semantics "owned by the producer"
+    // (see `firmwares/GHIDRA_DECOMPILATION.md` §2.8) — i.e. the
+    // RE notes only pin the *frame* layout (1 B day-offset + 48 B
+    // body), not the per-byte semantics of the body. The offsets
+    // above are our best guess from live captures.
     //
-    // Defensive clamping: H59MA v13 firmware emits the activity body
-    // with field semantics "owned by the producer" (see
-    // `firmwares/GHIDRA_DECOMPILATION.md` §2.8). On v13 the calorie
-    // field at body[6..8] can decode to values like 6,381,923 kcal,
-    // which is impossible for a human in a day. Until we have a
-    // RE-pinned offset for that build we clamp any value past
+    // Defensive clamping: on v13 the u24 BE field at body[6..8] can
+    // decode to values like 6,381,923 kcal (impossible). Until we
+    // have a RE-pinned offset for that build we clamp any value past
     // [kMaxSaneKcalPerDay] to 0 so the UI doesn't show absurd numbers
     // — the steps/distance fields are usually correct and are kept.
+    // The OLD app versions (before commit fd28b07) had no clamp,
+    // which produced kcal values like 108543 in the user's export;
+    // `DailyHistory.fromJson` now nulls those on read.
     const kMaxSaneSteps = 200000; // ~2 steps/sec for 24h straight
     const kMaxSaneKcal = 20000; // ~10x elite-athlete ceiling
     const kMaxSaneMeters = 200000; // 200 km in a day
@@ -965,35 +978,51 @@ class HistorySync extends ChangeNotifier {
       attributes: {'sync.sleep.kind': 'night'},
     );
     try {
-      final day = _dayFromSleepPayload(payload);
-      final anchor = day.midnight;
+      final wakeDay = _dayFromSleepPayload(payload);
+      final anchor = wakeDay.midnight;
       final added = SleepParser.parseNightSleepSegments(
         payload,
         anchor: anchor,
       );
       if (added.isEmpty) return 0;
-      final previous = _days[day] ?? DailyHistory(day: day);
-      final mergedByStart = <int, SleepSegment>{
-        for (final s in previous.sleep) s.start.millisecondsSinceEpoch: s,
-        for (final s in added) s.start.millisecondsSinceEpoch: s,
-      };
-      final merged = mergedByStart.values.toList()
-        ..sort((a, b) => a.start.compareTo(b.start));
-      final updated = DailyHistory(
-        day: day,
-        hr: previous.hr,
-        sleep: merged,
-        steps: previous.steps,
-        energyKcal: previous.energyKcal,
-        distanceMeters: previous.distanceMeters,
-        lastUpdated: DateTime.now(),
-      );
-      _days[day] = updated;
+      // The parser re-keys segments to the BEDTIME day when a
+      // block wraps midnight (e.g. wakeDay=2026-06-19, segments
+      // start at 2026-06-18T20:33). Group by the segment's
+      // own start date so each segment lands in the right day's
+      // _days bucket — otherwise a 4h50m night would be filed
+      // under the wake-up day even though its start timestamp
+      // belongs to the previous calendar date.
+      final addedByDay = <DateOnly, List<SleepSegment>>{};
+      for (final s in added) {
+        final d = DateOnly.fromDateTime(s.start);
+        addedByDay.putIfAbsent(d, () => []).add(s);
+      }
+      for (final entry in addedByDay.entries) {
+        final day = entry.key;
+        final segments = entry.value;
+        final previous = _days[day] ?? DailyHistory(day: day);
+        final mergedByStart = <int, SleepSegment>{
+          for (final s in previous.sleep) s.start.millisecondsSinceEpoch: s,
+          for (final s in segments) s.start.millisecondsSinceEpoch: s,
+        };
+        final merged = mergedByStart.values.toList()
+          ..sort((a, b) => a.start.compareTo(b.start));
+        final updated = DailyHistory(
+          day: day,
+          hr: previous.hr,
+          sleep: merged,
+          steps: previous.steps,
+          energyKcal: previous.energyKcal,
+          distanceMeters: previous.distanceMeters,
+          lastUpdated: DateTime.now(),
+        );
+        _days[day] = updated;
+        unawaited(_store?.mergeSleep(day, merged));
+      }
       _sleep
         ..clear()
         ..addAll(_days.values.expand((d) => d.sleep));
       _sleep.sort((a, b) => a.start.compareTo(b.start));
-      unawaited(_store?.mergeSleep(day, merged));
       return added.length;
     } catch (e, st) {
       span?.recordError(e, st);
@@ -1012,35 +1041,48 @@ class HistorySync extends ChangeNotifier {
       attributes: {'sync.sleep.kind': 'lunch'},
     );
     try {
-      final day = _dayFromSleepPayload(payload);
-      final anchor = day.midnight;
+      final wakeDay = _dayFromSleepPayload(payload);
+      final anchor = wakeDay.midnight;
       final added = SleepParser.parseLunchSleepSegments(
         payload,
         anchor: anchor,
       );
       if (added.isEmpty) return 0;
-      final previous = _days[day] ?? DailyHistory(day: day);
-      final mergedByStart = <int, SleepSegment>{
-        for (final s in previous.sleep) s.start.millisecondsSinceEpoch: s,
-        for (final s in added) s.start.millisecondsSinceEpoch: s,
-      };
-      final merged = mergedByStart.values.toList()
-        ..sort((a, b) => a.start.compareTo(b.start));
-      final updated = DailyHistory(
-        day: day,
-        hr: previous.hr,
-        sleep: merged,
-        steps: previous.steps,
-        energyKcal: previous.energyKcal,
-        distanceMeters: previous.distanceMeters,
-        lastUpdated: DateTime.now(),
-      );
-      _days[day] = updated;
+      // Re-bucket by segment start date (same logic as night) so
+      // a nap that ends after midnight lands under the bedtime
+      // day. Lunch/nap is normally < 90 min so this is rare, but
+      // the parser supports it.
+      final addedByDay = <DateOnly, List<SleepSegment>>{};
+      for (final s in added) {
+        final d = DateOnly.fromDateTime(s.start);
+        addedByDay.putIfAbsent(d, () => []).add(s);
+      }
+      for (final entry in addedByDay.entries) {
+        final day = entry.key;
+        final segments = entry.value;
+        final previous = _days[day] ?? DailyHistory(day: day);
+        final mergedByStart = <int, SleepSegment>{
+          for (final s in previous.sleep) s.start.millisecondsSinceEpoch: s,
+          for (final s in segments) s.start.millisecondsSinceEpoch: s,
+        };
+        final merged = mergedByStart.values.toList()
+          ..sort((a, b) => a.start.compareTo(b.start));
+        final updated = DailyHistory(
+          day: day,
+          hr: previous.hr,
+          sleep: merged,
+          steps: previous.steps,
+          energyKcal: previous.energyKcal,
+          distanceMeters: previous.distanceMeters,
+          lastUpdated: DateTime.now(),
+        );
+        _days[day] = updated;
+        unawaited(_store?.mergeSleep(day, merged));
+      }
       _sleep
         ..clear()
         ..addAll(_days.values.expand((d) => d.sleep));
       _sleep.sort((a, b) => a.start.compareTo(b.start));
-      unawaited(_store?.mergeSleep(day, merged));
       return added.length;
     } catch (e, st) {
       span?.recordError(e, st);

@@ -166,9 +166,19 @@ class SleepParser {
         totalMin += p.durMin;
       }
       var stMin = endMin - totalMin;
-      if (stMin < 0) stMin += 24 * 60; // wrap across midnight
-
-      final dayBase = DateTime(anchor.year, anchor.month, anchor.day);
+      // Wrap across midnight AND shift the segment date to the
+      // bedtime day. The H59MA v13 firmware stores night sleep on
+      // the wake-up day (the morning the user wakes up), so a block
+      // ending at 01:23 with 290 min of total duration starts at
+      // 20:33 the previous evening. Users expect this to be the
+      // "night of <bedtime day>" — without the shift, the segment
+      // shows up under the wake-up day with a start timestamp that
+      // belongs to the previous calendar date.
+      var dayBase = DateTime(anchor.year, anchor.month, anchor.day);
+      if (stMin < 0) {
+        stMin += 24 * 60;
+        dayBase = dayBase.subtract(const Duration(days: 1));
+      }
       for (final p in pairs) {
         final start = dayBase.add(Duration(minutes: stMin));
         out.add(
