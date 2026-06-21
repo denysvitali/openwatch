@@ -353,7 +353,7 @@ void main() {
           );
         }
         // 250 ms quiet window + a little slack.
-        await Future<void>.delayed(const Duration(milliseconds: 120));
+        await Future<void>.delayed(const Duration(milliseconds: 250));
 
         expect(records, hasLength(1));
         final r = records.single;
@@ -398,7 +398,7 @@ void main() {
           ),
         );
       }
-      await Future<void>.delayed(const Duration(milliseconds: 120));
+      await Future<void>.delayed(const Duration(milliseconds: 250));
 
       expect(records, hasLength(1));
       final r = records.single;
@@ -447,7 +447,7 @@ void main() {
         );
       }
       // Wait past the quiet window so #1 fires.
-      await Future<void>.delayed(const Duration(milliseconds: 120));
+      await Future<void>.delayed(const Duration(milliseconds: 250));
       expect(records, hasLength(1));
 
       // Record #2 — different slotId so we can verify it carried.
@@ -524,7 +524,7 @@ void main() {
           ),
         );
       }
-      await Future<void>.delayed(const Duration(milliseconds: 120));
+      await Future<void>.delayed(const Duration(milliseconds: 250));
 
       expect(records, hasLength(2));
       expect(records[0].slotId, 0x00);
@@ -571,7 +571,7 @@ void main() {
       );
       // Nothing else. The reassembler's 250 ms quiet timer should
       // fire and surface the partial record.
-      await Future<void>.delayed(const Duration(milliseconds: 120));
+      await Future<void>.delayed(const Duration(milliseconds: 250));
 
       expect(records, hasLength(1));
       expect(records.single.slotId, 0x00);
@@ -714,7 +714,7 @@ void main() {
 
       final future = sync.syncAll(daysBack: 1);
       // syncAll no longer sends 0x46 — it blind-polls day 0 directly.
-      await Future<void>.delayed(const Duration(milliseconds: 400));
+      await Future<void>.delayed(const Duration(milliseconds: 120));
       t.inA.add(Codec.buildChannelA(OpA.readDetailSport, [0xf0, 0x02, 0x01]));
       t.inA.add(
         Codec.buildChannelA(OpA.readDetailSport, [
@@ -763,7 +763,7 @@ void main() {
       // sleep commands are issued.
       final future = sync.syncAll(daysBack: 1);
       // The Channel-B writes happen after the per-day loop.
-      await Future<void>.delayed(const Duration(milliseconds: 400));
+      await Future<void>.delayed(const Duration(milliseconds: 120));
       await future;
       expect(
         t.sentB.map(Codec.rxChannelBCmd),
