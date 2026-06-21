@@ -202,8 +202,12 @@ class Commands {
 
   /// New sleep protocol (Channel-B `0x27`) for a given day offset. Sent as
   /// a framed BC/27/len/crc/payload frame; see PROTOCOL.md §4.4.
+  ///
+  /// The firmware handler `FUN_0082fada` (GHIDRA §2.3) expects a 2-byte
+  /// payload: `[dayOffset, recordType]` where `recordType = 0x00` selects the
+  /// night sleep pass.
   static Uint8List readSleepNewProtocol({int dayOffset = 0}) =>
-      Codec.buildChannelB(OpB.sleepNew, [dayOffset & 0xFF]);
+      Codec.buildChannelB(OpB.sleepNew, [dayOffset & 0xFF, 0x00]);
 
   /// New sleep protocol lunch/nap variant (Channel-B `0x3e`) for a given
   /// day offset. The firmware handler `FUN_0082fada` (GHIDRA §2.3) expects

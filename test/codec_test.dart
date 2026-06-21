@@ -175,10 +175,10 @@ void main() {
       expect(f.sublist(1, 6), [0x02, 0x00, 0x03, 0x09, 0x01]);
     });
 
-    test('readSleepNewProtocol uses Channel-B 0x27 with single day offset byte', () {
+    test('readSleepNewProtocol uses Channel-B 0x27 with day offset + record type 0x00', () {
       final f = Commands.readSleepNewProtocol(dayOffset: 3);
       expect(Codec.rxChannelBCmd(f), OpB.sleepNew);
-      expect(Codec.rxChannelBPayload(f), [0x03]);
+      expect(Codec.rxChannelBPayload(f), [0x03, 0x00]);
     });
 
     test('readSleepLunchProtocol uses Channel-B 0x3e with day offset + record type 0x01', () {
