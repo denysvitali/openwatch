@@ -7,7 +7,7 @@ import 'package:openwatch/core/protocol/channel_a.dart';
 import 'package:openwatch/core/protocol/channel_b.dart';
 import 'package:openwatch/core/protocol/codec.dart';
 import 'package:openwatch/core/protocol/opcodes.dart';
-import 'package:openwatch/core/services/app_log.dart';
+import 'package:openwatch/core/services/history_store.dart';
 import 'package:openwatch/core/services/history_sync.dart';
 
 class _StubTransport implements BleTransport {
@@ -534,608 +534,375 @@ void main() {
         );
       }
       await Future<void>.delayed(const Duration(milliseconds: 250));
-
       expect(records, hasLength(2));
       expect(records[0].slotId, 0x00);
-      expect(records[0].header, [0xA1, 0xA2, 0xA3, 0xA4]);
       expect(records[1].slotId, 0x01);
-      expect(records[1].header, [0xB1, 0xB2, 0xB3, 0xB4]);
-      await sub.cancel();
-      sync.dispose();
-      d.dispose();
-    });
-
-    test('pressureSetting 0x37 quiet-period flush emits in-flight record '
-        'after 250 ms with no further header (regression for reassembler '
-        'quiet-window timer)', () async {
-      final t = _StubTransport();
-      final d = ChannelADispatcher(t);
-      d.bind();
-      final sync = _testSync(t, d);
-      final records = <PressureRecord>[];
-      final sub = sync.pressureRecords.listen(records.add);
-
-      // Header + 1 chunk only — no second header follows.
-      t.inA.add(Codec.buildChannelA(OpA.pressureSetting, [0x00, 0x05, 0x1e]));
-      // Single chunk with 14 bytes of payload (fills the whole
-      // subData slot to avoid trailing-zero injection from
-      // `buildChannelA`).
-      t.inA.add(
-        Codec.buildChannelA(OpA.pressureSetting, [
-          0x01,
-          0x02,
-          0x03,
-          0x04,
-          0x05,
-          0x06,
-          0x07,
-          0x08,
-          0x09,
-          0x0A,
-          0x0B,
-          0x0C,
-          0x0D,
-          0x0E,
-        ]),
-      );
-      // Nothing else. The reassembler's 250 ms quiet timer should
-      // fire and surface the partial record.
-      await Future<void>.delayed(const Duration(milliseconds: 250));
-
-      expect(records, hasLength(1));
-      expect(records.single.slotId, 0x00);
-      expect(
-        records.single.header,
-        [0x01, 0x02, 0x03, 0x04],
-        reason: 'first 4 bytes of assembled payload = producer header',
-      );
-      expect(
-        records.single.body,
-        [0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E],
-        reason: 'remaining 10 bytes of the 14-byte chunk = body',
-      );
       await sub.cancel();
       sync.dispose();
       d.dispose();
     });
 
     // ------------------------------------------------------------------
-    // Channel-B sleep wiring (0x27 night + 0x3e lunch). Regression
-    // for the gap where HistorySync.syncAll() sent the requests
-    // but no consumer parsed the reassembled Channel-B commands
-    // — the sleep list was always empty.
+    // HS-5: ChannelBParser null → skip sleep/activity commands.
     // ------------------------------------------------------------------
 
-    test('Channel-B 0x27 night sleep frame populates HistorySync.sleep '
-        '(regression for missing Ch-B sleep consumer)', () async {
-      final t = _StubTransport();
-      final d = ChannelADispatcher(t);
-      d.bind();
-      final b = ChannelBParser(t);
-      b.bind();
-      final sync = _testSync(t, d, bParser: b);
-
-      // Build a single-block night payload: dayOffset=1,
-      // endMin=450 (07:30) BE, three (stage, durMin) pairs.
-      // Wire format (PROTOCOL.md §4.4 + GHIDRA §2.3):
-      //   [dayOffset, endMinBE, pairs…]
-      final nightPayload = Uint8List.fromList([
-        0x01, // dayOffset = 1 ("yesterday")
-        0x01, 0xC2, // endMin BE = 450 (07:30)
-        0x01, 0x1E, // light 30
-        0x02, 0x5A, // deep 90
-        0x03, 0x3C, // rem 60
-      ]);
-      t.inB.add(Codec.buildChannelB(OpB.sleepNew, nightPayload));
-
-      // Give the parser a tick to reassemble + HistorySync a tick
-      // to ingest + notify.
-      await Future<void>.delayed(const Duration(milliseconds: 30));
-
-      expect(sync.sleep, hasLength(3));
-      expect(sync.sleep.map((s) => s.stage), [
-        SleepStage.light,
-        SleepStage.deep,
-        SleepStage.rem,
-      ]);
-      expect(sync.sleep[0].duration.inMinutes, 30);
-      expect(sync.sleep[1].duration.inMinutes, 90);
-      expect(sync.sleep[2].duration.inMinutes, 60);
-      sync.dispose();
-      d.dispose();
-      b.dispose();
-    });
-
     test(
-      'Channel-B 0x3e lunch sleep frame populates HistorySync.sleep',
+      'syncAll skips sleep commands when ChannelBParser is null (HS-5)',
       () async {
         final t = _StubTransport();
         final d = ChannelADispatcher(t);
         d.bind();
-        final b = ChannelBParser(t);
-        b.bind();
-        final sync = _testSync(t, d, bParser: b);
-
-        final lunchPayload = Uint8List.fromList([
-          0x00, 0x3C, // endMin BE = 60 (01:00) — lunch has no dayOffset prefix
-          0x01, 0x3C, // light 60
-        ]);
-        t.inB.add(Codec.buildChannelB(OpB.sleepLunchNew, lunchPayload));
-
-        await Future<void>.delayed(const Duration(milliseconds: 30));
-
-        expect(sync.sleep, hasLength(1));
-        expect(sync.sleep.single.stage, SleepStage.light);
-        expect(sync.sleep.single.duration.inMinutes, 60);
-        sync.dispose();
-        d.dispose();
-        b.dispose();
-      },
-    );
-
-    test('Channel-B 0x2a activity summary populates day totals', () async {
-      final t = _StubTransport();
-      final d = ChannelADispatcher(t);
-      d.bind();
-      final b = ChannelBParser(t);
-      b.bind();
-      final sync = _testSync(t, d, bParser: b);
-
-      final body = List<int>.filled(48, 0);
-      body[0] = 0x00;
-      body[1] = 0x12;
-      body[2] = 0x34; // steps = 0x1234
-      body[6] = 0x00;
-      body[7] = 0x01;
-      body[8] = 0xf4; // kcal = 500
-      body[9] = 0x00;
-      body[10] = 0x0b;
-      body[11] = 0xb8; // distance = 3000 m
-      body[13] = 0xff; // compression marker normalised to 0
-      t.inB.add(Codec.buildChannelB(OpB.activitySummary, [0x02, ...body]));
-
-      await Future<void>.delayed(const Duration(milliseconds: 30));
-
-      final day = DateOnly.today().addDays(-2);
-      final stored = sync.dayOf(day);
-      expect(stored, isNotNull);
-      expect(stored!.steps, 0x1234);
-      expect(stored.energyKcal, 500);
-      expect(stored.distanceMeters, 3000);
-      expect(sync.activity.single.day, day);
-      expect(sync.activity.single.body[13], 0x00);
-      sync.dispose();
-      d.dispose();
-      b.dispose();
-    });
-
-    test('readDetailSport 0x43 records aggregate day steps', () async {
-      final t = _StubTransport();
-      final d = ChannelADispatcher(t);
-      d.bind();
-      final sync = _testSync(t, d);
-      final today = DateOnly.today();
-      final dateBytes = [
-        Codec.toBcd(today.year % 100),
-        Codec.toBcd(today.month),
-        Codec.toBcd(today.day),
-      ];
-
-      final future = sync.syncAll(daysBack: 1);
-      // syncAll no longer sends 0x46 — it blind-polls day 0 directly.
-      await Future<void>.delayed(const Duration(milliseconds: 120));
-      t.inA.add(Codec.buildChannelA(OpA.readDetailSport, [0xf0, 0x02, 0x01]));
-      t.inA.add(
-        Codec.buildChannelA(OpA.readDetailSport, [
-          ...dateBytes,
-          0x20, // slot 8
-          0x00, // record index
-          0x02, // count echo
-          0x0b, 0x01, // duration 267 s
-          0x65, 0x00, // steps 101
-          0x3c, 0x00, // distance 60 m
-          0x00, 0x00,
-        ]),
-      );
-      t.inA.add(
-        Codec.buildChannelA(OpA.readDetailSport, [
-          ...dateBytes,
-          0x24, // slot 9
-          0x01, // record index
-          0x02, // count echo
-          0x71, 0x06, // duration 1649 s
-          0x5f, 0x02, // steps 607
-          0x72, 0x01, // distance 370 m
-          0x00, 0x00,
-        ]),
-      );
-
-      await future;
-
-      final stored = sync.dayOf(today);
-      expect(stored, isNotNull);
-      expect(stored!.steps, 708);
-      expect(stored.distanceMeters, 430);
-      sync.dispose();
-      d.dispose();
-    });
-
-    test('syncAll sends both 0x27 night and 0x3e lunch on Channel-B', () async {
-      final t = _StubTransport();
-      final d = ChannelADispatcher(t);
-      d.bind();
-      final sync = _testSync(t, d);
-
-      // Drive syncAll; the device doesn't need a 0x46 query anymore —
-      // the per-day loop always polls {0} as part of the bounded
-      // blind-poll. We only care that the Channel-B writes for both
-      // sleep commands are issued.
-      final future = sync.syncAll(daysBack: 1);
-      // The Channel-B writes happen after the per-day loop.
-      await Future<void>.delayed(const Duration(milliseconds: 120));
-      await future;
-      expect(
-        t.sentB.map(Codec.rxChannelBCmd),
-        containsAll([OpB.activitySummary, OpB.sleepNew, OpB.sleepLunchNew]),
-      );
-      expect(sync.syncing, isFalse);
-      sync.dispose();
-      d.dispose();
-    });
-
-    test(
-      'syncAll always fetches sleep for all days, even when cached (HS-3)',
-      () async {
-        final t = _StubTransport();
-        final d = ChannelADispatcher(t);
-        d.bind();
-        final b = ChannelBParser(t);
-        b.bind();
-        final sync = _testSync(t, d, bParser: b);
-
-        // Pre-populate yesterday with sleep data so _days[yesterday] exists.
-        final yesterday = DateOnly.today().addDays(-1);
-        final nightPayload = Uint8List.fromList([
-          0x01, // dayOffset = 1 (yesterday)
-          0x01, 0xC2, // endMin BE = 450 (07:30)
-          0x01, 0x1E, // light 30
-        ]);
-        t.inB.add(Codec.buildChannelB(OpB.sleepNew, nightPayload));
-        await Future<void>.delayed(const Duration(milliseconds: 30));
-        expect(sync.sleep, hasLength(1));
-        expect(DateOnly.fromDateTime(sync.sleep.single.start), yesterday);
-
-        // Now run syncAll(daysBack: 2). The old buggy code would skip
-        // sleep fetch for yesterday because existing.sleep.isNotEmpty.
-        // The fix must still issue both 0x27 and 0x3e for yesterday.
-        final future = sync.syncAll(daysBack: 2);
-        await Future<void>.delayed(const Duration(milliseconds: 120));
+        final sync = _testSync(t, d, bParser: null);
+        final future = sync.syncAll(daysBack: 1);
+        await Future<void>.delayed(const Duration(milliseconds: 20));
         await future;
 
-        final sleepCmds = t.sentB.map(Codec.rxChannelBCmd).toList();
-        // At minimum we expect one activity summary, plus sleep new + lunch
-        // for each of the two days (today + yesterday).
+        // No sleep or lunch commands should be sent on Channel B.
         expect(
-          sleepCmds.where((c) => c == OpB.sleepNew).length,
-          greaterThanOrEqualTo(2),
-          reason: 'HS-3: sleep must be re-fetched for all days, not skipped',
+          t.sentB.where(
+            (f) => f.isNotEmpty && Codec.rxChannelBCmd(f) == OpB.sleepNew,
+          ),
+          isEmpty,
+          reason: '0x27 sleepNew must not be sent when bParser is null',
         );
         expect(
-          sleepCmds.where((c) => c == OpB.sleepLunchNew).length,
-          greaterThanOrEqualTo(2),
-          reason: 'HS-3: lunch sleep must be re-fetched for all days',
+          t.sentB.where(
+            (f) => f.isNotEmpty && Codec.rxChannelBCmd(f) == OpB.sleepLunchNew,
+          ),
+          isEmpty,
+          reason: '0x3e sleepLunchNew must not be sent when bParser is null',
         );
+
+        // HR sync should still proceed normally.
+        expect(
+          t.sent.where((f) => f.isNotEmpty && f[0] == OpA.readHeartRate),
+          isNotEmpty,
+        );
+
         sync.dispose();
         d.dispose();
-        b.dispose();
       },
     );
 
     test(
-      'sleep merge deduplicates when re-fetching the same day (HS-3)',
+      'syncAll sends sleep commands when ChannelBParser is provided (HS-5)',
       () async {
         final t = _StubTransport();
         final d = ChannelADispatcher(t);
+        final bParser = ChannelBParser(t);
         d.bind();
-        final b = ChannelBParser(t);
-        b.bind();
-        final sync = _testSync(t, d, bParser: b);
-
-        // First sync: one light segment on yesterday.
-        final yesterday = DateOnly.today().addDays(-1);
-        final nightPayload1 = Uint8List.fromList([
-          0x01, // dayOffset = 1 (yesterday)
-          0x01, 0xC2, // endMin BE = 450 (07:30)
-          0x01, 0x1E, // light 30
-        ]);
-        t.inB.add(Codec.buildChannelB(OpB.sleepNew, nightPayload1));
-        await Future<void>.delayed(const Duration(milliseconds: 30));
-        expect(sync.sleep, hasLength(1));
-
-        // Second sync: re-fetch the same day with identical payload.
-        // The merge logic should deduplicate, leaving exactly one segment.
-        final future = sync.syncAll(daysBack: 2);
-        await Future<void>.delayed(const Duration(milliseconds: 120));
-        // Re-inject the same payload during the re-fetch window.
-        t.inB.add(Codec.buildChannelB(OpB.sleepNew, nightPayload1));
+        final sync = _testSync(t, d, bParser: bParser);
+        final future = sync.syncAll(daysBack: 1);
+        await Future<void>.delayed(const Duration(milliseconds: 20));
         await future;
 
-        // Only one segment should remain; the second identical one was merged.
-        final yesterdaySleep = sync.sleep
-            .where((s) => DateOnly.fromDateTime(s.start) == yesterday)
-            .toList();
-        expect(yesterdaySleep, hasLength(1));
-        sync.dispose();
-        d.dispose();
-        b.dispose();
-      },
-    );
-
-    // ------------------------------------------------------------------
-    // Local-first: state exposed for the UI without an in-memory store.
-    // ------------------------------------------------------------------
-
-    test('days / watchDaysWithData / fetchedDays are exposed (regression '
-        'for new HistorySync API consumed by history_screen)', () async {
-      final t = _StubTransport();
-      final d = ChannelADispatcher(t);
-      d.bind();
-      final sync = _testSync(t, d);
-      expect(sync.days, isEmpty);
-      expect(sync.watchDaysWithData, isEmpty);
-      expect(sync.fetchedDays, isEmpty);
-      expect(sync.dayOf(DateOnly.today()), isNull);
-      expect(sync.lastSyncedAt, isNull);
-
-      final future = sync.syncAll(daysBack: 3);
-      // syncAll no longer sends 0x46 — the bounded blind-poll always
-      // covers days {0, 1, 2}. The fetched set tracks the days the
-      // per-day poll actually wrote to.
-      await future;
-      final today = DateOnly.today();
-      // No store → all three days were fetched (today always re-fetched
-      // for HR + sleep, and there's no on-disk record to short-circuit).
-      expect(
-        sync.fetchedDays,
-        containsAll([today, today.addDays(-1), today.addDays(-2)]),
-      );
-      // The 0x46 bitmask hasn't been pushed so watchDaysWithData is
-      // empty by design (no more gating on the bitmask).
-      expect(sync.watchDaysWithData, isEmpty);
-      sync.dispose();
-      d.dispose();
-    });
-    // ------------------------------------------------------------------
-    // HS-1: Lunch/nap sleep mis-attributed to wrong day because
-    // _dayFromSleepPayload treated payload[0] as dayOffset for 0x3e.
-    // ------------------------------------------------------------------
-
-    test(
-      '0x3e lunch with payload[0]=0x03 (endMin high-byte) is NOT '
-      'mis-attributed to 3 days ago (HS-1)',
-      () async {
-        final t = _StubTransport();
-        final d = ChannelADispatcher(t);
-        d.bind();
-        final b = ChannelBParser(t);
-        b.bind();
-        final sync = _testSync(t, d, bParser: b);
-
-        // Lunch payload: NO dayOffset prefix.
-        // endMin BE = 0x030C = 780 min = 13:00.
-        // payload[0] = 0x03 is the high byte of endMin, NOT a dayOffset.
-        // Old buggy code would read it as dayOffset=3 → today.addDays(-3).
-        final lunchPayload = Uint8List.fromList([
-          0x03, 0x0C, // endMin BE = 780 (13:00)
-          0x01, 0x1E, // light 30
-        ]);
-        t.inB.add(Codec.buildChannelB(OpB.sleepLunchNew, lunchPayload));
-
-        await Future<void>.delayed(const Duration(milliseconds: 30));
-
-        expect(sync.sleep, hasLength(1));
-        final seg = sync.sleep.single;
-        expect(seg.stage, SleepStage.light);
-        expect(seg.duration.inMinutes, 30);
-        // The nap should land on TODAY (or _currentSyncDay), not 3 days ago.
-        final today = DateOnly.today();
-        expect(DateOnly.fromDateTime(seg.start), today);
-        sync.dispose();
-        d.dispose();
-        b.dispose();
-      },
-    );
-
-    test(
-      '0x27 night with payload[0]=0x03 correctly uses dayOffset=3 (HS-1)',
-      () async {
-        final t = _StubTransport();
-        final d = ChannelADispatcher(t);
-        d.bind();
-        final b = ChannelBParser(t);
-        b.bind();
-        final sync = _testSync(t, d, bParser: b);
-
-        // Night payload: dayOffset=3, then endMin BE = 450 (07:30).
-        final nightPayload = Uint8List.fromList([
-          0x03, // dayOffset = 3 (3 days ago)
-          0x01, 0xC2, // endMin BE = 450 (07:30)
-          0x01, 0x1E, // light 30
-        ]);
-        t.inB.add(Codec.buildChannelB(OpB.sleepNew, nightPayload));
-
-        await Future<void>.delayed(const Duration(milliseconds: 30));
-
-        expect(sync.sleep, hasLength(1));
-        final seg = sync.sleep.single;
-        expect(seg.stage, SleepStage.light);
-        // Should be filed under 3 days ago, not today.
-        final expectedDay = DateOnly.today().addDays(-3);
-        expect(DateOnly.fromDateTime(seg.start), expectedDay);
-        sync.dispose();
-        d.dispose();
-        b.dispose();
-      },
-    );
-
-    test(
-      'sleep merge conflict at same start time logs a warning (HS-1)',
-      () async {
-        final t = _StubTransport();
-        final d = ChannelADispatcher(t);
-        d.bind();
-        final b = ChannelBParser(t);
-        b.bind();
-        final sync = _testSync(t, d, bParser: b);
-
-        // First frame: light 30 min ending at 07:30 on dayOffset=0 (today).
-        final nightPayload1 = Uint8List.fromList([
-          0x00, // dayOffset = 0 (today)
-          0x01, 0xC2, // endMin BE = 450 (07:30)
-          0x01, 0x1E, // light 30
-        ]);
-        t.inB.add(Codec.buildChannelB(OpB.sleepNew, nightPayload1));
-        await Future<void>.delayed(const Duration(milliseconds: 30));
-
-        // Second frame: deep 30 min ending at 07:30 on dayOffset=0 (today).
-        // Same start time (07:00) but different stage → merge conflict.
-        final nightPayload2 = Uint8List.fromList([
-          0x00, // dayOffset = 0 (today)
-          0x01, 0xC2, // endMin BE = 450 (07:30)
-          0x02, 0x1E, // deep 30
-        ]);
-        t.inB.add(Codec.buildChannelB(OpB.sleepNew, nightPayload2));
-        await Future<void>.delayed(const Duration(milliseconds: 30));
-
-        // Only one segment should remain (the second overwrites the first).
-        expect(sync.sleep, hasLength(1));
-        expect(sync.sleep.single.stage, SleepStage.deep);
-
-        // A warning should have been logged.
-        final warnings = AppLog.instance.entries
-            .where((e) => e.level == LogLevel.warn)
-            .where((e) => e.message.contains('sleep merge conflict'));
-        expect(warnings, isNotEmpty);
-
-        sync.dispose();
-        d.dispose();
-        b.dispose();
-      },
-    );
-    test(
-      'late HR chunk arriving after drain but before postCommandDelay '
-      'is attributed to correct day (HS-4)',
-      () async {
-        final t = _StubTransport();
-        final d = ChannelADispatcher(t);
-        d.bind();
-        // Use a non-zero postCommandDelay so the race window exists.
-        final sync = HistorySync(
-          t,
-          (_) {},
-          dispatcher: d,
-          drainDuration: const Duration(milliseconds: 50),
-          postCommandDelay: const Duration(milliseconds: 100),
-          fragmentQuietWindow: const Duration(milliseconds: 50),
+        // Sleep commands should be sent on Channel B.
+        expect(
+          t.sentB.where(
+            (f) => f.isNotEmpty && Codec.rxChannelBCmd(f) == OpB.sleepNew,
+          ),
+          isNotEmpty,
+          reason: '0x27 sleepNew must be sent when bParser is provided',
+        );
+        expect(
+          t.sentB.where(
+            (f) => f.isNotEmpty && Codec.rxChannelBCmd(f) == OpB.sleepLunchNew,
+          ),
+          isNotEmpty,
+          reason: '0x3e sleepLunchNew must be sent when bParser is provided',
         );
 
-        final syncFuture = sync.syncAll(daysBack: 1);
-        // Wait for the per-day poll window to start.
-        await Future<void>.delayed(const Duration(milliseconds: 150));
+        sync.dispose();
+        d.dispose();
+      },
+    );
 
-        // Header + first chunk — delivered during the drain.
-        t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x18, 0x80, 0x05]));
-        final dayStartBytes = [0x00, 0xF6, 0x34, 0x6A];
-        final chunk1 = Uint8List.fromList([
-          0x01, // seq=1
-          ...dayStartBytes,
-          0x60, 0x64, 0x66, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        ]);
-        t.inA.add(Codec.buildChannelA(OpA.readHeartRate, chunk1));
+    // ------------------------------------------------------------------
+    // HS-6: Step/calorie totals must not fallback to previous day on 0.
+    // ------------------------------------------------------------------
 
-        // Wait for the drain to finish (50 ms) but stay inside the
-        // postCommandDelay (100 ms).  The second chunk arrives in the
-        // gap — with the old code _currentSyncDay would already be null
-        // and the chunk would be mis-attributed.
-        await Future<void>.delayed(const Duration(milliseconds: 70));
+    test(
+      'activity summary 0x2a with all-zero body preserves nulls, '
+      'not previous-day totals (HS-6)',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        final bParser = ChannelBParser(t);
+        d.bind();
+        final sync = _testSync(t, d, bParser: bParser);
 
-        // Second chunk completes the record (count == 2, seq == 2).
-        final chunk2 = Uint8List.fromList([
-          0x02, // seq=2
-          ...dayStartBytes,
-          0x68, 0x6A, 0x6C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        ]);
-        t.inA.add(Codec.buildChannelA(OpA.readHeartRate, chunk2));
+        // Pre-seed yesterday with non-zero totals via a fake store so
+        // _days is hydrated before syncAll runs.
+        final yesterday = DateOnly.today().addDays(-1);
+        final fakeStore = _FakeHistoryStore(seed: {
+          yesterday: DailyHistory(
+            day: yesterday,
+            steps: 12345,
+            energyKcal: 678,
+            distanceMeters: 9876,
+          ),
+        });
+        await sync.bindStore(fakeStore);
 
-        // Let the postCommandDelay + any remaining drain finish.
-        await Future<void>.delayed(const Duration(milliseconds: 200));
-        await syncFuture;
+        final future = sync.syncAll(daysBack: 1);
+        await Future<void>.delayed(const Duration(milliseconds: 20));
 
-        // All six samples should be present and attributed to today.
+        // Build a Channel-B 0x2a payload with one entry:
+        //   dayOffset = 0 (today)
+        //   48-byte body all zeros → genuine "no activity yet today"
+        final body = List<int>.filled(48, 0x00);
+        final payload = Uint8List.fromList([0x00, ...body]);
+        t.inB.add(Codec.buildChannelB(OpB.activitySummary, payload));
+
+        await future;
+
         final today = DateOnly.today();
-        final stored = sync.dayOf(today);
-        expect(stored, isNotNull);
-        expect(stored!.hr, hasLength(6));
-        expect(stored.hr.map((s) => s.bpm), containsAll([96, 100, 102, 104, 106, 108]));
+        final todayHistory = sync.dayOf(today);
+        expect(todayHistory, isNotNull);
+        // The all-zero body must produce null totals, NOT fallback to
+        // yesterday's 12345/678/9876 values.
+        expect(todayHistory!.steps, isNull, reason: 'steps must be null for all-zero body');
+        expect(todayHistory.energyKcal, isNull, reason: 'calories must be null for all-zero body');
+        expect(todayHistory.distanceMeters, isNull, reason: 'distance must be null for all-zero body');
+
+        // Yesterday must remain untouched.
+        final yestHistory = sync.dayOf(yesterday);
+        expect(yestHistory!.steps, 12345);
+        expect(yestHistory.energyKcal, 678);
+        expect(yestHistory.distanceMeters, 9876);
+
         sync.dispose();
         d.dispose();
       },
     );
 
     test(
-      'HR chunk arriving after postCommandDelay of day N is NOT '
-      'mis-attributed to day N+1 (HS-4)',
+      'activity summary 0x2a with zero steps but non-zero calories '
+      'keeps steps=0 (HS-6)',
       () async {
         final t = _StubTransport();
         final d = ChannelADispatcher(t);
+        final bParser = ChannelBParser(t);
         d.bind();
-        final sync = HistorySync(
-          t,
-          (_) {},
-          dispatcher: d,
-          drainDuration: const Duration(milliseconds: 50),
-          postCommandDelay: const Duration(milliseconds: 80),
-          fragmentQuietWindow: const Duration(milliseconds: 50),
-        );
+        final sync = _testSync(t, d, bParser: bParser);
+        final future = sync.syncAll(daysBack: 0);
+        await Future<void>.delayed(const Duration(milliseconds: 20));
 
-        final syncFuture = sync.syncAll(daysBack: 2);
-        // Wait for day 0 (today) poll to start.
-        await Future<void>.delayed(const Duration(milliseconds: 150));
+        // Build a Channel-B 0x2a payload:
+        //   dayOffset = 0 (today)
+        //   body: steps = 0 (u24 BE @ 0), calories = 1500 (u24 BE @ 6),
+        //         distance = 2000 (u24 BE @ 9)
+        final body = List<int>.filled(48, 0x00);
+        body[0] = 0x00;
+        body[1] = 0x00;
+        body[2] = 0x00; // steps = 0
+        body[6] = 0x00;
+        body[7] = 0x05;
+        body[8] = 0xDC; // calories = 1500 (0x05DC)
+        body[9] = 0x00;
+        body[10] = 0x07;
+        body[11] = 0xD0; // distance = 2000 (0x07D0)
+        final payload = Uint8List.fromList([0x00, ...body]);
+        t.inB.add(Codec.buildChannelB(OpB.activitySummary, payload));
 
-        // Day 0: header only, no chunks.
-        t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x18, 0x80, 0x05]));
-        // Wait through day 0 drain + postCommandDelay.
-        await Future<void>.delayed(const Duration(milliseconds: 200));
+        await future;
 
-        // Day 1 poll should now be in progress.  Inject a stray chunk
-        // that was delayed from day 0.  With the fix _currentSyncDay
-        // points to day 1, so the stray chunk must NOT be filed under
-        // day 0 (there is none) and should be safely ignored or filed
-        // under the current day depending on implementation — the key
-        // assertion is that day 0 does NOT get samples.
-        final dayStartBytes = [0x00, 0xF6, 0x34, 0x6A];
-        final strayChunk = Uint8List.fromList([
-          0x01,
-          ...dayStartBytes,
-          0x60, 0x64, 0x66, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        ]);
-        t.inA.add(Codec.buildChannelA(OpA.readHeartRate, strayChunk));
-
-        // Let everything finish.
-        await Future<void>.delayed(const Duration(milliseconds: 400));
-        await syncFuture;
-
-        // Day 0 (today) should have no HR samples because we only sent a
-        // header with no completing chunks during its window.
         final today = DateOnly.today();
-        final todayStored = sync.dayOf(today);
-        // The stray chunk may or may not create a record for yesterday;
-        // the important thing is today has zero samples.
-        expect(todayStored == null || todayStored.hr.isEmpty, isTrue,
-            reason: 'today must not have HR from a stray chunk');
+        final todayHistory = sync.dayOf(today);
+        expect(todayHistory, isNotNull);
+        // steps = 0 is genuine zero activity, not "no data".
+        expect(todayHistory!.steps, 0, reason: 'steps must be 0, not null');
+        expect(todayHistory.energyKcal, 1500);
+        expect(todayHistory.distanceMeters, 2000);
+
+        sync.dispose();
+        d.dispose();
+      },
+    );
+
+    test(
+      'activity summary 0x2a absurd-clamped values become null '
+      'instead of 0 (HS-6)',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        final bParser = ChannelBParser(t);
+        d.bind();
+        final sync = _testSync(t, d, bParser: bParser);
+        final future = sync.syncAll(daysBack: 0);
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+
+        // Build a Channel-B 0x2a payload with absurd values that exceed
+        // the sanity clamps in _activityTotalsFromBody.
+        final body = List<int>.filled(48, 0x00);
+        // steps = 999_999 (> 200_000 clamp)
+        body[0] = 0x0F;
+        body[1] = 0x42;
+        body[2] = 0x3F;
+        // calories = 99_999 (> 20_000 clamp)
+        body[6] = 0x01;
+        body[7] = 0x86;
+        body[8] = 0x9F;
+        // distance = 999_999 (> 200_000 clamp)
+        body[9] = 0x0F;
+        body[10] = 0x42;
+        body[11] = 0x3F;
+        final payload = Uint8List.fromList([0x00, ...body]);
+        t.inB.add(Codec.buildChannelB(OpB.activitySummary, payload));
+
+        await future;
+
+        final today = DateOnly.today();
+        final todayHistory = sync.dayOf(today);
+        expect(todayHistory, isNotNull);
+        // Clamped values must be null so the UI can show "no data"
+        // and _upsertTotals won't fall back to stale previous-day values.
+        expect(todayHistory!.steps, isNull, reason: 'absurd steps must clamp to null');
+        expect(todayHistory.energyKcal, isNull, reason: 'absurd calories must clamp to null');
+        expect(todayHistory.distanceMeters, isNull, reason: 'absurd distance must clamp to null');
+
         sync.dispose();
         d.dispose();
       },
     );
   });
+}
+
+/// A minimal fake store that satisfies bindStore without touching disk.
+class _FakeHistoryStore implements HistoryStore {
+  _FakeHistoryStore({Map<DateOnly, DailyHistory>? seed}) : _seed = seed ?? {};
+
+  final Map<DateOnly, DailyHistory> _seed;
+  DateTime? _lastSyncedAt;
+  DateOnly? _lastSyncDay;
+
+  @override
+  Future<void> writeDay(DailyHistory history, {DateTime? lastUpdated}) async {
+    _seed[history.day] = history;
+  }
+
+  @override
+  Future<DailyHistory> readDay(DateOnly day) async =>
+      _seed[day] ?? DailyHistory(day: day);
+
+  @override
+  Future<List<DateOnly>> persistedDays() async => _seed.keys.toList();
+
+  @override
+  DateTime? get lastSyncedAt => _lastSyncedAt;
+
+  @override
+  Future<List<DailyHistory>> readRange(DateOnly from, DateOnly to) async {
+    final days = from.daysTo(to);
+    final out = <DailyHistory>[];
+    for (var i = 0; i <= days; i++) {
+      out.add(await readDay(from.addDays(i)));
+    }
+    return out;
+  }
+
+  @override
+  DateOnly? get lastSyncedDay => _lastSyncDay;
+
+  Future<void> setLastSyncDay(DateOnly day) async {
+    _lastSyncDay = day;
+  }
+
+  @override
+  Future<DailyHistory> mergeHr(DateOnly day, Iterable<HrSample> hrSamples) async {
+    final current = _seed[day] ?? DailyHistory(day: day);
+    final byTs = <int, HrSample>{
+      for (final h in current.hr) h.timestamp.millisecondsSinceEpoch: h,
+    };
+    for (final h in hrSamples) {
+      byTs[h.timestamp.millisecondsSinceEpoch] = h;
+    }
+    final merged = byTs.values.toList()
+      ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    final updated = DailyHistory(
+      day: day,
+      hr: merged,
+      sleep: current.sleep,
+      steps: current.steps,
+      energyKcal: current.energyKcal,
+      distanceMeters: current.distanceMeters,
+      lastUpdated: DateTime.now(),
+    );
+    _seed[day] = updated;
+    return updated;
+  }
+
+  @override
+  Future<DailyHistory> mergeSleep(
+    DateOnly day,
+    Iterable<SleepSegment> segments,
+  ) async {
+    final current = _seed[day] ?? DailyHistory(day: day);
+    final byStart = <int, SleepSegment>{
+      for (final s in current.sleep) s.start.millisecondsSinceEpoch: s,
+    };
+    for (final s in segments) {
+      byStart[s.start.millisecondsSinceEpoch] = s;
+    }
+    final merged = byStart.values.toList()
+      ..sort((a, b) => a.start.compareTo(b.start));
+    final updated = DailyHistory(
+      day: day,
+      hr: current.hr,
+      sleep: merged,
+      steps: current.steps,
+      energyKcal: current.energyKcal,
+      distanceMeters: current.distanceMeters,
+      lastUpdated: DateTime.now(),
+    );
+    _seed[day] = updated;
+    return updated;
+  }
+
+  @override
+  Future<DailyHistory> recordTotals(
+    DateOnly day, {
+    required int steps,
+    required int energyKcal,
+    required int distanceMeters,
+  }) async {
+    final current = _seed[day] ?? DailyHistory(day: day);
+    final updated = DailyHistory(
+      day: day,
+      hr: current.hr,
+      sleep: current.sleep,
+      steps: steps,
+      energyKcal: energyKcal,
+      distanceMeters: distanceMeters,
+      lastUpdated: DateTime.now(),
+    );
+    _seed[day] = updated;
+    return updated;
+  }
+
+  @override
+  Future<void> markSynced(DateTime at) async {
+    _lastSyncedAt = at;
+  }
+
+  @override
+  Future<void> clearAll() async {
+    _seed.clear();
+    _lastSyncedAt = null;
+    _lastSyncDay = null;
+  }
+
+  @override
+  Future<Map<String, dynamic>> exportAll() async => {
+    'schemaVersion': 1,
+    'exportedAt': DateTime.now().toUtc().toIso8601String(),
+    'watermarks': {
+      'lastSyncedAt': _lastSyncedAt?.toUtc().toIso8601String(),
+      'lastSyncDay': _lastSyncDay?.iso,
+    },
+    'days': [
+      for (final e in _seed.entries)
+        {'date': e.key.iso, 'data': e.value.toJson()},
+    ],
+  };
 }

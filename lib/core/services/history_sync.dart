@@ -82,16 +82,20 @@ class HrvRecord {
 }
 
 /// Day-aligned totals for the activity ring on the dashboard.
+///
+/// All fields are nullable so that `null` means "no data from the watch"
+/// and `0` means "the watch reported zero" — distinguishing a fresh day
+/// (e.g. after midnight) from a day that simply has no activity summary.
 @immutable
 class DailyTotals {
   const DailyTotals({
-    this.steps = 0,
-    this.calories = 0,
-    this.distanceMeters = 0,
+    this.steps,
+    this.calories,
+    this.distanceMeters,
   });
-  final int steps;
-  final int calories;
-  final int distanceMeters;
+  final int? steps;
+  final int? calories;
+  final int? distanceMeters;
 }
 
 /// One raw Channel-B `0x2a` activity-summary entry (GHIDRA §2.8).
@@ -578,14 +582,22 @@ class HistorySync extends ChangeNotifier {
       // by start timestamp, so we always poll every requested day to
       // catch new sleep sessions that may have arrived after a prior
       // sync (HS-3).
-      for (final d in wantsDays) {
-        final day = todayD.addDays(-d);
-        _currentSyncDay = day;
-        await transport.sendB(Commands.readSleepNewProtocol(dayOffset: d));
-        await transport.sendB(Commands.readSleepLunchProtocol(dayOffset: d));
-        await _drainRx(drainDuration);
-        await Future<void>.delayed(postCommandDelay);
-        _currentSyncDay = null;
+      if (_bParser != null) {
+        for (final d in wantsDays) {
+          final day = todayD.addDays(-d);
+          _currentSyncDay = day;
+          await transport.sendB(Commands.readSleepNewProtocol(dayOffset: d));
+          await transport.sendB(Commands.readSleepLunchProtocol(dayOffset: d));
+          await _drainRx(drainDuration);
+          await Future<void>.delayed(postCommandDelay);
+          _currentSyncDay = null;
+        }
+      } else {
+        AppLog.instance.warn(
+          'history',
+          'Skipping sleep/activity sync: ChannelBParser is null. '
+              'Sleep data will not be ingested.',
+        );
       }
 
       // Bump the watermark — only after a clean pass.
@@ -899,8 +911,8 @@ class HistorySync extends ChangeNotifier {
     // Defensive clamping: on v13 the u24 BE field at body[6..8] can
     // decode to values like 6,381,923 kcal (impossible). Until we
     // have a RE-pinned offset for that build we clamp any value past
-    // [kMaxSaneKcalPerDay] to 0 so the UI doesn't show absurd numbers
-    // — the steps/distance fields are usually correct and are kept.
+    // [kMaxSaneKcalPerDay] to null so the UI doesn't show absurd numbers
+    // and so _upsertTotals knows the field is missing (not zero).
     // The OLD app versions (before commit fd28b07) had no clamp,
     // which produced kcal values like 108543 in the user's export;
     // `DailyHistory.fromJson` now nulls those on read.
@@ -911,9 +923,9 @@ class HistorySync extends ChangeNotifier {
     final rawKcal = Codec.readU24be(body, 6);
     final rawMeters = Codec.readU24be(body, 9);
     return DailyTotals(
-      steps: rawSteps > kMaxSaneSteps ? 0 : rawSteps,
-      calories: rawKcal > kMaxSaneKcal ? 0 : rawKcal,
-      distanceMeters: rawMeters > kMaxSaneMeters ? 0 : rawMeters,
+      steps: rawSteps > kMaxSaneSteps ? null : rawSteps,
+      calories: rawKcal > kMaxSaneKcal ? null : rawKcal,
+      distanceMeters: rawMeters > kMaxSaneMeters ? null : rawMeters,
     );
   }
 
@@ -942,9 +954,9 @@ class HistorySync extends ChangeNotifier {
     final day = DateOnly(year, month, dayOfMonth);
     final previous = _sportDetailTotals[day] ?? const DailyTotals();
     final totals = DailyTotals(
-      steps: previous.steps + steps,
+      steps: (previous.steps ?? 0) + steps,
       calories: previous.calories,
-      distanceMeters: previous.distanceMeters + distance,
+      distanceMeters: (previous.distanceMeters ?? 0) + distance,
     );
     _sportDetailTotals[day] = totals;
     _upsertTotals(day, totals);
@@ -952,13 +964,9 @@ class HistorySync extends ChangeNotifier {
 
   void _upsertTotals(DateOnly day, DailyTotals totals) {
     final previous = _days[day] ?? DailyHistory(day: day);
-    final steps = totals.steps != 0 ? totals.steps : previous.steps;
-    final calories = totals.calories != 0
-        ? totals.calories
-        : previous.energyKcal;
-    final distance = totals.distanceMeters != 0
-        ? totals.distanceMeters
-        : previous.distanceMeters;
+    final steps = totals.steps ?? previous.steps;
+    final calories = totals.calories ?? previous.energyKcal;
+    final distance = totals.distanceMeters ?? previous.distanceMeters;
     final updated = DailyHistory(
       day: day,
       hr: previous.hr,
