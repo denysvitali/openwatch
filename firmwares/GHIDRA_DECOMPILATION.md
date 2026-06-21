@@ -3651,7 +3651,75 @@ convention* shared across the H59MA firmware.
 
 ---
 
-## 8. Vendor `0xFEE7` GATT Service — Active Protocol Role
+### 7.2 Accelerometer / LIS3DH SPI dispatcher (`FUN_00833334`)
+
+The accelerometer front-end. Unlike the HR module (§7.1)
+which has a 4-stage lifecycle, the accelerometer only
+supports **one sub-cmd (0)** — the firmware is hard-wired
+to start the LIS3DH SPI peripheral without lifecycle state.
+
+```c
+void FUN_00833334(u32 param_1, u32 param_2) {
+    if ((short)((u32)param_1 >> 0x10) != 0) {
+        // Invalid sub-cmd: assertion-fail
+        uVar1 = func_0x00005e6a(0x23400000, "qc_code_app_module_g");
+        func_0x00005aa8(DAT_008333fc, DAT_008333f8, 2, uVar1,
+                         DAT_00833380 + 0x3A, param_1, param_2);
+        return;
+    }
+    // Valid sub-cmd 0: start accelerometer
+    FUN_00832dd6();
+}
+```
+
+#### Why one sub-cmd instead of four?
+
+The accelerometer (LIS3DH) is a *simpler peripheral* than the
+HR sensor — it doesn't need the explicit lifecycle stages
+because the firmware handles the read/write on the SPI bus
+directly. The HR sensor uses an *algorithm library*
+(`VC_HRV_16Bit_integration_6.0_addRMSSD`, etc.) that
+requires explicit reset/start/stop calls to manage state.
+
+The accelerometer just needs one "start reading" call to
+spin up the SPI bus. After that, the firmware polls the
+LIS3DH via `FUN_00832dd6` and the host SDK reads via
+`FUN_00833968` (the §7 raw SPI reader).
+
+#### The assertion-fail path
+
+Like the HR module's `else` branch (§7.1), the
+accelerometer's `if (sub != 0)` branch calls the standard
+debug-helper pair (`func_0x00005e6a` / `func_0x00005aa8`)
+to log an assertion failure. The log message uses the
+**different module name** `qc_code_app_module_g` (vs the
+HR's `qc_code_app_module_h`) — each vendor module has its
+own assertion-fail label.
+
+The host SDK that sends a non-zero accelerometer sub-cmd
+will see the watch *log an assertion* but otherwise no-op.
+
+#### Why upper-16-bits of param_1
+
+Both §7.1 (HR) and §7.2 (accelerometer) take the sub-cmd in
+the upper 16 bits of the u32 parameter (`>> 0x10` is the
+shift). This is the same packing convention used elsewhere
+in the firmware (e.g. §8.5 / §8.7 0x69 mode control, §6
+system reset). The host SDK can use a single dispatcher
+helper to unpack the sub-cmd + mode-param across all the
+firmware's lifecycle commands.
+
+#### Pair with §3.20 / §3.21
+
+`FUN_00833334` is the *internal* firmware entry point for
+the accelerometer. The §3 Channel-A opcodes don't have a
+direct accelerometer opcode — the accelerometer is only
+controllable via the §7.2 internal dispatch path, which is
+in turn driven by the §6.1 button / DLPS init and §7.1 HR
+module cross-talk. The accelerometer runs as a background
+service, not a user-initiated command.
+
+---
 
 ## 8. Vendor `0xFEE7` GATT Service — Active Protocol Role
 
