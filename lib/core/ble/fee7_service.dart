@@ -49,9 +49,7 @@ class Fee7Service {
     final span = OpenTelemetryService().startTrace(
       'ble.fee7.rx',
       kind: SpanKind.consumer,
-      attributes: {
-        'ble.frame.length': frame.length,
-      },
+      attributes: {'ble.frame.length': frame.length},
     );
     try {
       _inbound.add(frame);
@@ -86,9 +84,7 @@ class Fee7Service {
     final span = OpenTelemetryService().startTrace(
       'ble.fee7.send',
       kind: SpanKind.client,
-      attributes: {
-        'ble.opcode': (frame[0] & 0xFF).toRadixString(16),
-      },
+      attributes: {'ble.opcode': (frame[0] & 0xFF).toRadixString(16)},
     );
     var ok = false;
     try {
