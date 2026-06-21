@@ -143,7 +143,11 @@ final historyStoreProvider = FutureProvider<HistoryStore>(
 /// the next `syncAll` will persist.
 final historySyncProvider = ChangeNotifierProvider<HistorySync>((ref) {
   final transport = ref.watch(bleTransportProvider);
-  final manager = ref.watch(watchManagerProvider);
+  // Read the stable manager instance without subscribing to its
+  // ChangeNotifier updates. WatchManager notifies on every live device
+  // update (battery, steps, HR, link state); if HistorySync watched it,
+  // Riverpod would recreate the sync object and drop freshly-fetched history.
+  final manager = ref.read(watchManagerProvider);
   final sync = HistorySync(
     transport,
     (_) {}, // totals are surfaced on the dashboard via WatchManager
