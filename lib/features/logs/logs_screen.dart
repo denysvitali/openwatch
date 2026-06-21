@@ -1,16 +1,22 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/providers/app_providers.dart';
 import '../../core/services/app_log.dart';
 import '../../core/services/opentelemetry_service.dart';
 
-/// Diagnostics: live BLE/app log with copy-to-clipboard for bug reports.
-class LogsScreen extends StatelessWidget {
+/// Diagnostics: live BLE/app log + copy-to-clipboard for bug reports,
+/// plus a JSON export of every persisted history day.
+class LogsScreen extends ConsumerWidget {
   const LogsScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final log = AppLog.instance;
+    final storeAsync = ref.watch(historyStoreProvider);
     return Scaffold(
       appBar: AppBar(
         title: const Text('Diagnostics'),
@@ -26,6 +32,11 @@ class LogsScreen extends StatelessWidget {
                 );
               }
             },
+          ),
+          IconButton(
+            icon: const Icon(Icons.download),
+            tooltip: 'Export history',
+            onPressed: () => _exportHistory(context, storeAsync.value),
           ),
           IconButton(
             icon: const Icon(Icons.delete_sweep),
@@ -82,6 +93,42 @@ class LogsScreen extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  /// Copies a JSON dump of every persisted history day + sync watermarks
+  /// to the clipboard. Designed for testers on the bus: no adb, no
+  /// cloud sync, no share-sheet plugin — just one tap and paste.
+  Future<void> _exportHistory(BuildContext context, dynamic store) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final storeObj = store;
+    if (storeObj == null) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text(
+            'History store not loaded yet — connect to your watch first.',
+          ),
+        ),
+      );
+      return;
+    }
+    try {
+      final bundle = await storeObj.exportAll() as Map<String, dynamic>;
+      final days = (bundle['days'] as List?) ?? const [];
+      // Pretty-print so the pasted JSON is readable in chat.
+      final pretty = const JsonEncoder.withIndent('  ').convert(bundle);
+      await Clipboard.setData(ClipboardData(text: pretty));
+      if (!context.mounted) return;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            'Exported ${days.length} day(s) (${pretty.length} chars) — '
+            'paste into a file or chat',
+          ),
+        ),
+      );
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Export failed: $e')));
+    }
   }
 
   Color _color(BuildContext context, LogLevel level) {

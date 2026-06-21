@@ -408,6 +408,47 @@ class HistoryStore {
     return out;
   }
 
+  /// Exports every persisted day + the sync watermarks as a single
+  /// JSON-serializable bundle. Used by the Diagnostics → 📤 Export
+  /// history button so a user (or a tester on the bus) can paste the
+  /// whole store into a bug report without needing adb.
+  ///
+  /// Shape:
+  /// ```
+  /// {
+  ///   "schemaVersion": 1,
+  ///   "exportedAt": "<UTC ISO-8601>",
+  ///   "watermarks": {
+  ///     "lastSyncedAt": "<UTC ISO-8601>" | null,
+  ///     "lastSyncedDay": "yyyy-mm-dd" | null
+  ///   },
+  ///   "days": [
+  ///     { "date": "yyyy-mm-dd", "data": <DailyHistory.toJson()> },
+  ///     ...
+  ///   ]
+  /// }
+  /// ```
+  ///
+  /// The schema is forward-compatible — bumping [schemaVersion] signals
+  /// to importers that field meanings may have shifted. Days are emitted
+  /// oldest → newest for a deterministic diff against the on-disk layout.
+  Future<Map<String, dynamic>> exportAll() async {
+    final days = await persistedDays();
+    final entries = <Map<String, dynamic>>[];
+    for (final d in days) {
+      entries.add({'date': d.iso, 'data': (await readDay(d)).toJson()});
+    }
+    return {
+      'schemaVersion': 1,
+      'exportedAt': DateTime.now().toUtc().toIso8601String(),
+      'watermarks': {
+        'lastSyncedAt': lastSyncedAt?.toUtc().toIso8601String(),
+        'lastSyncedDay': lastSyncedDay?.iso,
+      },
+      'days': entries,
+    };
+  }
+
   // ---------------------------------------------------------------------------
   // Day writes
   // ---------------------------------------------------------------------------
