@@ -1,8 +1,12 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:flutterrific_opentelemetry/flutterrific_opentelemetry.dart'
+    hide Logger;
+
 import '../protocol/codec.dart';
 import '../services/app_log.dart';
+import '../services/opentelemetry_service.dart';
 import 'ble_transport.dart';
 
 final _log = AppLog.instance;
@@ -30,12 +34,30 @@ class Fee7Service {
   factory Fee7Service.attach(Fee7Host host) {
     final s = Fee7Service._(host);
     s._sub = host.fee7Inbound.listen(
-      s._inbound.add,
+      s._inboundHandler,
       onError: (Object e, StackTrace _) {
         _log.error('fee7', 'inbound error: $e');
       },
     );
     return s;
+  }
+
+  // Per-frame consumer span for the 0xFEE7 notify stream. Mirrors the
+  // ble.rx span on Channel A/B but tagged with the fee7 channel name so
+  // the dispatcher can be analyzed independently.
+  void _inboundHandler(Uint8List frame) {
+    final span = OpenTelemetryService().startTrace(
+      'ble.fee7.rx',
+      kind: SpanKind.consumer,
+      attributes: {
+        'ble.frame.length': frame.length,
+      },
+    );
+    try {
+      _inbound.add(frame);
+    } finally {
+      span?.end();
+    }
   }
 
   final Fee7Host _transport;
@@ -59,13 +81,32 @@ class Fee7Service {
   ///
   /// Invalid frames raise [ArgumentError] before any BLE write is attempted.
   Future<void> sendCommand(Uint8List frame) {
-    if (!Codec.isValidChannelA(frame)) {
-      throw ArgumentError(
-        'Fee7Service.sendCommand requires a valid 16-byte frame '
-        '(len=${frame.length})',
-      );
+    // Outbound fee7 command: client span so we can correlate vendor
+    // opcodes (SpO2, find-phone, etc.) with any fee7 transport errors.
+    final span = OpenTelemetryService().startTrace(
+      'ble.fee7.send',
+      kind: SpanKind.client,
+      attributes: {
+        'ble.opcode': (frame[0] & 0xFF).toRadixString(16),
+      },
+    );
+    var ok = false;
+    try {
+      if (!Codec.isValidChannelA(frame)) {
+        throw ArgumentError(
+          'Fee7Service.sendCommand requires a valid 16-byte frame '
+          '(len=${frame.length})',
+        );
+      }
+      final future = _transport.sendFee7(frame);
+      ok = true;
+      return future;
+    } catch (e, stack) {
+      span?.recordError(e, stack);
+      rethrow;
+    } finally {
+      span?.end(ok: ok);
     }
-    return _transport.sendFee7(frame);
   }
 
   /// Detach the inbound subscription. Call once when tearing the link down.

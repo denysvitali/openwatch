@@ -3,10 +3,13 @@ import 'dart:collection';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart' hide LogLevel;
+import 'package:flutterrific_opentelemetry/flutterrific_opentelemetry.dart'
+    hide Logger;
 
 import '../protocol/codec.dart';
 import '../protocol/opcodes.dart';
 import '../services/app_log.dart';
+import '../services/opentelemetry_service.dart';
 import 'ble_constants.dart';
 import 'fee7_service.dart';
 
@@ -86,9 +89,22 @@ class BleTransport implements Fee7Host {
     BluetoothDevice device, {
     Duration timeout = const Duration(seconds: 20),
   }) async {
-    await disconnect();
-    _device = device;
-    _state.value = LinkState.connecting;
+    // Trace the full GATT connect handshake: from disconnecting any prior
+    // link through service discovery, notify-enable, and device-info read.
+    final span = OpenTelemetryService().startTrace(
+      'ble.connect',
+      kind: SpanKind.client,
+      attributes: {
+        'ble.device.id': device.remoteId.str,
+        'ble.device.name': device.platformName,
+        'ble.timeout_ms': timeout.inMilliseconds,
+      },
+    );
+    var ok = false;
+    try {
+      await disconnect();
+      _device = device;
+      _state.value = LinkState.connecting;
 
     _subs.add(
       device.connectionState.listen((s) {
@@ -179,26 +195,59 @@ class BleTransport implements Fee7Host {
       'ble',
       'Link READY (hw="$hardwareRevision" fw="$firmwareRevision")',
     );
+    ok = true;
+    } finally {
+      span?.end(ok: ok);
+    }
   }
 
   Future<void> _readDeviceInfo(List<BluetoothService> services) async {
-    final info = services.where((s) => s.uuid == BleUuids.deviceInfo).toList();
-    if (info.isEmpty) return;
-    for (final c in info.first.characteristics) {
-      try {
-        if (c.uuid == BleUuids.hardwareRevision) {
-          hardwareRevision = String.fromCharCodes(await c.read()).trim();
-        } else if (c.uuid == BleUuids.firmwareRevision) {
-          firmwareRevision = String.fromCharCodes(await c.read()).trim();
+    // Group the optional Device-Info GATT reads (hw/fw revision) under a
+    // single span so each connect's handshake cost is visible at a glance.
+    final span = OpenTelemetryService().startTrace(
+      'ble.read_device_info',
+      kind: SpanKind.internal,
+    );
+    try {
+      final info =
+          services.where((s) => s.uuid == BleUuids.deviceInfo).toList();
+      if (info.isEmpty) return;
+      for (final c in info.first.characteristics) {
+        try {
+          if (c.uuid == BleUuids.hardwareRevision) {
+            hardwareRevision = String.fromCharCodes(await c.read()).trim();
+          } else if (c.uuid == BleUuids.firmwareRevision) {
+            firmwareRevision = String.fromCharCodes(await c.read()).trim();
+          }
+        } catch (e) {
+          // Device-info reads are best-effort; absence must not block readiness.
+          _log.warn('ble', 'Device-info read failed for ${c.uuid.str}: $e');
         }
-      } catch (e) {
-        // Device-info reads are best-effort; absence must not block readiness.
-        _log.warn('ble', 'Device-info read failed for ${c.uuid.str}: $e');
       }
+    } finally {
+      span?.end();
     }
   }
 
   void _onChannelA(List<int> data) {
+    // Inbound Channel-A frame: traced as a consumer-side notification so
+    // latency from GATT notify to the dispatcher is measurable.
+    final span = OpenTelemetryService().startTrace(
+      'ble.rx',
+      kind: SpanKind.consumer,
+      attributes: {
+        'ble.channel': 'A',
+        'ble.frame.length': data.length,
+      },
+    );
+    try {
+      _onChannelATraced(data, span);
+    } finally {
+      span?.end();
+    }
+  }
+
+  void _onChannelATraced(List<int> data, OTelSpan? span) {
     final frame = Uint8List.fromList(data);
     final valid = Codec.isValidChannelA(frame);
     if (!valid) {
@@ -241,26 +290,54 @@ class BleTransport implements Fee7Host {
   }
 
   void _onChannelB(List<int> data) {
-    _log.frame('rx', 'RX-B', data);
-    _inboundB.add(Uint8List.fromList(data));
+    // Inbound Channel-B frame (large data); traced as a consumer so we can
+    // see chunk rate + size distribution.
+    final span = OpenTelemetryService().startTrace(
+      'ble.rx',
+      kind: SpanKind.consumer,
+      attributes: {
+        'ble.channel': 'B',
+        'ble.frame.length': data.length,
+      },
+    );
+    try {
+      _log.frame('rx', 'RX-B', data);
+      _inboundB.add(Uint8List.fromList(data));
+    } finally {
+      span?.end();
+    }
   }
 
   void _onFee7(List<int> data) {
-    final frame = Uint8List.fromList(data);
-    if (!Codec.isValidChannelA(frame)) {
-      _log.frame(
-        'rx',
-        'RX-FEE7(DROPPED len=${frame.length})',
-        data,
-        level: LogLevel.warn,
-      );
-      return;
+    // Inbound vendor 0xFEE7 frame; one span per notification so the fee7
+    // dispatcher can be monitored independently of the canonical channels.
+    final span = OpenTelemetryService().startTrace(
+      'ble.rx',
+      kind: SpanKind.consumer,
+      attributes: {
+        'ble.channel': 'fee7',
+        'ble.frame.length': data.length,
+      },
+    );
+    try {
+      final frame = Uint8List.fromList(data);
+      if (!Codec.isValidChannelA(frame)) {
+        _log.frame(
+          'rx',
+          'RX-FEE7(DROPPED len=${frame.length})',
+          data,
+          level: LogLevel.warn,
+        );
+        return;
+      }
+      // Use rxOpcodeRaw — fee7 opcodes are dense in 0x80..0xff where the
+      // top bit is part of the opcode namespace, not an error indicator.
+      final opcode = Codec.rxOpcodeRaw(frame);
+      _log.frame('rx', 'RX-FEE7 op=0x${opcode.toRadixString(16)}', data);
+      _inboundFee7.add(frame);
+    } finally {
+      span?.end();
     }
-    // Use rxOpcodeRaw — fee7 opcodes are dense in 0x80..0xff where the
-    // top bit is part of the opcode namespace, not an error indicator.
-    final opcode = Codec.rxOpcodeRaw(frame);
-    _log.frame('rx', 'RX-FEE7 op=0x${opcode.toRadixString(16)}', data);
-    _inboundFee7.add(frame);
   }
 
   // ---------------------------------------------------------------------------
@@ -280,28 +357,49 @@ class BleTransport implements Fee7Host {
     Uint8List frame, {
     Duration timeout = const Duration(seconds: 5),
   }) async {
-    _requireReady();
+    // Synchronous request/response RPC: outbound write + inbound wait.
+    // Traced as a client span so per-opcode latency and timeout rates
+    // are visible in the trace backend.
     final opcode = frame[0] & ~Codec.errorFlag;
-    final completer = Completer<Uint8List>();
-    (_pending[opcode] ??= []).add(completer);
-    _log.frame(
-      'tx',
-      'TX-A op=0x${opcode.toRadixString(16)} (await resp)',
-      frame,
+    final span = OpenTelemetryService().startTrace(
+      'ble.request',
+      kind: SpanKind.client,
+      attributes: {
+        'ble.opcode': (frame[0] & 0xFF).toRadixString(16),
+        'ble.timeout_ms': timeout.inMilliseconds,
+      },
     );
-    await _enqueue(_WriteOp(_writeA!, frame, withoutResponse: false));
+    var ok = false;
     try {
-      return await completer.future.timeout(timeout);
-    } on TimeoutException {
-      _log.error(
+      _requireReady();
+      final completer = Completer<Uint8List>();
+      (_pending[opcode] ??= []).add(completer);
+      _log.frame(
         'tx',
-        'No response to op=0x${opcode.toRadixString(16)} '
-            'within ${timeout.inSeconds}s',
+        'TX-A op=0x${opcode.toRadixString(16)} (await resp)',
+        frame,
       );
+      await _enqueue(_WriteOp(_writeA!, frame, withoutResponse: false));
+      try {
+        final result = await completer.future.timeout(timeout);
+        ok = true;
+        return result;
+      } on TimeoutException {
+        _log.error(
+          'tx',
+          'No response to op=0x${opcode.toRadixString(16)} '
+              'within ${timeout.inSeconds}s',
+        );
+        rethrow;
+      } finally {
+        _pending[opcode]?.remove(completer);
+        if (_pending[opcode]?.isEmpty ?? false) _pending.remove(opcode);
+      }
+    } catch (e, stack) {
+      span?.recordError(e, stack);
       rethrow;
     } finally {
-      _pending[opcode]?.remove(completer);
-      if (_pending[opcode]?.isEmpty ?? false) _pending.remove(opcode);
+      span?.end(ok: ok);
     }
   }
 
@@ -311,18 +409,39 @@ class BleTransport implements Fee7Host {
 
   /// Sends a fully-framed Channel-B buffer, sliced into [packageLength] chunks.
   Future<void> sendB(Uint8List framed) async {
-    final char = _writeB;
-    if (char == null) {
-      throw const BleTransportException(
-        'Channel B not available on this device',
-      );
-    }
-    for (var off = 0; off < framed.length; off += packageLength) {
-      final end = (off + packageLength < framed.length)
-          ? off + packageLength
-          : framed.length;
-      final chunk = Uint8List.sublistView(framed, off, end);
-      await _enqueue(_WriteOp(char, chunk, withoutResponse: true));
+    // Channel-B bulk transfer: spans the whole sliced send so we can
+    // correlate total bytes and chunk count against downstream OTA speed.
+    final span = OpenTelemetryService().startTrace(
+      'ble.sendB',
+      kind: SpanKind.client,
+      attributes: {
+        'ble.frame.length': framed.length,
+      },
+    );
+    var ok = false;
+    try {
+      final char = _writeB;
+      if (char == null) {
+        throw const BleTransportException(
+          'Channel B not available on this device',
+        );
+      }
+      var frames = 0;
+      for (var off = 0; off < framed.length; off += packageLength) {
+        final end = (off + packageLength < framed.length)
+            ? off + packageLength
+            : framed.length;
+        final chunk = Uint8List.sublistView(framed, off, end);
+        await _enqueue(_WriteOp(char, chunk, withoutResponse: true));
+        frames++;
+      }
+      span?.setAttribute('ble.frames_total', frames);
+      ok = true;
+    } catch (e, stack) {
+      span?.recordError(e, stack);
+      rethrow;
+    } finally {
+      span?.end(ok: ok);
     }
   }
 
@@ -370,6 +489,19 @@ class BleTransport implements Fee7Host {
     try {
       while (_queue.isNotEmpty) {
         final op = _queue.removeFirst();
+        // One child span per GATT write so a slow characteristic shows up
+        // in the trace timeline. Attributes identify which channel wrote
+        // and whether the write expects a response.
+        final span = OpenTelemetryService().startTrace(
+          'ble.gatt.write',
+          kind: SpanKind.internal,
+          attributes: {
+            'ble.characteristic.uuid': op.characteristic.uuid.str,
+            'ble.frame.length': op.value.length,
+            'ble.write.withResponse': !op.withoutResponse,
+          },
+        );
+        var ok = false;
         try {
           final noResp =
               op.withoutResponse &&
@@ -378,9 +510,13 @@ class BleTransport implements Fee7Host {
               .write(op.value, withoutResponse: noResp)
               .timeout(const Duration(seconds: 5));
           op.completer.complete();
-        } catch (e) {
+          ok = true;
+        } catch (e, stack) {
+          span?.recordError(e, stack);
           _log.error('tx', 'GATT write failed: $e');
           if (!op.completer.isCompleted) op.completer.completeError(e);
+        } finally {
+          span?.end(ok: ok);
         }
         await Future<void>.delayed(const Duration(milliseconds: 25));
       }
@@ -414,21 +550,36 @@ class BleTransport implements Fee7Host {
   }
 
   Future<void> disconnect() async {
-    for (final s in _subs) {
-      await s.cancel();
+    // Trace the full teardown path: subscription cancel, GATT disconnect,
+    // characteristic reset, state notification.
+    final span = OpenTelemetryService().startTrace(
+      'ble.disconnect',
+      kind: SpanKind.client,
+    );
+    var ok = false;
+    try {
+      for (final s in _subs) {
+        await s.cancel();
+      }
+      _subs.clear();
+      _onDisconnected();
+      final d = _device;
+      _device = null;
+      _writeA = _notifyA = _writeB = _notifyB = null;
+      _fee7Write = _fee7Read = _fee7Notify = _deviceName = null;
+      if (d != null) {
+        try {
+          await d.disconnect();
+        } catch (_) {}
+      }
+      _state.value = LinkState.disconnected;
+      ok = true;
+    } catch (e, stack) {
+      span?.recordError(e, stack);
+      rethrow;
+    } finally {
+      span?.end(ok: ok);
     }
-    _subs.clear();
-    _onDisconnected();
-    final d = _device;
-    _device = null;
-    _writeA = _notifyA = _writeB = _notifyB = null;
-    _fee7Write = _fee7Read = _fee7Notify = _deviceName = null;
-    if (d != null) {
-      try {
-        await d.disconnect();
-      } catch (_) {}
-    }
-    _state.value = LinkState.disconnected;
   }
 
   void dispose() {

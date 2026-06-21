@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:flutterrific_opentelemetry/flutterrific_opentelemetry.dart'
+    hide Logger;
+
 import '../ble/ble_transport.dart';
 import '../ble/fee7_service.dart';
 import '../protocol/ancs_client.dart';
@@ -9,6 +12,7 @@ import '../protocol/channel_b.dart';
 import '../protocol/fee7_dispatcher.dart';
 import '../protocol/ota_state.dart';
 import 'app_log.dart';
+import 'opentelemetry_service.dart';
 
 final _log = AppLog.instance;
 
@@ -54,18 +58,46 @@ class ProtocolHub {
     // the push frame the watch emits whenever a notification crosses the
     // bridge. We forward it as a synthetic firmware event 1 (notification).
     _pushSub = _dispatcher.onPushMsg.listen((push) {
-      final id = _ancsClientId ?? _ensureAncsClient();
-      _ancs.onFirmwareEvent(1, id, _encodePushForAncs(push));
+      // Trace every push message the firmware emits so notification
+      // arrival latency (and the synthetic ANCS encoding) is visible.
+      final span = OpenTelemetryService().startTrace(
+        'hub.push_msg',
+        kind: SpanKind.internal,
+        attributes: {
+          'ble.cmd': (push.type & 0xFF).toRadixString(16),
+          'ble.payload.length': push.text.length,
+        },
+      );
+      try {
+        final id = _ancsClientId ?? _ensureAncsClient();
+        _ancs.onFirmwareEvent(1, id, _encodePushForAncs(push));
+      } finally {
+        span?.end();
+      }
     });
 
     // Channel-B OTA replies (`0x01..0x05`) are surfaced via the parser; a
     // dedicated OTA driver owns the state machine (see [startOta]).
     _bCmdSub = _parser.commands.listen((cmd) {
-      _log.info(
-        'hub',
-        'Channel-B cmd=0x${cmd.cmd.toRadixString(16)} '
-            'len=${cmd.payload.length}',
+      // One span per Channel-B command so OTA/file transfer traffic is
+      // easy to slice apart from push notifications.
+      final span = OpenTelemetryService().startTrace(
+        'hub.channel_b_cmd',
+        kind: SpanKind.internal,
+        attributes: {
+          'ble.cmd': (cmd.cmd & 0xFF).toRadixString(16),
+          'ble.payload.length': cmd.payload.length,
+        },
       );
+      try {
+        _log.info(
+          'hub',
+          'Channel-B cmd=0x${cmd.cmd.toRadixString(16)} '
+              'len=${cmd.payload.length}',
+        );
+      } finally {
+        span?.end();
+      }
     });
   }
 
