@@ -530,12 +530,15 @@ class HistorySync extends ChangeNotifier {
             Commands.readHeartRateHistory(day: day.midnight),
           );
           await _drainRx(drainDuration);
-          _currentSyncDay = null;
           // Drain any sleep segments that came back on Channel B as
           // part of this day's poll. The parser may emit a few frames
           // after the per-day drain — [_onChannelBCommand] will
-          // append them and notify.
+          // append them and notify.  Keep _currentSyncDay alive until
+          // after the post-command delay so that any late HR chunks
+          // arriving on Channel A are still attributed to the correct
+          // day (HS-4).
           await Future<void>.delayed(postCommandDelay);
+          _currentSyncDay = null;
           daySpan?.end();
         } catch (e, st) {
           daySpan?.recordError(e, st);
@@ -571,15 +574,12 @@ class HistorySync extends ChangeNotifier {
 
       // Sleep for the most recent N days — the new protocol emits
       // a single day offset per request, so we fire-and-await for
-      // each. We only fetch days we haven't already pulled sleep
-      // for (the parser's payload always includes the day's
-      // segments, so re-fetching is safe but wasteful).
+      // each. Re-fetching is safe because the merge logic deduplicates
+      // by start timestamp, so we always poll every requested day to
+      // catch new sleep sessions that may have arrived after a prior
+      // sync (HS-3).
       for (final d in wantsDays) {
         final day = todayD.addDays(-d);
-        final existing = _days[day];
-        if (existing != null && existing.sleep.isNotEmpty && d != 0) {
-          continue;
-        }
         _currentSyncDay = day;
         await transport.sendB(Commands.readSleepNewProtocol(dayOffset: d));
         await transport.sendB(Commands.readSleepLunchProtocol(dayOffset: d));
@@ -762,6 +762,12 @@ class HistorySync extends ChangeNotifier {
       // Attribute to the day we asked for, not whatever the device
       // echoed back — the firmware's BCD date echo may differ by a
       // timezone near midnight, but we already know what we asked for.
+      //
+      // If _currentSyncDay has already been cleared (should not happen
+      // after the HS-4 fix), the fallback parses the firmware's echoed
+      // Unix timestamp as UTC.  This is a best-effort safety net; the
+      // timestamp format is not documented and may be local time on
+      // some firmware builds.
       final resolvedDay = _currentSyncDay ?? DateOnly.fromDateTime(dayStart);
       final previous = _days[resolvedDay] ?? DailyHistory(day: resolvedDay);
       final mergedByTs = <int, HrSample>{
@@ -966,15 +972,18 @@ class HistorySync extends ChangeNotifier {
     unawaited(_store?.writeDay(updated));
   }
 
-  /// Extracts the day offset from the payload of a `0x27` / `0x3e` Ch-B
-  /// sleep reply (PROTOCOL.md §4.4: first payload byte = dayOffset,
-  /// 0 = today, 1 = yesterday, …). Some older firmware revisions omit
-  /// the prefix entirely; in that case we default to the current sync
-  /// day (the one we just polled) so the data still lands in the
-  /// correct file.
-  DateOnly _dayFromSleepPayload(Uint8List payload) {
+  /// Extracts the day offset from the payload of a `0x27` Ch-B sleep reply.
+  ///
+  /// Only the night-sleep opcode (`0x27`) carries a `dayOffset` prefix
+  /// (PROTOCOL.md §4.4: first payload byte = dayOffset, 0 = today,
+  /// 1 = yesterday, …). The lunch/nap opcode (`0x3e`) does **not** have this
+  /// prefix — its first byte is the high byte of the BE `endMinuteOfDay`.
+  /// Some older firmware revisions omit the prefix entirely; in that case
+  /// we default to the current sync day (the one we just polled) so the
+  /// data still lands in the correct file.
+  DateOnly _dayFromSleepPayload(Uint8List payload, {required bool isNight}) {
     final today = DateOnly.today();
-    if (payload.isNotEmpty && payload[0] <= 31) {
+    if (isNight && payload.isNotEmpty && payload[0] <= 31) {
       return today.addDays(-payload[0]);
     }
     return _currentSyncDay ?? today;
@@ -988,7 +997,7 @@ class HistorySync extends ChangeNotifier {
       attributes: {'sync.sleep.kind': 'night'},
     );
     try {
-      final wakeDay = _dayFromSleepPayload(payload);
+      final wakeDay = _dayFromSleepPayload(payload, isNight: true);
       final anchor = wakeDay.midnight;
       final added = SleepParser.parseNightSleepSegments(
         payload,
@@ -1011,10 +1020,25 @@ class HistorySync extends ChangeNotifier {
         final day = entry.key;
         final segments = entry.value;
         final previous = _days[day] ?? DailyHistory(day: day);
-        final mergedByStart = <int, SleepSegment>{
-          for (final s in previous.sleep) s.start.millisecondsSinceEpoch: s,
-          for (final s in segments) s.start.millisecondsSinceEpoch: s,
-        };
+        final mergedByStart = <int, SleepSegment>{};
+        for (final s in previous.sleep) {
+          mergedByStart[s.start.millisecondsSinceEpoch] = s;
+        }
+        for (final s in segments) {
+          final key = s.start.millisecondsSinceEpoch;
+          final existing = mergedByStart[key];
+          if (existing != null &&
+              (existing.duration != s.duration || existing.stage != s.stage)) {
+            AppLog.instance.log(
+              'HistorySync',
+              'sleep merge conflict at ${s.start}: '
+              'existing ${existing.duration.inMinutes}min ${existing.stage.name} '
+              'vs new ${s.duration.inMinutes}min ${s.stage.name} — keeping new',
+              level: LogLevel.warn,
+            );
+          }
+          mergedByStart[key] = s;
+        }
         final merged = mergedByStart.values.toList()
           ..sort((a, b) => a.start.compareTo(b.start));
         final updated = DailyHistory(
@@ -1051,7 +1075,7 @@ class HistorySync extends ChangeNotifier {
       attributes: {'sync.sleep.kind': 'lunch'},
     );
     try {
-      final wakeDay = _dayFromSleepPayload(payload);
+      final wakeDay = _dayFromSleepPayload(payload, isNight: false);
       final anchor = wakeDay.midnight;
       final added = SleepParser.parseLunchSleepSegments(
         payload,
@@ -1071,10 +1095,25 @@ class HistorySync extends ChangeNotifier {
         final day = entry.key;
         final segments = entry.value;
         final previous = _days[day] ?? DailyHistory(day: day);
-        final mergedByStart = <int, SleepSegment>{
-          for (final s in previous.sleep) s.start.millisecondsSinceEpoch: s,
-          for (final s in segments) s.start.millisecondsSinceEpoch: s,
-        };
+        final mergedByStart = <int, SleepSegment>{};
+        for (final s in previous.sleep) {
+          mergedByStart[s.start.millisecondsSinceEpoch] = s;
+        }
+        for (final s in segments) {
+          final key = s.start.millisecondsSinceEpoch;
+          final existing = mergedByStart[key];
+          if (existing != null &&
+              (existing.duration != s.duration || existing.stage != s.stage)) {
+            AppLog.instance.log(
+              'HistorySync',
+              'sleep merge conflict at ${s.start}: '
+              'existing ${existing.duration.inMinutes}min ${existing.stage.name} '
+              'vs new ${s.duration.inMinutes}min ${s.stage.name} — keeping new',
+              level: LogLevel.warn,
+            );
+          }
+          mergedByStart[key] = s;
+        }
         final merged = mergedByStart.values.toList()
           ..sort((a, b) => a.start.compareTo(b.start));
         final updated = DailyHistory(
