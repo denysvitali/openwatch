@@ -166,5 +166,45 @@ void main() {
       expect(atCap.energyKcal, 20000);
       expect(overCap.energyKcal, isNull);
     });
+
+    test('absurd sleep totals from echoed firmware records are cleared on read '
+        '(regression for "25 hours of sleep" bug)', () {
+      // Old on-disk files may contain 24+ hours of sleep after the
+      // H59MA v13 firmware echoed a previous day's record into the
+      // current response. fromJson must coerce those back to empty.
+      final j = {
+        'day': '2026-06-19',
+        'hr': const [],
+        'sleep': [
+          // 25 one-hour segments = 1500 min = 25 h
+          for (var i = 0; i < 25; i++)
+            {'start': 1781785320000 + i * 3600000, 'dur': 60, 'stage': 'deep'},
+        ],
+        'steps': null,
+        'kcal': null,
+        'dist': null,
+        'updated': null,
+      };
+      final parsed = DailyHistory.fromJson(j);
+      expect(parsed.sleep, isEmpty);
+    });
+
+    test('sane sleep totals pass through the read clamp unchanged', () {
+      // 10 hours of sleep must survive; only absurd totals are cleared.
+      final j = {
+        'day': '2026-06-19',
+        'hr': const [],
+        'sleep': [
+          {'start': 1781785320000, 'dur': 600, 'stage': 'deep'},
+        ],
+        'steps': null,
+        'kcal': null,
+        'dist': null,
+        'updated': null,
+      };
+      final parsed = DailyHistory.fromJson(j);
+      expect(parsed.sleep.length, 1);
+      expect(parsed.sleep.single.duration.inMinutes, 600);
+    });
   });
 }

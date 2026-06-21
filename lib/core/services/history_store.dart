@@ -173,9 +173,30 @@ class DailyHistory {
     const kMaxSaneSteps = 200000;
     const kMaxSaneKcal = 20000;
     const kMaxSaneMeters = 200000;
+    // Sleep: a day cannot meaningfully contain more than ~20 hours of
+    // sleep. The H59MA v13 firmware sometimes echoes a previous day's
+    // record into the current response, which the old parser filed as a
+    // single block producing 24+ hour totals. Coerce those back to no
+    // data on read so the bogus entries clear without a manual wipe.
+    const kMaxSaneSleepMinutes = 20 * 60;
     final rawSteps = (j['steps'] as num?)?.toInt();
     final rawKcal = (j['kcal'] as num?)?.toInt();
     final rawDist = (j['dist'] as num?)?.toInt();
+    final sleepSegments = [
+      for (final s in sleepRaw.cast<Map>())
+        SleepSegment(
+          DateTime.fromMillisecondsSinceEpoch(
+            (s['start'] as num).toInt(),
+            isUtc: true,
+          ).toLocal(),
+          Duration(minutes: (s['dur'] as num).toInt()),
+          _stageFromName(s['stage'] as String?),
+        ),
+    ];
+    final sleepTotalMinutes = sleepSegments.fold(
+      0,
+      (a, s) => a + s.duration.inMinutes,
+    );
     return DailyHistory(
       day: parsed,
       hr: [
@@ -188,17 +209,9 @@ class DailyHistory {
             (h['bpm'] as num).toInt(),
           ),
       ],
-      sleep: [
-        for (final s in sleepRaw.cast<Map>())
-          SleepSegment(
-            DateTime.fromMillisecondsSinceEpoch(
-              (s['start'] as num).toInt(),
-              isUtc: true,
-            ).toLocal(),
-            Duration(minutes: (s['dur'] as num).toInt()),
-            _stageFromName(s['stage'] as String?),
-          ),
-      ],
+      sleep: sleepTotalMinutes > kMaxSaneSleepMinutes
+          ? const <SleepSegment>[]
+          : sleepSegments,
       steps: (rawSteps != null && rawSteps > kMaxSaneSteps) ? null : rawSteps,
       energyKcal: (rawKcal != null && rawKcal > kMaxSaneKcal) ? null : rawKcal,
       distanceMeters: (rawDist != null && rawDist > kMaxSaneMeters)
