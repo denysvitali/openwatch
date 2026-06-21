@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert' show base64;
 import 'dart:io' show Platform, SecurityContext;
+import 'dart:typed_data' show Uint8List;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
