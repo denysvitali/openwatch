@@ -50,8 +50,8 @@ class HistoryScreen extends ConsumerWidget {
                 title: 'Daily detail',
                 trailing: '${sync.days.length} days',
               ),
-              const SizedBox(height: 8),
-              ..._buildDayList(sync),
+              const SizedBox(height: 6),
+              _DailyDetailTabs(days: sync.days.reversed.toList(), sync: sync),
             ] else
               const _EmptyState(),
             const SizedBox(height: 20),
@@ -65,17 +65,6 @@ class HistoryScreen extends ConsumerWidget {
         ),
       ),
     );
-  }
-
-  List<Widget> _buildDayList(HistorySync sync) {
-    final reversed = sync.days.reversed.toList();
-    return [
-      for (var i = 0; i < reversed.length; i++)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: _DayCard(day: reversed[i], isExpanded: i == 0, sync: sync),
-        ),
-    ];
   }
 }
 
@@ -440,241 +429,347 @@ class _StoreWarning extends StatelessWidget {
   }
 }
 
-class _DayCard extends StatefulWidget {
-  const _DayCard({
-    required this.day,
-    required this.isExpanded,
-    required this.sync,
-  });
+class _DailyDetailTabs extends StatefulWidget {
+  const _DailyDetailTabs({required this.days, required this.sync});
 
-  final DailyHistory day;
-  final bool isExpanded;
+  final List<DailyHistory> days;
   final HistorySync sync;
 
   @override
-  State<_DayCard> createState() => _DayCardState();
+  State<_DailyDetailTabs> createState() => _DailyDetailTabsState();
 }
 
-class _DayCardState extends State<_DayCard> {
-  late bool _expanded;
+class _DailyDetailTabsState extends State<_DailyDetailTabs>
+    with SingleTickerProviderStateMixin {
+  late TabController _controller;
 
   @override
   void initState() {
     super.initState();
-    _expanded = widget.isExpanded;
+    _controller = _buildController(initialIndex: 0);
+  }
+
+  @override
+  void didUpdateWidget(_DailyDetailTabs oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.days.length != widget.days.length ||
+        _controller.length != widget.days.length) {
+      final nextIndex = _controller.index.clamp(0, widget.days.length - 1);
+      _controller.dispose();
+      _controller = _buildController(initialIndex: nextIndex);
+    }
+  }
+
+  TabController _buildController({required int initialIndex}) {
+    final controller = TabController(
+      length: widget.days.length,
+      initialIndex: initialIndex,
+      vsync: this,
+    );
+    controller.addListener(() {
+      if (mounted) setState(() {});
+    });
+    return controller;
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final day = widget.day;
+    final theme = Theme.of(context);
+    final current =
+        widget.days[_controller.index.clamp(0, widget.days.length - 1)];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TabBar(
+          controller: _controller,
+          isScrollable: true,
+          tabAlignment: TabAlignment.start,
+          dividerColor: theme.colorScheme.outlineVariant,
+          labelColor: theme.colorScheme.primary,
+          unselectedLabelColor: theme.colorScheme.onSurfaceVariant,
+          indicatorSize: TabBarIndicatorSize.label,
+          tabs: [
+            for (final day in widget.days)
+              Tab(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(_formatDayTab(day.day)),
+                    if (widget.sync.fetchedDays.contains(day.day)) ...[
+                      const SizedBox(width: 6),
+                      const _TabDot(),
+                    ],
+                  ],
+                ),
+              ),
+          ],
+        ),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          alignment: Alignment.topCenter,
+          child: SizedBox(
+            height: _detailHeight(current),
+            child: TabBarView(
+              controller: _controller,
+              children: [
+                for (final day in widget.days)
+                  SingleChildScrollView(
+                    key: PageStorageKey('history-day-${day.day.iso}'),
+                    physics: const NeverScrollableScrollPhysics(),
+                    padding: const EdgeInsets.only(top: 14),
+                    child: _DayDetailPage(day: day, sync: widget.sync),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  double _detailHeight(DailyHistory day) {
+    if (_isEmpty(day)) return 120;
+    var height = 132.0;
+    if (day.hr.isNotEmpty) {
+      height += 246;
+    } else {
+      height += 92;
+    }
+    if (day.sleep.isNotEmpty) height += 180;
+    if (day.energyKcal != null || day.distanceMeters != null) height += 88;
+    return height.clamp(260.0, 720.0);
+  }
+}
+
+class _TabDot extends StatelessWidget {
+  const _TabDot();
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.primary,
+        shape: BoxShape.circle,
+      ),
+      child: const SizedBox(width: 6, height: 6),
+    );
+  }
+}
+
+class _DayDetailPage extends StatelessWidget {
+  const _DayDetailPage({required this.day, required this.sync});
+
+  final DailyHistory day;
+  final HistorySync sync;
+
+  @override
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isToday = day.day == DateOnly.today();
-    final isEmpty = day.hr.isEmpty && day.sleep.isEmpty && day.steps == null;
+    final isEmpty = _isEmpty(day);
 
-    return _InsetCard(
-      padding: EdgeInsets.zero,
-      child: InkWell(
-        onTap: () => setState(() => _expanded = !_expanded),
-        borderRadius: BorderRadius.circular(8),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _formatDayHeader(day.day),
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        if (day.lastUpdated != null)
-                          Text(
-                            'Updated ${DateFormat.jm().format(day.lastUpdated!)}',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                      ],
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _formatDayHeader(day.day),
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
-                  ),
-                  if (widget.sync.fetchedDays.contains(day.day)) _NewBadge(),
-                  Icon(
-                    _expanded
-                        ? CupertinoIcons.chevron_up
-                        : CupertinoIcons.chevron_down,
-                    color: theme.colorScheme.onSurfaceVariant,
-                    size: 18,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              if (isEmpty)
-                Text(
-                  isToday ? 'No data today' : 'No watch data',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                )
-              else ...[
-                if (day.hr.isNotEmpty)
-                  MiniHrSpark(samples: day.hr, height: 46)
-                else
-                  SizedBox(
-                    height: 46,
-                    child: Center(
-                      child: Text(
-                        'No heart-rate samples',
+                    if (day.lastUpdated != null)
+                      Text(
+                        'Updated ${DateFormat.jm().format(day.lastUpdated!)}',
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant,
                         ),
                       ),
-                    ),
-                  ),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 8,
-                  children: [
-                    _MetricPill(
-                      icon: CupertinoIcons.heart_fill,
-                      label: day.hr.isEmpty ? '-' : '${_avgBpm(day.hr)} bpm',
-                      tint: const Color(0xFFFF3B30),
-                    ),
-                    _MetricPill(
-                      icon: CupertinoIcons.moon_fill,
-                      label: _sleepSummary(day),
-                      tint: const Color(0xFF5856D6),
-                    ),
-                    _MetricPill(
-                      icon: CupertinoIcons.arrow_up_right,
-                      label: day.steps == null
-                          ? '-'
-                          : NumberFormat.compact().format(day.steps),
-                      tint: theme.colorScheme.primary,
-                    ),
                   ],
                 ),
-              ],
-              if (_expanded && !isEmpty) ...[
-                const SizedBox(height: 18),
-                Divider(color: theme.colorScheme.outlineVariant),
-                if (day.hr.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  _ChartHeader(
-                    title: 'Heart rate',
-                    detail: '${_avgBpm(day.hr)} bpm avg',
-                  ),
-                  const SizedBox(height: 10),
-                  SizedBox(height: 184, child: HrLineChart(samples: day.hr)),
-                ],
-                if (day.sleep.isNotEmpty) ...[
-                  const SizedBox(height: 18),
-                  _ChartHeader(title: 'Sleep', detail: _sleepLongSummary(day)),
-                  const SizedBox(height: 10),
-                  SleepTimeline(segments: day.sleep, height: 110),
-                ],
-                if (day.energyKcal != null || day.distanceMeters != null) ...[
-                  const SizedBox(height: 18),
-                  _ChartHeader(title: 'Activity', detail: _activityDetail(day)),
-                  const SizedBox(height: 10),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 8,
-                    children: [
-                      _MetricPill(
-                        icon: CupertinoIcons.flame_fill,
-                        label: day.energyKcal == null
-                            ? '- kcal'
-                            : '${day.energyKcal} kcal',
-                        tint: const Color(0xFFFF9500),
-                      ),
-                      _MetricPill(
-                        icon: CupertinoIcons.location_fill,
-                        label: day.distanceMeters == null
-                            ? '- km'
-                            : '${(day.distanceMeters! / 1000).toStringAsFixed(2)} km',
-                        tint: const Color(0xFF34C759),
-                      ),
-                    ],
-                  ),
-                ],
-              ],
+              ),
+              if (sync.fetchedDays.contains(day.day)) _NewBadge(),
             ],
           ),
-        ),
+          const SizedBox(height: 14),
+          if (isEmpty)
+            Text(
+              isToday ? 'No data today' : 'No watch data',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            )
+          else ...[
+            Wrap(
+              spacing: 10,
+              runSpacing: 8,
+              children: [
+                _MetricPill(
+                  icon: CupertinoIcons.heart_fill,
+                  label: day.hr.isEmpty ? '-' : '${_avgBpm(day.hr)} bpm',
+                  tint: const Color(0xFFFF3B30),
+                ),
+                _MetricPill(
+                  icon: CupertinoIcons.moon_fill,
+                  label: _sleepSummary(day),
+                  tint: const Color(0xFF5856D6),
+                ),
+                _MetricPill(
+                  icon: CupertinoIcons.arrow_up_right,
+                  label: day.steps == null
+                      ? '-'
+                      : NumberFormat.compact().format(day.steps),
+                  tint: theme.colorScheme.primary,
+                ),
+              ],
+            ),
+            if (day.hr.isNotEmpty) ...[
+              const SizedBox(height: 20),
+              _ChartHeader(
+                title: 'Heart rate',
+                detail: '${_avgBpm(day.hr)} bpm avg',
+              ),
+              const SizedBox(height: 10),
+              SizedBox(height: 184, child: HrLineChart(samples: day.hr)),
+            ] else ...[
+              const SizedBox(height: 20),
+              SizedBox(
+                height: 64,
+                child: Center(
+                  child: Text(
+                    'No heart-rate samples',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+            if (day.sleep.isNotEmpty) ...[
+              const SizedBox(height: 20),
+              _ChartHeader(title: 'Sleep', detail: _sleepLongSummary(day)),
+              const SizedBox(height: 10),
+              SleepTimeline(segments: day.sleep, height: 110),
+            ],
+            if (day.energyKcal != null || day.distanceMeters != null) ...[
+              const SizedBox(height: 20),
+              _ChartHeader(title: 'Activity', detail: _activityDetail(day)),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 10,
+                runSpacing: 8,
+                children: [
+                  _MetricPill(
+                    icon: CupertinoIcons.flame_fill,
+                    label: day.energyKcal == null
+                        ? '- kcal'
+                        : '${day.energyKcal} kcal',
+                    tint: const Color(0xFFFF9500),
+                  ),
+                  _MetricPill(
+                    icon: CupertinoIcons.location_fill,
+                    label: day.distanceMeters == null
+                        ? '- km'
+                        : '${(day.distanceMeters! / 1000).toStringAsFixed(2)} km',
+                    tint: const Color(0xFF34C759),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ],
       ),
     );
   }
-
-  static String _formatDayHeader(DateOnly d) {
-    final today = DateOnly.today();
-    if (d == today) return 'Today · ${DateFormat.MMMd().format(d.midnight)}';
-    if (d == today.addDays(-1)) {
-      return 'Yesterday · ${DateFormat.MMMd().format(d.midnight)}';
-    }
-    return DateFormat('EEEE · MMM d').format(d.midnight);
-  }
-
-  static int _avgBpm(List<HrSample> samples) {
-    if (samples.isEmpty) return 0;
-    final sum = samples.fold<int>(0, (a, s) => a + s.bpm);
-    return (sum / samples.length).round();
-  }
-
-  static String _sleepSummary(DailyHistory day) {
-    if (day.sleep.isEmpty) return '-';
-    final total = day.sleep.fold<Duration>(
-      Duration.zero,
-      (a, s) => a + s.duration,
-    );
-    final h = total.inHours;
-    final m = total.inMinutes.remainder(60);
-    return '${h}h ${m}m';
-  }
-
-  static String _sleepLongSummary(DailyHistory day) {
-    final byStage = <SleepStage, Duration>{};
-    for (final s in day.sleep) {
-      byStage[s.stage] = (byStage[s.stage] ?? Duration.zero) + s.duration;
-    }
-    final parts = <String>[];
-    for (final s in [
-      SleepStage.deep,
-      SleepStage.light,
-      SleepStage.rem,
-      SleepStage.awake,
-    ]) {
-      final d = byStage[s];
-      if (d == null || d == Duration.zero) continue;
-      final h = d.inMinutes ~/ 60;
-      final m = d.inMinutes.remainder(60);
-      parts.add('${_label(s)} ${h}h ${m}m');
-    }
-    return parts.join(' · ');
-  }
-
-  static String _activityDetail(DailyHistory day) {
-    final parts = <String>[];
-    if (day.energyKcal != null) parts.add('${day.energyKcal} kcal');
-    if (day.distanceMeters != null) {
-      parts.add('${(day.distanceMeters! / 1000).toStringAsFixed(2)} km');
-    }
-    return parts.join(' · ');
-  }
-
-  static String _label(SleepStage s) => switch (s) {
-    SleepStage.awake => 'Awake',
-    SleepStage.rem => 'REM',
-    SleepStage.light => 'Light',
-    SleepStage.deep => 'Deep',
-  };
 }
+
+bool _isEmpty(DailyHistory day) =>
+    day.hr.isEmpty && day.sleep.isEmpty && day.steps == null;
+
+String _formatDayTab(DateOnly d) {
+  final today = DateOnly.today();
+  if (d == today) return 'Today';
+  if (d == today.addDays(-1)) return 'Yesterday';
+  return DateFormat.MMMd().format(d.midnight);
+}
+
+String _formatDayHeader(DateOnly d) {
+  final today = DateOnly.today();
+  if (d == today) return 'Today · ${DateFormat.MMMd().format(d.midnight)}';
+  if (d == today.addDays(-1)) {
+    return 'Yesterday · ${DateFormat.MMMd().format(d.midnight)}';
+  }
+  return DateFormat('EEEE · MMM d').format(d.midnight);
+}
+
+int _avgBpm(List<HrSample> samples) {
+  if (samples.isEmpty) return 0;
+  final sum = samples.fold<int>(0, (a, s) => a + s.bpm);
+  return (sum / samples.length).round();
+}
+
+String _sleepSummary(DailyHistory day) {
+  if (day.sleep.isEmpty) return '-';
+  final total = day.sleep.fold<Duration>(
+    Duration.zero,
+    (a, s) => a + s.duration,
+  );
+  final h = total.inHours;
+  final m = total.inMinutes.remainder(60);
+  return '${h}h ${m}m';
+}
+
+String _sleepLongSummary(DailyHistory day) {
+  final byStage = <SleepStage, Duration>{};
+  for (final s in day.sleep) {
+    byStage[s.stage] = (byStage[s.stage] ?? Duration.zero) + s.duration;
+  }
+  final parts = <String>[];
+  for (final s in [
+    SleepStage.deep,
+    SleepStage.light,
+    SleepStage.rem,
+    SleepStage.awake,
+  ]) {
+    final d = byStage[s];
+    if (d == null || d == Duration.zero) continue;
+    final h = d.inMinutes ~/ 60;
+    final m = d.inMinutes.remainder(60);
+    parts.add('${_label(s)} ${h}h ${m}m');
+  }
+  return parts.join(' · ');
+}
+
+String _activityDetail(DailyHistory day) {
+  final parts = <String>[];
+  if (day.energyKcal != null) parts.add('${day.energyKcal} kcal');
+  if (day.distanceMeters != null) {
+    parts.add('${(day.distanceMeters! / 1000).toStringAsFixed(2)} km');
+  }
+  return parts.join(' · ');
+}
+
+String _label(SleepStage s) => switch (s) {
+  SleepStage.awake => 'Awake',
+  SleepStage.rem => 'REM',
+  SleepStage.light => 'Light',
+  SleepStage.deep => 'Deep',
+};
 
 class _ChartHeader extends StatelessWidget {
   const _ChartHeader({required this.title, required this.detail});
