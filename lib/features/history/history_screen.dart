@@ -133,32 +133,47 @@ class _SyncStatusCard extends StatelessWidget {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (sync.syncing)
-              const SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(strokeWidth: 2.4),
-              )
-            else
-              Icon(icon, color: color),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(label, style: theme.textTheme.bodyMedium),
-                  const SizedBox(height: 2),
-                  Text(
-                    _detailLine(),
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
+            Row(
+              children: [
+                if (sync.syncing)
+                  const SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(strokeWidth: 2.4),
+                  )
+                else
+                  Icon(icon, color: color),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(label, style: theme.textTheme.bodyMedium),
+                      const SizedBox(height: 2),
+                      Text(
+                        _detailLine(),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
+            if (sync.syncing && sync.progressTotal > 0) ...[
+              const SizedBox(height: 12),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: sync.progressCurrent / sync.progressTotal,
+                  minHeight: 6,
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -169,6 +184,11 @@ class _SyncStatusCard extends StatelessWidget {
     final count = sync.days.length;
     final fetched = sync.fetchedDays.length;
     if (sync.syncing) {
+      final total = sync.progressTotal;
+      if (total > 0) {
+        return 'Fetching day ${sync.progressCurrent} of $total '
+            '($fetched pulled this session)…';
+      }
       return 'Fetching $fetched new day(s)…';
     }
     if (count == 0) return 'No data yet — tap sync to pull from the watch.';

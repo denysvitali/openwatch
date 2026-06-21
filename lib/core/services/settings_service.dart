@@ -21,6 +21,7 @@ class AppSettings {
     this.region = CloudRegion.international,
     this.authToken,
     this.autoSyncTimeOnConnect = true,
+    this.autoSyncHistoryOnConnect = true,
   });
 
   /// Master switch for the cloud integration. Default: OFF (offline-first).
@@ -35,16 +36,25 @@ class AppSettings {
   /// Sync the watch clock to phone time right after connecting (local, no cloud).
   final bool autoSyncTimeOnConnect;
 
+  /// Trigger a one-shot incremental history sync each time the BLE link
+  /// transitions to `ready`. The sync only re-fetches days the watch
+  /// says have new data AND we don't already have on disk — no work
+  /// happens on days with nothing new.
+  final bool autoSyncHistoryOnConnect;
+
   AppSettings copyWith({
     bool? cloudSyncEnabled,
     CloudRegion? region,
     String? authToken,
     bool? autoSyncTimeOnConnect,
+    bool? autoSyncHistoryOnConnect,
   }) => AppSettings(
     cloudSyncEnabled: cloudSyncEnabled ?? this.cloudSyncEnabled,
     region: region ?? this.region,
     authToken: authToken ?? this.authToken,
     autoSyncTimeOnConnect: autoSyncTimeOnConnect ?? this.autoSyncTimeOnConnect,
+    autoSyncHistoryOnConnect:
+        autoSyncHistoryOnConnect ?? this.autoSyncHistoryOnConnect,
   );
 }
 
@@ -57,6 +67,7 @@ class SettingsService {
   static const _kRegion = 'cloud_region';
   static const _kToken = 'auth_token';
   static const _kAutoTime = 'auto_sync_time';
+  static const _kAutoHistory = 'auto_sync_history';
   static const _kLastDeviceId = 'last_device_id';
   static const _kLastDeviceName = 'last_device_name';
 
@@ -83,12 +94,14 @@ class SettingsService {
     region: CloudRegion.values[_prefs.getInt(_kRegion) ?? 0],
     authToken: _prefs.getString(_kToken),
     autoSyncTimeOnConnect: _prefs.getBool(_kAutoTime) ?? true,
+    autoSyncHistoryOnConnect: _prefs.getBool(_kAutoHistory) ?? true,
   );
 
   Future<void> save(AppSettings s) async {
     await _prefs.setBool(_kCloud, s.cloudSyncEnabled);
     await _prefs.setInt(_kRegion, s.region.index);
     await _prefs.setBool(_kAutoTime, s.autoSyncTimeOnConnect);
+    await _prefs.setBool(_kAutoHistory, s.autoSyncHistoryOnConnect);
     if (s.authToken != null) {
       await _prefs.setString(_kToken, s.authToken!);
     } else {

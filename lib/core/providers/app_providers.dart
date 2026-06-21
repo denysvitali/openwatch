@@ -52,6 +52,9 @@ class SettingsNotifier extends Notifier<AppSettings> {
 
   Future<void> setAutoSyncTime(bool enabled) =>
       update(state.copyWith(autoSyncTimeOnConnect: enabled));
+
+  Future<void> setAutoSyncHistory(bool enabled) =>
+      update(state.copyWith(autoSyncHistoryOnConnect: enabled));
 }
 
 // --- BLE transport + watch manager ------------------------------------------
@@ -158,6 +161,25 @@ final historySyncProvider = ChangeNotifierProvider<HistorySync>((ref) {
     next.whenData((store) {
       sync.bindStore(store);
     });
+  }, fireImmediately: true);
+
+  // Auto-sync: when the BLE link transitions to `ready`, fire a single
+  // incremental sync (gated on the user's preference). Each transition
+  // gets one sync — we use the previous-state capture so a quick
+  // disconnect/reconnect cycle doesn't queue two back-to-back passes.
+  LinkState? lastLink;
+  ref.listen<AsyncValue<LinkState>>(linkStateProvider, (_, next) {
+    final current = next.value;
+    if (current == null) return;
+    final wasReady = lastLink == LinkState.ready;
+    lastLink = current;
+    if (current != LinkState.ready || wasReady) return;
+    final autoSync = ref.read(settingsProvider).autoSyncHistoryOnConnect;
+    if (!autoSync) return;
+    // `unawaited` — the future itself is observed by the UI via
+    // `sync.syncing`; if the user manually taps Sync, the existing
+    // in-flight call short-circuits via the `_syncing` guard.
+    unawaited(sync.syncAll());
   }, fireImmediately: true);
   return sync;
 });

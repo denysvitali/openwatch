@@ -308,6 +308,14 @@ class HistorySync extends ChangeNotifier {
   /// [syncAll] call.
   String? lastSyncError;
 
+  /// Sync progress as `(current, total)`. `current` is the index of the
+  /// day currently being fetched (1-based); `total` is the number of
+  /// days that will be re-fetched this pass. Zero / zero when idle.
+  int _progressCurrent = 0;
+  int _progressTotal = 0;
+  int get progressCurrent => _progressCurrent;
+  int get progressTotal => _progressTotal;
+
   StreamSubscription<Uint8List>? _inbound;
   final List<Uint8List> _rxQueue = [];
 
@@ -373,6 +381,8 @@ class HistorySync extends ChangeNotifier {
     _fetchedDays.clear();
     _hrChunks.clear();
     _days.clear();
+    _progressCurrent = 0;
+    _progressTotal = 0;
     notifyListeners();
 
     final effectiveDaysBack = daysBack.clamp(1, 32);
@@ -414,17 +424,11 @@ class HistorySync extends ChangeNotifier {
             if (d < effectiveDaysBack) d,
       };
 
-      var fetched = 0;
+      // Pre-compute the days we'll actually fetch so the UI can
+      // render an accurate progress fraction.
+      final toFetch = <int>[];
       for (final d in wantsDays) {
         final day = todayD.addDays(-d);
-        // Skip if the store already has this day AND we don't expect
-        // any newer data — the watch doesn't expose a per-day
-        // modified-at timestamp, so the watermark is "skip days we
-        // already pulled after the last sync". A user who wants to
-        // force a refresh can `clearAll()` on the store (UI hook
-        // TBD) or just relaunch the app and tap Sync again — the
-        // first day's freshness window ensures we always re-fetch
-        // today at minimum.
         final alreadyHave = _days.containsKey(day);
         final isToday = day == todayD;
         if (alreadyHave && !isToday) {
@@ -434,12 +438,23 @@ class HistorySync extends ChangeNotifier {
           );
           continue;
         }
+        toFetch.add(d);
+      }
+      _progressTotal = toFetch.length;
+      _progressCurrent = 0;
+      notifyListeners();
+
+      var fetched = 0;
+      for (final d in toFetch) {
+        final day = todayD.addDays(-d);
         _fetchedDays.add(day);
         fetched++;
         // Stage an empty record so the UI sees the day even if the
         // watch has nothing in it (error frame).
         _days.putIfAbsent(day, () => DailyHistory(day: day));
         _currentSyncDay = day;
+        _progressCurrent = fetched;
+        notifyListeners();
         await transport.sendA(Commands.readHeartRateHistory(day: day.midnight));
         await _drainRx(Duration(milliseconds: 600));
         _currentSyncDay = null;
@@ -507,6 +522,8 @@ class HistorySync extends ChangeNotifier {
       AppLog.instance.error('history', 'Sync failed: $e');
     } finally {
       _currentSyncDay = null;
+      _progressCurrent = 0;
+      _progressTotal = 0;
       _syncing = false;
       notifyListeners();
     }

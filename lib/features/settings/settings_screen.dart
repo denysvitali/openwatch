@@ -42,6 +42,16 @@ class SettingsScreen extends ConsumerWidget {
             value: settings.autoSyncTimeOnConnect,
             onChanged: settingsNotifier.setAutoSyncTime,
           ),
+          SwitchListTile(
+            secondary: const Icon(Icons.history_toggle_off),
+            title: const Text('Auto-sync history on connect'),
+            subtitle: const Text(
+              'Fetch missing days from the watch each time it becomes '
+              'ready — only days we haven\'t seen are pulled.',
+            ),
+            value: settings.autoSyncHistoryOnConnect,
+            onChanged: settingsNotifier.setAutoSyncHistory,
+          ),
           ListTile(
             leading: const Icon(Icons.system_update),
             title: const Text('Firmware update (OTA)'),
@@ -103,6 +113,14 @@ class SettingsScreen extends ConsumerWidget {
             trailing: const Icon(Icons.chevron_right),
             onTap: () => context.push('/logs'),
           ),
+          ListTile(
+            leading: const Icon(Icons.delete_sweep),
+            title: const Text('Clear stored history'),
+            subtitle: const Text(
+              'Wipes HR, sleep and step data stored on this phone.',
+            ),
+            onTap: () => _confirmClearHistory(context, ref),
+          ),
           const _SectionHeader('About'),
           ListTile(
             leading: const Icon(Icons.link_off),
@@ -162,6 +180,42 @@ class SettingsScreen extends ConsumerWidget {
         ],
       ),
     );
+  }
+
+  Future<void> _confirmClearHistory(BuildContext context, WidgetRef ref) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Clear stored history?'),
+        content: const Text(
+          'Removes every day of HR, sleep and step data stored on this '
+          'phone. The watch itself is untouched — a fresh sync will '
+          're-download whatever data it still has.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Clear'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final store = await ref.read(historyStoreProvider.future);
+    await store.clearAll();
+    // Force the in-memory mirror to re-hydrate from the now-empty
+    // directory so the UI updates immediately rather than waiting for
+    // the next sync.
+    await ref.read(historySyncProvider).loadFromStore();
+    if (context.mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Stored history cleared')));
+    }
   }
 
   void _confirmCloud(BuildContext context, VoidCallback onConfirm) {
