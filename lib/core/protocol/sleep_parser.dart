@@ -175,6 +175,16 @@ class SleepParser {
       for (final p in pairs) {
         totalMin += p.durMin;
       }
+      // Defensive clamp: the H59MA v13 firmware sometimes echoes the
+      // previous day's record into the current response (stale buffer),
+      // producing a single "block" with 14+ hours of sleep. Reject the
+      // whole block rather than filing a day with an impossible total.
+      // 14 hours is well above normal human sleep and catches the
+      // observed echo without clipping legitimate long sleeps.
+      const kMaxSleepSessionMinutes = 14 * 60;
+      if (totalMin > kMaxSleepSessionMinutes) {
+        break;
+      }
       var stMin = endMin - totalMin;
       // Wrap across midnight AND shift the segment date to the
       // bedtime day. The H59MA v13 firmware stores night sleep on

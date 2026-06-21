@@ -272,6 +272,34 @@ void main() {
       }
       expect(segs.first.start, DateTime(2026, 6, 20, 4, 0));
     });
+
+    test('rejects echoed stale data that would create a 14+ hour session '
+        '(regression for "25 hours of sleep" bug)', () {
+      // Live H59MA v13 capture: the response for dayOffset=2 contained
+      // the previous dayOffset=1 record appended (stale buffer). The
+      // concatenated block totals 858 min (14.3 h) and would otherwise
+      // be filed as a single sleep session, producing a day with >24 h
+      // of sleep when combined with the real dayOffset=1 record.
+      final pl = Uint8List.fromList([
+        0x02, // dayOffset = 2
+        0x01, 0x18, // endMin BE = 280 (04:40)
+        // Genuine dayOffset=2 block (12 pairs, 230 min):
+        0x2d, 0x01, 0x10, 0x02, 0x02, 0x26, 0x04, 0x0e, 0x03, 0x18, 0x04,
+        0x0f, 0x02, 0x1f, 0x03, 0x25, 0x04, 0x0b, 0x03, 0x21, 0x04, 0x11,
+        0x02, 0x07,
+        // Stale dayOffset=1 record echoed verbatim (endMin=52 + 26 pairs):
+        0x00, 0x34, 0x75, 0x05, 0x0e, 0x02, 0x02, 0x13, 0x03, 0x10, 0x04,
+        0x0e, 0x02, 0x22, 0x04, 0x0f, 0x02, 0x19, 0x03, 0x1d, 0x02, 0x15,
+        0x04, 0x0b, 0x03, 0x1f, 0x02, 0x0a, 0x03, 0x2e, 0x04, 0x02, 0x05,
+        0x07, 0x02, 0x15, 0x04, 0x15, 0x02, 0x2a, 0x03, 0x26, 0x04, 0x0e,
+        0x03, 0x35, 0x04, 0x0f, 0x03, 0x1e, 0x02, 0x32, 0x02, 0x05,
+      ]);
+      final segs = SleepParser.parseNightSleepSegments(
+        pl,
+        anchor: DateTime(2026, 6, 19),
+      );
+      expect(segs, isEmpty);
+    });
   });
 
   group('SleepParser — parseLunchSleepSegments (0x3e Ch-B)', () {
