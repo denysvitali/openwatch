@@ -2820,14 +2820,142 @@ the reset semantics differ between `0xff` (user-config
 only) and `0xc6 0x6C` (full RAM). This section is the
 *single place* in the doc that ties them together.
 
-The `0x2b` handler (`FUN_0082ba54`) backs a 16-byte persistent record on the
-device. The record is anchored at a runtime pointer stored in the literal
-pool slot `DAT_0082b0b8` (value `0x00208c7c`). Functions that touch the
-record refer to it via negative or positive byte offsets relative to that
-pointer; in the layout below **byte 0** of the record lives at
-`DAT_0082b0b8 - 6` (= `0x00208c76`).
+### 3.24 Deferred-command ring synthesis (`FUN_0082be64`)
 
-### 3.15 Opcode `0x08` findDevice / long-press branch (inline in `FUN_0082d2dc`)
+A cross-cutting view of the **10-slot deferred ring** at
+`DAT_0082bfcc` that backs *all* the opcodes routed through
+the dispatcher via the `FUN_0082be64(frame_ptr)` call.
+This ring is referenced in 15+ sections (every `0x2b`, `0x37`,
+`0x38`, `0x3a`, `0x3b`, `0x43 'C'`, `0x48 'H'`, `0x72`,
+`0x7a`, `0x81`, `0xa1`, `0xc6`, `0xc7 'D'`, `0xff`) but
+its actual structure was never documented in a single place.
+
+#### Behavior
+
+```c
+void FUN_0082be64(undefined1 *frame) {
+    state = DAT_0082bfcc;
+    // Copy 16 B from frame into the current slot
+    memcpy(state + 4 + (*(u16*)(state + 2)) * 0x10, frame, 0x10);
+    // Advance slot index (wrap at 10)
+    u16 slot = *(u16*)(state + 2);
+    if (slot < 9) *(u16*)(state + 2) = slot + 1;
+    else         *(u16*)(state + 2) = 0;
+    // Schedule the worker
+    FUN_00827124(0, DAT_0082bfd0);
+}
+```
+
+#### Ring layout (`DAT_0082bfcc`)
+
+| Off | Field | Notes |
+|---:|---|---|
+| `+0` | reserved / header | (the global struct base) |
+| `+2` | `slot_index` (u16 LE) | wraps at 10 (`0..9`) |
+| `+4` | `slots[0]` (16 B) | first ring slot |
+| `+14` | `slots[1]` (16 B) | second ring slot |
+| ... | ... | |
+| `+0xA0` | `slots[9]` (16 B) | last ring slot |
+
+Total size: `4 + 10 * 16 = 164` bytes (`0xA4`).
+
+#### Worker behavior (`FUN_00827124`)
+
+The worker (`FUN_00827124(0, DAT_0082bfd0)`) drains the
+ring asynchronously — each slot is consumed in order,
+dispatched to its corresponding handler (§3 — the same
+`FUN_0082d2dc` dispatch loop), and then freed. The
+`DAT_0082bfd0` argument is the work-item struct that holds
+the "next slot to drain" index.
+
+Because the worker runs *asynchronously* (on the next idle
+tick of the main loop), a host that sends an opcode routed
+through `FUN_0082be64` does *not* get an immediate response
+— the response comes via the §3 "Common response path"
+once the worker has dispatched the frame. This is why
+opcodes like `0x2b menstruation` (§3.1), `0x37 pressureSetting`
+(§3.20), and `0xc6 restoreKey` (§3.14) have a longer
+response latency than opcodes routed inline (`0xc6 0x6C 'l'`
+reboot, `0x08 0x01` start-find, etc.).
+
+#### Why 10 slots?
+
+The ring holds **10 slots** because the dispatcher routes
+~10 distinct opcodes that produce async work (the rest of the
+routed opcodes are short-lived enough to not need the ring).
+Each slot is one full request frame, so 10 slots × 16 B = 160
+B of state — small enough to live in the `.bss` section of
+the firmware image without competing with the larger config
+buffers at `DAT_0082bfcc + 0xA4+` (e.g. the user-config at
+`DAT_0082cff0` cleared by `0xff` factory reset).
+
+If the host sends 11 requests faster than the worker can
+drain, the 11th request **wraps the slot index back to 0**
+and overwrites the oldest queued request. The host SDK should
+pace requests at ≤ 10 / (worker tick interval) to avoid
+clobbering pending work.
+
+#### Cross-reference table
+
+Every opcode routed through `FUN_0082be64` (per §8.1
+dispatcher and §3 dispatcher):
+
+| Opcode | § | Handler (deferred-worker target) |
+|---|---|---|
+| `0x2b` menstruation | §3.1 | `FUN_0082ba54` |
+| `0x37` pressureSetting | §3.20 | `FUN_0082caa6` |
+| `0x38` pressure | §3.17 | `FUN_0082ca54` |
+| `0x3a` sub 0x03/0x04 sugar/lipids | §3.22 | `FUN_0082cc1e` |
+| `0x3b` uvTouch | §3.18 | `FUN_0082cbc8` |
+| `0x43 'C'` Channel-A capability | §3.6 | `FUN_0082d034` |
+| `0x48 'H'` 0xFEE7 handshake | §8.2 | `FUN_0082bf40` |
+| `0x72` pushMsgUint | §3.3 | `FUN_00829e92` |
+| `0x7a` muslim | §3.11 | `FUN_0082cb3a` |
+| `0x81` config chunk | §3.5 companion | `FUN_0082cdac` |
+| `0xa1` factory/test | §3.x | `FUN_00827f5c` + worker `FUN_00827dba` (§3.x) |
+| `0xc6` restoreKey | §3.14 | `FUN_0082c1e2` (inline in dispatcher) |
+| `0xc7 'D'` vibration | §3.2 | `FUN_00832ebc` |
+| `0xff` factory reset | §3.8 | `FUN_0082cde8` |
+
+That's **14 opcodes** routed through `FUN_0082be64`. The
+remaining ~30 documented 0xFEE7 opcodes are either inline
+in the dispatcher (no ring) or are state-update / ack-only
+(no response).
+
+#### Why this synthesis section exists
+
+Every detailed handler section (e.g. §3.1, §3.20, §8.2)
+mentions `FUN_0082be64` in passing but never explains the
+**ring layout, the 10-slot wrap, the async worker, or the
+14-opcode consumer list**. A host SDK author who reads §3
+top-to-bottom sees the ring referenced many times without a
+unified view of its structure. This section pulls the threads
+together: the ring is the **single async-work queue for the
+0xFEE7 dispatcher**, holds 10 in-flight frames, and
+deliberately wraps at 10 so a misbehaving host can't grow the
+queue unboundedly.
+
+#### §3 vs §8 ring usage
+
+The §3 dispatcher (`FUN_0082d2dc`) routes `0x2b`, `0x37`,
+`0x38`, `0x3a`, `0x3b`, `0x43`, `0x72`, `0x7a`, `0x81`,
+`0xa1`, `0xc6`, `0xc7`, `0xff` through `FUN_0082be64` —
+13 opcodes. The §8.1 0xFEE7 dispatcher adds `0x48 'H'` —
+1 opcode. Total **14 opcodes**.
+
+The §3 vs §8 split is *only* by dispatch path — both paths
+share the same `FUN_0082be64` helper, the same ring buffer
+(`DAT_0082bfcc`), and the same worker (`FUN_00827124`). A
+host that sends `0x48 'H'` and a host that sends `0x2b` use
+the *same* queue, and they will compete for slots if both
+are issued at high rate.
+
+The `0xc5/0xc8/0xc9 config-byte writes` (§8.1) and the
+self-marker handlers (`0x60`, `0x90`, `0x93`, `0x94`,
+`0x95`, `0x96`) are *not* routed through `FUN_0082be64` —
+they run inline in the dispatcher because their work is
+short-lived (a single config-byte write or an immediate
+self-marker ack) and don't need async dispatch.
 
 Like `0xc6` (see §3.14), the `0x08` opcode is *special-cased inline*
 in the main dispatcher `FUN_0082d2dc` rather than routed to a
