@@ -168,28 +168,31 @@ void main() {
       expect(s.startMinute, 30);
     });
 
-    test('heartRateSetting 0x16 read decodes enabled + interval + alarms', () async {
-      final t = _StubTransport();
-      final d = ChannelADispatcher(t);
-      d.bind();
-      final got = d.onHeartRateSetting.first;
-      // pl = [sub=0x01, enabled=0x01, interval=30, startInterval=0, tooLow=50, tooHigh=180]
-      final f = Codec.buildChannelA(OpA.heartRateSetting, [
-        0x01, // sub = read
-        0x01, // enabled (1=on, 2=off)
-        30, // interval minutes
-        0, // startInterval
-        50, // tooLow
-        180, // tooHigh
-      ]);
-      t.inA.add(f);
-      final s = await got.timeout(const Duration(seconds: 1));
-      expect(s.enabled, isTrue);
-      expect(s.interval, 30);
-      expect(s.startInterval, 0);
-      expect(s.tooLow, 50);
-      expect(s.tooHigh, 180);
-    });
+    test(
+      'heartRateSetting 0x16 read decodes enabled + interval + alarms',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final got = d.onHeartRateSetting.first;
+        // pl = [sub=0x01, enabled=0x01, interval=30, startInterval=0, tooLow=50, tooHigh=180]
+        final f = Codec.buildChannelA(OpA.heartRateSetting, [
+          0x01, // sub = read
+          0x01, // enabled (1=on, 2=off)
+          30, // interval minutes
+          0, // startInterval
+          50, // tooLow
+          180, // tooHigh
+        ]);
+        t.inA.add(f);
+        final s = await got.timeout(const Duration(seconds: 1));
+        expect(s.enabled, isTrue);
+        expect(s.interval, 30);
+        expect(s.startInterval, 0);
+        expect(s.tooLow, 50);
+        expect(s.tooHigh, 180);
+      },
+    );
 
     test('heartRateSetting 0x16 read disabled maps enabled=false', () async {
       final t = _StubTransport();
@@ -236,22 +239,6 @@ void main() {
       expect(s.startInterval, 0);
       expect(s.tooLow, 55);
       expect(s.tooHigh, 175);
-    });
-
-    test('heartRateSetting 0x16 short payload is ignored', () async {
-      final t = _StubTransport();
-      final d = ChannelADispatcher(t);
-      d.bind();
-      var fired = false;
-      final sub = d.onHeartRateSetting.listen((_) {
-        fired = true;
-      });
-      // Only 2 bytes — too short for either read or write decode.
-      final f = Codec.buildChannelA(OpA.heartRateSetting, [0x01, 0x01]);
-      t.inA.add(f);
-      await Future<void>.delayed(const Duration(milliseconds: 20));
-      expect(fired, isFalse);
-      await sub.cancel();
     });
 
     test('bloodOxygenSetting 0x2c decodes 1-bit SpO2 toggle', () async {

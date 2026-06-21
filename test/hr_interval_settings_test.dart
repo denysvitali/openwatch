@@ -54,10 +54,7 @@ void main() {
     });
 
     test('setHeartRateSetting disabled encodes enabled as 2', () {
-      final f = Commands.setHeartRateSetting(
-        enabled: false,
-        interval: 60,
-      );
+      final f = Commands.setHeartRateSetting(enabled: false, interval: 60);
       final pl = Codec.rxPayload(f);
       expect(pl[1], 2); // disabled = 2
       expect(pl[2], 60); // interval
@@ -77,10 +74,7 @@ void main() {
     });
 
     test('setHeartRateSetting uses default alarm thresholds', () {
-      final f = Commands.setHeartRateSetting(
-        enabled: true,
-        interval: 15,
-      );
+      final f = Commands.setHeartRateSetting(enabled: true, interval: 15);
       final pl = Codec.rxPayload(f);
       expect(pl[4], 50); // default tooLow
       expect(pl[5], 180); // default tooHigh
@@ -180,10 +174,7 @@ void main() {
 
   group('HeartRateSetting record', () {
     test('const construction with defaults', () {
-      const s = HeartRateSetting(
-        enabled: true,
-        interval: 30,
-      );
+      const s = HeartRateSetting(enabled: true, interval: 30);
       expect(s.enabled, isTrue);
       expect(s.interval, 30);
       expect(s.startInterval, 0);
