@@ -43,11 +43,94 @@ cover in isolation.
 | Address | Function | Notes |
 |---|---|---|
 | `0x00826400` | `entry` | Cortex-M trampoline: `ldr r0,[0x00826404]; bx r0` |
-| `0x0082643c` | reset handler | Sets SP, calls system init, then `app_main_task` (`0x00826988`) |
+| `0x0082643c` | reset handler | Sets SP, calls system init, then `app_main_task` (`0x00826988`) — see §1.1 |
 
 The vector table at `0x00826400` contains the initial SP, reset handler, and ISR pointers.
 
+### 1.1 `app_main_task` boot sequence (`FUN_00826988`)
+
+The post-reset main-task routine. Runs after the reset
+handler sets the SP and calls system init. Performs 10
+sequential steps to bring the firmware from "fresh-boot"
+to "ready-to-accept-BLE-traffic":
+
+```c
+void FUN_00826988() {
+    FUN_0083deb0(*DAT_008269dc);  // 1. write boot-state register
+    FUN_008294e0();              // 2. init (probably display / UI)
+    FUN_00826904();              // 3. peripheral init (likely BLE radio)
+    FUN_0083b956(1);             // 4. spawn task id 1 (main loop?)
+    FUN_0083b7c2();              // 5. init (probably sensor tasks)
+    FUN_0082e28c();              // 6. vendor setup (motor?)
+    FUN_0082e464();              // 7. BLE stack init (registers 0xFEE7 GATT — see §8)
+    FUN_00826942();              // 8. clock init
+    FUN_0082696c();              // 9. timer init (button / DLPS — see §6.1)
+    func_0x000131c2();            // 10. main-loop kickoff (task scheduler)
+}
+```
+
+The 10 steps fall into **three layers**:
+* **Hardware init** (steps 1-3, 7-9) — write boot-state,
+  init peripherals (display, BLE radio, vendor), init clocks
+  + timers.
+* **Task spawn** (step 4) — start the main event loop.
+* **Sensor init** (steps 5-6) — init the LIS3DH
+  accelerometer and the vibration motor (§7).
+* **Scheduler kickoff** (step 10) — enter the main event
+  loop and start processing BLE traffic.
+
+The boot sequence takes ~1 second to complete — most of
+the steps are quick register writes, but `FUN_0082e464`
+(BLE stack init) and `FUN_008294e0` (display init) involve
+multiple millisecond delays. After step 10 the firmware is
+in the "ready" state and starts accepting BLE connections.
+
+#### Why step 4 *spawns* the main loop
+
+`FUN_0083b956(1)` spawns task id 1 *before* step 7 (BLE
+init). The spawned task is the *event loop* (the `for (;;)`
+loop that processes BLE traffic). The BLE init in step 7
+runs *after* the event loop starts, which means the loop
+sees the BLE-init event during its first iteration. This
+ordering matters: if BLE init ran *before* the loop start,
+the loop would block forever (no event to process). Running
+it after the loop start lets the loop wake up as soon as the
+BLE-init event fires.
+
+#### Why step 10 *kicks off* the scheduler
+
+`func_0x000131c2()` is the **task-scheduler kickoff** — the
+function that runs the highest-priority ready task. The
+firmware's task system uses a static priority table; the
+scheduler iterates the table looking for the first task
+with `state == READY`. Once a task is selected, the
+scheduler switches to its stack and jumps into its entry
+function.
+
+After step 10, the scheduler runs task 1 (the main loop).
+The main loop blocks on a BLE event queue; when a BLE event
+arrives, the scheduler switches to the appropriate handler
+task (e.g. a notification-source task or a data-source task).
+
+#### Pair with §6.2 system reset
+
+`FUN_008275d8` (§6.2) does *not* call `app_main_task` — the
+system reset tears down all tasks and stops the main loop,
+then re-arms the timers and exits. The post-reset re-init
+*does* call `app_main_task` again, which goes through the
+same 10-step sequence. So a §6.2 system reset effectively
+re-runs the entire boot from step 1.
+
+#### Pair with §3.14 `0xc6 0x6L 'l'`
+
+`0xc6 0x6L 'l'` reboot (§3.14) calls `FUN_008275d8` (§6.2)
+which in turn calls `app_main_task` (this section). So `0xc6`
+indirectly re-bootstraps the firmware — the host sees the
+reboot ack before the new boot completes.
+
 ---
+
+## 2. Channel B — Large-Data / OTA / File Channel
 
 ## 2. Channel B — Large-Data / OTA / File Channel
 
