@@ -156,16 +156,27 @@ class SleepParser {
         break;
       }
       final pairs = <_SleepPair>[];
+      var terminated = false;
       while (i + 2 <= pl.length) {
         final stage = pl[i] & 0xFF;
         final dur = pl[i + 1] & 0xFF;
         i += 2;
         // A zero/zero pair is the natural terminator — older
         // firmwares pad the tail with NULs.
-        if (stage == 0 && dur == 0) break;
+        if (stage == 0 && dur == 0) {
+          terminated = true;
+          break;
+        }
         pairs.add(_SleepPair(stage, dur));
       }
-      if (pairs.isEmpty) continue;
+      // If we ran out of bytes before reading any pairs (and did not
+      // hit a zero/zero terminator), the remaining bytes are trailing
+      // garbage — do NOT continue and re-align on them, which would
+      // misinterpret pair bytes as a new endMin. (SP-1)
+      if (pairs.isEmpty) {
+        if (!terminated) break;
+        continue;
+      }
 
       // Compute the block's start minute by walking the pairs in
       // reverse (the wire order goes from wake → earlier segments
