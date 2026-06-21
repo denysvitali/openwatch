@@ -30,27 +30,32 @@ class _StubTransport implements BleTransport {
 
 void main() {
   group('ChannelBParser', () {
-    test('empty-payload sentinel emits immediately', () async {
-      final t = _StubTransport();
-      final p = ChannelBParser(t);
-      p.bind();
+    test(
+      'empty-payload sentinel emits immediately and does NOT auto-ACK',
+      () async {
+        final t = _StubTransport();
+        final p = ChannelBParser(t);
+        p.bind();
 
-      final done = p.commands.first;
-      t.inB.add(Uint8List.fromList([0xBC, 0x27, 0xFF, 0xFF, 0xFF, 0xFF]));
-      final c = await done.timeout(const Duration(seconds: 2));
-      expect(c.cmd, 0x27);
-      expect(c.payload, isEmpty);
+        final done = p.commands.first;
+        t.inB.add(Uint8List.fromList([0xBC, 0x27, 0xFF, 0xFF, 0xFF, 0xFF]));
+        final c = await done.timeout(const Duration(seconds: 2));
+        expect(c.cmd, 0x27);
+        expect(c.payload, isEmpty);
 
-      // ACK was sent — using `OpA.channelBAck` (`0x7E`) to avoid the
-      // 0x80-error-flag collision that aliases 0xBC → 0x3C deviceSupport.
-      await Future<void>.delayed(const Duration(milliseconds: 20));
-      expect(t.sentA, isNotEmpty);
-      expect(t.sentA.last[0], OpA.channelBAck);
-      expect(t.sentA.last[1], 0x27);
-      expect(t.sentA.last[2], 0x00); // status = OK
-    });
+        // NO auto-ACK: the firmware does not expect ACKs for unsolicited
+        // Channel-B pushes (FUN_0082eee6 is one-way). Sending an ACK would
+        // echo back as `0x7E ERR 0xee` and pollute the log.
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        expect(
+          t.sentA,
+          isEmpty,
+          reason: 'ChannelBParser must not auto-ACK unsolicited frames',
+        );
+      },
+    );
 
-    test('CRC mismatch sends NAK (status=2) and skips emit', () async {
+    test('CRC mismatch skips emit AND does NOT auto-NAK', () async {
       final t = _StubTransport();
       final p = ChannelBParser(t);
       p.bind();
@@ -66,9 +71,10 @@ void main() {
       final c = await got;
       expect(c.cmd, -1); // nothing emitted
 
-      // NAK was sent (status=2).
-      expect(t.sentA, isNotEmpty);
-      expect(t.sentA.last[2], 0x02);
+      // NO NAK — the firmware does not expect NAKs for frames it sends.
+      // CRC mismatches at this layer are firmware bugs and should be
+      // logged loudly, not acknowledged.
+      expect(t.sentA, isEmpty, reason: 'CRC mismatch must not auto-NAK');
     });
 
     test('buildAck encodes status byte', () {
@@ -96,28 +102,43 @@ void main() {
       }
     });
 
-    test('auto-ACK on every TX frame has clear high bit', () async {
+    test('sendAck() sends a Channel-A frame when explicitly invoked', () async {
       final t = _StubTransport();
       final p = ChannelBParser(t);
       p.bind();
-      // Empty-payload sentinel path (channel-b.dart:152).
-      t.inB.add(Uint8List.fromList([0xBC, 0x27, 0xFF, 0xFF, 0xFF, 0xFF]));
-      await Future<void>.delayed(const Duration(milliseconds: 20));
-      // CRC-mismatch NAK path (channel-b.dart:214).
-      final bad = Codec.buildChannelB(0x32, [1, 2, 3, 4, 5]);
-      bad[6] ^= 0xFF;
-      t.inB.add(bad);
-      await Future<void>.delayed(const Duration(milliseconds: 20));
-      expect(t.sentA, isNotEmpty);
-      for (final f in t.sentA) {
-        expect(
-          f[0] & 0x80,
-          0x00,
-          reason:
-              'auto-ACK 0x${f[0].toRadixString(16)} collides with '
-              'Channel-A error-flag strip',
-        );
+      // Caller-driven ACK (e.g. during OTA file transfer where the
+      // firmware is in a "waiting for confirmation" state). The parser
+      // itself does NOT auto-ACK.
+      await p.sendAck(0x27, status: 0);
+      expect(t.sentA, hasLength(1));
+      expect(t.sentA.last[0], OpA.channelBAck);
+      expect(t.sentA.last[1], 0x27);
+      expect(t.sentA.last[2], 0x00);
+    });
+
+    test('unsolicited Channel-B push triggers NO TX on the wire', () async {
+      final t = _StubTransport();
+      final p = ChannelBParser(t);
+      p.bind();
+      // Send several different unsolicited pushes (different cmds +
+      // payloads) and verify that ZERO bytes are written on Channel-A.
+      // Regression for the production log where every Channel-B push
+      // triggered a `TX-A op=0x7e` ACK → `RX-A op=0x7e ERR 0xee` echo.
+      final frames = [
+        Codec.buildChannelB(0x27, [0xC2, 0x01, 0x01]),
+        Codec.buildChannelB(0x2a, [0x02, 0x00, 0x12, 0x34]),
+        Codec.buildChannelB(0x3e, [0x00]),
+        Uint8List.fromList([0xBC, 0x3e, 0xFF, 0xFF, 0xFF, 0xFF]),
+      ];
+      for (final f in frames) {
+        t.inB.add(f);
       }
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(
+        t.sentA,
+        isEmpty,
+        reason: 'parser must not auto-ACK unsolicited Channel-B pushes',
+      );
     });
 
     test('multi-chunk reassembly completes one command', () async {
@@ -137,6 +158,9 @@ void main() {
       final c = await done.timeout(const Duration(seconds: 2));
       expect(c.cmd, 0x03);
       expect(c.payload, payload);
+      // Still no auto-ACK after a clean reassembly.
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(t.sentA, isEmpty);
     });
 
     test('OTA direct commands do not auto-ACK', () async {

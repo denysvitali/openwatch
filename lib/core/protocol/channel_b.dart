@@ -99,19 +99,22 @@ class ChannelBParser {
     },
   );
 
-  /// Builds an ACK/NAK for Channel-B responses (mirrors `FUN_0082ee00`).
+  /// Builds an ACK/NAK frame for Channel-B responses.
   ///
-  /// Sends a Channel-A frame `[0x7E, cmd, status]` where status:
-  ///   `0` = OK, `2` = CRC mismatch, others = firmware-defined errors.
+  /// **The H59MA firmware does not require ACKs for unsolicited
+  /// Channel-B pushes** — it dispatches via `FUN_0082eee6` (§2.0.1 in
+  /// `GHIDRA_DECOMPILATION.md`) and processes the frame without
+  /// expecting a reply. `ChannelBParser` therefore does **not** auto-ACK.
+  /// This helper is kept for callers that need to manually ACK a frame
+  /// (e.g. OTA file transfers where the firmware is in a "waiting for
+  /// confirmation" state). Most code paths should NOT call this.
   ///
-  /// The opcode is `OpA.channelBAck` (`0x7E`) — the highest unused
-  /// low-bit value in `OpA`. **Never** use the high bit (`0x80`) on
-  /// Channel-A: PROTOCOL.md §4 reserves it as the device→host error
-  /// flag, and the firmware strips it before dispatch (see
-  /// `Codec.rxOpcode` at `codec.dart:43`). Sending `0xBC` here would be
-  /// re-decoded as `OpA.deviceSupport` (`0x3C`) which expects empty
-  /// subData — every ACK would echo `0xC6 ERR 0xee` and pollute the
-  /// log with a phantom error loop.
+  /// The wire format is a Channel-A frame `[opcode, cmd, status]` where
+  /// the opcode is `OpA.channelBAck` (`0x7E`). The high bit (`0x80`)
+  /// must NOT be set on Channel-A — PROTOCOL.md §4 reserves it as the
+  /// device→host error flag, and the firmware strips it before
+  /// dispatch. Any opcode ≥ `0x80` aliases to a low-bit request opcode
+  /// and triggers an error response from the firmware.
   Uint8List buildAck(int cmd, int status) =>
       Codec.buildChannelA(OpA.channelBAck, [cmd & 0xFF, status & 0xFF]);
 
@@ -120,7 +123,10 @@ class ChannelBParser {
   Future<void> sendB(int cmd, [List<int> payload = const []]) =>
       _transport.sendB(Codec.buildChannelB(cmd, payload));
 
-  /// Sends an ACK frame on Channel A.
+  /// Sends an ACK/NAK frame on Channel A. See [buildAck] for the wire
+  /// format. **Callers should not invoke this for unsolicited Channel-B
+  /// pushes** — the firmware does not expect an ACK and will echo an
+  /// error (`0x7E ERR 0xee`) for every frame we send.
   Future<void> sendAck(int cmd, {int status = 0}) =>
       _sendA(buildAck(cmd, status));
 
@@ -176,19 +182,9 @@ class ChannelBParser {
         chunk[4] == 0xFF &&
         chunk[5] == 0xFF) {
       _emit(chunk[1], Uint8List(0));
-      // ACK the same way the firmware does — except OTA direct commands
-      // (mirrors the dispatcher at `FUN_0082eee6`).
-      const otaDirect = {
-        OpB.otaStart,
-        OpB.otaInit,
-        OpB.fileInit,
-        OpB.fileCheck,
-        OpB.fileDelete,
-        OpB.customWatchFace,
-      };
-      if (!otaDirect.contains(chunk[1])) {
-        unawaited(sendAck(chunk[1], status: 0));
-      }
+      // NO auto-ACK — the firmware does not expect ACKs for unsolicited
+      // Channel-B pushes (see [buildAck] docstring). OTA direct commands
+      // are dispatched via `FUN_0082fe52` and don't need them either.
       return;
     }
     if (chunk.length < 6) {
@@ -248,7 +244,10 @@ class ChannelBParser {
             'got=0x${got.toRadixString(16)} '
             'want=0x${_declaredCrc.toRadixString(16)}',
       );
-      unawaited(sendAck(cmd, status: 2));
+      // NO NAK — the firmware does not expect NAKs for frames it sends
+      // (FUN_0082eee6 is one-way: host receives, processes, no reply).
+      // CRC mismatches at this layer are protocol bugs in the firmware
+      // and should be logged loudly, not acknowledged.
       _reset();
       return;
     }
@@ -256,19 +255,8 @@ class ChannelBParser {
     _log.info('chb', 'RX cmd=0x${cmd.toRadixString(16)} len=${payload.length}');
 
     _emit(cmd, payload);
-    // Default ACK (status=0) for non-OTA commands — mirrors the firmware's
-    // behavior. OTA consumers suppress their own ACKs via the stream.
-    const otaDirect = {
-      OpB.otaStart,
-      OpB.otaInit,
-      OpB.fileInit,
-      OpB.fileCheck,
-      OpB.fileDelete,
-      OpB.customWatchFace,
-    };
-    if (!otaDirect.contains(cmd)) {
-      unawaited(sendAck(cmd, status: 0));
-    }
+    // NO auto-ACK — see [buildAck] docstring. Callers that need to
+    // manually ACK can call [sendAck] directly.
     _reset();
   }
 
