@@ -13,6 +13,7 @@ class _StubTransport implements BleTransport {
   final inA = StreamController<Uint8List>.broadcast();
   final inB = StreamController<Uint8List>.broadcast();
   final sent = <Uint8List>[];
+  final sentB = <Uint8List>[];
 
   @override
   Stream<Uint8List> get inboundA => inA.stream;
@@ -26,7 +27,9 @@ class _StubTransport implements BleTransport {
   }
 
   @override
-  Future<void> sendB(Uint8List framed) async {}
+  Future<void> sendB(Uint8List framed) async {
+    sentB.add(framed);
+  }
 
   @override
   dynamic noSuchMethod(Invocation invocation) => null;
@@ -620,6 +623,42 @@ void main() {
       },
     );
 
+    test('Channel-B 0x2a activity summary populates day totals', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final b = ChannelBParser(t);
+      b.bind();
+      final sync = HistorySync(t, (_) {}, dispatcher: d, bParser: b);
+
+      final body = List<int>.filled(48, 0);
+      body[0] = 0x00;
+      body[1] = 0x12;
+      body[2] = 0x34; // steps = 0x1234
+      body[6] = 0x00;
+      body[7] = 0x01;
+      body[8] = 0xf4; // kcal = 500
+      body[9] = 0x00;
+      body[10] = 0x0b;
+      body[11] = 0xb8; // distance = 3000 m
+      body[13] = 0xff; // compression marker normalised to 0
+      t.inB.add(Codec.buildChannelB(OpB.activitySummary, [0x02, ...body]));
+
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+
+      final day = DateOnly.today().addDays(-2);
+      final stored = sync.dayOf(day);
+      expect(stored, isNotNull);
+      expect(stored!.steps, 0x1234);
+      expect(stored.energyKcal, 500);
+      expect(stored.distanceMeters, 3000);
+      expect(sync.activity.single.day, day);
+      expect(sync.activity.single.body[13], 0x00);
+      sync.dispose();
+      d.dispose();
+      b.dispose();
+    });
+
     test('syncAll sends both 0x27 night and 0x3e lunch on Channel-B', () async {
       final t = _StubTransport();
       final d = ChannelADispatcher(t);
@@ -638,8 +677,10 @@ void main() {
       // The Channel-B writes happen after the per-day loop.
       await Future<void>.delayed(const Duration(milliseconds: 1800));
       await future;
-      // No assertion on the wire (the stub's sendB is a no-op) —
-      // the regression test is "doesn't throw + reaches finally".
+      expect(
+        t.sentB.map(Codec.rxChannelBCmd),
+        containsAll([OpB.activitySummary, OpB.sleepNew, OpB.sleepLunchNew]),
+      );
       expect(sync.syncing, isFalse);
       sync.dispose();
       d.dispose();
@@ -672,6 +713,8 @@ void main() {
       expect(sync.watchDaysWithData, containsAll([today, today.addDays(-2)]));
       // No store → fetched set still tracks which days were polled.
       expect(sync.fetchedDays, contains(today));
+      expect(sync.fetchedDays, contains(today.addDays(-2)));
+      expect(sync.fetchedDays, isNot(contains(today.addDays(2))));
       // Day 0 always re-fetched; day 2 also fetched because no store.
       expect(sync.fetchedDays.length, 2);
       sync.dispose();

@@ -43,6 +43,7 @@ class ChannelADispatcher {
   final _sugarLipids = StreamController<SugarLipidsSetting>.broadcast();
   final _uvTouch = StreamController<UvTouchSetting>.broadcast();
   final _sedentary = StreamController<SedentaryConfig>.broadcast();
+  final _todaySport = StreamController<SportTotals>.broadcast();
   final _sportDetailHeader = StreamController<SportDetailHeader>.broadcast();
   final _sportDetailRecord = StreamController<SportDetailRecord>.broadcast();
   final _pushMsg = StreamController<PushMsgUint>.broadcast();
@@ -144,6 +145,10 @@ class ChannelADispatcher {
 
   /// Sedentary reminder read/write (`0x25`/`0x26`).
   Stream<SedentaryConfig> get onSedentary => _sedentary.stream;
+
+  /// Today's activity totals (`0x48`). The payload uses the same 3-byte
+  /// big-endian groups as the legacy Oudmon SDK's `TodaySportDataRsp`.
+  Stream<SportTotals> get onTodaySport => _todaySport.stream;
 
   /// Detailed sport record header (`0x43`, phase 1).
   ///
@@ -251,6 +256,8 @@ class ChannelADispatcher {
       case OpA.setSitLong:
       case OpA.readSitLong:
         _decodeSedentary(pl);
+      case OpA.todaySport:
+        _decodeTodaySport(pl);
       case OpA.readDetailSport:
         _decodeSportDetail(pl);
       case OpA.pushMsgUint:
@@ -580,6 +587,17 @@ class ChannelADispatcher {
     );
   }
 
+  /// `todaySport` (0x48): 3-byte big-endian activity totals.
+  ///
+  /// This opcode is not part of the v14 Channel-A dispatcher table in
+  /// GHIDRA §3, but it remains in the APK-derived protocol and is used by
+  /// existing firmware variants. Keeping it typed here lets the rest of
+  /// the app share one parser with [WatchManager].
+  void _decodeTodaySport(Uint8List pl) {
+    final totals = SportTotals.tryParse(pl);
+    if (totals != null) _todaySport.add(totals);
+  }
+
   /// `readDetailSport` (0x43): two-phase per-hour activity dump.
   ///
   /// Phase 1 (header frame) — `pl[0]` is the end-of-data flag
@@ -854,6 +872,7 @@ class ChannelADispatcher {
       _sugarLipids,
       _uvTouch,
       _sedentary,
+      _todaySport,
       _sportDetailHeader,
       _sportDetailRecord,
       _pushMsg,
@@ -1100,6 +1119,37 @@ class SedentaryConfig {
 
   /// Nudge interval in minutes (clamped to ≤ 60 by the firmware).
   final int interval;
+}
+
+/// Activity totals from `0x48 todaySport`.
+///
+/// Payload layout follows `PROTOCOL.md` §4.4: five big-endian groups where
+/// the first four are 24-bit counters and the final duration is 16-bit.
+class SportTotals {
+  const SportTotals({
+    required this.steps,
+    required this.running,
+    required this.calories,
+    required this.distanceMeters,
+    required this.durationSeconds,
+  });
+
+  final int steps;
+  final int running;
+  final int calories;
+  final int distanceMeters;
+  final int durationSeconds;
+
+  static SportTotals? tryParse(Uint8List pl) {
+    if (pl.length < 12) return null;
+    return SportTotals(
+      steps: Codec.readU24be(pl, 0),
+      running: Codec.readU24be(pl, 3),
+      calories: Codec.readU24be(pl, 6),
+      distanceMeters: Codec.readU24be(pl, 9),
+      durationSeconds: pl.length >= 14 ? ((pl[12] << 8) | pl[13]) : 0,
+    );
+  }
 }
 
 /// Header frame for a `0x43` per-hour activity dump (phase 1).

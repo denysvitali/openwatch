@@ -93,8 +93,30 @@ class DailyTotals {
   final int distanceMeters;
 }
 
+/// One raw Channel-B `0x2a` activity-summary entry (GHIDRA §2.8).
+@immutable
+class ActivitySummaryRecord {
+  const ActivitySummaryRecord({
+    required this.day,
+    required this.dayOffset,
+    required this.body,
+    required this.totals,
+  });
+
+  final DateOnly day;
+  final int dayOffset;
+
+  /// The 48-byte producer-owned activity body with `0xff` bytes normalised
+  /// to `0x00`, matching the firmware's compression convention.
+  final Uint8List body;
+
+  /// Best-effort totals decoded from the first TodaySport-shaped groups.
+  final DailyTotals totals;
+}
+
 /// Pulls historical data from the watch. Uses the watch's data distribution
-/// bitmask to know which days have data, then requests HR + sleep per day.
+/// bitmask to know which days have data, then requests HR, sleep, and
+/// activity summaries per day.
 ///
 /// Multi-packet responses are reassembled here (the SDK does this in Java;
 /// the original payload layout is 13 bytes per sample at 5-min slots).
@@ -140,6 +162,7 @@ class HistorySync extends ChangeNotifier {
 
   final List<HrSample> _hr = [];
   final List<SleepSegment> _sleep = [];
+  final List<ActivitySummaryRecord> _activity = [];
   final Set<int> _availableDays = {};
 
   /// Days for which the watch reported data during the most recent
@@ -249,6 +272,7 @@ class HistorySync extends ChangeNotifier {
 
   List<HrSample> get hr => List.unmodifiable(_hr);
   List<SleepSegment> get sleep => List.unmodifiable(_sleep);
+  List<ActivitySummaryRecord> get activity => List.unmodifiable(_activity);
   Set<int> get availableDays => Set.unmodifiable(_availableDays);
 
   /// Days the watch reported as having data during the most recent sync.
@@ -343,6 +367,7 @@ class HistorySync extends ChangeNotifier {
     _rxQueue.clear();
     _hr.clear();
     _sleep.clear();
+    _activity.clear();
     _availableDays.clear();
     _watchDaysWithData.clear();
     _fetchedDays.clear();
@@ -391,7 +416,7 @@ class HistorySync extends ChangeNotifier {
 
       var fetched = 0;
       for (final d in wantsDays) {
-        final day = todayD.addDays(d);
+        final day = todayD.addDays(-d);
         // Skip if the store already has this day AND we don't expect
         // any newer data — the watch doesn't expose a per-day
         // modified-at timestamp, so the watermark is "skip days we
@@ -425,21 +450,48 @@ class HistorySync extends ChangeNotifier {
         await Future<void>.delayed(const Duration(milliseconds: 50));
       }
 
+      // Activity summary is the cheap v14 sport-motion probe (Channel-B
+      // `0x2a`, GHIDRA §2.8). It returns entries only for day offsets
+      // 0..2, so older history still relies on HR/sleep until a live
+      // capture confirms another totals source.
+      final activityOffsets = wantsDays.where((d) => d <= 2).toList()..sort();
+      if (activityOffsets.isNotEmpty) {
+        final maxOffset = activityOffsets.fold<int>(
+          0,
+          (max, d) => d > max ? d : max,
+        );
+        await transport.sendB(
+          Commands.readActivitySummary(dayOffset: maxOffset),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 600));
+
+        // Pair the summary with the per-hour detail command. The detail
+        // frames are surfaced through ChannelADispatcher.onSportDetail* for
+        // diagnostics and future richer charts; DailyHistory stores only
+        // day totals today.
+        for (final d in activityOffsets) {
+          await transport.sendA(Commands.readDetailSport(dayOffset: d));
+          await _drainRx(const Duration(milliseconds: 600));
+        }
+      }
+
       // Sleep for the most recent N days — the new protocol emits
       // a single day offset per request, so we fire-and-await for
       // each. We only fetch days we haven't already pulled sleep
       // for (the parser's payload always includes the day's
       // segments, so re-fetching is safe but wasteful).
       for (final d in wantsDays) {
-        final day = todayD.addDays(d);
+        final day = todayD.addDays(-d);
         final existing = _days[day];
         if (existing != null && existing.sleep.isNotEmpty && d != 0) {
           continue;
         }
+        _currentSyncDay = day;
         await transport.sendB(Commands.readSleepNewProtocol(dayOffset: d));
         await transport.sendB(Commands.readSleepLunchProtocol(dayOffset: d));
         await _drainRx(Duration(milliseconds: 600));
         await Future<void>.delayed(const Duration(milliseconds: 50));
+        _currentSyncDay = null;
       }
 
       // Bump the watermark — only after a clean pass.
@@ -454,6 +506,7 @@ class HistorySync extends ChangeNotifier {
       lastSyncError = e.toString();
       AppLog.instance.error('history', 'Sync failed: $e');
     } finally {
+      _currentSyncDay = null;
       _syncing = false;
       notifyListeners();
     }
@@ -514,6 +567,17 @@ class HistorySync extends ChangeNotifier {
               _flushHrChunks();
             }
           }
+        }
+      case OpA.todaySport:
+        final parsed = SportTotals.tryParse(pl);
+        if (parsed != null) {
+          final totals = DailyTotals(
+            steps: parsed.steps,
+            calories: parsed.calories,
+            distanceMeters: parsed.distanceMeters,
+          );
+          _upsertTotals(DateOnly.today(), totals);
+          onTotals(totals);
         }
     }
   }
@@ -600,26 +664,86 @@ class HistorySync extends ChangeNotifier {
   }
 
   // ---------------------------------------------------------------------------
-  // Channel-B command ingest — handles `0x27` night sleep + `0x3e`
-  // lunch/nap responses (PROTOCOL.md §4.4, GHIDRA §2.3). The
+  // Channel-B command ingest — handles `0x27` night sleep, `0x3e`
+  // lunch/nap responses (PROTOCOL.md §4.4, GHIDRA §2.3), and
+  // `0x2a` activity summaries (GHIDRA §2.8). The
   // `ChannelBParser` already validated CRC and emitted a fully
-  // reassembled payload; we just decode the segments.
+  // reassembled payload; we just decode the records.
   // ---------------------------------------------------------------------------
 
   void _onChannelBCommand(ChannelBCommand cmd) {
     final added = switch (cmd.cmd) {
       OpB.sleepNew => _decodeSleepNew(cmd.payload),
       OpB.sleepLunchNew => _decodeSleepLunch(cmd.payload),
+      OpB.activitySummary => _decodeActivitySummary(cmd.payload),
       _ => 0,
     };
     if (added > 0) {
       AppLog.instance.debug(
         'history',
-        'Channel-B cmd=0x${cmd.cmd.toRadixString(16)} +$added sleep segments '
-            '(total=${_sleep.length})',
+        'Channel-B cmd=0x${cmd.cmd.toRadixString(16)} +$added update(s) '
+            '(sleep=${_sleep.length} activity=${_activity.length})',
       );
       notifyListeners();
     }
+  }
+
+  int _decodeActivitySummary(Uint8List payload) {
+    var updated = 0;
+    var offset = 0;
+    final today = DateOnly.today();
+    while (offset + 49 <= payload.length) {
+      final dayOffset = payload[offset];
+      final body = Uint8List.fromList([
+        for (var i = offset + 1; i < offset + 49; i++)
+          payload[i] == 0xff ? 0x00 : payload[i],
+      ]);
+      if (offset > 0 && dayOffset == 0 && body.every((b) => b == 0)) {
+        break;
+      }
+      if (dayOffset <= 31) {
+        final day = today.addDays(-dayOffset);
+        final totals = _activityTotalsFromBody(body);
+        final rec = ActivitySummaryRecord(
+          day: day,
+          dayOffset: dayOffset,
+          body: body,
+          totals: totals,
+        );
+        _activity.removeWhere((r) => r.day == day);
+        _activity.add(rec);
+        _activity.sort((a, b) => a.day.compareTo(b.day));
+        _upsertTotals(day, totals);
+        if (day == today) onTotals(totals);
+        updated++;
+      }
+      offset += 49;
+    }
+    return updated;
+  }
+
+  DailyTotals _activityTotalsFromBody(Uint8List body) {
+    if (body.length < 12) return const DailyTotals();
+    return DailyTotals(
+      steps: Codec.readU24be(body, 0),
+      calories: Codec.readU24be(body, 6),
+      distanceMeters: Codec.readU24be(body, 9),
+    );
+  }
+
+  void _upsertTotals(DateOnly day, DailyTotals totals) {
+    final previous = _days[day] ?? DailyHistory(day: day);
+    final updated = DailyHistory(
+      day: day,
+      hr: previous.hr,
+      sleep: previous.sleep,
+      steps: totals.steps,
+      energyKcal: totals.calories,
+      distanceMeters: totals.distanceMeters,
+      lastUpdated: DateTime.now(),
+    );
+    _days[day] = updated;
+    unawaited(_store?.writeDay(updated));
   }
 
   /// Extracts the day offset from the payload of a `0x27` / `0x3e` Ch-B

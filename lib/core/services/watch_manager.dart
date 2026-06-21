@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../ble/ble_transport.dart';
 import '../protocol/capabilities.dart';
+import '../protocol/channel_a.dart';
 import '../protocol/codec.dart';
 import '../protocol/commands.dart';
 import '../protocol/hr_parser.dart';
@@ -128,10 +129,11 @@ class WatchManager extends ChangeNotifier {
         notifyListeners();
       case OpA.todaySport:
         // 3-byte big-endian groups: steps, running, calories, distance, duration.
-        if (pl.length >= 12) {
-          todaySteps = Codec.readU24be(pl, 0);
-          todayCalories = Codec.readU24be(pl, 6);
-          todayDistanceMeters = Codec.readU24be(pl, 9);
+        final totals = SportTotals.tryParse(pl);
+        if (totals != null) {
+          todaySteps = totals.steps;
+          todayCalories = totals.calories;
+          todayDistanceMeters = totals.distanceMeters;
           notifyListeners();
         }
       case OpA.battery:

@@ -840,6 +840,28 @@ void main() {
       expect(r.label, Uint8List.fromList(label));
     });
 
+    test('todaySport 0x48 routes totals to onTodaySport', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final got = d.onTodaySport.first;
+      t.inA.add(
+        Codec.buildChannelA(OpA.todaySport, [
+          0x00, 0x10, 0x00, // steps = 4096
+          0x00, 0x00, 0x2a, // running
+          0x00, 0x01, 0xf4, // calories = 500
+          0x00, 0x0b, 0xb8, // distance = 3000 m
+          0x01, 0x2c, // duration = 300 s
+        ]),
+      );
+      final totals = await got.timeout(const Duration(seconds: 1));
+      expect(totals.steps, 4096);
+      expect(totals.running, 42);
+      expect(totals.calories, 500);
+      expect(totals.distanceMeters, 3000);
+      expect(totals.durationSeconds, 300);
+    });
+
     test(
       'readDetailSport 0x43 header frame routes to onSportDetailHeader',
       () async {

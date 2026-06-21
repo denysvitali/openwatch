@@ -106,6 +106,31 @@ class Commands {
   static Uint8List readTotalSport({int dayOffset = 0}) =>
       Codec.buildChannelA(OpA.readTotalSport, [dayOffset & 0xFF]);
 
+  /// `ReadDetailSport` (`0x43`): per-hour activity detail for one day.
+  ///
+  /// H59MA v14 request layout (GHIDRA §3.6):
+  ///   byte 1 = day offset (`0` today, `1` yesterday, ...)
+  ///   byte 2 = reserved
+  ///   byte 3 = start hour (`0..23`)
+  ///   byte 4 = end hour (`0..23`)
+  ///   byte 5 = unit flag (`1` = seconds, `0` = 10-second units)
+  static Uint8List readDetailSport({
+    int dayOffset = 0,
+    int startHour = 0,
+    int endHour = 23,
+    bool oneSecondUnits = true,
+  }) {
+    final start = _clamp(startHour, 0, 23);
+    final end = _clamp(endHour, start, 23);
+    return Codec.buildChannelA(OpA.readDetailSport, [
+      dayOffset & 0xFF,
+      0x00,
+      start,
+      end,
+      oneSecondUnits ? 1 : 0,
+    ]);
+  }
+
   /// `QueryDataDistribution` (0x46) — the watch pushes a 32-bit bitmask where
   /// bit *d* = "day *d* has stored data". Trigger a re-emit by sending the bare
   /// opcode; the response is a one-shot notify on 0x46.
@@ -157,6 +182,13 @@ class Commands {
   /// reads from the lunch-sleep store via `FUN_0082fada` (GHIDRA §2.3).
   static Uint8List readSleepLunchProtocol({int dayOffset = 0}) =>
       Codec.buildChannelB(OpB.sleepLunchNew, [dayOffset & 0xFF]);
+
+  /// Activity / sport summary (Channel-B `0x2a`) for today through
+  /// [dayOffset]. The firmware clamps the offset to `2` and returns
+  /// 49-byte entries (`dayOffset` + 48-byte body) for each day with data;
+  /// see `GHIDRA_DECOMPILATION.md` §2.8.
+  static Uint8List readActivitySummary({int dayOffset = 2}) =>
+      Codec.buildChannelB(OpB.activitySummary, [_clamp(dayOffset, 0, 2)]);
 
   /// `TodaySportData` (0x48): read today's running step total (bare opcode).
   static Uint8List readTodaySport() => Codec.buildChannelA(OpA.todaySport);
@@ -306,6 +338,12 @@ class Commands {
   static List<int> utf8Clamp(String s, int max) {
     final bytes = s.codeUnits.where((c) => c < 0x80).take(max).toList();
     return bytes;
+  }
+
+  static int _clamp(int value, int min, int max) {
+    if (value < min) return min;
+    if (value > max) return max;
+    return value;
   }
 }
 

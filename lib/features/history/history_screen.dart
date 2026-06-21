@@ -8,6 +8,7 @@ import '../../core/providers/app_providers.dart';
 import '../../core/services/history_sync.dart';
 import 'widgets/hr_chart.dart';
 import 'widgets/sleep_chart.dart';
+import 'widgets/steps_chart.dart';
 
 /// Local-first history view.
 ///
@@ -50,6 +51,10 @@ class HistoryScreen extends ConsumerWidget {
             const SizedBox(height: 12),
             _Legend(),
             const SizedBox(height: 16),
+            if (sync.days.any((d) => d.steps != null)) ...[
+              _StepsOverviewCard(days: sync.days),
+              const SizedBox(height: 16),
+            ],
             if (sync.days.isEmpty)
               const _EmptyState()
             else
@@ -242,6 +247,30 @@ class _EmptyState extends StatelessWidget {
             textAlign: TextAlign.center,
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _StepsOverviewCard extends StatelessWidget {
+  const _StepsOverviewCard({required this.days});
+
+  final List<DailyHistory> days;
+
+  @override
+  Widget build(BuildContext context) {
+    final recent = days.length <= 7 ? days : days.sublist(days.length - 7);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Steps', style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: 12),
+            StepsBarChart(days: recent),
+          ],
+        ),
       ),
     );
   }

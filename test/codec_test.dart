@@ -164,6 +164,23 @@ void main() {
       expect(f[1], 0x00);
     });
 
+    test('readDetailSport encodes v14 day/hour/unit request', () {
+      final f = Commands.readDetailSport(
+        dayOffset: 2,
+        startHour: 3,
+        endHour: 9,
+        oneSecondUnits: true,
+      );
+      expect(f[0], OpA.readDetailSport);
+      expect(f.sublist(1, 6), [0x02, 0x00, 0x03, 0x09, 0x01]);
+    });
+
+    test('readActivitySummary uses Channel-B 0x2a and clamps day offset', () {
+      final f = Commands.readActivitySummary(dayOffset: 9);
+      expect(Codec.rxChannelBCmd(f), OpB.activitySummary);
+      expect(Codec.rxChannelBPayload(f), [0x02]);
+    });
+
     test('readSugarLipids defaults to sub 0x03 sugar read', () {
       final f = Commands.readSugarLipids();
       expect(f[0], OpA.sugarLipidsSetting);
