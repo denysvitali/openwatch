@@ -28,6 +28,69 @@ byte 4..5   payload CRC-16/MODBUS, little-endian u16
 byte 6..    payload bytes
 ```
 
+#### 2.0 Channel-B NAK packet (`FUN_0082ee00`)
+
+The *error-response* path for any Channel-B opcode. When
+the dispatcher detects an error (unknown cmd, no record
+found, bad payload length, etc.) it calls
+`FUN_0082ee00(cmd, error_code)` which builds a fixed-shape
+NAK packet.
+
+```c
+void FUN_0082ee00(byte cmd, byte error_code) {
+    rsp[0]  = 0xBC;                  // Channel-B magic
+    rsp[1..2] = 1;                   // u16 frame count = 1
+    rsp[3]  = error_code;
+    rsp[4]  = cmd;                    // original request cmd
+    rsp[5..6] = FUN_0082f114(&error_code, 1);  // CRC-16 over (error_code, cmd)
+    FUN_0082ece0(rsp, 7);             // send
+}
+```
+
+#### NAK packet layout (7 bytes)
+
+```
+byte 0:    0xBC                    (Channel-B magic)
+byte 1..2: u16 1 (frame count = 1, LE)
+byte 3:    error_code              (e.g. 0x02 = NAK code 2)
+byte 4:    cmd                     (original request cmd)
+byte 5..6: CRC-16/MODBUS over (error_code, cmd), LE
+```
+
+The error_code values used in the firmware:
+* `0x02` — generic NAK ("request rejected")
+* `0x10` — no data (e.g. `0x12 detailed sleep` when no
+  record exists)
+* `0x14` — invalid length
+
+A host SDK that consumes Channel-B responses should:
+1. Check the magic byte (`byte 0 == 0xBC`) to confirm a
+   Channel-B packet.
+2. Parse the frame-count from bytes 1..2.
+3. For each frame: read `byte 1` of the payload as the
+   sub-cmd, the rest as the data.
+4. **Check byte 4 vs the request cmd** — if byte 4 ≠ cmd,
+   the firmware sent a NAK and byte 3 is the error_code.
+5. Verify CRC-16 over the payload (bytes 6..N) against
+   the 2-byte CRC at the end of the header (bytes 4..5 of
+   the *frame*, not the packet).
+
+#### Why no response opcode
+
+Channel-B NAKs are **packet-level** (the 0xBC magic plus
+a frame count), not **opcode-level** (the request opcode).
+The error_code byte tells the host *what went wrong*; the
+original cmd byte tells the host *which request was
+rejected*. There is no separate "NAK opcode" — the NAK is
+the same 0xBC packet format as a normal response, just with
+the error_code byte set.
+
+This is why §2.6 (file commands) and §2.7 (device info) use
+`FUN_0082ee00(0x41, 0x02)` for "file cmd 0x41 not supported"
+but the same helper can emit `FUN_0082ee00(0x11, 0x10)` for
+"sleep summary cmd 0x11 has no data" — the opcode is just
+a parameter, not a separate dispatch.
+
 ### Key functions
 
 | Address | Function | Role |
