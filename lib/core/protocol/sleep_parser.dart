@@ -190,11 +190,11 @@ class SleepParser {
       // previous day's record into the current response (stale buffer),
       // producing a single "block" with 14+ hours of sleep. Reject the
       // whole block rather than filing a day with an impossible total.
-      // 14 hours is well above normal human sleep and catches the
+      // 20 hours is well above normal human sleep and catches the
       // observed echo without clipping legitimate long sleeps.
-      const kMaxSleepSessionMinutes = 14 * 60;
+      const kMaxSleepSessionMinutes = 20 * 60;
       if (totalMin > kMaxSleepSessionMinutes) {
-        break;
+        continue;
       }
       var stMin = endMin - totalMin;
       // Wrap across midnight AND shift the segment date to the
@@ -205,10 +205,18 @@ class SleepParser {
       // "night of <bedtime day>" — without the shift, the segment
       // shows up under the wake-up day with a start timestamp that
       // belongs to the previous calendar date.
+      //
+      // All sleep timestamps are in local wall-clock time.  When
+      // wrapping midnight we must account for DST transitions: a day
+      // can be 23 h or 25 h long, so we compute the actual minute
+      // count of the previous calendar day instead of assuming a
+      // fixed 1440-minute day.
       var dayBase = DateTime(anchor.year, anchor.month, anchor.day);
       if (stMin < 0) {
-        stMin += 24 * 60;
-        dayBase = dayBase.subtract(const Duration(days: 1));
+        final prevDay = dayBase.subtract(const Duration(days: 1));
+        final prevDayMinutes = dayBase.difference(prevDay).inMinutes;
+        stMin += prevDayMinutes;
+        dayBase = prevDay;
       }
       for (final p in pairs) {
         final start = dayBase.add(Duration(minutes: stMin));

@@ -251,6 +251,84 @@ void main() {
       );
     });
 
+    test('midnight wrap on DST spring-forward day uses 23-hour day (SP-3)', () {
+      // 2024-03-10 in US/Eastern: clocks spring forward at 02:00,
+      // so the day has 1380 minutes (23 hours).  A sleep ending at
+      // 01:30 (90 min) with total 300 min would start at 21:30 the
+      // previous evening — 90 min before midnight in a 23-hour day.
+      // With the old fixed 1440-minute arithmetic, startMin would be
+      // computed as 90 - 300 + 1440 = 1230 (20:30), off by 1 hour.
+      final dstAnchor = DateTime(2024, 3, 10); // spring-forward day
+      final prevDay = DateTime(2024, 3, 9);
+      final pl = Uint8List.fromList([
+        0x01, // dayOffset
+        0x00, 0x5A, // endMin BE = 90 (01:30)
+        0x01, 0x78, // light 120 min
+        0x02, 0x3C, // deep  60 min
+        0x03, 0x3C, // rem   60 min
+      ]);
+      final segs = SleepParser.parseNightSleepSegments(pl, anchor: dstAnchor);
+      expect(segs, hasLength(3));
+      // First segment should start at 21:30 on the PREVIOUS day
+      // (bedtime day), not 20:30.
+      expect(segs.first.start, DateTime(2024, 3, 9, 21, 30));
+      // Verify all segments are on the correct day
+      for (final s in segs) {
+        expect(
+          DateTime(s.start.year, s.start.month, s.start.day),
+          prevDay,
+          reason: 'all segments belong to the bedtime day (23-hour DST day)',
+        );
+      }
+    });
+
+    test('midnight wrap on DST fall-back day uses 25-hour day (SP-3)', () {
+      // 2024-11-03 in US/Eastern: clocks fall back at 02:00,
+      // so the day has 1500 minutes (25 hours).  A sleep ending at
+      // 01:30 (90 min) with total 300 min would start at 22:30 the
+      // previous evening — 90 min before midnight in a 25-hour day.
+      // With the old fixed 1440-minute arithmetic, startMin would be
+      // computed as 90 - 300 + 1440 = 1230 (20:30), off by 2 hours.
+      final dstAnchor = DateTime(2024, 11, 3); // fall-back day
+      final prevDay = DateTime(2024, 11, 2);
+      final pl = Uint8List.fromList([
+        0x01, // dayOffset
+        0x00, 0x5A, // endMin BE = 90 (01:30)
+        0x01, 0x78, // light 120 min
+        0x02, 0x3C, // deep  60 min
+        0x03, 0x3C, // rem   60 min
+      ]);
+      final segs = SleepParser.parseNightSleepSegments(pl, anchor: dstAnchor);
+      expect(segs, hasLength(3));
+      // First segment should start at 22:30 on the PREVIOUS day
+      // (bedtime day), not 20:30.
+      expect(segs.first.start, DateTime(2024, 11, 2, 22, 30));
+      // Verify all segments are on the correct day
+      for (final s in segs) {
+        expect(
+          DateTime(s.start.year, s.start.month, s.start.day),
+          prevDay,
+          reason: 'all segments belong to the bedtime day (25-hour DST day)',
+        );
+      }
+    });
+
+    test('non-DST day still computes correctly with dynamic day length (SP-3)', () {
+      // A normal 24-hour day should still produce the same results
+      // as before — the dynamic computation just happens to equal 1440.
+      final pl = Uint8List.fromList([
+        0x01, // dayOffset
+        0x00, 0x53, // endMinOfDay BE = 83 (01:23)
+        0x04, 0x75, // awake 117 min
+        0x01, 0x0F, // light 15 min
+        0x02, 0x78, // deep 120 min
+        0x03, 0x14, // rem  20 min
+        0x01, 0x1E, // light 30 min
+      ]);
+      final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
+      expect(segs.first.start, DateTime(2026, 6, 19, 20, 21));
+    });
+
     test('blocks that do NOT wrap midnight stay on the wake-up day', () {
       // endMin = 480 (08:00), total = 240 min ⇒ startMin = 240
       // (04:00) — no wrap. All segments on the anchor day.
@@ -343,11 +421,14 @@ void main() {
       expect(segs.single.stage, SleepStage.light);
       expect(segs.single.duration.inMinutes, 30);
     });
+    test('stale-buffer echo is skipped but genuine block is kept (SP-2)', () {
       // Live H59MA v13 capture: the response for dayOffset=2 contained
       // the previous dayOffset=1 record appended (stale buffer). The
       // concatenated block totals 858 min (14.3 h) and would otherwise
       // be filed as a single sleep session, producing a day with >24 h
       // of sleep when combined with the real dayOffset=1 record.
+      // With `continue` (not `break`) only the malformed block is
+      // skipped; the genuine dayOffset=2 record is preserved.
       final pl = Uint8List.fromList([
         0x02, // dayOffset = 2
         0x01, 0x18, // endMin BE = 280 (04:40)
@@ -366,6 +447,37 @@ void main() {
         pl,
         anchor: DateTime(2026, 6, 19),
       );
+      // The genuine dayOffset=2 block has 12 pairs totalling 230 min.
+      expect(segs, hasLength(12));
+      // The stale echo (858 min total) is skipped.
+    });
+
+    test('legitimate 14.5 h sleep session is accepted (SP-2)', () {
+      // A 14 h 30 min session is rare but physiologically possible
+      // (e.g. medical condition, very long nap + night combined).
+      // The 14 h clamp would reject this; the 20 h clamp accepts it.
+      final pl = Uint8List.fromList([
+        0x01, // dayOffset
+        0x00, 0x5A, // endMin BE = 90 (01:30)
+        // 29 pairs of 30 min each = 870 min = 14.5 h
+        ...List.generate(29, (_) => [0x01, 0x1E]).expand((x) => x),
+      ]);
+      final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
+      expect(segs, hasLength(29));
+      expect(segs.first.start, DateTime(2026, 6, 19, 11, 0));
+      expect(segs.last.duration.inMinutes, 30);
+    });
+
+    test('stale-buffer echo alone returns empty (SP-2)', () {
+      // If the ONLY block in the payload is the stale echo (>20h),
+      // the parser returns empty because every block is skipped.
+      final pl = Uint8List.fromList([
+        0x02, // dayOffset
+        0x00, 0x34, // endMin = 52
+        // 40 pairs of 30 min each = 1200 min = 20 h — exceeds clamp
+        ...List.generate(40, (_) => [0x01, 0x1E]).expand((x) => x),
+      ]);
+      final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
       expect(segs, isEmpty);
     });
   });
