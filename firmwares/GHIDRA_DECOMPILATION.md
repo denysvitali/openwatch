@@ -3307,6 +3307,79 @@ Channel-A `0x72` path.
 
 The 32-byte OTA digest buffer is prepared in `FUN_0082f240` but the hashing algorithm itself is not located in the firmware body; it may live in the bootloader or be computed by the host tool.
 
+### 5.1 OTA/DFU state machine (`FUN_0082fe52`)
+
+The four-sub-cmd Channel-B OTA dispatcher referenced from
+multiple sections (e.g. §1.2 "0x21, 0x31, 0x35, 0x36, 0x61",
+§3.20, §8.3). It uses two state buffers and four
+sub-cmd values to drive the OTA flow.
+
+#### State buffers
+
+| Buffer | Role |
+|---|---|
+| `DAT_00830120` | OTA control state — byte 0 = current state, byte 3 = "needs drain" flag |
+| `DAT_00830120 + -8` | OTA timer state (shared with `FUN_008275d8` / `FUN_0082f160`) |
+| `DAT_00830124 + 0x11` | OTA dispatcher state byte — must equal `0x02` for the handler to run (else early return) |
+| `DAT_00830128` | OTA image config / data (4 state addresses: `+0x14`, `+0x18`, `+0x1C`) |
+| `DAT_0083012c` | OTA image config 2 (used by sub-cmd 1) |
+| `DAT_00830130` | OTA worker queue (deferred-ring downstream) |
+
+#### Sub-cmd dispatch
+
+| `param_1` (cmd id) | Action | Helper called |
+|---:|---|---|
+| `4` | "transition to ready" — clear timer, set state = 4 | `FUN_0082fe4c(DAT_00830128)` |
+| `0` | "cancel" — drain queue | `FUN_0082fe4c(DAT_00830128 + 0x14)` |
+| `1` | "init" — drain queue | `FUN_0082fe4c(DAT_0083012c)` |
+| `2` | "receive" — drain queue | `FUN_0082fe4c(DAT_00830128 + 0x18)` |
+| `3` | "complete" — drain queue | `FUN_0082fe4c(DAT_00830128 + 0x1C)` |
+
+#### State-machine semantics
+
+The handler dispatches based on the **delta** between the
+current state (`*pbVar1`) and the requested state
+(`param_1`):
+
+* If `current_state == 4` (ready) and the new request is
+  also `4`: no-op.
+* If `current_state == 4` and the new request is *not*
+  `4`: early-return (state already at "ready").
+* If `param_1 == 4` (force-ready): set state = 4, call
+  `FUN_0082fe4c(DAT_00830128)`.
+* If `current_state != param_1` and `param_1 != 0`:
+  call the matching `FUN_0082fe4c` sub-routine.
+* If `param_2 != 0` after the helper: queue a worker via
+  `FUN_00829c24` for downstream consumption.
+
+The `param_1 == 4` "force-ready" path is the **OTA bootloader
+ready** signal — the OEM host tools send `0x04` to clear
+any previous OTA state before pushing a new image.
+
+#### Why `DAT_00830124 + 0x11 == 0x02` is the entry guard
+
+The byte at `+0x11` in `DAT_00830124` is a *vendor-mode*
+flag — the OTA handler is only active when the watch is in
+"OTA mode" (state `2`). Outside OTA mode (e.g. normal
+runtime), the handler early-returns without doing
+anything. This prevents accidental OTA state transitions
+from a misbehaving host.
+
+#### Pair with §5 helper functions
+
+The four sub-cmds (`0x00`, `0x01`, `0x02`, `0x03`) route to
+the §5 helper functions:
+
+* `0x00` (cancel) → `FUN_0082f1a4` (OTA start ack)
+* `0x01` (init) → `FUN_0082f1b6` (OTA init)
+* `0x02` (receive) → `FUN_0082f240` (OTA data)
+* `0x03` (complete) → `FUN_0082f378` (OTA check)
+
+The state machine (`FUN_0082fe52`) is the *dispatcher*,
+the §5 helpers are the *workers*. A host that sends a
+sequence of OTA commands (init → receive N times → complete)
+sees the dispatcher route each to the right worker.
+
 ---
 
 ## 6. Power Management & System
