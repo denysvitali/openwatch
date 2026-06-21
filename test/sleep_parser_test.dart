@@ -338,21 +338,24 @@ void main() {
       }
     });
 
-    test('non-DST day still computes correctly with dynamic day length (SP-3)', () {
-      // A normal 24-hour day should still produce the same results
-      // as before — the dynamic computation just happens to equal 1440.
-      final pl = Uint8List.fromList([
-        0x01, // dayOffset
-        0x00, 0x53, // endMinOfDay BE = 83 (01:23)
-        0x04, 0x75, // awake 117 min
-        0x01, 0x0F, // light 15 min
-        0x02, 0x78, // deep 120 min
-        0x03, 0x14, // rem  20 min
-        0x01, 0x1E, // light 30 min
-      ]);
-      final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
-      expect(segs.first.start, DateTime(2026, 6, 19, 20, 21));
-    });
+    test(
+      'non-DST day still computes correctly with dynamic day length (SP-3)',
+      () {
+        // A normal 24-hour day should still produce the same results
+        // as before — the dynamic computation just happens to equal 1440.
+        final pl = Uint8List.fromList([
+          0x01, // dayOffset
+          0x00, 0x53, // endMinOfDay BE = 83 (01:23)
+          0x04, 0x75, // awake 117 min
+          0x01, 0x0F, // light 15 min
+          0x02, 0x78, // deep 120 min
+          0x03, 0x14, // rem  20 min
+          0x01, 0x1E, // light 30 min
+        ]);
+        final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
+        expect(segs.first.start, DateTime(2026, 6, 19, 20, 21));
+      },
+    );
 
     test('blocks that do NOT wrap midnight stay on the wake-up day', () {
       // endMin = 480 (08:00), total = 240 min ⇒ startMin = 240
@@ -376,33 +379,36 @@ void main() {
       expect(segs.first.start, DateTime(2026, 6, 20, 4, 0));
     });
 
-    test('empty pair block after endMin does not misalign on trailing bytes (SP-1)', () {
-      // Regression: after reading endMin, if the buffer ends immediately
-      // (no pairs), the old code did `continue` with `i` unchanged relative
-      // to the outer while check. The next outer iteration would then read
-      // a new endMin from what was actually the start of pair data of the
-      // NEXT block, causing misalignment. The fix: when pairs is empty and
-      // we did NOT hit a zero/zero terminator, break out of the outer loop.
-      //
-      // Payload: dayOffset=1, endMin=52 (0x00 0x34), then a valid block
-      // endMin=120 (0x00 0x78), (light=1, 30min). The first block has no
-      // pairs, so the parser should stop and NOT misread 0x00 0x78 as
-      // a pair (stage=0, dur=120) which would then misalign the next block.
-      final pl = Uint8List.fromList([
-        0x01, // dayOffset
-        0x00, 0x34, // endMin = 52 — block with NO pairs
-        0x00, 0x78, // endMin = 120 — next block
-        0x01, 0x1E, // light, 30 min
-      ]);
-      final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
-      // The first block is skipped (empty pairs), and the parser should
-      // break cleanly instead of misaligning. The second block should be
-      // parsed correctly.
-      expect(segs, hasLength(1));
-      expect(segs.single.stage, SleepStage.light);
-      expect(segs.single.duration.inMinutes, 30);
-      expect(segs.single.start, DateTime(2026, 6, 20, 1, 30));
-    });
+    test(
+      'empty pair block after endMin does not misalign on trailing bytes (SP-1)',
+      () {
+        // Regression: after reading endMin, if the buffer ends immediately
+        // (no pairs), the old code did `continue` with `i` unchanged relative
+        // to the outer while check. The next outer iteration would then read
+        // a new endMin from what was actually the start of pair data of the
+        // NEXT block, causing misalignment. The fix: when pairs is empty and
+        // we did NOT hit a zero/zero terminator, break out of the outer loop.
+        //
+        // Payload: dayOffset=1, endMin=52 (0x00 0x34), then a valid block
+        // endMin=120 (0x00 0x78), (light=1, 30min). The first block has no
+        // pairs, so the parser should stop and NOT misread 0x00 0x78 as
+        // a pair (stage=0, dur=120) which would then misalign the next block.
+        final pl = Uint8List.fromList([
+          0x01, // dayOffset
+          0x00, 0x34, // endMin = 52 — block with NO pairs
+          0x00, 0x78, // endMin = 120 — next block
+          0x01, 0x1E, // light, 30 min
+        ]);
+        final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
+        // The first block is skipped (empty pairs), and the parser should
+        // break cleanly instead of misaligning. The second block should be
+        // parsed correctly.
+        expect(segs, hasLength(1));
+        expect(segs.single.stage, SleepStage.light);
+        expect(segs.single.duration.inMinutes, 30);
+        expect(segs.single.start, DateTime(2026, 6, 20, 1, 30));
+      },
+    );
 
     test('empty pair block with trailing garbage stops parsing (SP-1)', () {
       // After endMin, only 1 byte remains — not enough for a pair.
@@ -417,22 +423,25 @@ void main() {
       expect(segs, isEmpty);
     });
 
-    test('empty pair block followed by terminator skips block and continues (SP-1)', () {
-      // Block 1: endMin=52, no pairs, then zero/zero terminator
-      // Block 2: endMin=120, (light=1, 30min)
-      final pl = Uint8List.fromList([
-        0x01, // dayOffset
-        0x00, 0x34, // endMin = 52 — block with NO pairs
-        0x00, 0x00, // terminator for block 1
-        0x00, 0x78, // endMin = 120 — block 2
-        0x01, 0x1E, // light, 30 min
-      ]);
-      final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
-      expect(segs, hasLength(1));
-      expect(segs.single.stage, SleepStage.light);
-      expect(segs.single.duration.inMinutes, 30);
-      expect(segs.single.start, DateTime(2026, 6, 20, 1, 30));
-    });
+    test(
+      'empty pair block followed by terminator skips block and continues (SP-1)',
+      () {
+        // Block 1: endMin=52, no pairs, then zero/zero terminator
+        // Block 2: endMin=120, (light=1, 30min)
+        final pl = Uint8List.fromList([
+          0x01, // dayOffset
+          0x00, 0x34, // endMin = 52 — block with NO pairs
+          0x00, 0x00, // terminator for block 1
+          0x00, 0x78, // endMin = 120 — block 2
+          0x01, 0x1E, // light, 30 min
+        ]);
+        final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
+        expect(segs, hasLength(1));
+        expect(segs.single.stage, SleepStage.light);
+        expect(segs.single.duration.inMinutes, 30);
+        expect(segs.single.start, DateTime(2026, 6, 20, 1, 30));
+      },
+    );
 
     test('lunch: empty pair block after endMin does not misalign (SP-1)', () {
       // Same bug for lunch/nap parser (no dayOffset prefix).
@@ -465,55 +474,65 @@ void main() {
       expect(segs.single.start, DateTime(2026, 6, 20, 1, 30));
     });
 
-    test('endMin == 0 sentinel with terminator skips block and continues (SP-5)', () {
-      // The sentinel may be followed by a zero/zero terminator; the
-      // parser should still continue to the next block.
-      final pl = Uint8List.fromList([
-        0x01, // dayOffset
-        0x00, 0x00, // endMin = 0 — no-data sentinel
-        0x00, 0x00, // terminator
-        0x00, 0x78, // endMin = 120 — next block
-        0x01, 0x1E, // light, 30 min
-      ]);
-      final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
-      expect(segs, hasLength(1));
-      expect(segs.single.stage, SleepStage.light);
-      expect(segs.single.duration.inMinutes, 30);
-      expect(segs.single.start, DateTime(2026, 6, 20, 1, 30));
-    });
+    test(
+      'endMin == 0 sentinel with terminator skips block and continues (SP-5)',
+      () {
+        // The sentinel may be followed by a zero/zero terminator; the
+        // parser should still continue to the next block.
+        final pl = Uint8List.fromList([
+          0x01, // dayOffset
+          0x00, 0x00, // endMin = 0 — no-data sentinel
+          0x00, 0x00, // terminator
+          0x00, 0x78, // endMin = 120 — next block
+          0x01, 0x1E, // light, 30 min
+        ]);
+        final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
+        expect(segs, hasLength(1));
+        expect(segs.single.stage, SleepStage.light);
+        expect(segs.single.duration.inMinutes, 30);
+        expect(segs.single.start, DateTime(2026, 6, 20, 1, 30));
+      },
+    );
 
-    test('lunch: endMin == 0 with empty pairs is a no-data sentinel (SP-5)', () {
-      // Lunch/nap variant has no dayOffset prefix.
-      final pl = Uint8List.fromList([
-        0x00, 0x00, // endMin = 0 — no-data sentinel, no pairs
-        0x00, 0x78, // endMin = 120 — next block
-        0x01, 0x1E, // light, 30 min
-      ]);
-      final segs = SleepParser.parseLunchSleepSegments(pl, anchor: anchor);
-      expect(segs, hasLength(1));
-      expect(segs.single.stage, SleepStage.light);
-      expect(segs.single.duration.inMinutes, 30);
-      expect(segs.single.start, DateTime(2026, 6, 20, 1, 30));
-    });
+    test(
+      'lunch: endMin == 0 with empty pairs is a no-data sentinel (SP-5)',
+      () {
+        // Lunch/nap variant has no dayOffset prefix.
+        final pl = Uint8List.fromList([
+          0x00, 0x00, // endMin = 0 — no-data sentinel, no pairs
+          0x00, 0x78, // endMin = 120 — next block
+          0x01, 0x1E, // light, 30 min
+        ]);
+        final segs = SleepParser.parseLunchSleepSegments(pl, anchor: anchor);
+        expect(segs, hasLength(1));
+        expect(segs.single.stage, SleepStage.light);
+        expect(segs.single.duration.inMinutes, 30);
+        expect(segs.single.start, DateTime(2026, 6, 20, 1, 30));
+      },
+    );
 
     test('endMin == 0 sentinel at end of payload returns empty (SP-5)', () {
       // When the sentinel is the last thing in the payload, there is no
       // next block to parse — the result is simply empty.
       final pl = Uint8List.fromList([
         0x01, // dayOffset
-        0x00, 0x00, // endMin = 0 — no-data sentinel, no pairs, no trailing bytes
+        0x00,
+        0x00, // endMin = 0 — no-data sentinel, no pairs, no trailing bytes
       ]);
       final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
       expect(segs, isEmpty);
     });
 
-    test('lunch: endMin == 0 sentinel at end of payload returns empty (SP-5)', () {
-      final pl = Uint8List.fromList([
-        0x00, 0x00, // endMin = 0 — no-data sentinel, no pairs
-      ]);
-      final segs = SleepParser.parseLunchSleepSegments(pl, anchor: anchor);
-      expect(segs, isEmpty);
-    });
+    test(
+      'lunch: endMin == 0 sentinel at end of payload returns empty (SP-5)',
+      () {
+        final pl = Uint8List.fromList([
+          0x00, 0x00, // endMin = 0 — no-data sentinel, no pairs
+        ]);
+        final segs = SleepParser.parseLunchSleepSegments(pl, anchor: anchor);
+        expect(segs, isEmpty);
+      },
+    );
     test('stale-buffer echo is skipped but genuine block is kept (SP-2)', () {
       // Live H59MA v13 capture: the response for dayOffset=2 contained
       // the previous dayOffset=1 record appended (stale buffer). The
@@ -578,22 +597,28 @@ void main() {
   group('SleepParser — SP-4 empty/null payload tracing', () {
     final anchor = DateTime(2026, 6, 20);
 
-    test('night: 1-byte payload (only dayOffset) logs warn and returns empty', () {
-      AppLog.instance.clear();
-      final pl = Uint8List.fromList([0x01]); // dayOffset only
-      expect(SleepParser.parseNightSleepSegments(pl, anchor: anchor), isEmpty);
-      expect(
-        AppLog.instance.entries.any(
-          (e) =>
-              e.tag == 'sleep' &&
-              e.level == LogLevel.warn &&
-              e.message.contains('too short') &&
-              e.message.contains('len=0'),
-        ),
-        isTrue,
-        reason: 'after stripping dayOffset, length is 0',
-      );
-    });
+    test(
+      'night: 1-byte payload (only dayOffset) logs warn and returns empty',
+      () {
+        AppLog.instance.clear();
+        final pl = Uint8List.fromList([0x01]); // dayOffset only
+        expect(
+          SleepParser.parseNightSleepSegments(pl, anchor: anchor),
+          isEmpty,
+        );
+        expect(
+          AppLog.instance.entries.any(
+            (e) =>
+                e.tag == 'sleep' &&
+                e.level == LogLevel.warn &&
+                e.message.contains('too short') &&
+                e.message.contains('len=0'),
+          ),
+          isTrue,
+          reason: 'after stripping dayOffset, length is 0',
+        );
+      },
+    );
 
     test('night: 2-byte payload logs warn and returns empty', () {
       AppLog.instance.clear();
@@ -661,19 +686,29 @@ void main() {
       );
     });
 
-    test('night: 4-byte payload (dayOffset + endMin + no pairs) is valid empty', () {
-      AppLog.instance.clear();
-      final pl = Uint8List.fromList([0x01, 0x00, 0x34]); // dayOffset + endMin BE
-      expect(SleepParser.parseNightSleepSegments(pl, anchor: anchor), isEmpty);
-      // Same as lunch 2-byte: endMin is read, inner loop has no pairs,
-      // outer loop exits. No warn.
-      expect(
-        AppLog.instance.entries.any(
-          (e) => e.tag == 'sleep' && e.level == LogLevel.warn,
-        ),
-        isFalse,
-      );
-    });
+    test(
+      'night: 4-byte payload (dayOffset + endMin + no pairs) is valid empty',
+      () {
+        AppLog.instance.clear();
+        final pl = Uint8List.fromList([
+          0x01,
+          0x00,
+          0x34,
+        ]); // dayOffset + endMin BE
+        expect(
+          SleepParser.parseNightSleepSegments(pl, anchor: anchor),
+          isEmpty,
+        );
+        // Same as lunch 2-byte: endMin is read, inner loop has no pairs,
+        // outer loop exits. No warn.
+        expect(
+          AppLog.instance.entries.any(
+            (e) => e.tag == 'sleep' && e.level == LogLevel.warn,
+          ),
+          isFalse,
+        );
+      },
+    );
 
     test('well-formed payload does not log warn', () {
       AppLog.instance.clear();
@@ -682,7 +717,10 @@ void main() {
         0x00, 0x34, // endMin BE = 52
         0x01, 0x1E, // light, 30 min
       ]);
-      expect(SleepParser.parseNightSleepSegments(pl, anchor: anchor), hasLength(1));
+      expect(
+        SleepParser.parseNightSleepSegments(pl, anchor: anchor),
+        hasLength(1),
+      );
       expect(
         AppLog.instance.entries.any(
           (e) => e.tag == 'sleep' && e.level == LogLevel.warn,

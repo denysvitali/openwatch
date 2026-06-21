@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:openwatch/core/ble/ble_transport.dart';
 import 'package:openwatch/core/protocol/channel_a.dart';
 import 'package:openwatch/core/protocol/codec.dart';
+import 'package:openwatch/core/protocol/commands.dart';
 import 'package:openwatch/core/protocol/opcodes.dart';
 
 class _StubTransport implements BleTransport {
@@ -985,5 +986,36 @@ void main() {
         expect(r.auxHi, 0x9a);
       },
     );
+  });
+
+  group('Commands', () {
+    test('readHeartRateHistory packs BCD date + slot as u32le', () {
+      final frame = Commands.readHeartRateHistory(
+        day: DateTime(2026, 6, 20),
+        slot: 3,
+      );
+      // Opcode is first byte.
+      expect(frame[0], OpA.readHeartRate);
+      // Payload bytes 1..4 are the little-endian packed word.
+      final packed =
+          frame[1] | (frame[2] << 8) | (frame[3] << 16) | (frame[4] << 24);
+      expect(packed & 0xFF, Codec.toBcd(26)); // year
+      expect((packed >> 8) & 0xFF, Codec.toBcd(6)); // month
+      expect((packed >> 16) & 0xFF, Codec.toBcd(20)); // day
+      expect((packed >> 24) & 0xFF, 3); // slot
+    });
+
+    test('readHeartRateHistory uses local wall-clock date components', () {
+      // HS-10: a UTC midnight that falls on a different local day must
+      // NOT shift the packed BCD.  We simulate a +05:30 timezone by
+      // constructing a DateTime at 2026-06-20 00:00 local (which is
+      // 2026-06-19 18:30 UTC).  The command must still ask for 20 June.
+      final localMidnight = DateTime(2026, 6, 20);
+      final frame = Commands.readHeartRateHistory(day: localMidnight);
+      final packed = frame[1] | (frame[2] << 8) | (frame[3] << 16);
+      expect(packed & 0xFF, Codec.toBcd(26));
+      expect((packed >> 8) & 0xFF, Codec.toBcd(6));
+      expect((packed >> 16) & 0xFF, Codec.toBcd(20));
+    });
   });
 }

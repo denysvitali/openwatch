@@ -99,11 +99,7 @@ class _RxEntry {
 /// (e.g. after midnight) from a day that simply has no activity summary.
 @immutable
 class DailyTotals {
-  const DailyTotals({
-    this.steps,
-    this.calories,
-    this.distanceMeters,
-  });
+  const DailyTotals({this.steps, this.calories, this.distanceMeters});
   final int? steps;
   final int? calories;
   final int? distanceMeters;
@@ -548,6 +544,11 @@ class HistorySync extends ChangeNotifier {
           _progressCurrent = fetched;
           notifyListeners();
           await transport.sendA(
+            // readHeartRateHistory expects a local-midnight DateTime so
+            // the packed BCD date matches the firmware's wall-clock day
+            // counter (setTime also sends local BCD).  Using UTC here
+            // would shift the date near midnight for positive-offset
+            // timezones (HS-10).
             Commands.readHeartRateHistory(day: day.midnight),
           );
           await _drainRx(drainDuration);
@@ -1055,8 +1056,8 @@ class HistorySync extends ChangeNotifier {
             AppLog.instance.log(
               'HistorySync',
               'sleep merge conflict at ${s.start}: '
-              'existing ${existing.duration.inMinutes}min ${existing.stage.name} '
-              'vs new ${s.duration.inMinutes}min ${s.stage.name} — keeping new',
+                  'existing ${existing.duration.inMinutes}min ${existing.stage.name} '
+                  'vs new ${s.duration.inMinutes}min ${s.stage.name} — keeping new',
               level: LogLevel.warn,
             );
           }
@@ -1130,8 +1131,8 @@ class HistorySync extends ChangeNotifier {
             AppLog.instance.log(
               'HistorySync',
               'sleep merge conflict at ${s.start}: '
-              'existing ${existing.duration.inMinutes}min ${existing.stage.name} '
-              'vs new ${s.duration.inMinutes}min ${s.stage.name} — keeping new',
+                  'existing ${existing.duration.inMinutes}min ${existing.stage.name} '
+                  'vs new ${s.duration.inMinutes}min ${s.stage.name} — keeping new',
               level: LogLevel.warn,
             );
           }

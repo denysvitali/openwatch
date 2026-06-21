@@ -153,7 +153,7 @@ class SleepParser {
       AppLog.instance.warn(
         'sleep',
         '$source payload too short for chained block '
-        '(len=${pl.length}, need>=4)',
+            '(len=${pl.length}, need>=4)',
       );
       return out;
     }

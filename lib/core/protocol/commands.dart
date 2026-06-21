@@ -167,17 +167,21 @@ class Commands {
 
   /// `ReadHeartRateReq` (0x15): request a stored HR record for a given day.
   ///
-  /// **Wire format is a packed BCD date index, NOT a unix timestamp**
-  /// (see `GHIDRA_DECOMPILATION.md` §3.12, `FUN_0082cf48` +
-  /// `FUN_008279c4`). The 4-byte index is laid out as
-  /// `year_lo_bcd | (month_bcd << 8) | (day_bcd << 16) | (slot << 24)`,
-  /// matching the byte layout of `setTime`'s BCD date bytes so the
-  /// firmware's shared month-index → epoch helper can decode it
-  /// without any endianness or field-width ambiguity.
+  /// `ReadHeartRate` (0x15): requests the 5-minute BPM history for a
+  /// specific calendar day.
   ///
-  /// * [day] — calendar day the record belongs to. The handler ignores
-  ///   the hour/minute/second components; only year/month/day
-  ///   participate in the lookup.
+  /// The firmware indexes HR records by packed BCD (year, month, day) in a
+  /// 32-bit little-endian word.  Because the firmware's RTC is set with
+  /// local wall-clock time via [setTime], the date here must also be in
+  /// the **same local timezone** — otherwise a UTC midnight that falls on
+  /// a different local day would request the wrong calendar page.  Callers
+  /// that already hold a `DateOnly` should pass `DateOnly.midnight` (which
+  /// is local midnight) so the packed BCD matches the firmware's day
+  /// counter.
+  ///
+  /// * [day] — calendar day to query.  Only `year % 100`, `month`, and
+  ///   `day` are used; the time-of-day fields are ignored.  Must be local
+  ///   time, not UTC.
   /// * [slot] — record index within that day (`0..N`); `0` is the
   ///   most-recent record. Sending `0x00000000` (all bytes zero) is
   ///   the firmware's "current/latest" sentinel and bypasses the

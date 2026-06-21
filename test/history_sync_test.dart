@@ -304,127 +304,127 @@ void main() {
       },
     );
 
-    test(
-      'late Channel-A HR frame is attributed to correct day even when '
-      'sync loop has moved on to sleep/activity (HS-8)',
-      () async {
-        final t = _StubTransport();
-        final d = ChannelADispatcher(t);
-        d.bind();
-        final sync = _testSync(t, d);
-        final syncFuture = sync.syncAll(daysBack: 2);
+    test('late Channel-A HR frame is attributed to correct day even when '
+        'sync loop has moved on to sleep/activity (HS-8)', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final sync = _testSync(t, d);
+      final syncFuture = sync.syncAll(daysBack: 2);
 
-        // Wait for the first day (today) HR poll to be sent.
-        await Future<void>.delayed(const Duration(milliseconds: 150));
+      // Wait for the first day (today) HR poll to be sent.
+      await Future<void>.delayed(const Duration(milliseconds: 150));
 
-        // Today: send a header + chunk 1 that will NOT flush yet (seq=2).
-        // Day-start timestamp = 2026-06-19 00:00 UTC = 0x6A34F600 (LE).
-        final dayStartBytes = [0x00, 0xF6, 0x34, 0x6A];
-        t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x18, 0x80, 0x05]));
-        t.inA.add(
-          Codec.buildChannelA(OpA.readHeartRate, [
-            0x01, // seq=1 (need 2 chunks to flush)
-            ...dayStartBytes,
-            0x60, 0x64, 0x66, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-          ]),
-        );
+      // Today: send a header + chunk 1 that will NOT flush yet (seq=2).
+      // Day-start timestamp = 2026-06-19 00:00 UTC = 0x6A34F600 (LE).
+      final dayStartBytes = [0x00, 0xF6, 0x34, 0x6A];
+      t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x18, 0x80, 0x05]));
+      t.inA.add(
+        Codec.buildChannelA(OpA.readHeartRate, [
+          0x01, // seq=1 (need 2 chunks to flush)
+          ...dayStartBytes,
+          0x60, 0x64, 0x66, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ]),
+      );
 
-        // Let the drain for today run.
-        await Future<void>.delayed(const Duration(milliseconds: 150));
+      // Let the drain for today run.
+      await Future<void>.delayed(const Duration(milliseconds: 150));
 
-        // Now the sync loop moves to yesterday (day 1). The chunk for
-        // today is still pending in _hrChunks because seq=2 was needed.
-        // Wait for yesterday's poll to be sent.
-        await Future<void>.delayed(const Duration(milliseconds: 150));
+      // Now the sync loop moves to yesterday (day 1). The chunk for
+      // today is still pending in _hrChunks because seq=2 was needed.
+      // Wait for yesterday's poll to be sent.
+      await Future<void>.delayed(const Duration(milliseconds: 150));
 
-        // Now inject the SECOND chunk for TODAY, but AFTER the sync loop
-        // has moved _currentSyncDay to yesterday. In the old code this
-        // would be mis-attributed to yesterday because _flushHrChunks read
-        // _currentSyncDay at flush time. With HS-8 fix, the day is
-        // captured in the _RxEntry when the frame arrives.
-        t.inA.add(
-          Codec.buildChannelA(OpA.readHeartRate, [
-            0x02, // seq=2 (now count >= seq, so flush)
-            ...dayStartBytes,
-            0x6A, 0x6E, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-          ]),
-        );
+      // Now inject the SECOND chunk for TODAY, but AFTER the sync loop
+      // has moved _currentSyncDay to yesterday. In the old code this
+      // would be mis-attributed to yesterday because _flushHrChunks read
+      // _currentSyncDay at flush time. With HS-8 fix, the day is
+      // captured in the _RxEntry when the frame arrives.
+      t.inA.add(
+        Codec.buildChannelA(OpA.readHeartRate, [
+          0x02, // seq=2 (now count >= seq, so flush)
+          ...dayStartBytes,
+          0x6A, 0x6E, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ]),
+      );
 
-        // Wait for the drain to process the late frame.
-        await Future<void>.delayed(const Duration(milliseconds: 150));
+      // Wait for the drain to process the late frame.
+      await Future<void>.delayed(const Duration(milliseconds: 150));
 
-        // Let sync finish.
-        await syncFuture;
+      // Let sync finish.
+      await syncFuture;
 
-        // The late frame should be attributed to today, not yesterday.
-        final today = DateOnly.today();
-        final yesterday = today.addDays(-1);
-        final todayHistory = sync.dayOf(today);
-        final yesterdayHistory = sync.dayOf(yesterday);
+      // The late frame should be attributed to today, not yesterday.
+      final today = DateOnly.today();
+      final yesterday = today.addDays(-1);
+      final todayHistory = sync.dayOf(today);
+      final yesterdayHistory = sync.dayOf(yesterday);
 
-        expect(todayHistory, isNotNull);
-        expect(todayHistory!.hr, isNotEmpty,
-            reason: 'today should have HR samples from the late frame');
+      expect(todayHistory, isNotNull);
+      expect(
+        todayHistory!.hr,
+        isNotEmpty,
+        reason: 'today should have HR samples from the late frame',
+      );
 
-        // Yesterday should have no HR samples (we only sent a header for
-        // today, and the late chunk was for today).
-        expect(yesterdayHistory == null || yesterdayHistory.hr.isEmpty, isTrue,
-            reason: 'yesterday must not receive today\'s late HR samples');
+      // Yesterday should have no HR samples (we only sent a header for
+      // today, and the late chunk was for today).
+      expect(
+        yesterdayHistory == null || yesterdayHistory.hr.isEmpty,
+        isTrue,
+        reason: 'yesterday must not receive today\'s late HR samples',
+      );
 
-        sync.dispose();
-        d.dispose();
-      },
-    );
+      sync.dispose();
+      d.dispose();
+    });
 
-    test(
-      '0xFF empty-day frame is attributed to correct day when captured '
-      '(HS-8)',
-      () async {
-        final t = _StubTransport();
-        final d = ChannelADispatcher(t);
-        d.bind();
-        final sync = _testSync(t, d);
-        final syncFuture = sync.syncAll(daysBack: 2);
+    test('0xFF empty-day frame is attributed to correct day when captured '
+        '(HS-8)', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final sync = _testSync(t, d);
+      final syncFuture = sync.syncAll(daysBack: 2);
 
-        // Wait for today HR poll.
-        await Future<void>.delayed(const Duration(milliseconds: 150));
+      // Wait for today HR poll.
+      await Future<void>.delayed(const Duration(milliseconds: 150));
 
-        // Send an empty-day response for today.
-        t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0xff]));
+      // Send an empty-day response for today.
+      t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0xff]));
 
-        // Wait for drain.
-        await Future<void>.delayed(const Duration(milliseconds: 150));
+      // Wait for drain.
+      await Future<void>.delayed(const Duration(milliseconds: 150));
 
-        // Wait for yesterday HR poll.
-        await Future<void>.delayed(const Duration(milliseconds: 150));
+      // Wait for yesterday HR poll.
+      await Future<void>.delayed(const Duration(milliseconds: 150));
 
-        // Now send a late 0xFF for today, after _currentSyncDay has moved
-        // to yesterday. With HS-8, the day is captured at enqueue time.
-        t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0xff]));
+      // Now send a late 0xFF for today, after _currentSyncDay has moved
+      // to yesterday. With HS-8, the day is captured at enqueue time.
+      t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0xff]));
 
-        // Wait for drain.
-        await Future<void>.delayed(const Duration(milliseconds: 150));
+      // Wait for drain.
+      await Future<void>.delayed(const Duration(milliseconds: 150));
 
-        await syncFuture;
+      await syncFuture;
 
-        // Both days should have empty HR records (the 0xFF commits an
-        // empty day). The late 0xFF should not create a duplicate or
-        // mis-attributed record.
-        final today = DateOnly.today();
-        final yesterday = today.addDays(-1);
-        final todayHistory = sync.dayOf(today);
-        final yesterdayHistory = sync.dayOf(yesterday);
+      // Both days should have empty HR records (the 0xFF commits an
+      // empty day). The late 0xFF should not create a duplicate or
+      // mis-attributed record.
+      final today = DateOnly.today();
+      final yesterday = today.addDays(-1);
+      final todayHistory = sync.dayOf(today);
+      final yesterdayHistory = sync.dayOf(yesterday);
 
-        expect(todayHistory, isNotNull);
-        expect(todayHistory!.hr, isEmpty);
+      expect(todayHistory, isNotNull);
+      expect(todayHistory!.hr, isEmpty);
 
-        // Yesterday should also be empty (no chunks sent for it).
-        expect(yesterdayHistory == null || yesterdayHistory.hr.isEmpty, isTrue);
+      // Yesterday should also be empty (no chunks sent for it).
+      expect(yesterdayHistory == null || yesterdayHistory.hr.isEmpty, isTrue);
 
-        sync.dispose();
-        d.dispose();
-      },
-    );
+      sync.dispose();
+      d.dispose();
+    });
 
     // ------------------------------------------------------------------
     // 0x37 pressureSetting + 0x39 hrvSetting two-phase reassembly.
@@ -739,75 +739,72 @@ void main() {
       },
     );
 
-    test(
-      'activity summary 0x2a terminator with non-zero padding stops at '
-          'first dayOffset==0 (HS-7)',
-      () async {
-        final t = _StubTransport();
-        final d = ChannelADispatcher(t);
-        final bParser = ChannelBParser(t);
-        d.bind();
-        final sync = _testSync(t, d, bParser: bParser);
-        final future = sync.syncAll(daysBack: 1);
-        await Future<void>.delayed(const Duration(milliseconds: 20));
+    test('activity summary 0x2a terminator with non-zero padding stops at '
+        'first dayOffset==0 (HS-7)', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      final bParser = ChannelBParser(t);
+      d.bind();
+      final sync = _testSync(t, d, bParser: bParser);
+      final future = sync.syncAll(daysBack: 1);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
 
-        // Build a Channel-B 0x2a payload with two entries:
-        //   entry 1: dayOffset = 1 (yesterday), body has data
-        //   entry 2: dayOffset = 0 (terminator), body has non-zero padding
-        //            (firmware sometimes pads sentinel entries with garbage)
-        //   entry 3: dayOffset = 2 (garbage beyond terminator) — must NOT be read
-        final body1 = List<int>.filled(48, 0x00);
-        body1[0] = 0x00;
-        body1[1] = 0x00;
-        body1[2] = 0x64; // steps = 100
-        body1[6] = 0x00;
-        body1[7] = 0x00;
-        body1[8] = 0x32; // calories = 50
-        body1[9] = 0x00;
-        body1[10] = 0x00;
-        body1[11] = 0x50; // distance = 80
+      // Build a Channel-B 0x2a payload with two entries:
+      //   entry 1: dayOffset = 1 (yesterday), body has data
+      //   entry 2: dayOffset = 0 (terminator), body has non-zero padding
+      //            (firmware sometimes pads sentinel entries with garbage)
+      //   entry 3: dayOffset = 2 (garbage beyond terminator) — must NOT be read
+      final body1 = List<int>.filled(48, 0x00);
+      body1[0] = 0x00;
+      body1[1] = 0x00;
+      body1[2] = 0x64; // steps = 100
+      body1[6] = 0x00;
+      body1[7] = 0x00;
+      body1[8] = 0x32; // calories = 50
+      body1[9] = 0x00;
+      body1[10] = 0x00;
+      body1[11] = 0x50; // distance = 80
 
-        final body2 = List<int>.filled(48, 0x00);
-        body2[0] = 0xAA; // non-zero padding in sentinel body
-        body2[1] = 0xBB;
-        body2[2] = 0xCC;
+      final body2 = List<int>.filled(48, 0x00);
+      body2[0] = 0xAA; // non-zero padding in sentinel body
+      body2[1] = 0xBB;
+      body2[2] = 0xCC;
 
-        final body3 = List<int>.filled(48, 0x00);
-        body3[0] = 0x00;
-        body3[1] = 0x00;
-        body3[2] = 0xFF; // would be steps = 255 if parsed
+      final body3 = List<int>.filled(48, 0x00);
+      body3[0] = 0x00;
+      body3[1] = 0x00;
+      body3[2] = 0xFF; // would be steps = 255 if parsed
 
-        final payload = Uint8List.fromList([
-          0x01, ...body1, // yesterday with data
-          0x00, ...body2, // terminator with non-zero padding
-          0x02, ...body3, // garbage beyond terminator
-        ]);
-        t.inB.add(Codec.buildChannelB(OpB.activitySummary, payload));
+      final payload = Uint8List.fromList([
+        0x01, ...body1, // yesterday with data
+        0x00, ...body2, // terminator with non-zero padding
+        0x02, ...body3, // garbage beyond terminator
+      ]);
+      t.inB.add(Codec.buildChannelB(OpB.activitySummary, payload));
 
-        await future;
+      await future;
 
-        // Only yesterday should be recorded; the dayOffset=0 terminator
-        // must stop parsing even though its body is non-zero.
-        final yesterday = DateOnly.today().addDays(-1);
-        final yestHistory = sync.dayOf(yesterday);
-        expect(yestHistory, isNotNull);
-        expect(yestHistory!.steps, 100);
-        expect(yestHistory.energyKcal, 50);
-        expect(yestHistory.distanceMeters, 80);
+      // Only yesterday should be recorded; the dayOffset=0 terminator
+      // must stop parsing even though its body is non-zero.
+      final yesterday = DateOnly.today().addDays(-1);
+      final yestHistory = sync.dayOf(yesterday);
+      expect(yestHistory, isNotNull);
+      expect(yestHistory!.steps, 100);
+      expect(yestHistory.energyKcal, 50);
+      expect(yestHistory.distanceMeters, 80);
 
-        // The day before yesterday (dayOffset=2) must NOT appear.
-        final twoDaysAgo = DateOnly.today().addDays(-2);
-        final twoDaysAgoHistory = sync.dayOf(twoDaysAgo);
-        expect(
-          twoDaysAgoHistory == null || twoDaysAgoHistory.steps == null,
-          isTrue,
-          reason: 'dayOffset=2 beyond terminator must not be ingested',
-        );
+      // The day before yesterday (dayOffset=2) must NOT appear.
+      final twoDaysAgo = DateOnly.today().addDays(-2);
+      final twoDaysAgoHistory = sync.dayOf(twoDaysAgo);
+      expect(
+        twoDaysAgoHistory == null || twoDaysAgoHistory.steps == null,
+        isTrue,
+        reason: 'dayOffset=2 beyond terminator must not be ingested',
+      );
 
-        sync.dispose();
-        d.dispose();
-      },
-    );
+      sync.dispose();
+      d.dispose();
+    });
 
     test(
       'activity summary 0x2a all-zero body terminator still stops parsing (HS-7)',
@@ -903,150 +900,167 @@ void main() {
     // HS-6: Step/calorie totals must not fallback to previous day on 0.
     // ------------------------------------------------------------------
 
-    test(
-      'activity summary 0x2a with all-zero body preserves nulls, '
-      'not previous-day totals (HS-6)',
-      () async {
-        final t = _StubTransport();
-        final d = ChannelADispatcher(t);
-        final bParser = ChannelBParser(t);
-        d.bind();
-        final sync = _testSync(t, d, bParser: bParser);
+    test('activity summary 0x2a with all-zero body preserves nulls, '
+        'not previous-day totals (HS-6)', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      final bParser = ChannelBParser(t);
+      d.bind();
+      final sync = _testSync(t, d, bParser: bParser);
 
-        // Pre-seed yesterday with non-zero totals via a fake store so
-        // _days is hydrated before syncAll runs.
-        final yesterday = DateOnly.today().addDays(-1);
-        final fakeStore = _FakeHistoryStore(seed: {
+      // Pre-seed yesterday with non-zero totals via a fake store so
+      // _days is hydrated before syncAll runs.
+      final yesterday = DateOnly.today().addDays(-1);
+      final fakeStore = _FakeHistoryStore(
+        seed: {
           yesterday: DailyHistory(
             day: yesterday,
             steps: 12345,
             energyKcal: 678,
             distanceMeters: 9876,
           ),
-        });
-        await sync.bindStore(fakeStore);
+        },
+      );
+      await sync.bindStore(fakeStore);
 
-        final future = sync.syncAll(daysBack: 1);
-        await Future<void>.delayed(const Duration(milliseconds: 20));
+      final future = sync.syncAll(daysBack: 1);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
 
-        // Build a Channel-B 0x2a payload with one entry:
-        //   dayOffset = 0 (today)
-        //   48-byte body all zeros → genuine "no activity yet today"
-        final body = List<int>.filled(48, 0x00);
-        final payload = Uint8List.fromList([0x00, ...body]);
-        t.inB.add(Codec.buildChannelB(OpB.activitySummary, payload));
+      // Build a Channel-B 0x2a payload with one entry:
+      //   dayOffset = 0 (today)
+      //   48-byte body all zeros → genuine "no activity yet today"
+      final body = List<int>.filled(48, 0x00);
+      final payload = Uint8List.fromList([0x00, ...body]);
+      t.inB.add(Codec.buildChannelB(OpB.activitySummary, payload));
 
-        await future;
+      await future;
 
-        final today = DateOnly.today();
-        final todayHistory = sync.dayOf(today);
-        expect(todayHistory, isNotNull);
-        // The all-zero body must produce null totals, NOT fallback to
-        // yesterday's 12345/678/9876 values.
-        expect(todayHistory!.steps, isNull, reason: 'steps must be null for all-zero body');
-        expect(todayHistory.energyKcal, isNull, reason: 'calories must be null for all-zero body');
-        expect(todayHistory.distanceMeters, isNull, reason: 'distance must be null for all-zero body');
+      final today = DateOnly.today();
+      final todayHistory = sync.dayOf(today);
+      expect(todayHistory, isNotNull);
+      // The all-zero body must produce null totals, NOT fallback to
+      // yesterday's 12345/678/9876 values.
+      expect(
+        todayHistory!.steps,
+        isNull,
+        reason: 'steps must be null for all-zero body',
+      );
+      expect(
+        todayHistory.energyKcal,
+        isNull,
+        reason: 'calories must be null for all-zero body',
+      );
+      expect(
+        todayHistory.distanceMeters,
+        isNull,
+        reason: 'distance must be null for all-zero body',
+      );
 
-        // Yesterday must remain untouched.
-        final yestHistory = sync.dayOf(yesterday);
-        expect(yestHistory!.steps, 12345);
-        expect(yestHistory.energyKcal, 678);
-        expect(yestHistory.distanceMeters, 9876);
+      // Yesterday must remain untouched.
+      final yestHistory = sync.dayOf(yesterday);
+      expect(yestHistory!.steps, 12345);
+      expect(yestHistory.energyKcal, 678);
+      expect(yestHistory.distanceMeters, 9876);
 
-        sync.dispose();
-        d.dispose();
-      },
-    );
+      sync.dispose();
+      d.dispose();
+    });
 
-    test(
-      'activity summary 0x2a with zero steps but non-zero calories '
-      'keeps steps=0 (HS-6)',
-      () async {
-        final t = _StubTransport();
-        final d = ChannelADispatcher(t);
-        final bParser = ChannelBParser(t);
-        d.bind();
-        final sync = _testSync(t, d, bParser: bParser);
-        final future = sync.syncAll(daysBack: 0);
-        await Future<void>.delayed(const Duration(milliseconds: 20));
+    test('activity summary 0x2a with zero steps but non-zero calories '
+        'keeps steps=0 (HS-6)', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      final bParser = ChannelBParser(t);
+      d.bind();
+      final sync = _testSync(t, d, bParser: bParser);
+      final future = sync.syncAll(daysBack: 0);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
 
-        // Build a Channel-B 0x2a payload:
-        //   dayOffset = 0 (today)
-        //   body: steps = 0 (u24 BE @ 0), calories = 1500 (u24 BE @ 6),
-        //         distance = 2000 (u24 BE @ 9)
-        final body = List<int>.filled(48, 0x00);
-        body[0] = 0x00;
-        body[1] = 0x00;
-        body[2] = 0x00; // steps = 0
-        body[6] = 0x00;
-        body[7] = 0x05;
-        body[8] = 0xDC; // calories = 1500 (0x05DC)
-        body[9] = 0x00;
-        body[10] = 0x07;
-        body[11] = 0xD0; // distance = 2000 (0x07D0)
-        final payload = Uint8List.fromList([0x00, ...body]);
-        t.inB.add(Codec.buildChannelB(OpB.activitySummary, payload));
+      // Build a Channel-B 0x2a payload:
+      //   dayOffset = 0 (today)
+      //   body: steps = 0 (u24 BE @ 0), calories = 1500 (u24 BE @ 6),
+      //         distance = 2000 (u24 BE @ 9)
+      final body = List<int>.filled(48, 0x00);
+      body[0] = 0x00;
+      body[1] = 0x00;
+      body[2] = 0x00; // steps = 0
+      body[6] = 0x00;
+      body[7] = 0x05;
+      body[8] = 0xDC; // calories = 1500 (0x05DC)
+      body[9] = 0x00;
+      body[10] = 0x07;
+      body[11] = 0xD0; // distance = 2000 (0x07D0)
+      final payload = Uint8List.fromList([0x00, ...body]);
+      t.inB.add(Codec.buildChannelB(OpB.activitySummary, payload));
 
-        await future;
+      await future;
 
-        final today = DateOnly.today();
-        final todayHistory = sync.dayOf(today);
-        expect(todayHistory, isNotNull);
-        // steps = 0 is genuine zero activity, not "no data".
-        expect(todayHistory!.steps, 0, reason: 'steps must be 0, not null');
-        expect(todayHistory.energyKcal, 1500);
-        expect(todayHistory.distanceMeters, 2000);
+      final today = DateOnly.today();
+      final todayHistory = sync.dayOf(today);
+      expect(todayHistory, isNotNull);
+      // steps = 0 is genuine zero activity, not "no data".
+      expect(todayHistory!.steps, 0, reason: 'steps must be 0, not null');
+      expect(todayHistory.energyKcal, 1500);
+      expect(todayHistory.distanceMeters, 2000);
 
-        sync.dispose();
-        d.dispose();
-      },
-    );
+      sync.dispose();
+      d.dispose();
+    });
 
-    test(
-      'activity summary 0x2a absurd-clamped values become null '
-      'instead of 0 (HS-6)',
-      () async {
-        final t = _StubTransport();
-        final d = ChannelADispatcher(t);
-        final bParser = ChannelBParser(t);
-        d.bind();
-        final sync = _testSync(t, d, bParser: bParser);
-        final future = sync.syncAll(daysBack: 0);
-        await Future<void>.delayed(const Duration(milliseconds: 20));
+    test('activity summary 0x2a absurd-clamped values become null '
+        'instead of 0 (HS-6)', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      final bParser = ChannelBParser(t);
+      d.bind();
+      final sync = _testSync(t, d, bParser: bParser);
+      final future = sync.syncAll(daysBack: 0);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
 
-        // Build a Channel-B 0x2a payload with absurd values that exceed
-        // the sanity clamps in _activityTotalsFromBody.
-        final body = List<int>.filled(48, 0x00);
-        // steps = 999_999 (> 200_000 clamp)
-        body[0] = 0x0F;
-        body[1] = 0x42;
-        body[2] = 0x3F;
-        // calories = 99_999 (> 20_000 clamp)
-        body[6] = 0x01;
-        body[7] = 0x86;
-        body[8] = 0x9F;
-        // distance = 999_999 (> 200_000 clamp)
-        body[9] = 0x0F;
-        body[10] = 0x42;
-        body[11] = 0x3F;
-        final payload = Uint8List.fromList([0x00, ...body]);
-        t.inB.add(Codec.buildChannelB(OpB.activitySummary, payload));
+      // Build a Channel-B 0x2a payload with absurd values that exceed
+      // the sanity clamps in _activityTotalsFromBody.
+      final body = List<int>.filled(48, 0x00);
+      // steps = 999_999 (> 200_000 clamp)
+      body[0] = 0x0F;
+      body[1] = 0x42;
+      body[2] = 0x3F;
+      // calories = 99_999 (> 20_000 clamp)
+      body[6] = 0x01;
+      body[7] = 0x86;
+      body[8] = 0x9F;
+      // distance = 999_999 (> 200_000 clamp)
+      body[9] = 0x0F;
+      body[10] = 0x42;
+      body[11] = 0x3F;
+      final payload = Uint8List.fromList([0x00, ...body]);
+      t.inB.add(Codec.buildChannelB(OpB.activitySummary, payload));
 
-        await future;
+      await future;
 
-        final today = DateOnly.today();
-        final todayHistory = sync.dayOf(today);
-        expect(todayHistory, isNotNull);
-        // Clamped values must be null so the UI can show "no data"
-        // and _upsertTotals won't fall back to stale previous-day values.
-        expect(todayHistory!.steps, isNull, reason: 'absurd steps must clamp to null');
-        expect(todayHistory.energyKcal, isNull, reason: 'absurd calories must clamp to null');
-        expect(todayHistory.distanceMeters, isNull, reason: 'absurd distance must clamp to null');
+      final today = DateOnly.today();
+      final todayHistory = sync.dayOf(today);
+      expect(todayHistory, isNotNull);
+      // Clamped values must be null so the UI can show "no data"
+      // and _upsertTotals won't fall back to stale previous-day values.
+      expect(
+        todayHistory!.steps,
+        isNull,
+        reason: 'absurd steps must clamp to null',
+      );
+      expect(
+        todayHistory.energyKcal,
+        isNull,
+        reason: 'absurd calories must clamp to null',
+      );
+      expect(
+        todayHistory.distanceMeters,
+        isNull,
+        reason: 'absurd distance must clamp to null',
+      );
 
-        sync.dispose();
-        d.dispose();
-      },
-    );
+      sync.dispose();
+      d.dispose();
+    });
   });
 }
 
@@ -1091,7 +1105,10 @@ class _FakeHistoryStore implements HistoryStore {
   }
 
   @override
-  Future<DailyHistory> mergeHr(DateOnly day, Iterable<HrSample> hrSamples) async {
+  Future<DailyHistory> mergeHr(
+    DateOnly day,
+    Iterable<HrSample> hrSamples,
+  ) async {
     final current = _seed[day] ?? DailyHistory(day: day);
     final byTs = <int, HrSample>{
       for (final h in current.hr) h.timestamp.millisecondsSinceEpoch: h,
