@@ -5985,24 +5985,6 @@ post-§8.8 synthesis, §8.22 = final wire-format synthesis),
 so reading them in §0's recommended order gives the right
 narrative arc.
 
-### 10.1 Doc structure note
-
-The §8 sub-sections §8.1-§8.8 are in the correct location
-(in §8, right after the §8 heading at line 4020). The
-later §8 sub-sections §8.9-§8.22 are appended *after* this
-§10 section because the doc was edited incrementally over
-many rounds and the §8.x content was added to the end of the
-file each time. The numbering is still correct (§8.x within
-the §8 group), but the physical order in the file is:
-§8 heading → §8.1-§8.8 → §9 → §10 → §8.9-§8.22.
-
-The reading-order (§0) treats §8.x as a single logical
-group regardless of physical order in the file. The
-sub-sections are still in synthesis order (§8.9 = first
-post-§8.8 synthesis, §8.22 = final wire-format synthesis),
-so reading them in §0's recommended order gives the right
-narrative arc.
-
 ### 8.15 0x3e lipids read/set (`FUN_0082c550`)
 
 The 0xFEE7 vendor-side **duplicate** of the `0x3a sub 0x04`
