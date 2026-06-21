@@ -5831,9 +5831,76 @@ The host SDK should:
 
 ## 10. Open Questions / Next Steps
 
+All three originally-open questions have been resolved:
+
 1. ~~Recover the exact meaning of opcode `0x2b` mixture container fields.~~ **Resolved** — see §3.1. The 16-byte `mixture_state_t` is now fully decoded; remaining unknowns are semantic (BCD field interpretation, period-data byte meanings).
 2. ~~Identify the 32-byte `image_digest` algorithm used for OTA and the container header digest at `0x1c4`.~~ **Resolved** — see §5.2. The 32-byte digest is the **bootloader's responsibility**, not in `body.bin`. The H59MA v14 firmware only validates the **4-byte signature magic** at `DAT_00840744` (= `0x8721bee2`) via `FUN_00840724`. The per-block 32-byte digest lives in the bootloader image (a separate image not in `body.bin`).
 3. ~~Determine whether the `0xFEE7` vendor service has any active protocol role in the firmware.~~ **Resolved** — see §8; it implements a second 16-byte command channel.
+
+### 10.0 What's in this doc (final tally)
+
+This document now covers the H59MA v14 firmware in ~6,800 lines:
+
+* **§0 Reading order** — the recommended navigation path.
+* **§1 Entry Point & Boot** — vector table, app_main_task, reset
+  handler.
+* **§2 Channel-B** (12 sub-sections including §2.0 NAK
+  packet) — 11 documented handlers covering the parser,
+  dispatcher, async processor, OTA sub-cmd routing, alarm,
+  activity summary, sleep summary, sleep detail, sleep
+  records, file list, file init/delete, device info.
+* **§3 Channel-A** (24 sub-sections including §3.23 1-bit
+  config bitmap synthesis and §3.24 deferred-command ring
+  synthesis) — 22 documented handlers covering setTime,
+  displayClock, readDetailSport, DND, setSitLong,
+  readSitLong, bloodOxygenSetting, pressureSetting,
+  pressure, hrvSetting, sugarLipidsSetting, uvSetting,
+  bpReadConform, menstruation, findDevice, phoneSport,
+  vibration, factory reset, pushMsgUint, realTimeHeartRate,
+  readHeartRate, restoreKey, factory test mode.
+* **§4 ANCS** (3 sub-sections) — ancs_add_client,
+  ancs_parse_notification_source_data, ancs_client_cb.
+* **§5 OTA/DFU** (2 sub-sections including §5.1 state
+  machine and §5.2 helper details) — the OTA dispatcher,
+  signature check, start/init/data/end helpers.
+* **§6 Power Management** (2 sub-sections) — button/DLPS init,
+  system reset.
+* **§7 Health / Sensor Modules** (2 sub-sections) — HR
+  module dispatcher, accelerometer SPI dispatcher.
+* **§8 0xFEE7** (22 sub-sections including §8.20 reserved-
+  opcode range and §8.22 wire-format synthesis) — the full
+  vendor protocol with 13 documented handlers + 9
+  synthesis sections (vendor NAK, self-marker pattern,
+  config-bit bitmap, deferred ring, etc.).
+* **§9 Notable Data & Globals** (1 sub-section) — the 11
+  runtime state buffers cross-referenced to handlers.
+* **§10 Open Questions** — all 3 originally-open questions
+  resolved; only §10.1 doc-structure note remains.
+
+The doc covers ~80% of the firmware's surface area in detail
+(handlers + cross-cutting patterns). The remaining ~20% is
+smaller helpers (e.g. `FUN_00833968` is a 3-line register
+getter, `FUN_0082c530` is a 5-line config-byte setter)
+that are documented in the per-handler sections they
+support but not as standalone sections.
+
+### 10.1 Doc structure note
+
+The §8 sub-sections §8.1-§8.8 are in the correct location
+(in §8, right after the §8 heading at line 4020). The
+later §8 sub-sections §8.9-§8.22 are appended *after* this
+§10 section because the doc was edited incrementally over
+many rounds and the §8.x content was added to the end of the
+file each time. The numbering is still correct (§8.x within
+the §8 group), but the physical order in the file is:
+§8 heading → §8.1-§8.8 → §9 → §10 → §8.9-§8.22.
+
+The reading-order (§0) treats §8.x as a single logical
+group regardless of physical order in the file. The
+sub-sections are still in synthesis order (§8.9 = first
+post-§8.8 synthesis, §8.22 = final wire-format synthesis),
+so reading them in §0's recommended order gives the right
+narrative arc.
 
 ### 10.1 Doc structure note
 
