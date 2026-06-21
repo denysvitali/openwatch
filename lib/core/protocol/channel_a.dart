@@ -383,9 +383,12 @@ class ChannelADispatcher {
   /// `readHeartRate` (0x15): two-phase per-record dump.
   ///
   /// Per `FUN_0082cf48` (`GHIDRA_DECOMPILATION.md` §3.12):
-  ///   * Header frame  — `pl[0] == 0x18` (payload-size low byte),
-  ///                     `pl[1..2] == 0x80 0x05` (rest of the
-  ///                     `0x5180015` feature-bitmap dword).
+  ///   * Header frame  — older captures use `pl[0] == 0x18` (payload-size
+  ///                     low byte), `pl[1..2] == 0x80 0x05` (rest of the
+  ///                     `0x5180015` feature-bitmap dword). H59MAX live
+  ///                     firmware sends the same phase as
+  ///                     `pl[0] == 0x00`, `pl[1] == totalFrames`,
+  ///                     `pl[2] == sampleIntervalMinutes`.
   ///   * Payload chunk — `pl[0]` is the 1-based sequence number
   ///                     (1..23); `pl[1..14]` carries ≤13 payload
   ///                     bytes of the 292-byte HR record.
@@ -397,7 +400,7 @@ class ChannelADispatcher {
   void _decodeHeartRate(Uint8List pl) {
     if (pl.isEmpty) return;
     final tag = pl[0];
-    if (tag == 0x18) {
+    if (tag == 0x18 || (tag == 0x00 && pl.length >= 3 && pl[1] > 0)) {
       _heartRateHeader.add(null);
       return;
     }
@@ -543,7 +546,9 @@ class ChannelADispatcher {
       _pressureSettingHeader.add(PressureSettingHeader(slotId: pl[0]));
       return;
     }
-    _pressureSettingChunk.add(PressureSettingChunk(payload: pl));
+    _pressureSettingChunk.add(
+      PressureSettingChunk(payload: _stripOptionalSeriesSeq(pl)),
+    );
   }
 
   /// `hrv` (0x39): read/write HRV config.
@@ -562,7 +567,16 @@ class ChannelADispatcher {
       _hrvHeader.add(HrvSettingHeader(slotId: pl[0]));
       return;
     }
-    _hrvChunk.add(HrvSettingChunk(payload: pl));
+    _hrvChunk.add(HrvSettingChunk(payload: _stripOptionalSeriesSeq(pl)));
+  }
+
+  Uint8List _stripOptionalSeriesSeq(Uint8List pl) {
+    // Live H59MAX 0x37/0x39 chunks carry a 1-based series byte followed
+    // by 13 data bytes. Header frames are filtered before this helper.
+    if (pl.length == 14 && pl[0] >= 1 && pl[0] <= 4) {
+      return Uint8List.sublistView(pl, 1);
+    }
+    return pl;
   }
 
   /// `sugarLipidsSetting` (0x3a): sub `0x03` (sugar) / `0x04` (lipids)

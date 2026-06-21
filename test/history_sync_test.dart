@@ -190,6 +190,62 @@ void main() {
     });
 
     test(
+      'readHeartRate 0x15 seq-0 firmware header waits for all chunks',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final sync = _testSync(t, d);
+        final syncFuture = sync.syncAll();
+        await Future<void>.delayed(const Duration(milliseconds: 150));
+
+        t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x00, 0x03, 0x05]));
+        final dayStartBytes = [0x00, 0xF6, 0x34, 0x6A];
+        final chunk1 = Uint8List.fromList([
+          0x01,
+          ...dayStartBytes,
+          0x60,
+          0x65,
+          0xff,
+          0x6a,
+          0x6e,
+          0,
+          0,
+          0,
+          0,
+        ]);
+        t.inA.add(Codec.buildChannelA(OpA.readHeartRate, chunk1));
+        await Future<void>.delayed(const Duration(milliseconds: 120));
+        expect(sync.hr, isEmpty, reason: 'seq-0 header declares 2 chunks');
+
+        final chunk2 = Uint8List.fromList([
+          0x02,
+          0x6f,
+          0x72,
+          0x73,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+        ]);
+        t.inA.add(Codec.buildChannelA(OpA.readHeartRate, chunk2));
+        await Future<void>.delayed(const Duration(milliseconds: 150));
+        final bpms = sync.hr.map((s) => s.bpm).toList();
+        expect(bpms, containsAll([96, 101, 106, 110, 111, 114, 115]));
+
+        await syncFuture;
+        sync.dispose();
+        d.dispose();
+      },
+    );
+
+    test(
       'syncAll sends a packed-BCD date index for 0x15 (regression for '
       'GHIDRA §3.12 — FUN_0082cf48 takes a packed date, not unix sec)',
       () async {

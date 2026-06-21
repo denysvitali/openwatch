@@ -438,9 +438,22 @@ void main() {
         // Actually the buildChannelA helper will already zero-pad.
         t.inA.add(f);
         final c = await got.timeout(const Duration(seconds: 1));
-        expect(c.payload.length, 14);
+        expect(c.payload.length, 13);
+        expect(c.payload.take(4).toList(), [0x00, 0x00, ...payload.take(2)]);
       },
     );
+
+    test('pressureSetting 0x37 firmware chunk strips seq byte', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final got = d.onPressureSettingChunk.first;
+      final data = List<int>.generate(13, (i) => 0x40 + i);
+      final f = Codec.buildChannelA(OpA.pressureSetting, [0x01, ...data]);
+      t.inA.add(f);
+      final c = await got.timeout(const Duration(seconds: 1));
+      expect(c.payload, data);
+    });
 
     test(
       'hrvSetting 0x39 header (pl[2]==0x1E) routes to onHrvHeader',
@@ -475,7 +488,19 @@ void main() {
       ]);
       t.inA.add(f);
       final c = await got.timeout(const Duration(seconds: 1));
-      expect(c.payload.length, 14);
+      expect(c.payload.length, 13);
+    });
+
+    test('hrvSetting 0x39 firmware chunk strips seq byte', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final got = d.onHrvChunk.first;
+      final data = List<int>.generate(13, (i) => 0x2b + i);
+      final f = Codec.buildChannelA(OpA.hrv, [0x01, ...data]);
+      t.inA.add(f);
+      final c = await got.timeout(const Duration(seconds: 1));
+      expect(c.payload, data);
     });
 
     test('readHeartRate 0x15 header frame fires onHeartRateHeader', () async {
@@ -494,6 +519,24 @@ void main() {
       expect(fired, isTrue);
       await sub.cancel();
     });
+
+    test(
+      'readHeartRate 0x15 seq-0 firmware header fires onHeartRateHeader',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        var fired = false;
+        final sub = d.onHeartRateHeader.listen((_) {
+          fired = true;
+        });
+        final f = Codec.buildChannelA(OpA.readHeartRate, [0x00, 0x18, 0x05]);
+        t.inA.add(f);
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        expect(fired, isTrue);
+        await sub.cancel();
+      },
+    );
 
     test(
       'readHeartRate 0x15 chunk frame fires onHeartRateChunk with seq + payload',

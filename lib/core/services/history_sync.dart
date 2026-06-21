@@ -416,6 +416,7 @@ class HistorySync extends ChangeNotifier {
     _watchDaysWithData.clear();
     _fetchedDays.clear();
     _hrChunks.clear();
+    _hrExpectedChunks = null;
     _hrChunkDay = null;
     _days.clear();
     _progressCurrent = 0;
@@ -753,7 +754,9 @@ class HistorySync extends ChangeNotifier {
         }
       case OpA.readHeartRate:
         // 0x15 multi-pkt reassembly per FUN_0082cf48 (GHIDRA §3.12).
-        //   * pl[0] == 0x18 → header — fire _hrHeader
+        //   * pl[0] == 0x18 → legacy header.
+        //   * pl[0] == 0x00 && pl[1] > 0 → H59MAX firmware header
+        //     where pl[1] is total frame count including the header.
         //   * pl[0] == 0xFF → empty-day answer (watch has no HR for
         //     this date). This is a WATCH-SIDE answer, not a decoder
         //     error — the watch only stores HR samples when continuous
@@ -766,14 +769,16 @@ class HistorySync extends ChangeNotifier {
         //     follow (samples at 5-min intervals)
         if (pl.isEmpty) return;
         final tag = pl[0];
-        if (tag == 0x18) {
+        if (tag == 0x18 || (tag == 0x00 && pl.length >= 3 && pl[1] > 0)) {
           _hrChunks.clear();
+          _hrExpectedChunks = tag == 0x00 ? pl[1] - 1 : null;
           // Capture the day the header arrived for; subsequent chunks
           // for this series will flush under that day even if they
           // arrive after _currentSyncDay has moved on (HS-8).
           _hrChunkDay = day;
         } else if (tag == 0xff) {
           _hrChunks.clear();
+          _hrExpectedChunks = null;
           _hrChunkDay = null;
           // Persist the (possibly empty) record so the UI shows the
           // day even when the watch has no HR data for it.
@@ -781,7 +786,9 @@ class HistorySync extends ChangeNotifier {
         } else if (tag >= 1 && tag <= 23) {
           if (pl.length >= 1 + 13) {
             _hrChunks.add(Uint8List.fromList(pl.sublist(1, 1 + 13)));
-            if (_hrChunks.length >= tag) {
+            final expected = _hrExpectedChunks;
+            if ((expected != null && _hrChunks.length >= expected) ||
+                (expected == null && _hrChunks.length >= tag)) {
               _flushHrChunks(_hrChunkDay ?? day);
             }
           }
@@ -803,6 +810,7 @@ class HistorySync extends ChangeNotifier {
   }
 
   final List<Uint8List> _hrChunks = [];
+  int? _hrExpectedChunks;
 
   void _flushHrChunks(DateOnly? day) {
     // Spans the assembly + merge step for one day's HR series; tagged
@@ -824,6 +832,7 @@ class HistorySync extends ChangeNotifier {
       final rec = buf.toBytes();
       if (rec.length < 5) {
         _hrChunks.clear();
+        _hrExpectedChunks = null;
         return;
       }
       final dayStart = DateTime.fromMillisecondsSinceEpoch(
@@ -839,6 +848,7 @@ class HistorySync extends ChangeNotifier {
         );
       }
       _hrChunks.clear();
+      _hrExpectedChunks = null;
 
       // Attribute to the day we asked for, not whatever the device
       // echoed back — the firmware's BCD date echo may differ by a
