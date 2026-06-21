@@ -25,6 +25,10 @@ dependencies:
   dartastic_opentelemetry: 1.0.2-alpha
   dartastic_opentelemetry_api: 1.0.0-alpha
   package_info_plus: ^10.1.0
+  # Loads the OS-level user-installed certificate store on Android so
+  # the OTLP/HTTPS collector handshake trusts the same CA the user
+  # trusts (e.g. a corporate MITM proxy). Mirrors happy_flutter.
+  flutter_user_certificates_android: ^0.0.1
 
   # State management and routing
   flutter_riverpod: ^3.2.0

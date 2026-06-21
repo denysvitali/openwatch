@@ -39,10 +39,31 @@ class OpenTelemetryService {
   final NavigatorObserver _routeObserver;
 
   bool _initialized = false;
+  bool _initFailed = false;
+  String? _initErrorMessage;
   Future<void>? _initializeFuture;
+  Future<void>? _trustedCertsFuture;
   _OpenWatchOtelLifecycleObserver? _lifecycleObserver;
 
   bool get isInitialized => _initialized;
+
+  /// True if the last [initialize] attempt failed (e.g. OTLP handshake
+  /// rejected, or the collector endpoint is unreachable). The Logs
+  /// screen reads this to render a status banner.
+  bool get initFailed => _initFailed;
+
+  /// Human-readable failure message from the last [initialize] attempt,
+  /// or null when init succeeded. Surfaced in the Logs screen so the
+  /// user can see *why* spans never appeared.
+  String? get initErrorMessage => _initErrorMessage;
+
+  /// Static status string for the Logs screen: "active", "failed", or
+  /// "pending" (init not yet attempted / still in flight).
+  String get statusLabel {
+    if (_initialized) return 'active';
+    if (_initFailed) return 'failed';
+    return 'pending';
+  }
 
   NavigatorObserver get routeObserver => _routeObserver;
 
@@ -93,6 +114,16 @@ class OpenTelemetryService {
   @visibleForTesting
   bool get configuredTracingEnabledByDefault => tracingEnabledByDefault;
 
+  /// Wire up a future that resolves once the host's user-installed
+  /// certificate store (e.g. Android user CA bundle, corporate MITM
+  /// proxy) is loaded into [SecurityContext.defaultContext]. Mirrors
+  /// happy_flutter — without this, the OTLP/HTTPS handshake rejects
+  /// the collector's cert and `initialize()` fails silently (well,
+  /// loudly in the Logs screen, but no spans ever make it out).
+  void setTrustedCertificatesFuture(Future<void> future) {
+    _trustedCertsFuture = future;
+  }
+
   Future<void> initialize() async {
     if (_initialized) return;
     final existing = _initializeFuture;
@@ -107,6 +138,27 @@ class OpenTelemetryService {
     if (_initialized) return;
 
     try {
+      // Wait for the user-installed certificate store (if any) to be
+      // loaded into SecurityContext.defaultContext. The certs plugin is
+      // a platform-channel call that can take 100ms+; running it in
+      // parallel with first frame is fine, but the OTLP handshake MUST
+      // happen after.
+      final certsFuture = _trustedCertsFuture;
+      if (certsFuture != null) {
+        AppLog.instance.debug('otel', 'awaiting user trusted certificates');
+        try {
+          await certsFuture;
+        } catch (e, stack) {
+          // Cert load failure is not fatal — log it and proceed; the
+          // OTLP handshake will probably fail too, and the user will
+          // see that in the Logs screen.
+          AppLog.instance.error(
+            'otel',
+            'user trusted certificates failed to load: $e\n$stack',
+          );
+        }
+      }
+
       // Hard-code a service version fallback in case PackageInfo fails
       // on a stubbed platform (e.g. tests). The package_info_plus call
       // is best-effort; a missing version shouldn't block tracer init.
@@ -135,9 +187,16 @@ class OpenTelemetryService {
       );
       _replacePackageLifecycleObserver();
       _initialized = true;
+      _initFailed = false;
+      _initErrorMessage = null;
       AppLog.instance.info('otel', 'initialized endpoint=$endpoint');
     } catch (e, stack) {
-      AppLog.instance.warn('otel', 'initialization failed: $e\n$stack');
+      _initFailed = true;
+      _initErrorMessage = e.toString();
+      // ERROR level (not warn) so the Logs screen renders the failure
+      // in red — a tracer that can't ship spans is operationally bad
+      // and the user needs to see it at a glance.
+      AppLog.instance.error('otel', 'initialization failed: $e\n$stack');
     } finally {
       _initializeFuture = null;
     }
@@ -186,7 +245,9 @@ class OpenTelemetryService {
       );
       return OTelSpan._(span);
     } catch (e, stack) {
-      AppLog.instance.warn('otel', 'failed to start span $name: $e\n$stack');
+      // Span start failures are also at error level so a malformed
+      // attribute or missing tracer shows up in the Logs screen.
+      AppLog.instance.error('otel', 'failed to start trace $name: $e\n$stack');
       return null;
     }
   }
@@ -208,7 +269,10 @@ class OpenTelemetryService {
       );
       return OTelSpan._(span);
     } catch (e, stack) {
-      AppLog.instance.warn('otel', 'failed to start span $name: $e\n$stack');
+      AppLog.instance.error(
+        'otel',
+        'failed to start child span $name: $e\n$stack',
+      );
       return null;
     }
   }
