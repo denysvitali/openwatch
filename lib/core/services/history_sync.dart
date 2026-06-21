@@ -516,12 +516,12 @@ class HistorySync extends ChangeNotifier {
       final toFetch = <int>[];
       for (final d in wantsDays) {
         final day = todayD.addDays(-d);
-        final alreadyHave = _days.containsKey(day);
+        final existing = _days[day];
         final isToday = day == todayD;
-        if (alreadyHave && !isToday) {
+        if (existing != null && !isToday && existing.hr.isNotEmpty) {
           AppLog.instance.debug(
             'history',
-            'skip ${day.iso} (already in store)',
+            'skip ${day.iso} (already has HR in store)',
           );
           continue;
         }

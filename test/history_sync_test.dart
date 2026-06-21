@@ -114,6 +114,81 @@ void main() {
       },
     );
 
+    test('syncAll re-fetches persisted past days with empty HR', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final sync = _testSync(t, d);
+      final today = DateOnly.today();
+      final yesterday = today.addDays(-1);
+      await sync.bindStore(
+        _FakeHistoryStore(
+          seed: {
+            yesterday: DailyHistory(
+              day: yesterday,
+              hr: const [],
+              sleep: [
+                SleepSegment(
+                  yesterday.midnight.add(const Duration(hours: 22)),
+                  const Duration(minutes: 30),
+                  SleepStage.deep,
+                ),
+              ],
+              steps: 7087,
+              energyKcal: 0,
+              distanceMeters: 4522,
+            ),
+          },
+        ),
+      );
+
+      await sync.syncAll(daysBack: 2);
+
+      final hrReads = t.sent
+          .where((f) => f.isNotEmpty && f[0] == OpA.readHeartRate)
+          .toList();
+      expect(
+        hrReads,
+        hasLength(2),
+        reason: 'empty HR persisted by older parser versions must be re-polled',
+      );
+      expect(sync.fetchedDays, containsAll([today, yesterday]));
+      sync.dispose();
+      d.dispose();
+    });
+
+    test('syncAll skips persisted past days that already have HR', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final sync = _testSync(t, d);
+      final today = DateOnly.today();
+      final yesterday = today.addDays(-1);
+      await sync.bindStore(
+        _FakeHistoryStore(
+          seed: {
+            yesterday: DailyHistory(
+              day: yesterday,
+              hr: [
+                HrSample(yesterday.midnight.add(const Duration(hours: 8)), 62),
+              ],
+            ),
+          },
+        ),
+      );
+
+      await sync.syncAll(daysBack: 2);
+
+      final hrReads = t.sent
+          .where((f) => f.isNotEmpty && f[0] == OpA.readHeartRate)
+          .toList();
+      expect(hrReads, hasLength(1));
+      expect(sync.fetchedDays, contains(today));
+      expect(sync.fetchedDays, isNot(contains(yesterday)));
+      sync.dispose();
+      d.dispose();
+    });
+
     test(
       'unsolicited 0x46 push from the watch does NOT throw or break sync',
       () async {
