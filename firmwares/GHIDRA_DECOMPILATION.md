@@ -6048,6 +6048,44 @@ distinct worker calls (`FUN_008337fa` to start the read,
 keeps them in the right order without the deferred-ring
 worker needing to know about the second call.
 
+#### 3.0.1 Channel-A "common response path" synthesis
+
+The §3.0 "common response path" mentions three helpers
+(`FUN_0082b0c4` checksum, `FUN_0082ebdc` notify queue,
+`FUN_0082eb8a` notify kick). These are referenced in *every*
+per-opcode §3.x sub-section because every Channel-A handler
+goes through them. This sub-section pulls the threads
+together.
+
+The three helpers form a **3-step pipeline**:
+
+1. `FUN_0082b0c4(rsp, 0xf)` — compute the additive
+   checksum over bytes 0..14 and store it in `rsp[15]`. This
+   is the §2.0 CRC-16/MODBUS variant: it uses the same
+   algorithm but operates on a 15-byte window instead of
+   the 6-byte header.
+2. `FUN_0082ebdc(rsp)` — queue the 16-byte frame at the
+   `DAT_0082edbc + 0xc + slot_idx * 0xb6` slot, advancing
+   `slot_idx` (wraps at 8). The ring buffer holds 8
+   in-flight frames.
+3. `FUN_0082eb8a()` — kick the BLE notify task to drain
+   the ring. Called once per queued frame; the firmware
+   coalesces multiple frames into a single notify if the
+   host can keep up.
+
+The handler helper `FUN_0082b986(cmd, isNotify)` (which
+emits 1-byte acks with `0x80` flag) uses the *same*
+pipeline but skips `FUN_0082b938` (the fragmenter) — the
+1-byte ack is queued directly into the ring.
+
+Why a synthesis section: a host SDK author who needs to
+understand the Channel-A *response* pipeline sees
+`FUN_0082b0c4`, `FUN_0082ebdc`, `FUN_0082eb8a` referenced
+across §3.1-§3.24. Without §3.0.1, those references are
+isolated. §3.0.1 pulls them into a single 3-step pipeline
+description that explains *why* the same three helpers
+appear in every per-opcode section.
+
 #### Pair with `0x15 readHeartRate` (Channel-A)
 
 `0xc1` is the 0xFEE7 vendor variant of `0x15` (§3.12). Both
