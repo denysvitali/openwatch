@@ -108,6 +108,18 @@ class OpA {
   static const int mixRead = 0x01;
   static const int mixWrite = 0x02;
   static const int mixDelete = 0x03;
+
+  /// Channel-B ACK/NAK carrier (host→watch).
+  ///
+  /// Reserved low-bit opcode (`0x7E`) used exclusively by
+  /// `ChannelBParser.buildAck` to signal "frame received OK / CRC fail"
+  /// for inbound Channel-B traffic. Deliberately outside the documented
+  /// `0x00..0x7F` request range — the high bit (`0x80`) is reserved as
+  /// the **device→host** error flag on Channel A (see `Codec.errorFlag`
+  /// at `codec.dart:12`), and the firmware strips it before dispatch.
+  /// Any opcode ≥ `0x80` would alias to a defined low-bit request
+  /// (e.g. `0xBC` → `0x3C deviceSupport`) and trigger an error loop.
+  static const int channelBAck = 0x7E;
 }
 
 /// Channel-B large-data / file / OTA command ids (byte[1]).

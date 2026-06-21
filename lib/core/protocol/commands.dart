@@ -132,8 +132,16 @@ class Commands {
   }
 
   /// `QueryDataDistribution` (0x46) — the watch pushes a 32-bit bitmask where
-  /// bit *d* = "day *d* has stored data". Trigger a re-emit by sending the bare
-  /// opcode; the response is a one-shot notify on 0x46.
+  /// bit *d* = "day *d* has stored data". Per PROTOCOL.md §4.6 this is a
+  /// **watch→phone notify only** opcode; there is no documented host→watch
+  /// request. The legacy implementation sent a bare `0x46` and the firmware
+  /// replied with `0xC6 ERR 0xee`, so [HistorySync.syncAll] no longer issues
+  /// this frame. Callers building a frame for tests / fuzzing should use
+  /// `Codec.buildChannelA(OpA.queryDataDistribution)` directly.
+  @Deprecated(
+    '0x46 is watch→phone notify only — no host→watch request '
+    'exists. See PROTOCOL.md §4.6.',
+  )
   static Uint8List queryDataDistribution() =>
       Codec.buildChannelA(OpA.queryDataDistribution);
 

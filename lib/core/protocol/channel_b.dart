@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:typed_data';
 
 import '../ble/ble_transport.dart';
@@ -35,7 +36,14 @@ class ChannelBParser {
     this._transport, {
     this.fragmentTimeout = const Duration(seconds: 2),
   }) : _inboundB = _transport.inboundB,
-       _sendA = _transport.sendA;
+       _sendA = _transport.sendA,
+       // 4× the fragment timeout is plenty to absorb a BLE-link replay
+       // storm while still allowing a legitimate re-emit after the watch
+       // comes back from sleep (the firmware pushes 0x27/0x2a/0x3e on
+       // every state transition).
+       _seenTtl = Duration(
+         milliseconds: (fragmentTimeout.inMilliseconds * 4).clamp(2000, 60000),
+       );
 
   final BleTransport _transport;
   final Stream<Uint8List> _inboundB;
@@ -46,6 +54,9 @@ class ChannelBParser {
   /// Max time to wait between fragments before discarding the in-progress
   /// frame. Firmware uses `m_ble_packet_timer_id` at 2000 ms (`FUN_0082f098`).
   final Duration fragmentTimeout;
+
+  /// TTL for dedup entries. See constructor body.
+  final Duration _seenTtl;
 
   /// `DAT_0082f0f0 + 0xb`: reassembly state (`0` = waiting for first fragment,
   /// `1` = accumulating continuation, `2` = complete & queued for dispatch).
@@ -58,6 +69,23 @@ class ChannelBParser {
   int _currentCmd = 0;
   int _declaredCrc = 0;
   Timer? _timeout;
+
+  /// LRU of recently-emitted Channel-B frames keyed by FNV-1a(payload).
+  /// Prevents duplicate-ingest storms when the watch (or firmware) replays
+  /// the same `0x27`/`0x2a`/`0x3e` frame N times during a link glitch —
+  /// we observed 5× back-to-back in production (`history_sync.dart`
+  /// would otherwise fire `_decodeSleepNew` 5× and emit 5× `notifyListeners`
+  /// storms). `cmd` is checked alongside the hash so two different
+  /// commands that collide on the hash (vanishingly rare at ≤64 entries)
+  /// are still treated as distinct frames.
+  ///
+  /// Bounded to [_maxSeenFrames]; on overflow we evict the oldest entry
+  /// (LinkedHashMap iteration order is insertion-order in Dart). TTL is
+  /// enforced at lookup time, so a legitimate re-emit after the watch
+  /// recovers from a long sleep still gets through.
+  static const int _maxSeenFrames = 64;
+  final LinkedHashMap<int, _RecentFrame> _seenFrames =
+      LinkedHashMap<int, _RecentFrame>();
 
   StreamController<ChannelBCommand>? _ctrl;
   Stream<ChannelBCommand> get commands =>
@@ -73,10 +101,19 @@ class ChannelBParser {
 
   /// Builds an ACK/NAK for Channel-B responses (mirrors `FUN_0082ee00`).
   ///
-  /// Sends a Channel-A frame `[0xBC, cmd, status]` where status:
+  /// Sends a Channel-A frame `[0x7E, cmd, status]` where status:
   ///   `0` = OK, `2` = CRC mismatch, others = firmware-defined errors.
+  ///
+  /// The opcode is `OpA.channelBAck` (`0x7E`) — the highest unused
+  /// low-bit value in `OpA`. **Never** use the high bit (`0x80`) on
+  /// Channel-A: PROTOCOL.md §4 reserves it as the device→host error
+  /// flag, and the firmware strips it before dispatch (see
+  /// `Codec.rxOpcode` at `codec.dart:43`). Sending `0xBC` here would be
+  /// re-decoded as `OpA.deviceSupport` (`0x3C`) which expects empty
+  /// subData — every ACK would echo `0xC6 ERR 0xee` and pollute the
+  /// log with a phantom error loop.
   Uint8List buildAck(int cmd, int status) =>
-      Codec.buildChannelA(0xBC, [cmd & 0xFF, status & 0xFF]);
+      Codec.buildChannelA(OpA.channelBAck, [cmd & 0xFF, status & 0xFF]);
 
   /// Wraps a payload as a Channel-B frame and sends it via the transport's
   /// `sendB` (chunked, no-response). Mirrors `FUN_0082ece0`.
@@ -238,6 +275,32 @@ class ChannelBParser {
   void _emit(int cmd, Uint8List payload) {
     final ctrl = _ctrl;
     if (ctrl == null || ctrl.isClosed) return;
+
+    // Garbage-collect expired entries before the dedup check so we never
+    // compare against stale state. The LRU is bounded, so this loop is
+    // cheap in practice (≤ 64 entries per frame).
+    final now = DateTime.now();
+    _seenFrames.removeWhere((_, f) => now.difference(f.emittedAt) > _seenTtl);
+
+    final hash = _fnv1a(payload);
+    final seen = _seenFrames[hash];
+    if (seen != null &&
+        seen.cmd == cmd &&
+        now.difference(seen.emittedAt) <= _seenTtl) {
+      _log.debug(
+        'chb',
+        'dedup cmd=0x${cmd.toRadixString(16)} '
+            'hash=0x${hash.toRadixString(16)} '
+            '(age=${now.difference(seen.emittedAt).inMilliseconds}ms)',
+      );
+      return;
+    }
+
+    _seenFrames[hash] = _RecentFrame(cmd, hash, now);
+    while (_seenFrames.length > _maxSeenFrames) {
+      _seenFrames.remove(_seenFrames.keys.first);
+    }
+
     ctrl.add(ChannelBCommand(cmd, payload));
   }
 
@@ -252,8 +315,32 @@ class ChannelBParser {
 
   void dispose() {
     _timeout?.cancel();
+    _seenFrames.clear();
     _ctrl?.close();
   }
+}
+
+/// Entry recorded by [ChannelBParser] for duplicate-detection purposes.
+class _RecentFrame {
+  _RecentFrame(this.cmd, this.payloadHash, this.emittedAt);
+  final int cmd;
+  final int payloadHash;
+  final DateTime emittedAt;
+}
+
+/// 32-bit FNV-1a hash over [data] (offset-basis `0x811c9dc5`,
+/// prime `0x01000193`). Collision rate at ≤64 entries × ~13-byte
+/// average Channel-B payload is negligible (birthday bound ~2^16
+/// entries) and dedup is best-effort anyway — a collision just causes
+/// one missed emit, which the watch will re-push on the next state
+/// transition.
+int _fnv1a(Uint8List data) {
+  var hash = 0x811c9dc5;
+  for (final b in data) {
+    hash ^= b & 0xFF;
+    hash = (hash * 0x01000193) & 0xFFFFFFFF;
+  }
+  return hash;
 }
 
 /// Fully-reassembled Channel-B command surfaced by [ChannelBParser].

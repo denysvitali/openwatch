@@ -166,8 +166,6 @@ class HistorySync extends ChangeNotifier {
   final List<ActivitySummaryRecord> _activity = [];
   final Set<int> _availableDays = {};
   final Map<DateOnly, DailyTotals> _sportDetailTotals = {};
-  bool _distributionAnswered = false;
-  bool _distributionFailed = false;
 
   /// Days for which the watch reported data during the most recent
   /// [syncAll] — used by the UI to render the availability ribbon.
@@ -382,8 +380,6 @@ class HistorySync extends ChangeNotifier {
     _activity.clear();
     _availableDays.clear();
     _sportDetailTotals.clear();
-    _distributionAnswered = false;
-    _distributionFailed = false;
     _watchDaysWithData.clear();
     _fetchedDays.clear();
     _hrChunks.clear();
@@ -448,13 +444,22 @@ class HistorySync extends ChangeNotifier {
       // if the watch drops the link halfway through a re-fetch.
       await loadFromStore();
 
-      // Distribution bitmask
-      _dispatcher?.markDistributionQuery();
-      await transport.sendA(Commands.queryDataDistribution());
-      // Drain the response BEFORE computing wantsDays — the bitmask
-      // arrives on the same Channel-A inbound stream and won't be
-      // visible to `_parse` until we explicitly flush `_rxQueue`.
-      await _drainRx(const Duration(milliseconds: 800));
+      // NOTE: 0x46 (`queryDataDistribution`) is a **watch→phone notify
+      // only** opcode per PROTOCOL.md §4.6 — no host→watch request
+      // exists. The previous implementation sent a bare 0x46 and the
+      // firmware replied with `0xC6 ERR 0xee`, forcing the
+      // `_distributionFailed` fallback on every handshake. We instead
+      // rely on the unsolicited Channel-B 0x27 / 0x2a / 0x3e pushes
+      // the watch emits when ready, plus a bounded blind-poll of the
+      // last `effectiveDaysBack` days for anything that hasn't surfaced.
+      // The watch's dayOffset for activity summaries is clamped to ≤2,
+      // so the per-day reads (0x15 HR / 0x2a activity / 0x27 sleep)
+      // remain the source of truth for older history.
+      AppLog.instance.debug(
+        'history',
+        'sync start: relying on unsolicited Channel-B pushes + '
+            'bounded blind-poll of last $effectiveDaysBack day(s)',
+      );
 
       // The watch expects a **packed BCD date index** per GHIDRA
       // §3.12 (`FUN_0082cf48` + `FUN_008279c4`) — NOT a unix
@@ -465,24 +470,11 @@ class HistorySync extends ChangeNotifier {
       // don't matter.
       final today = DateTime.now();
       final todayD = DateOnly.fromDateTime(today);
-      // The watch bitmask is 0-indexed from today; day 0 = today,
-      // day 1 = yesterday, etc. Combine with what we already have
-      // on disk to decide which days to fetch.
-      final blindScan = _distributionFailed || !_distributionAnswered;
-      if (blindScan) {
-        AppLog.instance.warn(
-          'history',
-          '0x46 data-distribution unavailable; blind polling last '
-              '$effectiveDaysBack day(s)',
-        );
-      }
-      final wantsDays = <int>{
-        if (blindScan)
-          for (var d = 0; d < effectiveDaysBack; d++) d
-        else
-          for (final d in _availableDays)
-            if (d < effectiveDaysBack) d,
-      };
+      // Always blind-poll the last `effectiveDaysBack` days; the
+      // watch's per-day reads are idempotent and `HistoryStore.merge*`
+      // dedupes on timestamp / start.ms, so re-pulling a day we
+      // already have is wasted bytes only — never a wrong write.
+      final wantsDays = <int>{for (var d = 0; d < effectiveDaysBack; d++) d};
 
       // Pre-compute the days we'll actually fetch so the UI can
       // render an accurate progress fraction.
@@ -639,25 +631,28 @@ class HistorySync extends ChangeNotifier {
     final pl = Codec.rxPayload(frame);
     switch (op) {
       case OpA.queryDataDistribution:
-        _distributionAnswered = true;
+        // Unsolicited watch→phone push (PROTOCOL.md §4.6). The host
+        // never sends a 0x46 request — sending one aliases to
+        // `0xC6 deviceReboot` on the firmware and the device replies
+        // with `0xC6 ERR 0xee`. We still decode the bitmask in case
+        // some firmware builds push it (the data goes to
+        // `availableDays` / `watchDaysWithData` for the UI), but the
+        // sync flow no longer gates on it — it always blind-polls the
+        // last `daysBack` days.
         if (Codec.rxIsError(frame)) {
-          _distributionFailed = true;
           final code = pl.isEmpty ? -1 : pl[0];
           AppLog.instance.warn(
             'history',
-            '0x46 data-distribution error response '
-                '(code=0x${code.toRadixString(16)})',
+            '0x46 data-distribution error push (code=0x'
+                '${code.toRadixString(16)}); ignoring',
           );
           return;
         }
         // 4-byte BE bitmask: bit d = day d has data (PROTOCOL.md §4.6).
-        // The high 4 bytes of the 14-byte payload are reserved; the
-        // watch normally only fills the first 4.
         if (pl.length < 4) {
-          _distributionFailed = true;
           AppLog.instance.warn(
             'history',
-            '0x46 data-distribution response too short (${pl.length} B)',
+            '0x46 data-distribution push too short (${pl.length} B)',
           );
           return;
         }

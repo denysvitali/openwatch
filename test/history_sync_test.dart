@@ -48,60 +48,73 @@ Uint8List _channelAErrorFrame(int op, List<int> payload) {
 
 void main() {
   group('HistorySync', () {
+    test('syncAll never sends 0x46 (it is a watch→phone notify-only opcode '
+        'per PROTOCOL.md §4.6 — no host→watch request exists)', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final sync = HistorySync(t, (_) {}, dispatcher: d);
+      final future = sync.syncAll(daysBack: 1);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      // No 0x46 frame should ever appear on the wire — the previous
+      // implementation sent a bare 0x46 and the firmware replied with
+      // `0xC6 ERR 0xee`, forcing the `_distributionFailed` fallback.
+      expect(
+        t.sent.where((f) => f.isNotEmpty && f[0] == OpA.queryDataDistribution),
+        isEmpty,
+        reason: '0x46 is watch→phone notify-only; phone must never send it',
+      );
+      await future;
+      sync.dispose();
+      d.dispose();
+    });
+
     test(
-      'queryDataDistribution 0x46 bitmask 0x00000005 → availableDays {0, 2}',
+      'syncAll blindly polls the last N days without needing 0x46',
       () async {
         final t = _StubTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final sync = HistorySync(t, (_) {}, dispatcher: d);
-        // Drive a sync; the device will respond to the 0x46 query
-        // with a bitmask + 0xFF errors for each per-day 0x15 read.
-        // The test only cares about _availableDays being populated
-        // from the 0x46 response.
-        final syncFuture = sync.syncAll();
-        // Wait for the distribution query to be sent, then send the
-        // bitmask response.
+        final future = sync.syncAll(daysBack: 2);
         await Future<void>.delayed(const Duration(milliseconds: 50));
-        t.inA.add(
-          Codec.buildChannelA(OpA.queryDataDistribution, [
-            0x00,
-            0x00,
-            0x00,
-            0x05,
-          ]),
+        await future;
+
+        // Per-day HR reads fire for both day 0 (today) and day 1.
+        expect(
+          t.sent.where((f) => f.isNotEmpty && f[0] == OpA.readHeartRate),
+          hasLength(2),
         );
-        await syncFuture;
-        expect(sync.availableDays, containsAll([0, 2]));
-        expect(sync.availableDays.contains(1), isFalse);
+        // Activity summary fires on Channel-B (clamped to dayOffset ≤ 2).
+        expect(t.sentB.map(Codec.rxChannelBCmd), contains(OpB.activitySummary));
+        final today = DateOnly.today();
+        expect(sync.fetchedDays, containsAll([today, today.addDays(-1)]));
         sync.dispose();
         d.dispose();
       },
     );
 
     test(
-      'queryDataDistribution error falls back to blind recent-day polling',
+      'unsolicited 0x46 push from the watch does NOT throw or break sync',
       () async {
         final t = _StubTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final sync = HistorySync(t, (_) {}, dispatcher: d);
-
-        final future = sync.syncAll(daysBack: 2);
+        final future = sync.syncAll(daysBack: 1);
         await Future<void>.delayed(const Duration(milliseconds: 50));
-        t.inA.add(_channelAErrorFrame(OpA.queryDataDistribution, [0xee]));
-
-        await future;
-
-        final today = DateOnly.today();
-        expect(sync.availableDays, isEmpty);
-        expect(sync.fetchedDays, containsAll([today, today.addDays(-1)]));
-        expect(sync.fetchedDays.length, 2);
-        expect(
-          t.sent.where((f) => f.isNotEmpty && f[0] == OpA.readHeartRate),
-          hasLength(2),
+        // Some firmware builds push 0x46 unsolicited — the decoder
+        // must NOT throw and the sync must complete cleanly.
+        t.inA.add(
+          Codec.buildChannelA(OpA.queryDataDistribution, [
+            0x00,
+            0x00,
+            0x00,
+            0x01,
+          ]),
         );
-        expect(t.sentB.map(Codec.rxChannelBCmd), contains(OpB.activitySummary));
+        await future; // must complete without throwing
+        expect(sync.lastSyncError, isNull);
         sync.dispose();
         d.dispose();
       },
@@ -113,20 +126,10 @@ void main() {
       d.bind();
       final sync = HistorySync(t, (_) {}, dispatcher: d);
       final syncFuture = sync.syncAll();
-      // Push the 0x46 bitmask response first so day 0 is polled.
-      await Future<void>.delayed(const Duration(milliseconds: 50));
-      t.inA.add(
-        Codec.buildChannelA(OpA.queryDataDistribution, [
-          0x00,
-          0x00,
-          0x00,
-          0x01,
-        ]),
-      );
+      // syncAll no longer sends 0x46 — it blind-polls day 0 directly.
       // Wait long enough for the per-day 0x15 poll + drain
-      // (T+800 distribution drain + 0x15 send at T+800 + 600ms
-      // drain at T+1400 = total ~1500ms).
-      await Future<void>.delayed(const Duration(milliseconds: 1000));
+      // (0x15 send at T+0 + 600ms drain at T+600).
+      await Future<void>.delayed(const Duration(milliseconds: 800));
       // Header
       t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x18, 0x80, 0x05]));
       // First 4 bytes of the reassembled record = the day
@@ -185,12 +188,9 @@ void main() {
           0x00, // slot = 0
         ]);
         final future = sync.syncAll();
+        // syncAll no longer sends 0x46 — it blind-polls day 0 directly.
         await Future<void>.delayed(const Duration(milliseconds: 50));
-        // Bitmask response so day 0 is polled.
-        t.inA.add(
-          Codec.buildChannelA(OpA.queryDataDistribution, [0, 0, 0, 0x01]),
-        );
-        await Future<void>.delayed(const Duration(milliseconds: 900));
+        await Future<void>.delayed(const Duration(milliseconds: 800));
         // The wire bytes for the 0x15 request must be the packed
         // BCD date index, NOT a unix timestamp.
         final sent = t.sent.firstWhere(
@@ -231,18 +231,9 @@ void main() {
         d.bind();
         final sync = HistorySync(t, (_) {}, dispatcher: d);
         final syncFuture = sync.syncAll();
-        // Push the 0x46 bitmask response so day 0 is polled.
-        await Future<void>.delayed(const Duration(milliseconds: 50));
-        t.inA.add(
-          Codec.buildChannelA(OpA.queryDataDistribution, [
-            0x00,
-            0x00,
-            0x00,
-            0x01,
-          ]),
-        );
+        // syncAll no longer sends 0x46 — it blind-polls day 0 directly.
         // Wait for the per-day poll window.
-        await Future<void>.delayed(const Duration(milliseconds: 1000));
+        await Future<void>.delayed(const Duration(milliseconds: 800));
         t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x18, 0x80, 0x05]));
         // seq=1, dayStart=0x6A34F600 (LE), 9 sample bytes (96, 100, 102)
         t.inA.add(
@@ -705,15 +696,7 @@ void main() {
       ];
 
       final future = sync.syncAll(daysBack: 1);
-      await Future<void>.delayed(const Duration(milliseconds: 50));
-      t.inA.add(
-        Codec.buildChannelA(OpA.queryDataDistribution, [
-          0x00,
-          0x00,
-          0x00,
-          0x01,
-        ]),
-      );
+      // syncAll no longer sends 0x46 — it blind-polls day 0 directly.
       await Future<void>.delayed(const Duration(milliseconds: 2200));
       t.inA.add(Codec.buildChannelA(OpA.readDetailSport, [0xf0, 0x02, 0x01]));
       t.inA.add(
@@ -757,15 +740,11 @@ void main() {
       d.bind();
       final sync = HistorySync(t, (_) {}, dispatcher: d);
 
-      // Drive syncAll; the device doesn't respond to the 0x46 query
-      // (bitmask stays empty), so the per-day loop polls {0} only.
-      // We only care that the Channel-B writes for both sleep
-      // commands are issued — `t.sent` accumulates Channel-A
-      // writes; Channel-B writes aren't captured here, so we
-      // confirm the call doesn't throw and completes.
+      // Drive syncAll; the device doesn't need a 0x46 query anymore —
+      // the per-day loop always polls {0} as part of the bounded
+      // blind-poll. We only care that the Channel-B writes for both
+      // sleep commands are issued.
       final future = sync.syncAll(daysBack: 1);
-      await Future<void>.delayed(const Duration(milliseconds: 50));
-      // Missing bitmask → one-day blind poll → 0x15 fired → settle.
       // The Channel-B writes happen after the per-day loop.
       await Future<void>.delayed(const Duration(milliseconds: 1800));
       await future;
@@ -794,21 +773,21 @@ void main() {
       expect(sync.dayOf(DateOnly.today()), isNull);
       expect(sync.lastSyncedAt, isNull);
 
-      final future = sync.syncAll();
-      await Future<void>.delayed(const Duration(milliseconds: 50));
-      // Bitmask reports day 0 + day 2 have data.
-      t.inA.add(
-        Codec.buildChannelA(OpA.queryDataDistribution, [0, 0, 0, 0x05]),
-      );
+      final future = sync.syncAll(daysBack: 3);
+      // syncAll no longer sends 0x46 — the bounded blind-poll always
+      // covers days {0, 1, 2}. The fetched set tracks the days the
+      // per-day poll actually wrote to.
       await future;
       final today = DateOnly.today();
-      expect(sync.watchDaysWithData, containsAll([today, today.addDays(-2)]));
-      // No store → fetched set still tracks which days were polled.
-      expect(sync.fetchedDays, contains(today));
-      expect(sync.fetchedDays, contains(today.addDays(-2)));
-      expect(sync.fetchedDays, isNot(contains(today.addDays(2))));
-      // Day 0 always re-fetched; day 2 also fetched because no store.
-      expect(sync.fetchedDays.length, 2);
+      // No store → all three days were fetched (today always re-fetched
+      // for HR + sleep, and there's no on-disk record to short-circuit).
+      expect(
+        sync.fetchedDays,
+        containsAll([today, today.addDays(-1), today.addDays(-2)]),
+      );
+      // The 0x46 bitmask hasn't been pushed so watchDaysWithData is
+      // empty by design (no more gating on the bitmask).
+      expect(sync.watchDaysWithData, isEmpty);
       sync.dispose();
       d.dispose();
     });
