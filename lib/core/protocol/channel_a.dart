@@ -1211,13 +1211,22 @@ class SportTotals {
 
   static SportTotals? tryParse(Uint8List pl) {
     if (pl.length < 12) return null;
+    final rawCalories = Codec.readU24be(pl, 6);
     return SportTotals(
       steps: Codec.readU24be(pl, 0),
       running: Codec.readU24be(pl, 3),
-      calories: Codec.readU24be(pl, 6),
+      calories: _normalizeCalories(rawCalories),
       distanceMeters: Codec.readU24be(pl, 9),
       durationSeconds: pl.length >= 14 ? ((pl[12] << 8) | pl[13]) : 0,
     );
+  }
+
+  static int _normalizeCalories(int rawCalories) {
+    const maxSaneKcal = 20000;
+    if (rawCalories <= maxSaneKcal) return rawCalories;
+    // Live H59MA captures show this 24-bit field as small calories while the
+    // app stores and displays food calories (kcal): e.g. 265301 -> 265 kcal.
+    return (rawCalories / 1000).round();
   }
 }
 

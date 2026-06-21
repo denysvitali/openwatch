@@ -936,6 +936,26 @@ void main() {
       expect(totals.durationSeconds, 300);
     });
 
+    test('todaySport 0x48 normalizes raw calories to kcal', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final got = d.onTodaySport.first;
+      t.inA.add(
+        Codec.buildChannelA(OpA.todaySport, [
+          0x00, 0x20, 0x0f, // steps = 8207
+          0x00, 0x00, 0x00, // running
+          0x03, 0x9c, 0x95, // calories = 236693 cal = 237 kcal
+          0x00, 0x14, 0xb7, // distance = 5303 m
+          0x00, 0xc2, // duration = 194 s
+        ]),
+      );
+      final totals = await got.timeout(const Duration(seconds: 1));
+      expect(totals.steps, 8207);
+      expect(totals.calories, 237);
+      expect(totals.distanceMeters, 5303);
+    });
+
     test(
       'readDetailSport 0x43 header frame routes to onSportDetailHeader',
       () async {
