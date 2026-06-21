@@ -8,7 +8,6 @@ import '../../core/providers/app_providers.dart';
 import '../../core/services/history_sync.dart';
 import 'widgets/hr_chart.dart';
 import 'widgets/sleep_chart.dart';
-import 'widgets/steps_chart.dart';
 
 /// Local-first history view.
 class HistoryScreen extends ConsumerWidget {
@@ -38,13 +37,7 @@ class HistoryScreen extends ConsumerWidget {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
           children: [
-            _SyncStatusCard(sync: sync),
-            const SizedBox(height: 12),
             if (sync.days.isNotEmpty) ...[
-              _SummaryStrip(days: sync.days),
-              const SizedBox(height: 12),
-              _StepsOverviewCard(days: sync.days),
-              const SizedBox(height: 16),
               _SectionTitle(
                 title: 'Daily detail',
                 trailing: '${sync.days.length} days',
@@ -59,278 +52,6 @@ class HistoryScreen extends ConsumerWidget {
             if (store == null) ...[const SizedBox(height: 16), _StoreWarning()],
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _SyncStatusCard extends StatelessWidget {
-  const _SyncStatusCard({required this.sync});
-  final HistorySync sync;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final last = sync.lastSyncedAt;
-    final error = sync.lastSyncError;
-
-    final (title, detail, color, icon) = switch ((sync.syncing, last, error)) {
-      (true, _, _) => (
-        'Syncing',
-        _progressLine(),
-        theme.colorScheme.primary,
-        CupertinoIcons.arrow_2_circlepath,
-      ),
-      (false, _, String e) => (
-        'Sync failed',
-        e,
-        theme.colorScheme.error,
-        CupertinoIcons.exclamationmark_circle,
-      ),
-      (false, null, _) => (
-        'Never synced',
-        'Pull from the watch to build local history',
-        theme.colorScheme.outline,
-        Icons.cloud_off_rounded,
-      ),
-      (false, DateTime l, _) => (
-        'Up to date',
-        'Last sync ${_formatRelative(l)}',
-        theme.colorScheme.secondary,
-        CupertinoIcons.checkmark_circle_fill,
-      ),
-    };
-
-    return _InsetCard(
-      child: Column(
-        children: [
-          Row(
-            children: [
-              if (sync.syncing)
-                const SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: CircularProgressIndicator(strokeWidth: 2.4),
-                )
-              else
-                Icon(icon, color: color),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(title, style: theme.textTheme.titleMedium),
-                    const SizedBox(height: 2),
-                    Text(
-                      detail,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ),
-              Text(
-                '${sync.days.length}d',
-                style: theme.textTheme.titleMedium?.copyWith(color: color),
-              ),
-            ],
-          ),
-          if (sync.syncing && sync.progressTotal > 0) ...[
-            const SizedBox(height: 12),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: LinearProgressIndicator(
-                value: sync.progressCurrent / sync.progressTotal,
-                minHeight: 7,
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  String _progressLine() {
-    if (sync.progressTotal > 0) {
-      return 'Fetching day ${sync.progressCurrent} of ${sync.progressTotal}';
-    }
-    if (sync.fetchedDays.isNotEmpty) {
-      return '${sync.fetchedDays.length} new days pulled';
-    }
-    return 'Checking the watch';
-  }
-
-  String _formatRelative(DateTime when) {
-    final delta = DateTime.now().difference(when);
-    if (delta.inMinutes < 1) return 'just now';
-    if (delta.inMinutes < 60) return '${delta.inMinutes}m ago';
-    if (delta.inHours < 24) return '${delta.inHours}h ago';
-    if (delta.inDays < 7) return '${delta.inDays}d ago';
-    return DateFormat.yMMMd().format(when);
-  }
-}
-
-class _SummaryStrip extends StatelessWidget {
-  const _SummaryStrip({required this.days});
-
-  final List<DailyHistory> days;
-
-  @override
-  Widget build(BuildContext context) {
-    final week = days.length <= 7 ? days : days.sublist(days.length - 7);
-    final stepsTotal = week.fold<int>(0, (sum, d) => sum + (d.steps ?? 0));
-    final hrSamples = week.expand((d) => d.hr).toList();
-    final avgHr = hrSamples.isEmpty
-        ? null
-        : (hrSamples.fold<int>(0, (sum, h) => sum + h.bpm) / hrSamples.length)
-              .round();
-    final sleep = days.last.sleep.fold<Duration>(
-      Duration.zero,
-      (sum, s) => sum + s.duration,
-    );
-
-    return Row(
-      children: [
-        Expanded(
-          child: _SummaryTile(
-            icon: CupertinoIcons.arrow_up_right,
-            label: '7-day steps',
-            value: NumberFormat.compact().format(stepsTotal),
-            tint: Theme.of(context).colorScheme.primary,
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: _SummaryTile(
-            icon: CupertinoIcons.heart_fill,
-            label: 'Avg heart',
-            value: avgHr == null ? '-' : '$avgHr',
-            unit: avgHr == null ? null : 'bpm',
-            tint: const Color(0xFFFF3B30),
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: _SummaryTile(
-            icon: CupertinoIcons.moon_fill,
-            label: 'Sleep',
-            value: sleep == Duration.zero
-                ? '-'
-                : '${sleep.inHours}h ${sleep.inMinutes.remainder(60)}m',
-            tint: const Color(0xFF5856D6),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _SummaryTile extends StatelessWidget {
-  const _SummaryTile({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.tint,
-    this.unit,
-  });
-
-  final IconData icon;
-  final String label;
-  final String value;
-  final String? unit;
-  final Color tint;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return _InsetCard(
-      padding: const EdgeInsets.all(12),
-      child: SizedBox(
-        height: 84,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(icon, color: tint, size: 18),
-            const Spacer(),
-            FittedBox(
-              alignment: Alignment.centerLeft,
-              fit: BoxFit.scaleDown,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    value,
-                    style: theme.textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  if (unit != null) ...[
-                    const SizedBox(width: 3),
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 3),
-                      child: Text(
-                        unit!,
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            Text(
-              label,
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _StepsOverviewCard extends StatelessWidget {
-  const _StepsOverviewCard({required this.days});
-
-  final List<DailyHistory> days;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final recent = days.length <= 7 ? days : days.sublist(days.length - 7);
-    final best = recent.fold<int>(0, (max, d) {
-      final steps = d.steps ?? 0;
-      return steps > max ? steps : max;
-    });
-
-    return _InsetCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(child: Text('Steps', style: theme.textTheme.titleLarge)),
-              Text(
-                best == 0
-                    ? 'No peak'
-                    : 'Best ${NumberFormat.compact().format(best)}',
-                style: theme.textTheme.labelLarge?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          StepsBarChart(days: recent, height: 156),
-        ],
       ),
     );
   }
@@ -792,18 +513,14 @@ class _NewBadge extends StatelessWidget {
 }
 
 class _InsetCard extends StatelessWidget {
-  const _InsetCard({
-    required this.child,
-    this.padding = const EdgeInsets.all(16),
-  });
+  const _InsetCard({required this.child});
 
   final Widget child;
-  final EdgeInsetsGeometry padding;
 
   @override
   Widget build(BuildContext context) {
     return Card(
-      child: Padding(padding: padding, child: child),
+      child: Padding(padding: const EdgeInsets.all(16), child: child),
     );
   }
 }

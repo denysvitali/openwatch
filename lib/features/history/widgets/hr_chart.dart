@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../core/services/history_sync.dart';
 
@@ -70,9 +71,12 @@ class _HrLineChartState extends State<HrLineChart> {
                 behavior: HitTestBehavior.opaque,
                 onTapDown: (details) =>
                     _selectNearest(details.localPosition, size),
-                onScaleStart: (_) {
+                onScaleStart: (details) {
                   _scaleStartStart = _viewStart;
                   _scaleStartEnd = _viewEnd;
+                  if (details.pointerCount <= 1) {
+                    _selectNearest(details.localFocalPoint, size);
+                  }
                 },
                 onScaleUpdate: (details) => _handleScaleUpdate(details, size),
                 child: ClipRect(
@@ -129,6 +133,10 @@ class _HrLineChartState extends State<HrLineChart> {
       _setRange(anchor - nextSpan * focal, anchor + nextSpan * (1 - focal));
       return;
     }
+    if (details.pointerCount <= 1) {
+      _selectNearest(details.localFocalPoint, size);
+      return;
+    }
     final delta =
         -details.focalPointDelta.dx / chartRect.width * (_viewEnd - _viewStart);
     if (delta.abs() > 0.0001) {
@@ -156,8 +164,17 @@ class _HrLineChartState extends State<HrLineChart> {
       }
     }
     if (best != null) {
-      setState(() => _selected = best);
+      _selectSample(best);
     }
+  }
+
+  void _selectSample(HrSample sample) {
+    final current = _selected;
+    if (current?.timestamp == sample.timestamp && current?.bpm == sample.bpm) {
+      return;
+    }
+    HapticFeedback.lightImpact();
+    setState(() => _selected = sample);
   }
 
   void _zoom(double factor) {

@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../core/protocol/sleep_parser.dart';
 
@@ -56,9 +57,12 @@ class _SleepTimelineState extends State<SleepTimeline> {
                   behavior: HitTestBehavior.opaque,
                   onTapDown: (details) =>
                       _selectSegment(details.localPosition, size, range),
-                  onScaleStart: (_) {
+                  onScaleStart: (details) {
                     _scaleStartStart = _viewStart;
                     _scaleStartEnd = _viewEnd;
+                    if (details.pointerCount <= 1) {
+                      _selectSegment(details.localFocalPoint, size, range);
+                    }
                   },
                   onScaleUpdate: (details) =>
                       _handleScaleUpdate(details, size, range),
@@ -131,6 +135,10 @@ class _SleepTimelineState extends State<SleepTimeline> {
       );
       return;
     }
+    if (details.pointerCount <= 1) {
+      _selectSegment(details.localFocalPoint, size, range);
+      return;
+    }
     final delta =
         -details.focalPointDelta.dx / chartRect.width * (_viewEnd - _viewStart);
     if (delta.abs() > 0.0001) {
@@ -164,8 +172,19 @@ class _SleepTimelineState extends State<SleepTimeline> {
       }
     }
     if (best != null) {
-      setState(() => _selected = best);
+      _selectSleepSegment(best);
     }
+  }
+
+  void _selectSleepSegment(SleepSegment segment) {
+    final current = _selected;
+    if (current?.start == segment.start &&
+        current?.duration == segment.duration &&
+        current?.stage == segment.stage) {
+      return;
+    }
+    HapticFeedback.lightImpact();
+    setState(() => _selected = segment);
   }
 
   void _zoom(double factor, _SleepRange range) {
