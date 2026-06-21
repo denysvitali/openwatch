@@ -206,10 +206,11 @@ class Commands {
       Codec.buildChannelB(OpB.sleepNew, [dayOffset & 0xFF]);
 
   /// New sleep protocol lunch/nap variant (Channel-B `0x3e`) for a given
-  /// day offset. Same wire shape as [readSleepNewProtocol] but the firmware
-  /// reads from the lunch-sleep store via `FUN_0082fada` (GHIDRA §2.3).
+  /// day offset. The firmware handler `FUN_0082fada` (GHIDRA §2.3) expects
+  /// a 2-byte payload: `[dayOffset, recordType]` where `recordType = 0x01`
+  /// selects the lunch/nap pass (`param_2 == 1`).
   static Uint8List readSleepLunchProtocol({int dayOffset = 0}) =>
-      Codec.buildChannelB(OpB.sleepLunchNew, [dayOffset & 0xFF]);
+      Codec.buildChannelB(OpB.sleepLunchNew, [dayOffset & 0xFF, 0x01]);
 
   /// Activity / sport summary (Channel-B `0x2a`) for today through
   /// [dayOffset]. The firmware clamps the offset to `2` and returns
