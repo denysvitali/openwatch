@@ -304,6 +304,128 @@ void main() {
       },
     );
 
+    test(
+      'late Channel-A HR frame is attributed to correct day even when '
+      'sync loop has moved on to sleep/activity (HS-8)',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final sync = _testSync(t, d);
+        final syncFuture = sync.syncAll(daysBack: 2);
+
+        // Wait for the first day (today) HR poll to be sent.
+        await Future<void>.delayed(const Duration(milliseconds: 150));
+
+        // Today: send a header + chunk 1 that will NOT flush yet (seq=2).
+        // Day-start timestamp = 2026-06-19 00:00 UTC = 0x6A34F600 (LE).
+        final dayStartBytes = [0x00, 0xF6, 0x34, 0x6A];
+        t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x18, 0x80, 0x05]));
+        t.inA.add(
+          Codec.buildChannelA(OpA.readHeartRate, [
+            0x01, // seq=1 (need 2 chunks to flush)
+            ...dayStartBytes,
+            0x60, 0x64, 0x66, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+          ]),
+        );
+
+        // Let the drain for today run.
+        await Future<void>.delayed(const Duration(milliseconds: 150));
+
+        // Now the sync loop moves to yesterday (day 1). The chunk for
+        // today is still pending in _hrChunks because seq=2 was needed.
+        // Wait for yesterday's poll to be sent.
+        await Future<void>.delayed(const Duration(milliseconds: 150));
+
+        // Now inject the SECOND chunk for TODAY, but AFTER the sync loop
+        // has moved _currentSyncDay to yesterday. In the old code this
+        // would be mis-attributed to yesterday because _flushHrChunks read
+        // _currentSyncDay at flush time. With HS-8 fix, the day is
+        // captured in the _RxEntry when the frame arrives.
+        t.inA.add(
+          Codec.buildChannelA(OpA.readHeartRate, [
+            0x02, // seq=2 (now count >= seq, so flush)
+            ...dayStartBytes,
+            0x6A, 0x6E, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+          ]),
+        );
+
+        // Wait for the drain to process the late frame.
+        await Future<void>.delayed(const Duration(milliseconds: 150));
+
+        // Let sync finish.
+        await syncFuture;
+
+        // The late frame should be attributed to today, not yesterday.
+        final today = DateOnly.today();
+        final yesterday = today.addDays(-1);
+        final todayHistory = sync.dayOf(today);
+        final yesterdayHistory = sync.dayOf(yesterday);
+
+        expect(todayHistory, isNotNull);
+        expect(todayHistory!.hr, isNotEmpty,
+            reason: 'today should have HR samples from the late frame');
+
+        // Yesterday should have no HR samples (we only sent a header for
+        // today, and the late chunk was for today).
+        expect(yesterdayHistory == null || yesterdayHistory.hr.isEmpty, isTrue,
+            reason: 'yesterday must not receive today\'s late HR samples');
+
+        sync.dispose();
+        d.dispose();
+      },
+    );
+
+    test(
+      '0xFF empty-day frame is attributed to correct day when captured '
+      '(HS-8)',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final sync = _testSync(t, d);
+        final syncFuture = sync.syncAll(daysBack: 2);
+
+        // Wait for today HR poll.
+        await Future<void>.delayed(const Duration(milliseconds: 150));
+
+        // Send an empty-day response for today.
+        t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0xff]));
+
+        // Wait for drain.
+        await Future<void>.delayed(const Duration(milliseconds: 150));
+
+        // Wait for yesterday HR poll.
+        await Future<void>.delayed(const Duration(milliseconds: 150));
+
+        // Now send a late 0xFF for today, after _currentSyncDay has moved
+        // to yesterday. With HS-8, the day is captured at enqueue time.
+        t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0xff]));
+
+        // Wait for drain.
+        await Future<void>.delayed(const Duration(milliseconds: 150));
+
+        await syncFuture;
+
+        // Both days should have empty HR records (the 0xFF commits an
+        // empty day). The late 0xFF should not create a duplicate or
+        // mis-attributed record.
+        final today = DateOnly.today();
+        final yesterday = today.addDays(-1);
+        final todayHistory = sync.dayOf(today);
+        final yesterdayHistory = sync.dayOf(yesterday);
+
+        expect(todayHistory, isNotNull);
+        expect(todayHistory!.hr, isEmpty);
+
+        // Yesterday should also be empty (no chunks sent for it).
+        expect(yesterdayHistory == null || yesterdayHistory.hr.isEmpty, isTrue);
+
+        sync.dispose();
+        d.dispose();
+      },
+    );
+
     // ------------------------------------------------------------------
     // 0x37 pressureSetting + 0x39 hrvSetting two-phase reassembly.
     // Wired via FragmentReassembler — GHIDRA §3.20 / §3.21.

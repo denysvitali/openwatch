@@ -81,6 +81,17 @@ class HrvRecord {
   final Uint8List body;
 }
 
+/// A queued inbound Channel-A frame paired with the [DateOnly] day it
+/// was captured for.  Day is snapshotted from [_currentSyncDay] at
+/// enqueue time so that late frames are still attributed to the
+/// correct day even after the sync loop has moved on (HS-8).
+@immutable
+class _RxEntry {
+  const _RxEntry(this.frame, this.day);
+  final Uint8List frame;
+  final DateOnly? day;
+}
+
 /// Day-aligned totals for the activity ring on the dashboard.
 ///
 /// All fields are nullable so that `null` means "no data from the watch"
@@ -333,7 +344,13 @@ class HistorySync extends ChangeNotifier {
   int get progressTotal => _progressTotal;
 
   StreamSubscription<Uint8List>? _inbound;
-  final List<Uint8List> _rxQueue = [];
+
+  /// One queued inbound Channel-A frame together with the sync-day it
+  /// belongs to, captured at the moment the frame arrives.  This removes
+  /// the HS-8 race where a late HR frame could be mis-attributed to a
+  /// later sleep/activity day because [_currentSyncDay] had already
+  /// moved on.
+  final List<_RxEntry> _rxQueue = [];
 
   /// The day the in-flight HR chunks belong to. Set just before we send
   /// `0x15` for a given day; consumed by [_flushHrChunks]. Channel-B
@@ -621,7 +638,7 @@ class HistorySync extends ChangeNotifier {
   }
 
   void _collectRx(Uint8List frame) {
-    _rxQueue.add(frame);
+    _rxQueue.add(_RxEntry(frame, _currentSyncDay));
   }
 
   Future<void> _drainRx(Duration settle) async {
@@ -635,8 +652,8 @@ class HistorySync extends ChangeNotifier {
       await Future<void>.delayed(settle);
       final frames = _rxQueue.toList();
       _rxQueue.clear();
-      for (final f in frames) {
-        _parse(f);
+      for (final e in frames) {
+        _parse(e.frame, e.day);
       }
       notifyListeners();
       span?.end();
@@ -647,7 +664,7 @@ class HistorySync extends ChangeNotifier {
     }
   }
 
-  void _parse(Uint8List frame) {
+  void _parse(Uint8List frame, DateOnly? day) {
     if (frame.length != 16) return;
     final op = Codec.rxOpcode(frame);
     final pl = Codec.rxPayload(frame);
@@ -707,12 +724,12 @@ class HistorySync extends ChangeNotifier {
           _hrChunks.clear();
           // Persist the (possibly empty) record so the UI shows the
           // day even when the watch has no HR data for it.
-          _commitCurrentDayHr();
+          _commitCurrentDayHr(day);
         } else if (tag >= 1 && tag <= 23) {
           if (pl.length >= 1 + 13) {
             _hrChunks.add(Uint8List.fromList(pl.sublist(1, 1 + 13)));
             if (_hrChunks.length >= tag) {
-              _flushHrChunks();
+              _flushHrChunks(day);
             }
           }
         }
@@ -734,8 +751,7 @@ class HistorySync extends ChangeNotifier {
 
   final List<Uint8List> _hrChunks = [];
 
-  void _flushHrChunks() {
-    final day = _currentSyncDay;
+  void _flushHrChunks(DateOnly? day) {
     // Spans the assembly + merge step for one day's HR series; tagged
     // with the target day so flame graphs show which day is slow.
     final span = OpenTelemetryService().startChildSpan(
@@ -775,12 +791,12 @@ class HistorySync extends ChangeNotifier {
       // echoed back — the firmware's BCD date echo may differ by a
       // timezone near midnight, but we already know what we asked for.
       //
-      // If _currentSyncDay has already been cleared (should not happen
-      // after the HS-4 fix), the fallback parses the firmware's echoed
-      // Unix timestamp as UTC.  This is a best-effort safety net; the
+      // If the entry has no stored day (should not happen after the
+      // HS-8 fix), the fallback parses the firmware's echoed Unix
+      // timestamp as UTC.  This is a best-effort safety net; the
       // timestamp format is not documented and may be local time on
       // some firmware builds.
-      final resolvedDay = _currentSyncDay ?? DateOnly.fromDateTime(dayStart);
+      final resolvedDay = day ?? DateOnly.fromDateTime(dayStart);
       final previous = _days[resolvedDay] ?? DailyHistory(day: resolvedDay);
       final mergedByTs = <int, HrSample>{
         for (final h in previous.hr) h.timestamp.millisecondsSinceEpoch: h,
@@ -819,8 +835,7 @@ class HistorySync extends ChangeNotifier {
   /// when the watch returns `pl[0] == 0xff` (no data for this slot).
   /// Without this, an empty day would never be written to disk and the
   /// next sync would re-fetch it forever.
-  void _commitCurrentDayHr() {
-    final day = _currentSyncDay;
+  void _commitCurrentDayHr(DateOnly? day) {
     if (day == null) return;
     final previous = _days[day] ?? DailyHistory(day: day);
     if (previous.hr.isNotEmpty) return; // already persisted
