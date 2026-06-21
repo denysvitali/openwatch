@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+import '../services/app_log.dart';
+
 /// A single sleep segment (deep / light / awake / rem).
 enum SleepStage { awake, light, deep, rem }
 
@@ -112,8 +114,11 @@ class SleepParser {
     Uint8List pl, {
     required DateTime anchor,
   }) {
-    if (pl.isEmpty) return const [];
-    return _parseChained(pl.sublist(1), anchor: anchor);
+    if (pl.isEmpty) {
+      AppLog.instance.debug('sleep', 'night payload empty — no sleep record');
+      return const [];
+    }
+    return _parseChained(pl.sublist(1), anchor: anchor, source: 'night');
   }
 
   /// Parses a `0x3e` lunch/nap-sleep payload. Same wire shape as the
@@ -121,7 +126,7 @@ class SleepParser {
   static List<SleepSegment> parseLunchSleepSegments(
     Uint8List pl, {
     required DateTime anchor,
-  }) => _parseChained(pl, anchor: anchor);
+  }) => _parseChained(pl, anchor: anchor, source: 'lunch');
 
   /// Walks [pl] as a sequence of chained day blocks; each block is
   /// `u16 BE endMin` + `(stageByte, durMin)*`.
@@ -137,9 +142,21 @@ class SleepParser {
   static List<SleepSegment> _parseChained(
     Uint8List pl, {
     required DateTime anchor,
+    required String source,
   }) {
     final out = <SleepSegment>[];
-    if (pl.length < 4) return out;
+    if (pl.length < 4) {
+      // Distinguish "no data" (length 0 or 2 for lunch, length 1 or 3 for night
+      // after dayOffset strip) from "corrupted data" (any other short length).
+      // Log at warn so telemetry can detect firmware sending unexpectedly
+      // short sleep payloads (SP-4).
+      AppLog.instance.warn(
+        'sleep',
+        '$source payload too short for chained block '
+        '(len=${pl.length}, need>=4)',
+      );
+      return out;
+    }
 
     var i = 0;
 

@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openwatch/core/protocol/sleep_parser.dart';
+import 'package:openwatch/core/services/app_log.dart';
 
 void main() {
   group('SleepParser — parseNightSleepSegments (0x27 Ch-B)', () {
@@ -74,19 +75,43 @@ void main() {
     });
 
     test('returns an empty list for an empty payload', () {
+      AppLog.instance.clear();
       expect(
         SleepParser.parseNightSleepSegments(Uint8List(0), anchor: anchor),
         isEmpty,
       );
+      // Empty payload is "no data", not "corrupted data" — logged at debug.
+      expect(
+        AppLog.instance.entries.any(
+          (e) =>
+              e.tag == 'sleep' &&
+              e.level == LogLevel.debug &&
+              e.message.contains('empty'),
+        ),
+        isTrue,
+      );
     });
 
     test('returns an empty list for a payload shorter than 4 bytes', () {
+      AppLog.instance.clear();
       expect(
         SleepParser.parseNightSleepSegments(
           Uint8List.fromList([0x00, 0x00]),
           anchor: anchor,
         ),
         isEmpty,
+      );
+      // After stripping dayOffset, remaining length is 1 — too short.
+      // Logged at warn so telemetry can detect unexpectedly short
+      // firmware payloads (SP-4).
+      expect(
+        AppLog.instance.entries.any(
+          (e) =>
+              e.tag == 'sleep' &&
+              e.level == LogLevel.warn &&
+              e.message.contains('too short'),
+        ),
+        isTrue,
       );
     });
 
@@ -482,6 +507,123 @@ void main() {
     });
   });
 
+  group('SleepParser — SP-4 empty/null payload tracing', () {
+    final anchor = DateTime(2026, 6, 20);
+
+    test('night: 1-byte payload (only dayOffset) logs warn and returns empty', () {
+      AppLog.instance.clear();
+      final pl = Uint8List.fromList([0x01]); // dayOffset only
+      expect(SleepParser.parseNightSleepSegments(pl, anchor: anchor), isEmpty);
+      expect(
+        AppLog.instance.entries.any(
+          (e) =>
+              e.tag == 'sleep' &&
+              e.level == LogLevel.warn &&
+              e.message.contains('too short') &&
+              e.message.contains('len=0'),
+        ),
+        isTrue,
+        reason: 'after stripping dayOffset, length is 0',
+      );
+    });
+
+    test('night: 2-byte payload logs warn and returns empty', () {
+      AppLog.instance.clear();
+      final pl = Uint8List.fromList([0x01, 0x00]); // dayOffset + 1 byte
+      expect(SleepParser.parseNightSleepSegments(pl, anchor: anchor), isEmpty);
+      expect(
+        AppLog.instance.entries.any(
+          (e) =>
+              e.tag == 'sleep' &&
+              e.level == LogLevel.warn &&
+              e.message.contains('too short') &&
+              e.message.contains('len=1'),
+        ),
+        isTrue,
+        reason: 'after stripping dayOffset, length is 1',
+      );
+    });
+
+    test('night: 3-byte payload logs warn and returns empty', () {
+      AppLog.instance.clear();
+      final pl = Uint8List.fromList([0x01, 0x00, 0x34]); // dayOffset + 2 bytes
+      expect(SleepParser.parseNightSleepSegments(pl, anchor: anchor), isEmpty);
+      expect(
+        AppLog.instance.entries.any(
+          (e) =>
+              e.tag == 'sleep' &&
+              e.level == LogLevel.warn &&
+              e.message.contains('too short') &&
+              e.message.contains('len=2'),
+        ),
+        isTrue,
+        reason: 'after stripping dayOffset, length is 2',
+      );
+    });
+
+    test('lunch: 1-byte payload logs warn and returns empty', () {
+      AppLog.instance.clear();
+      final pl = Uint8List.fromList([0x01]); // lone byte, not enough for endMin
+      expect(SleepParser.parseLunchSleepSegments(pl, anchor: anchor), isEmpty);
+      expect(
+        AppLog.instance.entries.any(
+          (e) =>
+              e.tag == 'sleep' &&
+              e.level == LogLevel.warn &&
+              e.message.contains('too short') &&
+              e.message.contains('len=1'),
+        ),
+        isTrue,
+      );
+    });
+
+    test('lunch: 2-byte payload (only endMin) logs warn and returns empty', () {
+      AppLog.instance.clear();
+      final pl = Uint8List.fromList([0x00, 0x34]); // endMin only, no pairs
+      expect(SleepParser.parseLunchSleepSegments(pl, anchor: anchor), isEmpty);
+      // endMin is read, then inner loop sees no pairs. The outer loop
+      // continues but i == 2, so outer while (2+2 <= 2) is false and
+      // exits cleanly. No warn here — the block is valid but empty.
+      expect(
+        AppLog.instance.entries.any(
+          (e) => e.tag == 'sleep' && e.level == LogLevel.warn,
+        ),
+        isFalse,
+        reason: 'a valid endMin with no pairs is not a warn condition',
+      );
+    });
+
+    test('night: 4-byte payload (dayOffset + endMin + no pairs) is valid empty', () {
+      AppLog.instance.clear();
+      final pl = Uint8List.fromList([0x01, 0x00, 0x34]); // dayOffset + endMin BE
+      expect(SleepParser.parseNightSleepSegments(pl, anchor: anchor), isEmpty);
+      // Same as lunch 2-byte: endMin is read, inner loop has no pairs,
+      // outer loop exits. No warn.
+      expect(
+        AppLog.instance.entries.any(
+          (e) => e.tag == 'sleep' && e.level == LogLevel.warn,
+        ),
+        isFalse,
+      );
+    });
+
+    test('well-formed payload does not log warn', () {
+      AppLog.instance.clear();
+      final pl = Uint8List.fromList([
+        0x01, // dayOffset
+        0x00, 0x34, // endMin BE = 52
+        0x01, 0x1E, // light, 30 min
+      ]);
+      expect(SleepParser.parseNightSleepSegments(pl, anchor: anchor), hasLength(1));
+      expect(
+        AppLog.instance.entries.any(
+          (e) => e.tag == 'sleep' && e.level == LogLevel.warn,
+        ),
+        isFalse,
+      );
+    });
+  });
+
   group('SleepParser — parseLunchSleepSegments (0x3e Ch-B)', () {
     final anchor = DateTime(2026, 6, 20);
 
@@ -515,9 +657,21 @@ void main() {
     });
 
     test('returns an empty list for an empty payload', () {
+      AppLog.instance.clear();
       expect(
         SleepParser.parseLunchSleepSegments(Uint8List(0), anchor: anchor),
         isEmpty,
+      );
+      // Empty lunch payload is "no data" — logged at warn because
+      // _parseChained sees length 0 < 4 (SP-4).
+      expect(
+        AppLog.instance.entries.any(
+          (e) =>
+              e.tag == 'sleep' &&
+              e.level == LogLevel.warn &&
+              e.message.contains('too short'),
+        ),
+        isTrue,
       );
     });
   });
