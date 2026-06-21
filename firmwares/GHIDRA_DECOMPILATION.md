@@ -6049,7 +6049,7 @@ All three originally-open questions have been resolved:
 
 ### 10.0 What's in this doc (final tally)
 
-This document now covers the H59MA v14 firmware in ~6,800 lines:
+This document covers the H59MA v14 firmware in **~7,250 lines** with **17+ synthesis sections** and **~55 documented handlers / sub-sections** across 11 top-level sections (§0-§10). The earlier ~6,800-line tally has grown ~450 lines from §2.0.1 (Channel-B internal helpers) and §2.0.2 (async state structure), and the §10.2 unified handler inventory.
 
 * **§0 Reading order** — the recommended navigation path.
 * **§1 Entry Point & Boot** — vector table, app_main_task, reset
