@@ -5054,6 +5054,79 @@ flags, and vice-versa.
 | `DAT_0082f894` | Sleep data context pointer |
 | `DAT_0082f8a4` | Device info context pointer |
 
+### 9.1 Global state-buffer map
+
+A cross-cutting view of the **11 runtime state buffers**
+that handlers across §2 / §3 / §5 / §6 / §7 / §8 share.
+Each global is a *pointer* to a struct in the firmware's
+RAM (runtime addresses in the `0x002xxxxx` range); the
+handlers dereference them with field offsets. This section
+maps each global to the handlers that read or write it.
+
+| Global | Owners (handlers / sections) |
+|---|---|
+| `DAT_0082d440` | `FUN_0082d2dc` Channel-A dispatcher ring (§3); `FUN_0082d034` `0x43 readDetailSport` (§3.6); `FUN_0082ce0c` `0x77 phoneSport` (§3.16); `FUN_0082cb28` `0x0e bpReadConform` (§3.19) |
+| `DAT_0082f0f0` | `FUN_0082efea` Channel-B parser (§2.0); `FUN_0082eee6` dispatcher (§2.0); `FUN_0082f098` 2-sec fragment timeout (§2.0); `FUN_0082f4fa` per-frame store (§2.0) |
+| `DAT_0082edb8` | `FUN_0082ebdc` Channel-A notify ring builder (§3); §3 "Common response path" |
+| `DAT_00830120` / `DAT_00830124` | `FUN_0082fe52` OTA state machine (§5.1); `FUN_0082f240` OTA data writer (§5.1); `FUN_00840724` OTA signature check (§5.2) |
+| `DAT_0082b0b8` | `FUN_0082ba54` `0x2b menstruation` (§3.1); `FUN_0082bb4e` `0x01 setTime` (§3.4); `FUN_0082edc4` BCD decoder (§3.4) |
+| `DAT_00827e8c` | `FUN_0082bb4e` `0x01 setTime` (§3.4); `FUN_00827b6c` vibration-mode setter (§3.2); `FUN_00827ba6` vibration-player (§3.2); `FUN_0082c7b8` `0x08` findDevice vibration (§3.15) |
+| `DAT_0082cfe8` | `FUN_0082cdac` `0x81 config-chunk write` (§3.5); `FUN_0082ccb6` `0x18 displayClock` (§3.5) |
+| `DAT_0082fcbc` | `FUN_0082fc0c` Channel-B async processor (§2.0); §2.1-§2.7 Channel-B handlers read/write here |
+| `DAT_0082f458` | `FUN_0082fe52` OTA state machine (§5.1); `FUN_0082f1b6` OTA init (§5.2); §5.1 deferred-ring downstream |
+| `DAT_0082f894` | `FUN_0082f5a2` `0x11 sleep summary` (§2.9); `FUN_0082f50c` `0x12 detailed sleep` (§2.10) |
+| `DAT_0082f8a4` | `FUN_0082f6ec` `0x5a device info` (§2.7) |
+
+#### The two "shared with all of §8" globals
+
+`DAT_0082bfcc` and `DAT_0082bfd4` are referenced in many
+sections but not in the §9 table above — they're documented
+in §3.24 (the deferred-ring synthesis) and §8.3 (the live
+status field). Both are *central* to the firmware's runtime
+state but their primary consumer is the 0xFEE7 dispatcher
+(§8.1) rather than the §2 / §3 / §5 paths.
+
+#### Why the OTA state is at `+0x14..+0x1C` (offsets in `DAT_00830128`)
+
+`FUN_0082fe52` (§5.1) dispatches `sub 0/1/2/3` to
+`FUN_0082fe4c(DAT_00830128 + 0x14)` / `+0x18` / `+0x1C`.
+The three consecutive offsets correspond to the four
+sub-cmd's "phase 2 / phase 3 / phase 4" state slots. Each
+phase has its own state entry (the OTA handler writes a
+state struct at the appropriate offset when the
+corresponding sub-cmd is received).
+
+#### Why the sleep context is at `DAT_0082f894`
+
+The sleep data context (`DAT_0082f894`) holds the *current*
+sleep record — the one the firmware is actively filling in
+during the night. The §2.9 `0x11 sleep summary` reads the
+finalised summary from this context (the `FUN_0082ee00`
+"no data" path returns when the context is empty), and the
+§2.10 `0x12 detailed sleep` reads the per-segment detail
+from the same context. Both opcodes share the underlying
+sleep record buffer — the difference is just the *amount*
+of data they return (summary vs detail).
+
+#### Why the device info context is at `DAT_0082f8a4`
+
+The device info context (`DAT_0082f8a4`) holds the
+TLV-encoded device metadata (vendor name, model, version,
+build date — see §2.7). The §2.7 `0x5a device info` reads
+from this context to assemble the response; the §8.2
+`0x48 'H'` handshake reads a separate live battery u32
+from `DAT_0082bfd4 + 0x2C` (not this buffer).
+
+#### Why this section exists
+
+Without §9.1, the §9 single-line table is a *list of
+pointers* with no links to the handler sections that use
+them. A host SDK author reading the per-handler sections
+sees these globals referenced (e.g. `DAT_0082d440` in §3.6,
+§3.16, §3.19) without knowing they're *shared* across
+handlers. This section is the *single place* in the doc
+that ties the 11 globals to the 30+ handlers that use them.
+
 ### 8.9 0xcd byte-reverse echo / link-sanity test (`FUN_0082be12`)
 
 A vendor-service **byte-order sanity check**. When the host
