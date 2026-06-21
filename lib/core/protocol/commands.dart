@@ -170,23 +170,21 @@ class Commands {
   /// `ReadHeartRate` (0x15): requests the 5-minute BPM history for a
   /// specific calendar day.
   ///
-  /// The firmware indexes HR records by packed BCD (year, month, day) in a
-  /// 32-bit little-endian word.  Because the firmware's RTC is set with
-  /// local wall-clock time via [setTime], the date here must also be in
-  /// the **same local timezone** — otherwise a UTC midnight that falls on
-  /// a different local day would request the wrong calendar page.  Callers
-  /// that already hold a `DateOnly` should pass `DateOnly.midnight` (which
-  /// is local midnight) so the packed BCD matches the firmware's day
-  /// counter.
+  /// The request index is the UTC day-start timestamp in seconds, encoded as
+  /// a 32-bit little-endian integer. This matches the public protocol table
+  /// (`PROTOCOL.md` §4.3) and live H59MAX behaviour: packed BCD dates such as
+  /// `26 06 21 00` are accepted as bytes but the watch replies with `0xff`
+  /// ("no record").
   ///
-  /// * [day] — calendar day to query.  Only `year % 100`, `month`, and
-  ///   `day` are used; the time-of-day fields are ignored.  Must be local
-  ///   time, not UTC.
-  /// * [slot] — record index within that day (`0..N`); `0` is the
-  ///   most-recent record. Sending `0x00000000` (all bytes zero) is
-  ///   the firmware's "current/latest" sentinel and bypasses the
-  ///   date lookup entirely — useful for a "give me whatever is
-  ///   freshest" probe.
+  /// * [day] — calendar day to query. Only the year/month/day fields are used;
+  ///   the command sends `DateTime.utc(year, month, day)` as epoch seconds.
+  /// * [slot] — optional 5-minute sample slot offset within the day. The app
+  ///   uses `0` for full-day reads; non-zero values advance the timestamp by
+  ///   `slot * 5 minutes`.
+  ///
+  /// Sending `0x00000000` (all bytes zero) is the firmware's "current/latest"
+  /// sentinel and bypasses the date lookup entirely — useful for a "give me
+  /// whatever is freshest" probe.
   ///
   /// Multi-packet response (GHIDRA §3.12): header frame
   /// `pl[0] == 0x18`, then up to 23 chunk frames with sequence
@@ -196,12 +194,10 @@ class Commands {
   /// index, so `HistorySync` should ignore the first 4 bytes when
   /// walking the 5-min BPM slots.
   static Uint8List readHeartRateHistory({required DateTime day, int slot = 0}) {
-    final yearBcd = Codec.toBcd(day.year % 100) & 0xFF;
-    final monthBcd = Codec.toBcd(day.month) & 0xFF;
-    final dayBcd = Codec.toBcd(day.day) & 0xFF;
-    final packed =
-        yearBcd | (monthBcd << 8) | (dayBcd << 16) | ((slot & 0xFF) << 24);
-    return Codec.buildChannelA(OpA.readHeartRate, Codec.u32le(packed));
+    final utcDayStart = DateTime.utc(day.year, day.month, day.day);
+    final seconds = utcDayStart.millisecondsSinceEpoch ~/ 1000;
+    final start = seconds + (slot * 5 * 60);
+    return Codec.buildChannelA(OpA.readHeartRate, Codec.u32le(start));
   }
 
   /// New sleep protocol (Channel-B `0x27`) for a given day offset. Sent as

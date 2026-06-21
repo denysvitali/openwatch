@@ -321,51 +321,35 @@ void main() {
     );
 
     test(
-      'syncAll sends a packed-BCD date index for 0x15 (regression for '
-      'GHIDRA §3.12 — FUN_0082cf48 takes a packed date, not unix sec)',
+      'syncAll sends UTC day-start seconds for 0x15 HR history',
       () async {
         final t = _StubTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final sync = _testSync(t, d);
-        // Compute the expected packed bytes from `DateTime.now()` so
-        // the test is timezone-independent (host TZ can be +00..+12
-        // and the day part still matches).
         final today = DateTime.now();
-        final expected = Uint8List.fromList([
-          Codec.toBcd(today.year % 100) & 0xFF,
-          Codec.toBcd(today.month) & 0xFF,
-          Codec.toBcd(today.day) & 0xFF,
-          0x00, // slot = 0
-        ]);
+        final expectedSeconds =
+            DateTime.utc(
+              today.year,
+              today.month,
+              today.day,
+            ).millisecondsSinceEpoch ~/
+            1000;
         final future = sync.syncAll();
         // syncAll no longer sends 0x46 — it blind-polls day 0 directly.
         await Future<void>.delayed(const Duration(milliseconds: 20));
         await Future<void>.delayed(const Duration(milliseconds: 150));
-        // The wire bytes for the 0x15 request must be the packed
-        // BCD date index, NOT a unix timestamp.
         final sent = t.sent.firstWhere(
           (f) => f.isNotEmpty && f[0] == OpA.readHeartRate,
           orElse: () => Uint8List(0),
         );
         expect(sent, isNotEmpty);
         expect(
-          sent.sublist(1, 5),
-          expected,
+          Codec.readU32le(sent, 1),
+          expectedSeconds,
           reason:
-              '0x15 subData must be packed-BCD date (year_lo | month | day '
-              '| slot=0) per GHIDRA §3.12; FUN_008279c4 shares its byte '
-              'layout with the setTime BCD date struct',
-        );
-        // And the request must NOT be a unix timestamp (~1.78e9).
-        // A packed date fits in 4 B comfortably (< ~0x02000000);
-        // anything bigger is the legacy unix-seconds path.
-        expect(
-          Codec.readU32le(sent, 1) < 0x02000000,
-          isTrue,
-          reason:
-              'request was a packed date (small u32), not unix seconds '
-              '(>1.7e9)',
+              '0x15 subData must be UTC day-start seconds; H59MAX replies '
+              '0xff to packed BCD date bytes such as 26 06 21 00',
         );
         await Future<void>.delayed(const Duration(milliseconds: 1200));
         await future;

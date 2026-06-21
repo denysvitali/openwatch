@@ -2654,11 +2654,12 @@ if (local_13c == 0) {
 int found = FUN_00833c92(timestamp, data);
 ```
 
-The conversion helper `FUN_008279c4` is the same month-index → epoch
-helper used by `FUN_00828390` (see §3.4 setTime). The 4-byte index
-therefore acts as a *date* packed in the same way the `0x01` setTime
-BCD date struct is decoded — typically `year_lo | (month << 8) | (day << 16) | (slot << 24)`, where `slot` picks the n-th HR record
-stored for that day.
+Live H59MAX_1.00.13 testing shows the accepted index is the UTC
+day-start timestamp in seconds, matching `PROTOCOL.md` §4.3. Packed
+BCD dates such as `26 06 21 00` are accepted at the byte level but
+return the universal `0xff` no-data frame. Treat earlier BCD/date-index
+readings of `FUN_008279c4` as an incorrect interpretation for this
+firmware family.
 
 #### Phase 1 — header / error
 
@@ -6132,7 +6133,7 @@ on completion. The differences:
 | | `0x15` (Channel-A) | `0xc1` (0xFEE7) |
 |---|---|---|
 | Trigger | dispatcher calls `FUN_0082cf48` directly | dispatcher calls `FUN_008337fa` + `FUN_0082b938` |
-| Read mode | `FUN_008279c4(idx)` — month-index | `FUN_0083371e(2)` — one-shot |
+| Read mode | `FUN_008279c4(idx)` — live-tested as UTC day-start seconds | `FUN_0083371e(2)` — one-shot |
 | Ack | none — payload frames only | 1-byte ack frame sent immediately |
 | State machine | per-call fresh state | debounced via `flag` + secondary out-pointer |
 

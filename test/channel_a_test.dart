@@ -1052,33 +1052,26 @@ void main() {
   });
 
   group('Commands', () {
-    test('readHeartRateHistory packs BCD date + slot as u32le', () {
+    test('readHeartRateHistory packs UTC day-start seconds as u32le', () {
       final frame = Commands.readHeartRateHistory(
         day: DateTime(2026, 6, 20),
         slot: 3,
       );
-      // Opcode is first byte.
       expect(frame[0], OpA.readHeartRate);
-      // Payload bytes 1..4 are the little-endian packed word.
-      final packed =
-          frame[1] | (frame[2] << 8) | (frame[3] << 16) | (frame[4] << 24);
-      expect(packed & 0xFF, Codec.toBcd(26)); // year
-      expect((packed >> 8) & 0xFF, Codec.toBcd(6)); // month
-      expect((packed >> 16) & 0xFF, Codec.toBcd(20)); // day
-      expect((packed >> 24) & 0xFF, 3); // slot
+      final seconds = Codec.readU32le(frame, 1);
+      final expected =
+          DateTime.utc(2026, 6, 20).millisecondsSinceEpoch ~/ 1000 +
+          (3 * 5 * 60);
+      expect(seconds, expected);
     });
 
-    test('readHeartRateHistory uses local wall-clock date components', () {
-      // HS-10: a UTC midnight that falls on a different local day must
-      // NOT shift the packed BCD.  We simulate a +05:30 timezone by
-      // constructing a DateTime at 2026-06-20 00:00 local (which is
-      // 2026-06-19 18:30 UTC).  The command must still ask for 20 June.
-      final localMidnight = DateTime(2026, 6, 20);
-      final frame = Commands.readHeartRateHistory(day: localMidnight);
-      final packed = frame[1] | (frame[2] << 8) | (frame[3] << 16);
-      expect(packed & 0xFF, Codec.toBcd(26));
-      expect((packed >> 8) & 0xFF, Codec.toBcd(6));
-      expect((packed >> 16) & 0xFF, Codec.toBcd(20));
+    test('readHeartRateHistory uses calendar components, not instant UTC day', () {
+      final localDayWithTime = DateTime(2026, 6, 20, 23, 45);
+      final frame = Commands.readHeartRateHistory(day: localDayWithTime);
+      expect(
+        Codec.readU32le(frame, 1),
+        DateTime.utc(2026, 6, 20).millisecondsSinceEpoch ~/ 1000,
+      );
     });
   });
 }

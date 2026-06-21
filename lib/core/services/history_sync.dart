@@ -496,13 +496,10 @@ class HistorySync extends ChangeNotifier {
             'bounded blind-poll of last $effectiveDaysBack day(s)',
       );
 
-      // The watch expects a **packed BCD date index** per GHIDRA
-      // §3.12 (`FUN_0082cf48` + `FUN_008279c4`) — NOT a unix
-      // timestamp as PROTOCOL.md §4.3 implies. We pre-construct a
-      // LOCAL-midnight DateTime for the target day and let
-      // `Commands.readHeartRateHistory` pack it; the firmware only
-      // reads year/month/day so the hour/minute/second components
-      // don't matter.
+      // The watch expects a UTC day-start timestamp for 0x15 HR history.
+      // Live H59MAX firmware replies 0xff to packed BCD dates such as
+      // `26 06 21 00`; `Commands.readHeartRateHistory` converts the
+      // DateOnly-style day to epoch seconds.
       final today = DateTime.now();
       final todayD = DateOnly.fromDateTime(today);
       // Always blind-poll the last `effectiveDaysBack` days; the
@@ -552,11 +549,8 @@ class HistorySync extends ChangeNotifier {
           _progressCurrent = fetched;
           notifyListeners();
           await transport.sendA(
-            // readHeartRateHistory expects a local-midnight DateTime so
-            // the packed BCD date matches the firmware's wall-clock day
-            // counter (setTime also sends local BCD).  Using UTC here
-            // would shift the date near midnight for positive-offset
-            // timezones (HS-10).
+            // readHeartRateHistory only uses the calendar components and
+            // sends DateTime.utc(year, month, day) as seconds since epoch.
             Commands.readHeartRateHistory(day: day.midnight),
           );
           await _drainRx(drainDuration);
