@@ -617,6 +617,166 @@ void main() {
       },
     );
 
+    test(
+      'activity summary 0x2a terminator with non-zero padding stops at '
+          'first dayOffset==0 (HS-7)',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        final bParser = ChannelBParser(t);
+        d.bind();
+        final sync = _testSync(t, d, bParser: bParser);
+        final future = sync.syncAll(daysBack: 1);
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+
+        // Build a Channel-B 0x2a payload with two entries:
+        //   entry 1: dayOffset = 1 (yesterday), body has data
+        //   entry 2: dayOffset = 0 (terminator), body has non-zero padding
+        //            (firmware sometimes pads sentinel entries with garbage)
+        //   entry 3: dayOffset = 2 (garbage beyond terminator) — must NOT be read
+        final body1 = List<int>.filled(48, 0x00);
+        body1[0] = 0x00;
+        body1[1] = 0x00;
+        body1[2] = 0x64; // steps = 100
+        body1[6] = 0x00;
+        body1[7] = 0x00;
+        body1[8] = 0x32; // calories = 50
+        body1[9] = 0x00;
+        body1[10] = 0x00;
+        body1[11] = 0x50; // distance = 80
+
+        final body2 = List<int>.filled(48, 0x00);
+        body2[0] = 0xAA; // non-zero padding in sentinel body
+        body2[1] = 0xBB;
+        body2[2] = 0xCC;
+
+        final body3 = List<int>.filled(48, 0x00);
+        body3[0] = 0x00;
+        body3[1] = 0x00;
+        body3[2] = 0xFF; // would be steps = 255 if parsed
+
+        final payload = Uint8List.fromList([
+          0x01, ...body1, // yesterday with data
+          0x00, ...body2, // terminator with non-zero padding
+          0x02, ...body3, // garbage beyond terminator
+        ]);
+        t.inB.add(Codec.buildChannelB(OpB.activitySummary, payload));
+
+        await future;
+
+        // Only yesterday should be recorded; the dayOffset=0 terminator
+        // must stop parsing even though its body is non-zero.
+        final yesterday = DateOnly.today().addDays(-1);
+        final yestHistory = sync.dayOf(yesterday);
+        expect(yestHistory, isNotNull);
+        expect(yestHistory!.steps, 100);
+        expect(yestHistory.energyKcal, 50);
+        expect(yestHistory.distanceMeters, 80);
+
+        // The day before yesterday (dayOffset=2) must NOT appear.
+        final twoDaysAgo = DateOnly.today().addDays(-2);
+        final twoDaysAgoHistory = sync.dayOf(twoDaysAgo);
+        expect(
+          twoDaysAgoHistory == null || twoDaysAgoHistory.steps == null,
+          isTrue,
+          reason: 'dayOffset=2 beyond terminator must not be ingested',
+        );
+
+        sync.dispose();
+        d.dispose();
+      },
+    );
+
+    test(
+      'activity summary 0x2a all-zero body terminator still stops parsing (HS-7)',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        final bParser = ChannelBParser(t);
+        d.bind();
+        final sync = _testSync(t, d, bParser: bParser);
+        final future = sync.syncAll(daysBack: 1);
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+
+        // Build a Channel-B 0x2a payload with two entries:
+        //   entry 1: dayOffset = 1 (yesterday), body has data
+        //   entry 2: dayOffset = 0 (terminator), body all zeros
+        //   entry 3: dayOffset = 2 (garbage beyond terminator) — must NOT be read
+        final body1 = List<int>.filled(48, 0x00);
+        body1[0] = 0x00;
+        body1[1] = 0x00;
+        body1[2] = 0x64; // steps = 100
+
+        final body2 = List<int>.filled(48, 0x00); // all-zero terminator
+
+        final body3 = List<int>.filled(48, 0x00);
+        body3[0] = 0x00;
+        body3[1] = 0x00;
+        body3[2] = 0xFF; // would be steps = 255 if parsed
+
+        final payload = Uint8List.fromList([
+          0x01, ...body1, // yesterday with data
+          0x00, ...body2, // all-zero terminator
+          0x02, ...body3, // garbage beyond terminator
+        ]);
+        t.inB.add(Codec.buildChannelB(OpB.activitySummary, payload));
+
+        await future;
+
+        // Only yesterday should be recorded.
+        final yesterday = DateOnly.today().addDays(-1);
+        final yestHistory = sync.dayOf(yesterday);
+        expect(yestHistory, isNotNull);
+        expect(yestHistory!.steps, 100);
+
+        // The day before yesterday (dayOffset=2) must NOT appear.
+        final twoDaysAgo = DateOnly.today().addDays(-2);
+        final twoDaysAgoHistory = sync.dayOf(twoDaysAgo);
+        expect(
+          twoDaysAgoHistory == null || twoDaysAgoHistory.steps == null,
+          isTrue,
+          reason: 'dayOffset=2 beyond terminator must not be ingested',
+        );
+
+        sync.dispose();
+        d.dispose();
+      },
+    );
+
+    test(
+      'activity summary 0x2a first entry dayOffset=0 is not a terminator (HS-7)',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        final bParser = ChannelBParser(t);
+        d.bind();
+        final sync = _testSync(t, d, bParser: bParser);
+        final future = sync.syncAll(daysBack: 0);
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+
+        // Build a Channel-B 0x2a payload with one entry:
+        //   dayOffset = 0 (today), body has data
+        // The offset > 0 guard means the first entry is never treated as a
+        // terminator, even if dayOffset == 0.
+        final body = List<int>.filled(48, 0x00);
+        body[0] = 0x00;
+        body[1] = 0x00;
+        body[2] = 0x64; // steps = 100
+        final payload = Uint8List.fromList([0x00, ...body]);
+        t.inB.add(Codec.buildChannelB(OpB.activitySummary, payload));
+
+        await future;
+
+        final today = DateOnly.today();
+        final todayHistory = sync.dayOf(today);
+        expect(todayHistory, isNotNull);
+        expect(todayHistory!.steps, 100);
+
+        sync.dispose();
+        d.dispose();
+      },
+    );
+
     // ------------------------------------------------------------------
     // HS-6: Step/calorie totals must not fallback to previous day on 0.
     // ------------------------------------------------------------------

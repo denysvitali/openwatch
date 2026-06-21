@@ -874,7 +874,7 @@ class HistorySync extends ChangeNotifier {
         for (var i = offset + 1; i < offset + 49; i++)
           payload[i] == 0xff ? 0x00 : payload[i],
       ]);
-      if (offset > 0 && dayOffset == 0 && body.every((b) => b == 0)) {
+      if (offset > 0 && dayOffset == 0) {
         break;
       }
       if (dayOffset <= 31) {

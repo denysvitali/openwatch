@@ -190,8 +190,19 @@ class SleepParser {
       // hit a zero/zero terminator), the remaining bytes are trailing
       // garbage — do NOT continue and re-align on them, which would
       // misinterpret pair bytes as a new endMin. (SP-1)
+      //
+      // Special case: endMin == 0 with no pairs is a firmware "no data"
+      // sentinel (similar to the 0xFF empty-day marker in HR history).
+      // Skip it cleanly so the next block in a chained frame is still
+      // parsed. (SP-5)
       if (pairs.isEmpty) {
-        if (!terminated) break;
+        if (!terminated) {
+          if (endMin == 0) {
+            // No-data sentinel — keep walking the chain.
+            continue;
+          }
+          break;
+        }
         continue;
       }
 

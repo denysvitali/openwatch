@@ -446,6 +446,74 @@ void main() {
       expect(segs.single.stage, SleepStage.light);
       expect(segs.single.duration.inMinutes, 30);
     });
+
+    test('endMin == 0 with empty pairs is a no-data sentinel (SP-5)', () {
+      // Firmware may use endMin = 0 with no pairs as a "no sleep record"
+      // sentinel (similar to the 0xFF empty-day marker in HR history).
+      // The parser must skip it and continue to the next block rather
+      // than breaking out of the outer loop.
+      final pl = Uint8List.fromList([
+        0x01, // dayOffset
+        0x00, 0x00, // endMin = 0 — no-data sentinel, no pairs
+        0x00, 0x78, // endMin = 120 — next block
+        0x01, 0x1E, // light, 30 min
+      ]);
+      final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
+      expect(segs, hasLength(1));
+      expect(segs.single.stage, SleepStage.light);
+      expect(segs.single.duration.inMinutes, 30);
+      expect(segs.single.start, DateTime(2026, 6, 20, 1, 30));
+    });
+
+    test('endMin == 0 sentinel with terminator skips block and continues (SP-5)', () {
+      // The sentinel may be followed by a zero/zero terminator; the
+      // parser should still continue to the next block.
+      final pl = Uint8List.fromList([
+        0x01, // dayOffset
+        0x00, 0x00, // endMin = 0 — no-data sentinel
+        0x00, 0x00, // terminator
+        0x00, 0x78, // endMin = 120 — next block
+        0x01, 0x1E, // light, 30 min
+      ]);
+      final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
+      expect(segs, hasLength(1));
+      expect(segs.single.stage, SleepStage.light);
+      expect(segs.single.duration.inMinutes, 30);
+      expect(segs.single.start, DateTime(2026, 6, 20, 1, 30));
+    });
+
+    test('lunch: endMin == 0 with empty pairs is a no-data sentinel (SP-5)', () {
+      // Lunch/nap variant has no dayOffset prefix.
+      final pl = Uint8List.fromList([
+        0x00, 0x00, // endMin = 0 — no-data sentinel, no pairs
+        0x00, 0x78, // endMin = 120 — next block
+        0x01, 0x1E, // light, 30 min
+      ]);
+      final segs = SleepParser.parseLunchSleepSegments(pl, anchor: anchor);
+      expect(segs, hasLength(1));
+      expect(segs.single.stage, SleepStage.light);
+      expect(segs.single.duration.inMinutes, 30);
+      expect(segs.single.start, DateTime(2026, 6, 20, 1, 30));
+    });
+
+    test('endMin == 0 sentinel at end of payload returns empty (SP-5)', () {
+      // When the sentinel is the last thing in the payload, there is no
+      // next block to parse — the result is simply empty.
+      final pl = Uint8List.fromList([
+        0x01, // dayOffset
+        0x00, 0x00, // endMin = 0 — no-data sentinel, no pairs, no trailing bytes
+      ]);
+      final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
+      expect(segs, isEmpty);
+    });
+
+    test('lunch: endMin == 0 sentinel at end of payload returns empty (SP-5)', () {
+      final pl = Uint8List.fromList([
+        0x00, 0x00, // endMin = 0 — no-data sentinel, no pairs
+      ]);
+      final segs = SleepParser.parseLunchSleepSegments(pl, anchor: anchor);
+      expect(segs, isEmpty);
+    });
     test('stale-buffer echo is skipped but genuine block is kept (SP-2)', () {
       // Live H59MA v13 capture: the response for dayOffset=2 contained
       // the previous dayOffset=1 record appended (stale buffer). The
