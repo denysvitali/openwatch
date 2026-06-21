@@ -5967,8 +5967,160 @@ getter, `FUN_0082c530` is a 5-line config-byte setter)
 that are documented in the per-handler sections they
 support but not as standalone sections.
 
-### 10.1 Doc structure note
+### 10.2 Unified handler inventory (quick reference)
 
+A *single-table* index of every documented handler across all
+sections. Use this when you know the *transport* (Channel-A
+/ Channel-B / 0xFEE7) but need to find the *exact opcode +
+section number* for a given operation.
+
+#### Channel-B (§2) — 11 documented handlers
+
+| Cmd (hex) | Sub-byte | § | Operation |
+|---|---|---|---|
+| `0x11` | day_offset | §2.9 | sleep summary (100 B) |
+| `0x12` | day_offset | §2.10 | sleep detail (289 B) |
+| `0x27` | — | §2.4 | sleep records (night) |
+| `0x2a` | day_offset | §2.8 | activity summary (2 × 52 B) |
+| `0x2c` | sub 0x01 / 0x02 | §2.5 | alarm read / write |
+| `0x3e` | — | §2.4 | lunch sleep records (same as `0x27`) |
+| `0x41` | file_index | §2.11 | file list (up to 10 files, `0x42` response opcode) |
+| `0x43` | payload | §2.11 | file init (no response) |
+| `0x46` | payload | §2.11 | file delete (no response) |
+| `0x5a` | config_tlv | §2.7 | device info TLV |
+| `NAK` | — | §2.0 | vendor NAK packet (error_code + cmd) |
+
+#### Channel-A (§3) — 22 documented handlers
+
+| Cmd (hex) | § | Operation |
+|---|---|---|
+| `0x01` | §3.4 | setTime (BCD → RTC, sends `0x2f` MTU ack + 14 B `0x01` ack) |
+| `0x06` | §3.7 | DND read/write (sub 0x01 / 0x02) |
+| `0x08` | §3.15 | findDevice / camera / long-press (sub 0x00 / 0x01 / `0xAB 0xDC`) |
+| `0x0e` | §3.19 | bpReadConfirm (advances BP record index, returns 1/2 frame `0x0d`) |
+| `0x15` | §3.12 | readHeartRate (multi-frame `0x15` response or `0xff15` error) |
+| `0x18` | §3.5 | displayClock (watch-face / clock) |
+| `0x1e` | §3.13 | realTimeHeartRate (sub 0x01 start 60 s, 0x02 stop, 0x03 reset) |
+| `0x25` | §3.9 | setSitLong (writes sedentary config) |
+| `0x26` | §3.9 | readSitLong (reads sedentary config) |
+| `0x2b` | §3.1 | menstruation (mixture container, 16 B record) |
+| `0x2c` | §3.10 | bloodOxygenSetting (SpO2 on/off, bit 1 of shared config byte) |
+| `0x37` | §3.20 | pressureSetting (long fragmented config) |
+| `0x38` | §3.17 | pressure (bit 3 of shared config byte) |
+| `0x39` | §3.21 | hrvSetting (long fragmented config) |
+| `0x3a` | §3.22 | sugarLipidsSetting (bits 5 / 7 of shared config byte) |
+| `0x3b` | §3.18 | uvSetting (touch control, 1 byte at `DAT_0082cfe8 + 8`) |
+| `0x43` | §3.6 | readDetailSport (per-day 292 B detail dump) |
+| `0x72` | §3.3 | pushMsgUint (chunked Unicode buffer, 11 B per chunk + flush marker) |
+| `0x77` | §3.16 | phoneSport (4-stage lifecycle via switch8) |
+| `0x7a` | §3.11 | muslim (long fragmented config; producer is a stub) |
+| `0xa1` | §3.x | factory/test mode (6 sub-cmds, saves 1 kB context to `DAT_00830128`) |
+| `0xc6` | §3.14 | restoreKey (full reboot sequence) |
+| `0xc7` | §3.2 | vibration / motor pattern (two modes `'#'` / `'D'`) |
+| `0xff` | §3.8 | factory reset (memset 164 B config at `DAT_0082cff0`) |
+
+#### 0xFEE7 vendor service (§8) — 13 documented handlers
+
+| Cmd (hex) | § | Operation |
+|---|---|---|
+| `0x36` | (mentioned in §8) | HR-related read/set |
+| `0x3c` | §8.12 | capability block (fixed 16 B response, features at bytes 2/7/11) |
+| `0x3e` | §8.15 | lipids read/set (bit 7 of shared config byte — was wrongly labelled SpO2) |
+| `0x48` | §8.2 | handshake (`'H'` returns 15 B device-info block) |
+| `0x51` | §8.11 | find-phone / long alert (`'Q'` triggers vendor alert + motor pattern 9) |
+| `0x60` | §8.16 | status-field write (writes u32 to `DAT_0082bfd4 + 0x2C`, self-marker) |
+| `0x61` | §8.3 | status response (`'a'` returns u32 from `DAT_0082bfd4 + 0x2C`) |
+| `0x69` | §8.5 | mode control (`'i'` — 4-stage lifecycle: reset / start / receive / read) |
+| `0x6a` | §8.7 | mode-control continuation (`'j'` — the byte-reversed sub-byte pair with `0x69`) |
+| `0x90` | §8.6 | self-marker echo (`'.'` returns `[0x90, 0, 0, 0, ..., 0, 0x90]`) |
+| `0x93` | §8.18 | firmware version + build-date string (returns `"1.00.14_260508"`) |
+| `0x94` / `0x95` | §8.19 | state-update modes 1 / 3 (self-marker ack) |
+| `0x96` | §8.4 | reset-state (self-marker ack, also resets `DAT_0082caec[3..5]`) |
+| `0xbf` / `0xc0` | §8.17 | vendor memory R/W (raw `memcpy` to / from host-supplied address) |
+| `0xc1` | §8.14 | deferred long-fragmented response (queues async HR read + immediate 1 B ack) |
+| `0xc5` / `0xc8` / `0xc9` | §8.1 | inline config-byte writes to `DAT_0082caec[3..5]` |
+| `0xcd` | §8.9 | byte-reverse echo / link-sanity test |
+| `0xce` | §8.10 | factory/test sub-commands (sub `0x01`/`0x02`/`' '`/`'!'`/`'"'`) |
+| `0xfe` | §8.13 | vibration pattern from duration (fire-and-forget, no response) |
+
+#### ANCS (§4) — 3 callbacks
+
+| Callback | § | Operation |
+|---|---|---|
+| `ancs_add_client` (`FUN_00839e4e`) | §4.1 | register ANCS client, allocate state |
+| `ancs_parse_notification_source_data` (`FUN_00839fee`) | §4.2 | parse incoming notification source bytes |
+| `ancs_client_cb` (`FUN_0083a116`) | §4.3 | handle `connect`/`notification`/`data`/`disconnect` events |
+
+#### OTA / DFU (§5) — 4 helpers
+
+| Function | § | Operation |
+|---|---|---|
+| `FUN_00840724` | §5.2 | OTA signature check (4 B magic `0x8721bee2`) |
+| `FUN_0082fe52` | §5.1 | OTA state machine (sub 0/1/2/3/4 lifecycle) |
+| `FUN_0082f1a4` | §5.2 | OTA start ack |
+| `FUN_0082f1b6` | §5.2 | OTA init (parses 9 B header) |
+
+#### Power management (§6) — 2 helpers
+
+| Function | § | Operation |
+|---|---|---|
+| `FUN_0082a144` | §6.1 | button / DLPS init (3 timers + GPIO mask `0x1D`) |
+| `FUN_008275d8` | §6.2 | system reset (14-step sequence) |
+
+#### Sensors (§7) — 2 dispatchers
+
+| Function | § | Operation |
+|---|---|---|
+| `FUN_00833770` | §7.1 | HR module dispatcher (4-stage lifecycle) |
+| `FUN_00833334` | §7.2 | accelerometer / LIS3DH SPI dispatcher (single sub-cmd) |
+
+#### Boot (§1) — 2 functions
+
+| Function | § | Operation |
+|---|---|---|
+| `entry` (`0x00826400`) | §1 | Cortex-M trampoline |
+| `app_main_task` (`FUN_00826988`) | §1.1 | post-reset main-task (10-step boot sequence) |
+
+#### Why this section exists
+
+Without §10.2, a host SDK author who knows the transport
+(Channel-A / Channel-B / 0xFEE7) but not the specific
+opcode would have to read each top-level section (§2 / §3 /
+§4 / §5 / §6 / §7 / §8) in full to find the right entry.
+§10.2 is the **single table** that maps transport + opcode →
+§, eliminating the need to scan the per-section tables.
+
+The §10.2 table intentionally **omits** opcodes that are
+not actively used on the H59MA v14 (e.g. §2's reserved
+sub-cmds, §3's switch8 default-slot handlers, §8's
+0x97-0x9F reserved range). The 0x9D silent-drop (§8.20) and
+the 0x97-0x9F default-slot (§8.20) opcodes are noted in
+their respective syntheses but not repeated in §10.2.
+
+#### Cross-cutting synthesis index
+
+§10.2 is the *inventory*. The *patterns* that connect the
+handlers are documented in the 15+ synthesis sections:
+
+* §0 reading order — recommended navigation path
+* §2.0 — Channel-B NAK packet
+* §3.23 — DAT_008277f0 + 0x2D 1-bit config bitmap
+* §3.24 — DAT_0082bfcc deferred-command ring
+* §5.1 — OTA state machine
+* §6.1 / §6.2 — power-management helpers
+* §7.1 / §7.2 — sensor dispatchers
+* §8.20 — 0x97-0x9F reserved-opcode range
+* §8.21 — self-marker opcode pattern
+* §8.22 — cross-section wire-format
+* §9.1 — DAT state-buffer map
+
+A host SDK author who reads §0 first (§0 reading order),
+then uses §10.2 (this section) as the inventory, can
+locate any handler in the doc with two lookups: §10.2 for
+the §-number, then the §-number for the detailed payload /
+response / state-layout.
+
+### 10.1 Doc structure note
 The §8 sub-sections §8.1-§8.8 are in the correct location
 (in §8, right after the §8 heading at line 4020). The
 later §8 sub-sections §8.9-§8.22 are appended *after* this
