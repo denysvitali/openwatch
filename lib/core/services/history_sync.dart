@@ -276,7 +276,7 @@ class HistorySync extends ChangeNotifier {
               payload.length,
             ),
           ),
-          quietWindow: const Duration(milliseconds: 250),
+          quietWindow: fragmentQuietWindow,
         );
     _hrvReassembler = reassembler;
     return reassembler.assembled;
