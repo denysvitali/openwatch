@@ -1,7 +1,5 @@
 import 'dart:typed_data';
 
-import '../ble/ble_constants.dart';
-
 /// Low-level frame codecs for both BLE channels (see `PROTOCOL.md` §3).
 ///
 /// These are pure functions over bytes — no BLE or async — so they are fully
@@ -10,6 +8,7 @@ class Codec {
   Codec._();
 
   static const int errorFlag = 0x80;
+  static const int channelAFrameLength = 16;
 
   // ---------------------------------------------------------------------------
   // Channel A — fixed 16-byte command frames + additive 8-bit checksum.
@@ -17,7 +16,7 @@ class Codec {
 
   /// Builds a Channel-A frame: `[opcode][subData(≤14, zero-padded)][checksum]`.
   static Uint8List buildChannelA(int opcode, [List<int> subData = const []]) {
-    final buf = Uint8List(BleUuids.channelAFrameLength);
+    final buf = Uint8List(channelAFrameLength);
     buf[0] = opcode & 0xFF;
     final n = subData.length > 14 ? 14 : subData.length;
     for (var i = 0; i < n; i++) {
@@ -29,7 +28,7 @@ class Codec {
 
   /// Validates a received Channel-A frame: exactly 16 bytes and checksum matches.
   static bool isValidChannelA(Uint8List frame) {
-    if (frame.length != BleUuids.channelAFrameLength) return false;
+    if (frame.length != channelAFrameLength) return false;
     return _sum8(frame, 0, 15) == frame[15];
   }
 

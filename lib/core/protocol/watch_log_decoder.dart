@@ -1,0 +1,1095 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'codec.dart';
+import 'hr_parser.dart';
+import 'opcodes.dart';
+
+const _channelAUuid = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
+const _channelBUuid = 'de5bf729-d711-4e47-af26-65e3012a5dc7';
+const _fee7NotifyUuid = '0000fea2-0000-1000-8000-00805f9b34fb';
+const _fee7AltNotifyUuid = '0000fea1-0000-1000-8000-00805f9b34fb';
+
+final _nrfLine = RegExp(
+  r'Notification received from ([0-9a-fA-F-]+), value: \(0x\) ([0-9A-Fa-f-]+)',
+);
+
+final _timePrefix = RegExp(r'^\S\s+(\d\d:\d\d:\d\d\.\d{3})\s+');
+
+/// Decodes nRF Connect notification logs into protocol-level frame summaries.
+///
+/// This is intentionally pure Dart so it can be used from a CLI and from the
+/// Flutter app without depending on BLE state.
+class WatchLogDecoder {
+  const WatchLogDecoder({this.captureDate});
+
+  /// Calendar date of the capture. nRF Connect lines only carry time-of-day;
+  /// this fills in the date for sleep/activity summaries.
+  final DateTime? captureDate;
+
+  WatchLogReport decodeNrfConnectLog(String text) {
+    final frames = <DecodedLogFrame>[];
+    final state = _AssemblyState();
+    var lineNo = 0;
+
+    for (final line in const LineSplitter().convert(text)) {
+      lineNo++;
+      final match = _nrfLine.firstMatch(line);
+      if (match == null) continue;
+
+      final uuid = match.group(1)!.toLowerCase();
+      final bytes = _parseHexBytes(match.group(2)!);
+      final timestamp = _timePrefix.firstMatch(line)?.group(1);
+      final frame = _decodeFrame(lineNo, timestamp, uuid, bytes);
+      frames.add(frame);
+      state.accept(frame);
+    }
+
+    return WatchLogReport(
+      frames: frames,
+      heartRateSeries: state.finishHeartRate(),
+      pressureSeries: state.finishSeries(OpA.pressure),
+      hrvSeries: state.finishSeries(OpA.hrv),
+    );
+  }
+
+  DecodedLogFrame decodeHex(String hex, {String? uuid}) {
+    final normalizedUuid = uuid?.toLowerCase() ?? _channelAUuid;
+    return _decodeFrame(1, null, normalizedUuid, _parseHexBytes(hex));
+  }
+
+  DecodedLogFrame _decodeFrame(
+    int lineNo,
+    String? timestamp,
+    String uuid,
+    Uint8List bytes,
+  ) {
+    final channel = _channelForUuid(uuid);
+    return switch (channel) {
+      WatchLogChannel.channelA => _decodeChannelA(
+        lineNo,
+        timestamp,
+        uuid,
+        bytes,
+      ),
+      WatchLogChannel.channelB => _decodeChannelB(
+        lineNo,
+        timestamp,
+        uuid,
+        bytes,
+      ),
+      WatchLogChannel.fee7 => _decodeFee7(lineNo, timestamp, uuid, bytes),
+      WatchLogChannel.unknown => DecodedLogFrame(
+        lineNo: lineNo,
+        timestamp: timestamp,
+        uuid: uuid,
+        channel: channel,
+        bytes: bytes,
+        valid: false,
+        title: 'unknown notify characteristic',
+        details: const {},
+      ),
+    };
+  }
+
+  DecodedLogFrame _decodeChannelA(
+    int lineNo,
+    String? timestamp,
+    String uuid,
+    Uint8List bytes,
+  ) {
+    if (bytes.length != 16) {
+      return DecodedLogFrame(
+        lineNo: lineNo,
+        timestamp: timestamp,
+        uuid: uuid,
+        channel: WatchLogChannel.channelA,
+        bytes: bytes,
+        valid: false,
+        title: 'Channel A invalid length ${bytes.length}',
+        details: const {},
+      );
+    }
+
+    final valid = Codec.isValidChannelA(bytes);
+    final rawOpcode = Codec.rxOpcodeRaw(bytes);
+    final opcode = Codec.rxOpcode(bytes);
+    final payload = Codec.rxPayload(bytes);
+    final isError = Codec.rxIsError(bytes);
+    final label = _labelForChannelA(opcode);
+    final details = <String, Object?>{
+      'opcode': _hex(opcode),
+      'rawOpcode': _hex(rawOpcode),
+      'label': label,
+      'error': isError,
+      'payload': _hexList(payload),
+    };
+
+    var title = 'A ${_hex(opcode)} $label';
+    if (!valid) {
+      details['expectedChecksum'] = _hex(_sum8(bytes, 0, 15));
+      details['checksum'] = _hex(bytes[15]);
+      title = '$title checksum mismatch';
+    } else if (isError) {
+      final code = payload.isEmpty ? null : payload[0];
+      details['errorCode'] = code == null ? null : _hex(code);
+      title = '$title error code=${code == null ? 'n/a' : _hex(code)}';
+    } else {
+      title = _summarizeChannelA(opcode, payload, details);
+    }
+
+    return DecodedLogFrame(
+      lineNo: lineNo,
+      timestamp: timestamp,
+      uuid: uuid,
+      channel: WatchLogChannel.channelA,
+      bytes: bytes,
+      valid: valid,
+      title: title,
+      details: details,
+    );
+  }
+
+  DecodedLogFrame _decodeFee7(
+    int lineNo,
+    String? timestamp,
+    String uuid,
+    Uint8List bytes,
+  ) {
+    final valid = bytes.length == 16 && Codec.isValidChannelA(bytes);
+    final opcode = bytes.isEmpty ? 0 : bytes[0] & 0xff;
+    final details = <String, Object?>{
+      'opcode': _hex(opcode),
+      'label': _labelForFee7(opcode),
+      'payload': bytes.length >= 15
+          ? _hexList(Uint8List.sublistView(bytes, 1, 15))
+          : _hexList(bytes),
+    };
+    return DecodedLogFrame(
+      lineNo: lineNo,
+      timestamp: timestamp,
+      uuid: uuid,
+      channel: WatchLogChannel.fee7,
+      bytes: bytes,
+      valid: valid,
+      title: valid
+          ? 'FEE7 ${_hex(opcode)} ${_labelForFee7(opcode)}'
+          : 'FEE7 invalid frame',
+      details: details,
+    );
+  }
+
+  DecodedLogFrame _decodeChannelB(
+    int lineNo,
+    String? timestamp,
+    String uuid,
+    Uint8List bytes,
+  ) {
+    if (bytes.length < 6 || bytes[0] != Codec.channelBMagic) {
+      return DecodedLogFrame(
+        lineNo: lineNo,
+        timestamp: timestamp,
+        uuid: uuid,
+        channel: WatchLogChannel.channelB,
+        bytes: bytes,
+        valid: false,
+        title: 'Channel B invalid frame',
+        details: const {},
+      );
+    }
+
+    final cmd = Codec.rxChannelBCmd(bytes);
+    final label = _labelForChannelB(cmd);
+    final isEmptySentinel =
+        bytes.length >= 6 &&
+        bytes[2] == 0xff &&
+        bytes[3] == 0xff &&
+        bytes[4] == 0xff &&
+        bytes[5] == 0xff;
+    final payload = isEmptySentinel
+        ? Uint8List(0)
+        : Codec.rxChannelBPayload(bytes);
+    final declaredLength = bytes[2] | (bytes[3] << 8);
+    final declaredCrc = bytes[4] | (bytes[5] << 8);
+    final valid = isEmptySentinel || payload != null;
+    final details = <String, Object?>{
+      'cmd': _hex(cmd),
+      'label': label,
+      'declaredLength': isEmptySentinel ? 0 : declaredLength,
+      'declaredCrc': isEmptySentinel ? null : _hex(declaredCrc),
+      'payload': _hexList(payload ?? Uint8List(0)),
+    };
+
+    var title = valid
+        ? 'B ${_hex(cmd)} $label len=${payload!.length}'
+        : 'B ${_hex(cmd)} $label CRC/length mismatch';
+    if (valid && payload!.isNotEmpty) {
+      title = _summarizeChannelB(cmd, payload, details);
+    }
+
+    return DecodedLogFrame(
+      lineNo: lineNo,
+      timestamp: timestamp,
+      uuid: uuid,
+      channel: WatchLogChannel.channelB,
+      bytes: bytes,
+      valid: valid,
+      title: title,
+      details: details,
+    );
+  }
+
+  String _summarizeChannelA(
+    int opcode,
+    Uint8List payload,
+    Map<String, Object?> details,
+  ) {
+    switch (opcode) {
+      case OpA.battery:
+        if (payload.isNotEmpty) {
+          details['batteryPercent'] = payload[0];
+          return 'A 0x03 battery ${payload[0]}%';
+        }
+      case OpA.readHeartRate:
+        return _summarizeHeartRateFrame(payload, details);
+      case OpA.heartRateSetting:
+        if (payload.length >= 3) {
+          details['sub'] = _hex(payload[0]);
+          details['enabled'] = payload.length >= 2 ? payload[1] == 1 : null;
+          details['intervalMinutes'] = payload[2];
+          return 'A 0x16 HR setting sub=${_hex(payload[0])} '
+              'enabled=${payload.length >= 2 && payload[1] == 1} '
+              'interval=${payload[2]}m';
+        }
+      case OpA.bloodOxygenSetting:
+        if (payload.length >= 2) {
+          details['sub'] = _hex(payload[0]);
+          details['enabled'] = payload[1] != 0;
+          return 'A 0x2c SpO2 setting sub=${_hex(payload[0])} '
+              'enabled=${payload[1] != 0}';
+        }
+      case OpA.pressure:
+      case OpA.hrv:
+        return _summarizeFourChunkSeriesFrame(opcode, payload, details);
+      case OpA.pressureSetting:
+      case OpA.hrvSetting:
+        if (payload.length >= 2) {
+          details['sub'] = _hex(payload[0]);
+          details['enabled'] = payload[1] != 0;
+          return 'A ${_hex(opcode)} ${_labelForChannelA(opcode)} '
+              'sub=${_hex(payload[0])} enabled=${payload[1] != 0}';
+        }
+      case OpA.readDetailSport:
+        return _summarizeSportDetail(payload, details);
+      case OpA.todaySport:
+        final totals = _parseTodaySport(payload);
+        if (totals != null) {
+          details.addAll(totals.toJson());
+          return 'A 0x48 today sport steps=${totals.steps} '
+              'kcal=${totals.calories} distance=${totals.distanceMeters}m';
+        }
+      case OpA.startMeasure:
+        final parsed = HrParser.parseStartMeasureReply(payload);
+        if (parsed != null) {
+          details['type'] = parsed.type;
+          details['err'] = parsed.err;
+          details['bpm'] = parsed.bpm;
+          if (payload.length >= 7) {
+            details['auxU16At5'] = Codec.readU16le(payload, 5);
+          }
+          return 'A 0x69 measurement type=${parsed.type} err=${parsed.err} '
+              'bpm=${parsed.bpm ?? 'pending'}';
+        }
+      case OpA.packageLength:
+        if (payload.isNotEmpty) {
+          details['packageLength'] = payload[0];
+          return 'A 0x2f package length ${payload[0]}';
+        }
+      case OpA.deviceNotify:
+        return 'A 0x73 device notify payload=${_compactHex(payload)}';
+      case OpA.queryDataDistribution:
+        if (payload.length >= 4) {
+          final mask = Codec.readU32be(payload, 0);
+          final days = [
+            for (var d = 0; d < 32; d++)
+              if ((mask & (1 << d)) != 0) d,
+          ];
+          details['daysWithData'] = days;
+          return 'A 0x46 data distribution offsets=$days';
+        }
+    }
+    return 'A ${_hex(opcode)} ${_labelForChannelA(opcode)} '
+        'payload=${_compactHex(payload)}';
+  }
+
+  String _summarizeHeartRateFrame(
+    Uint8List payload,
+    Map<String, Object?> details,
+  ) {
+    if (payload.isEmpty) return 'A 0x15 HR empty payload';
+    final tag = payload[0];
+    if (tag == 0x00 && payload.length >= 3 && payload[1] > 0) {
+      final totalFrames = payload[1];
+      details['hrHeaderShape'] = 'seq0-totalFrames';
+      details['totalFrames'] = totalFrames;
+      details['expectedChunks'] = totalFrames - 1;
+      details['sampleIntervalMinutes'] = payload[2];
+      return 'A 0x15 HR history header chunks=${totalFrames - 1} '
+          'interval=${payload[2]}m';
+    }
+    if (tag == 0x18) {
+      details['hrHeaderShape'] = 'legacy-size-tag';
+      return 'A 0x15 HR history header legacy tag=0x18';
+    }
+    if (tag == 0xff) return 'A 0x15 HR no-data/end marker';
+    details['seq'] = tag;
+    details['dataBytes'] = payload.length - 1;
+    return 'A 0x15 HR chunk seq=$tag bytes=${payload.length - 1}';
+  }
+
+  String _summarizeFourChunkSeriesFrame(
+    int opcode,
+    Uint8List payload,
+    Map<String, Object?> details,
+  ) {
+    final label = _labelForChannelA(opcode);
+    if (payload.length >= 3 && payload[0] == 0x00 && payload[2] == 0x1e) {
+      details['seriesHeader'] = true;
+      details['slotId'] = payload[0];
+      details['totalFrames'] = payload[1];
+      return 'A ${_hex(opcode)} $label header slot=${payload[0]} '
+          'frames=${payload[1]}';
+    }
+    if (payload.isNotEmpty && payload[0] >= 1 && payload[0] <= 4) {
+      details['seq'] = payload[0];
+      details['dataBytes'] = payload.length - 1;
+      return 'A ${_hex(opcode)} $label chunk seq=${payload[0]} '
+          'bytes=${payload.length - 1}';
+    }
+    return 'A ${_hex(opcode)} $label payload=${_compactHex(payload)}';
+  }
+
+  String _summarizeSportDetail(
+    Uint8List payload,
+    Map<String, Object?> details,
+  ) {
+    if (payload.length < 4) return 'A 0x43 sport detail short payload';
+    if (payload[0] == 0xf0 || payload[0] == 0xff) {
+      details['endOfData'] = payload[0] == 0xff;
+      details['recordCount'] = payload[1];
+      details['unitFlag'] = payload[2];
+      return payload[0] == 0xff
+          ? 'A 0x43 sport detail empty/end'
+          : 'A 0x43 sport detail header records=${payload[1]} '
+                'unit=${payload[2]}';
+    }
+    if (payload.length >= 12) {
+      final year = 2000 + Codec.fromBcd(payload[0]);
+      final month = Codec.fromBcd(payload[1]);
+      final day = Codec.fromBcd(payload[2]);
+      final slot = (payload[3] >> 2) & 0x3f;
+      final recordIdx = payload[4];
+      final recordCount = payload[5];
+      final durationSeconds = Codec.readU16le(payload, 6);
+      final steps = Codec.readU16le(payload, 8);
+      final distance = Codec.readU16le(payload, 10);
+      details.addAll({
+        'date': _dateString(year, month, day),
+        'slot': slot,
+        'recordIdx': recordIdx,
+        'recordCount': recordCount,
+        'durationSeconds': durationSeconds,
+        'steps': steps,
+        'distanceMeters': distance,
+      });
+      return 'A 0x43 sport detail ${_dateString(year, month, day)} '
+          'slot=$slot idx=$recordIdx/$recordCount steps=$steps '
+          'distance=${distance}m';
+    }
+    return 'A 0x43 sport detail payload=${_compactHex(payload)}';
+  }
+
+  String _summarizeChannelB(
+    int cmd,
+    Uint8List payload,
+    Map<String, Object?> details,
+  ) {
+    switch (cmd) {
+      case OpB.sleepNew:
+        final summary = _parseSleep(
+          payload,
+          isNight: true,
+          captureDate: captureDate,
+        );
+        details.addAll(summary.toJson());
+        return 'B 0x27 night sleep dayOffset=${summary.dayOffset ?? 'n/a'} '
+            'segments=${summary.segmentCount} total=${summary.totalMinutes}m';
+      case OpB.sleepLunchNew:
+        final summary = _parseSleep(
+          payload,
+          isNight: false,
+          captureDate: captureDate,
+        );
+        details.addAll(summary.toJson());
+        return 'B 0x3e nap sleep segments=${summary.segmentCount} '
+            'total=${summary.totalMinutes}m';
+      case OpB.activitySummary:
+        final records = _parseActivitySummary(payload);
+        details['records'] = records.map((r) => r.toJson()).toList();
+        return 'B 0x2a activity records=${records.length} '
+            '${records.map((r) => 'd${r.dayOffset}:steps=${r.steps ?? 'n/a'}').join(', ')}';
+    }
+    return 'B ${_hex(cmd)} ${_labelForChannelB(cmd)} '
+        'payload=${_compactHex(payload)}';
+  }
+}
+
+class WatchLogReport {
+  const WatchLogReport({
+    required this.frames,
+    required this.heartRateSeries,
+    required this.pressureSeries,
+    required this.hrvSeries,
+  });
+
+  final List<DecodedLogFrame> frames;
+  final List<HeartRateSeriesSummary> heartRateSeries;
+  final List<ByteSeriesSummary> pressureSeries;
+  final List<ByteSeriesSummary> hrvSeries;
+
+  int get validFrameCount => frames.where((f) => f.valid).length;
+
+  int get invalidFrameCount => frames.length - validFrameCount;
+
+  Map<String, int> get channelCounts {
+    final counts = <String, int>{};
+    for (final frame in frames) {
+      counts.update(frame.channel.name, (v) => v + 1, ifAbsent: () => 1);
+    }
+    return counts;
+  }
+
+  Iterable<DecodedLogFrame> get invalidFrames => frames.where((f) => !f.valid);
+
+  Map<String, Object?> toJson({bool includeFrames = true}) => {
+    'frameCount': frames.length,
+    'validFrameCount': validFrameCount,
+    'invalidFrameCount': invalidFrameCount,
+    'channelCounts': channelCounts,
+    'heartRateSeries': heartRateSeries.map((s) => s.toJson()).toList(),
+    'pressureSeries': pressureSeries.map((s) => s.toJson()).toList(),
+    'hrvSeries': hrvSeries.map((s) => s.toJson()).toList(),
+    if (includeFrames) 'frames': frames.map((f) => f.toJson()).toList(),
+  };
+}
+
+enum WatchLogChannel { channelA, channelB, fee7, unknown }
+
+class DecodedLogFrame {
+  const DecodedLogFrame({
+    required this.lineNo,
+    required this.timestamp,
+    required this.uuid,
+    required this.channel,
+    required this.bytes,
+    required this.valid,
+    required this.title,
+    required this.details,
+  });
+
+  final int lineNo;
+  final String? timestamp;
+  final String uuid;
+  final WatchLogChannel channel;
+  final Uint8List bytes;
+  final bool valid;
+  final String title;
+  final Map<String, Object?> details;
+
+  Map<String, Object?> toJson() => {
+    'lineNo': lineNo,
+    if (timestamp != null) 'timestamp': timestamp,
+    'uuid': uuid,
+    'channel': channel.name,
+    'valid': valid,
+    'title': title,
+    'bytes': _compactHex(bytes),
+    'details': details,
+  };
+}
+
+class HeartRateSeriesSummary {
+  const HeartRateSeriesSummary({
+    required this.startedAtLine,
+    required this.timestamp,
+    required this.expectedChunks,
+    required this.receivedChunks,
+    required this.sampleIntervalMinutes,
+    required this.samples,
+    required this.minBpm,
+    required this.maxBpm,
+    required this.avgBpm,
+  });
+
+  final int startedAtLine;
+  final DateTime? timestamp;
+  final int? expectedChunks;
+  final int receivedChunks;
+  final int sampleIntervalMinutes;
+  final int samples;
+  final int? minBpm;
+  final int? maxBpm;
+  final double? avgBpm;
+
+  Map<String, Object?> toJson() => {
+    'startedAtLine': startedAtLine,
+    'timestamp': timestamp?.toIso8601String(),
+    'expectedChunks': expectedChunks,
+    'receivedChunks': receivedChunks,
+    'sampleIntervalMinutes': sampleIntervalMinutes,
+    'samples': samples,
+    'minBpm': minBpm,
+    'maxBpm': maxBpm,
+    'avgBpm': avgBpm == null ? null : double.parse(avgBpm!.toStringAsFixed(1)),
+  };
+}
+
+class ByteSeriesSummary {
+  const ByteSeriesSummary({
+    required this.opcode,
+    required this.startedAtLine,
+    required this.expectedChunks,
+    required this.receivedChunks,
+    required this.byteCount,
+    required this.nonZeroCount,
+    required this.minNonZero,
+    required this.maxNonZero,
+  });
+
+  final int opcode;
+  final int startedAtLine;
+  final int? expectedChunks;
+  final int receivedChunks;
+  final int byteCount;
+  final int nonZeroCount;
+  final int? minNonZero;
+  final int? maxNonZero;
+
+  Map<String, Object?> toJson() => {
+    'opcode': _hex(opcode),
+    'label': _labelForChannelA(opcode),
+    'startedAtLine': startedAtLine,
+    'expectedChunks': expectedChunks,
+    'receivedChunks': receivedChunks,
+    'byteCount': byteCount,
+    'nonZeroCount': nonZeroCount,
+    'minNonZero': minNonZero,
+    'maxNonZero': maxNonZero,
+  };
+}
+
+class ActivityRecordSummary {
+  const ActivityRecordSummary({
+    required this.dayOffset,
+    required this.steps,
+    required this.calories,
+    required this.distanceMeters,
+  });
+
+  final int dayOffset;
+  final int? steps;
+  final int? calories;
+  final int? distanceMeters;
+
+  Map<String, Object?> toJson() => {
+    'dayOffset': dayOffset,
+    'steps': steps,
+    'calories': calories,
+    'distanceMeters': distanceMeters,
+  };
+}
+
+class SleepSummary {
+  const SleepSummary({
+    required this.dayOffset,
+    required this.wakeDate,
+    required this.segmentCount,
+    required this.totalMinutes,
+    required this.stageMinutes,
+  });
+
+  final int? dayOffset;
+  final String? wakeDate;
+  final int segmentCount;
+  final int totalMinutes;
+  final Map<String, int> stageMinutes;
+
+  Map<String, Object?> toJson() => {
+    'dayOffset': dayOffset,
+    'wakeDate': wakeDate,
+    'segmentCount': segmentCount,
+    'totalMinutes': totalMinutes,
+    'stageMinutes': stageMinutes,
+  };
+}
+
+class _AssemblyState {
+  _AssemblyState();
+
+  _HeartRateAccumulator? _hr;
+  final _series = <int, _ByteSeriesAccumulator>{};
+  final _hrDone = <HeartRateSeriesSummary>[];
+  final _seriesDone = <int, List<ByteSeriesSummary>>{};
+
+  void accept(DecodedLogFrame frame) {
+    if (!frame.valid || frame.channel != WatchLogChannel.channelA) return;
+    final opcode = frame.details['opcode'];
+    if (opcode is! String) return;
+    final op = int.parse(opcode.substring(2), radix: 16);
+    final payload = _payloadFromDetails(frame);
+    if (payload == null) return;
+
+    if (op == OpA.readHeartRate) {
+      _acceptHeartRate(frame, payload);
+    } else if (op == OpA.pressure || op == OpA.hrv) {
+      _acceptByteSeries(frame, op, payload);
+    }
+  }
+
+  List<HeartRateSeriesSummary> finishHeartRate() {
+    final current = _hr;
+    if (current != null && current.receivedChunks > 0) {
+      _hrDone.add(current.finish());
+    }
+    _hr = null;
+    return List.unmodifiable(_hrDone);
+  }
+
+  List<ByteSeriesSummary> finishSeries(int opcode) {
+    final current = _series.remove(opcode);
+    if (current != null && current.receivedChunks > 0) {
+      _seriesDone.putIfAbsent(opcode, () => []).add(current.finish());
+    }
+    return List.unmodifiable(_seriesDone[opcode] ?? const []);
+  }
+
+  void _acceptHeartRate(DecodedLogFrame frame, Uint8List payload) {
+    if (payload.isEmpty) return;
+    if (payload[0] == 0x00 && payload.length >= 3 && payload[1] > 0) {
+      final current = _hr;
+      if (current != null && current.receivedChunks > 0) {
+        _hrDone.add(current.finish());
+      }
+      _hr = _HeartRateAccumulator(
+        startedAtLine: frame.lineNo,
+        expectedChunks: payload[1] - 1,
+        sampleIntervalMinutes: payload[2] == 0 ? 5 : payload[2],
+      );
+      return;
+    }
+    if (payload[0] == 0xff) {
+      final current = _hr;
+      if (current != null && current.receivedChunks > 0) {
+        _hrDone.add(current.finish());
+      }
+      _hr = null;
+      return;
+    }
+    final current = _hr;
+    if (current == null || payload[0] == 0 || payload[0] > 0x40) return;
+    current.addChunk(payload[0], Uint8List.sublistView(payload, 1));
+    if (current.isComplete) {
+      _hrDone.add(current.finish());
+      _hr = null;
+    }
+  }
+
+  void _acceptByteSeries(DecodedLogFrame frame, int opcode, Uint8List payload) {
+    if (payload.length >= 3 && payload[0] == 0x00 && payload[2] == 0x1e) {
+      final current = _series[opcode];
+      if (current != null && current.receivedChunks > 0) {
+        _seriesDone.putIfAbsent(opcode, () => []).add(current.finish());
+      }
+      _series[opcode] = _ByteSeriesAccumulator(
+        opcode: opcode,
+        startedAtLine: frame.lineNo,
+        expectedChunks: payload[1] > 0 ? payload[1] - 1 : null,
+      );
+      return;
+    }
+    final current = _series[opcode];
+    if (current == null || payload.isEmpty || payload[0] < 1) return;
+    current.addChunk(payload[0], Uint8List.sublistView(payload, 1));
+    if (current.isComplete) {
+      _seriesDone.putIfAbsent(opcode, () => []).add(current.finish());
+      _series.remove(opcode);
+    }
+  }
+}
+
+class _HeartRateAccumulator {
+  _HeartRateAccumulator({
+    required this.startedAtLine,
+    required this.expectedChunks,
+    required this.sampleIntervalMinutes,
+  });
+
+  final int startedAtLine;
+  final int? expectedChunks;
+  final int sampleIntervalMinutes;
+  final Map<int, Uint8List> chunks = {};
+
+  int get receivedChunks => chunks.length;
+
+  bool get isComplete =>
+      expectedChunks != null && receivedChunks >= expectedChunks!;
+
+  void addChunk(int seq, Uint8List data) {
+    chunks[seq] = Uint8List.fromList(data);
+  }
+
+  HeartRateSeriesSummary finish() {
+    final ordered = chunks.keys.toList()..sort();
+    final builder = BytesBuilder();
+    for (final seq in ordered) {
+      builder.add(chunks[seq]!);
+    }
+    final data = builder.toBytes();
+    DateTime? timestamp;
+    final bpms = <int>[];
+    if (data.length >= 4) {
+      timestamp = DateTime.fromMillisecondsSinceEpoch(
+        Codec.readU32le(data, 0) * 1000,
+      );
+      for (var i = 4; i < data.length; i++) {
+        final bpm = data[i] & 0xff;
+        if (HrParser.isPlausibleBpm(bpm)) bpms.add(bpm);
+      }
+    }
+    final sum = bpms.fold<int>(0, (a, b) => a + b);
+    return HeartRateSeriesSummary(
+      startedAtLine: startedAtLine,
+      timestamp: timestamp,
+      expectedChunks: expectedChunks,
+      receivedChunks: receivedChunks,
+      sampleIntervalMinutes: sampleIntervalMinutes,
+      samples: bpms.length,
+      minBpm: bpms.isEmpty ? null : bpms.reduce((a, b) => a < b ? a : b),
+      maxBpm: bpms.isEmpty ? null : bpms.reduce((a, b) => a > b ? a : b),
+      avgBpm: bpms.isEmpty ? null : sum / bpms.length,
+    );
+  }
+}
+
+class _ByteSeriesAccumulator {
+  _ByteSeriesAccumulator({
+    required this.opcode,
+    required this.startedAtLine,
+    required this.expectedChunks,
+  });
+
+  final int opcode;
+  final int startedAtLine;
+  final int? expectedChunks;
+  final Map<int, Uint8List> chunks = {};
+
+  int get receivedChunks => chunks.length;
+
+  bool get isComplete =>
+      expectedChunks != null && receivedChunks >= expectedChunks!;
+
+  void addChunk(int seq, Uint8List data) {
+    chunks[seq] = Uint8List.fromList(data);
+  }
+
+  ByteSeriesSummary finish() {
+    final ordered = chunks.keys.toList()..sort();
+    final data = <int>[];
+    for (final seq in ordered) {
+      data.addAll(chunks[seq]!);
+    }
+    final nonZero = data.where((b) => b != 0).toList();
+    return ByteSeriesSummary(
+      opcode: opcode,
+      startedAtLine: startedAtLine,
+      expectedChunks: expectedChunks,
+      receivedChunks: receivedChunks,
+      byteCount: data.length,
+      nonZeroCount: nonZero.length,
+      minNonZero: nonZero.isEmpty
+          ? null
+          : nonZero.reduce((a, b) => a < b ? a : b),
+      maxNonZero: nonZero.isEmpty
+          ? null
+          : nonZero.reduce((a, b) => a > b ? a : b),
+    );
+  }
+}
+
+WatchLogChannel _channelForUuid(String uuid) {
+  switch (uuid) {
+    case _channelAUuid:
+      return WatchLogChannel.channelA;
+    case _channelBUuid:
+      return WatchLogChannel.channelB;
+    case _fee7NotifyUuid:
+    case _fee7AltNotifyUuid:
+      return WatchLogChannel.fee7;
+    default:
+      return WatchLogChannel.unknown;
+  }
+}
+
+Uint8List? _payloadFromDetails(DecodedLogFrame frame) {
+  final payload = frame.details['payload'];
+  if (payload is! List) return null;
+  return Uint8List.fromList([
+    for (final item in payload)
+      if (item is String) int.parse(item.substring(2), radix: 16),
+  ]);
+}
+
+Uint8List _parseHexBytes(String text) {
+  final matches = RegExp(r'[0-9a-fA-F]{2}').allMatches(text);
+  return Uint8List.fromList([
+    for (final match in matches) int.parse(match.group(0)!, radix: 16),
+  ]);
+}
+
+SleepSummary _parseSleep(
+  Uint8List payload, {
+  required bool isNight,
+  required DateTime? captureDate,
+}) {
+  final body = isNight && payload.isNotEmpty
+      ? Uint8List.sublistView(payload, 1)
+      : payload;
+  var i = 0;
+  final stageMinutes = <String, int>{};
+  var total = 0;
+  var segments = 0;
+  while (i + 2 <= body.length) {
+    final endMin = (body[i] << 8) | body[i + 1];
+    i += 2;
+    if (endMin > 24 * 60 - 1) break;
+
+    while (i + 2 <= body.length) {
+      final stage = body[i] & 0xff;
+      final dur = body[i + 1] & 0xff;
+      if (stage == 0 && dur == 0) {
+        i += 2;
+        break;
+      }
+      final maybeNextEnd = (stage << 8) | dur;
+      if (segments > 0 &&
+          maybeNextEnd <= 24 * 60 - 1 &&
+          maybeNextEnd < endMin) {
+        break;
+      }
+      final label = _sleepStageLabel(stage);
+      stageMinutes.update(label, (v) => v + dur, ifAbsent: () => dur);
+      total += dur;
+      segments++;
+      i += 2;
+    }
+  }
+  final dayOffset = isNight && payload.isNotEmpty ? payload[0] : null;
+  DateTime? wakeDay;
+  if (captureDate != null && dayOffset != null && dayOffset <= 31) {
+    wakeDay = captureDate.subtract(Duration(days: dayOffset));
+  }
+  return SleepSummary(
+    dayOffset: dayOffset,
+    wakeDate: wakeDay == null
+        ? null
+        : _dateString(wakeDay.year, wakeDay.month, wakeDay.day),
+    segmentCount: segments,
+    totalMinutes: total,
+    stageMinutes: stageMinutes,
+  );
+}
+
+String _sleepStageLabel(int stage) {
+  if (stage == 0) return 'awake';
+  if (stage == 1) return 'light';
+  if (stage == 2) return 'deep';
+  if (stage == 3) return 'rem';
+  if (stage == 4) return 'awake';
+  if (stage <= 0x0f) return 'deep';
+  if (stage <= 0x1f) return 'light';
+  if (stage <= 0x2f) return 'rem';
+  return 'awake';
+}
+
+List<ActivityRecordSummary> _parseActivitySummary(Uint8List payload) {
+  final out = <ActivityRecordSummary>[];
+  var offset = 0;
+  while (offset + 49 <= payload.length) {
+    final dayOffset = payload[offset];
+    final body = Uint8List.fromList([
+      for (var i = offset + 1; i < offset + 49; i++)
+        payload[i] == 0xff ? 0x00 : payload[i],
+    ]);
+    if (offset > 0 && dayOffset == 0) break;
+    final totals = _parseActivityBody(body);
+    out.add(
+      ActivityRecordSummary(
+        dayOffset: dayOffset,
+        steps: totals.steps,
+        calories: totals.calories,
+        distanceMeters: totals.distanceMeters,
+      ),
+    );
+    offset += 49;
+  }
+  return out;
+}
+
+_ActivityTotals _parseActivityBody(Uint8List body) {
+  if (body.length < 12) return const _ActivityTotals();
+  final steps = Codec.readU24be(body, 0);
+  final calories = Codec.readU24be(body, 6);
+  final distance = Codec.readU24be(body, 9);
+  if (steps == 0 && calories == 0 && distance == 0) {
+    return const _ActivityTotals();
+  }
+  return _ActivityTotals(
+    steps: steps > 200000 ? null : steps,
+    calories: calories > 20000 ? null : calories,
+    distanceMeters: distance > 200000 ? null : distance,
+  );
+}
+
+_ActivityTotals? _parseTodaySport(Uint8List payload) {
+  if (payload.length < 12) return null;
+  final rawCalories = Codec.readU24be(payload, 6);
+  final calories = rawCalories <= 20000
+      ? rawCalories
+      : (rawCalories / 1000).round();
+  return _ActivityTotals(
+    steps: Codec.readU24be(payload, 0),
+    calories: calories,
+    distanceMeters: Codec.readU24be(payload, 9),
+  );
+}
+
+class _ActivityTotals {
+  const _ActivityTotals({this.steps, this.calories, this.distanceMeters});
+
+  final int? steps;
+  final int? calories;
+  final int? distanceMeters;
+
+  Map<String, Object?> toJson() => {
+    'steps': steps,
+    'calories': calories,
+    'distanceMeters': distanceMeters,
+  };
+}
+
+String _labelForChannelA(int opcode) {
+  switch (opcode) {
+    case OpA.setTime:
+      return 'setTime/capabilities';
+    case OpA.battery:
+      return 'battery';
+    case OpA.dnd:
+      return 'doNotDisturb';
+    case OpA.timeFormat:
+      return 'timeFormat';
+    case OpA.bpSetting:
+      return 'bloodPressureSetting';
+    case OpA.bpData:
+      return 'bloodPressureData';
+    case OpA.readHeartRate:
+      return 'readHeartRate';
+    case OpA.heartRateSetting:
+      return 'heartRateSetting';
+    case OpA.bloodOxygenSetting:
+      return 'bloodOxygenSetting';
+    case OpA.deviceAvatar:
+      return 'deviceAvatar';
+    case OpA.pressureSetting:
+      return 'pressureEnableSetting';
+    case OpA.pressure:
+      return 'pressureHistory';
+    case OpA.hrvSetting:
+      return 'hrvEnableSetting';
+    case OpA.hrv:
+      return 'hrvHistory';
+    case OpA.readDetailSport:
+      return 'readDetailSport';
+    case OpA.todaySport:
+      return 'todaySport';
+    case OpA.packageLength:
+      return 'packageLength';
+    case OpA.setAncs:
+      return 'setAncs';
+    case OpA.startMeasure:
+      return 'startMeasure';
+    case OpA.deviceNotify:
+      return 'deviceNotify';
+    case OpA.weatherForecast:
+      return 'weatherForecast';
+    case OpA.displayTime:
+      return 'displayTime';
+    case OpA.queryDataDistribution:
+      return 'queryDataDistribution';
+    default:
+      return 'unknown';
+  }
+}
+
+String _labelForChannelB(int cmd) {
+  switch (cmd) {
+    case OpB.sleepNew:
+      return 'sleepNew/night';
+    case OpB.activitySummary:
+      return 'activitySummary';
+    case OpB.sleepLunchNew:
+      return 'sleepLunch/nap';
+    case OpB.fileList:
+      return 'fileList';
+    case OpB.fileDelete:
+      return 'fileDelete';
+    default:
+      return 'unknown';
+  }
+}
+
+String _labelForFee7(int opcode) {
+  switch (opcode) {
+    case Fee7.handshakeResponse:
+      return 'handshake';
+    case Fee7.modeControl:
+      return 'modeControl';
+    case Fee7.statusResponse:
+      return 'status';
+    case Fee7.bloodOxygenUpdate:
+      return 'bloodOxygenUpdate';
+    case Fee7.hrv:
+      return 'hrv';
+    default:
+      return 'unknown';
+  }
+}
+
+String _hex(int v) => '0x${(v & 0xff).toRadixString(16).padLeft(2, '0')}';
+
+String _compactHex(Iterable<int> bytes) =>
+    bytes.map((b) => (b & 0xff).toRadixString(16).padLeft(2, '0')).join('-');
+
+List<String> _hexList(Iterable<int> bytes) => [for (final b in bytes) _hex(b)];
+
+int _sum8(Uint8List b, int start, int end) {
+  var sum = 0;
+  for (var i = start; i < end; i++) {
+    sum += b[i];
+  }
+  return sum & 0xff;
+}
+
+String _dateString(int year, int month, int day) =>
+    '${year.toString().padLeft(4, '0')}-'
+    '${month.toString().padLeft(2, '0')}-'
+    '${day.toString().padLeft(2, '0')}';
