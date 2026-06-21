@@ -50,16 +50,15 @@ HistorySync _testSync(
   _StubTransport t,
   ChannelADispatcher d, {
   ChannelBParser? bParser,
-}) =>
-    HistorySync(
-      t,
-      (_) {},
-      dispatcher: d,
-      bParser: bParser,
-      drainDuration: const Duration(milliseconds: 50),
-      postCommandDelay: Duration.zero,
-      fragmentQuietWindow: const Duration(milliseconds: 50),
-    );
+}) => HistorySync(
+  t,
+  (_) {},
+  dispatcher: d,
+  bParser: bParser,
+  drainDuration: const Duration(milliseconds: 50),
+  postCommandDelay: Duration.zero,
+  fragmentQuietWindow: const Duration(milliseconds: 50),
+);
 
 void main() {
   group('HistorySync', () {
