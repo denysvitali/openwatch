@@ -3476,6 +3476,156 @@ the §5 helpers are the *workers*. A host that sends a
 sequence of OTA commands (init → receive N times → complete)
 sees the dispatcher route each to the right worker.
 
+### 5.2 OTA helper details (`FUN_00840724`, `FUN_0082f1a4`, `FUN_0082f1b6`)
+
+The three "small" §5 helpers that wrap the OTA flow's
+*signature check* and *state transitions*. None of these are
+documented in detail elsewhere; this section pulls them
+together.
+
+#### `FUN_00840724` — OTA signature check
+
+The smallest of the three:
+
+```c
+bool FUN_00840724() {
+    uint32_t read_value = FUN_0083dfa4();    // read first 4 B of image
+    bool ok = (read_value == DAT_00840744);
+    if (!ok) {
+        func_0x00005a06(0x23000000,
+                         "wrong signature! Read %8X != Requried %8X",
+                         read_value);
+    }
+    return ok;
+}
+```
+
+The function reads the first 4 bytes of the OTA image
+(via `FUN_0083dfa4`, a fixed-address reader) and compares
+against `DAT_00840744` which holds the magic value
+`0x8721bee2` (the §5 header-magic). On mismatch, it logs
+the firmware's standard "wrong signature!" message via
+`func_0x00005a06` (the debug-output helper that emits a
+formatted string with the `0x23000000` log-channel id).
+**Note** the typo: "Requried" instead of "Required" — the
+firmware's debug message has a spelling error.
+
+Returns `true` if the signature matches, `false` otherwise.
+The caller (`FUN_0082f240` OTA data handler) uses this
+return to abort the OTA write if the signature is wrong.
+
+#### `FUN_0082f1a4` — OTA start ack
+
+```c
+u32 FUN_0082f1a4() {
+    (*(code **)(DAT_0082f458 + -4))(1, 0);
+    return 0;
+}
+```
+
+The simplest of the three — just calls a function pointer
+loaded from `DAT_0082f458 + -4` with args `(1, 0)` and
+returns 0. The `1` arg is the "OTA start" sub-cmd; the `0`
+arg is presumably "no payload". The function pointer table
+at `DAT_0082f458` is the same vendor table used by `0xce ' '`
+(§8.10) — the OTA start ack is implemented as a call into
+the OEM vendor code.
+
+#### `FUN_0082f1b6` — OTA init
+
+```c
+u32 FUN_0082f1b6(char *req, int param_2) {
+    state = DAT_0082f458;
+    state_base = state - 0x18;
+    pcVar7 = *(code **)(state - 4);
+    if (param_2 == 9) {                          // OTA-init sub-cmd 9
+        if ((*req == '\x01') || (*req == '\x04')) {
+            // parse 9-byte init payload
+            byte cmd  = req[0];                   // 0x01 or 0x04
+            byte b1   = req[3];
+            byte b2   = req[4];
+            u16  size = *(u16*)(req + 1);         // image size LE
+            *(u32*)(state - 0xc) = 0;
+            *(u16*)(state - 0x12) = 0;
+            *(u8*) state_base = cmd;
+            *(u32*)(state - 0x10) = (b1 << 16) | (b2 << 24) | size;
+            *(u8*) (state - 0x17) = 1;            // state = 1 (init)
+            *(u16*)(state - 0x16) = *(u16*)(req + 5);  // version
+            *(u16*)(state - 0x14) = *(u16*)(req + 7);  // CRC
+            *(u8*) (state - 0x17) = 2;            // state = 2 (ready)
+            (*pcVar7)(2, 0);                       // start OTA worker
+            return 0;
+        }
+        return 2;                                // bad cmd byte
+    }
+    return 1;                                    // wrong sub-cmd
+}
+```
+
+The OTA-init handler parses the 9-byte init payload:
+
+* `req[0]` — cmd byte (`0x01` or `0x04`)
+* `req[1..2]` — image size (u16 LE)
+* `req[3..4]` — image_id bytes (packed into the high bytes of
+  the image_id u32)
+* `req[5..6]` — version (u16)
+* `req[7..8]` — CRC (u16)
+
+The state-machine transitions are:
+1. Clear the OTA context's `state - 0xC..-0x10` region (12 B).
+2. Set state = 1 (init) at `state - 0x17`.
+3. Store the image_id u32 at `state - 0x10`.
+4. Set state = 2 (ready) at `state - 0x17`.
+5. Call `pcVar7(2, 0)` to start the OTA worker (function
+   pointer from `state - 4`).
+
+The `0x01` and `0x04` cmd bytes are the only ones accepted.
+The `0x04` cmd byte is the *force-ready* path (same as the
+§5.1 `param_1 == 4` branch in `FUN_0082fe52`); the `0x01`
+cmd byte is the normal init path. Any other cmd byte
+returns error 2; any other sub-cmd returns error 1.
+
+#### Why three helpers for OTA?
+
+`FUN_0082f1a4` is the "ack" path — called *after* the OTA
+init succeeds to ack the host that the watch has started
+processing the image. `FUN_0082f1b6` is the "init" path —
+called *before* the data transfer to set up the state
+context. `FUN_00840724` is the "verify" path — called *during*
+the data transfer to abort if the image signature is wrong.
+
+The three helpers form a **state-transition triple**:
+* `init` (FUN_0082f1b6) sets the context up
+* `verify` (FUN_00840724) checks each image block
+* `ack` (FUN_0082f1a4) tells the host the init succeeded
+
+The OTA host SDK calls these in sequence: `0x01 0x09 init
+payload` → `FUN_0082f1b6` sets up state, then `0x01 0x01 ack`
+→ `FUN_0082f1a4` acks the start, then `0x21 0x01 data
+payload` → `FUN_0082f240` checks signature via `FUN_00840724`
+and writes the block.
+
+#### Why the typo "Requried"
+
+The OTA signature-check log message has a spelling error
+in the firmware's debug output: "Requried" instead of
+"Required". This is likely an OEM-supplied string that
+was never corrected. The OEM likely doesn't ship a debug
+build to end users — the typo only matters for the firmware
+developers reading serial logs.
+
+#### Pair with §10.2 (open question)
+
+The 32-byte OTA digest algorithm referenced in §10.2 is
+**not** in the firmware body — the only digest check is
+the **4-byte signature magic** at `DAT_00840744` (validated
+by `FUN_00840724`). The 32-byte digest is presumably computed
+either by the bootloader (which lives in a separate image
+not in `body.bin`) or by the host tool before sending the
+image. The H59MA v14 firmware only validates the 4-byte
+magic; the per-block 32-byte digest is the bootloader's
+responsibility.
+
 ---
 
 ## 6. Power Management & System
