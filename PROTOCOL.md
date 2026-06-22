@@ -361,7 +361,7 @@ the generic bitmap below.
 |---|---|---|---|---|---|---|
 | ReadHeartRateReq | `0x15` | — | →watch | `[1..4]`=utcStart i32 LE | **ReadHeartRateRsp** multi-pkt (hdr `pl[0]=00`{size,range}, data `pl[0]=01`{ts i32 LE + samples}, `0xFF`/`0x17`=end). stride 13B. | Read stored HR history. Up to 288 5-min slots/day. |
 | HeartRateSettingReq | `0x16` | 01/02 | →watch | w2:`[02,en?1:2,interval]`; w5:`+[startInterval,tooLow,tooHigh]` | read: `[1]`en, `[2]`interval, `[3]`startInterval, `[4]`tooLow, `[5]`tooHigh | HR auto-measure config + hi/lo alarms. |
-| RealTimeHeartRate | `0x1e` | — | →watch | `[type]` | `pl[0]`=instantaneous bpm | Toggle/poll realtime HR stream. |
+| RealTimeHeartRate | `0x1e` | — | →watch | `[action]` where `01`=start 60 s, `02`=stop, `03`=reset/extend | no direct ack on H59MA; live HR arrives on notify paths | Toggle realtime HR stream. |
 | StartHeartRateReq | `0x69` | type | →watch | `[type, sub]` (type enum below) | `[0]`type `[1]`errCode `[2]`value; if len≥5 `[3]`sbp `[4]`dbp | Start a measurement session. |
 | StopHeartRateReq | `0x6a` | type | →watch | `[type, p2, p3]` (factories per type) | `[0]`type `[1]`err `[2]`value; len≥5 `[3]`sbp `[4]`dbp | Stop a measurement. (per-request waiter) |
 | ReadPressureReq | `0x14` | — | →watch | `[1..4]`utcStart i32 LE `[5]=00` `[6]=0x32` | **ReadBlePressureRsp**: `[0..3]`ts i32 LE (`0xFFFFFFFF`=end), `[4]`val, `[5]`val2 → BlePressure. ≤50 records. | Read BLE-pressure measured values. |
@@ -404,7 +404,7 @@ REALTIMEHEARTRATE=6, ECG=7, PRESSURE=8, BLOOD_SUGAR=9, HRV=0xa, BODY_TEMPERATURE
 | TargetSettingReq (write s/c/d) | `0x21` | `0x02` | →watch | `[02]+step LE24+cal LE24+dist LE24` (10B) | echo via TargetSettingRsp | Write step/cal/dist goals. |
 | TargetSettingReq (write +sport/sleep) | `0x21` | `0x02` | →watch | `…+sportMin u16 LE+sleepMin u16 LE` (14B) | echo | Extended goal write. |
 | TodaySportData | `0x48` | — | watch→ | (read) bare opcode | **TodaySportDataRsp**: 3B **BE** groups — totalSteps `b[0..2]`, running `b[3..5]`, calorie `b[6..8]`, walkDist `b[9..11]`, sportDur `b[12..13]`(2B) | Today's running step total. |
-| SleepNewProtoResp (night) | `0x27` (Ch B) | — | watch→ | Ch-B `[BC,27,len,crc,dayOffset]` | parseDaySleep: chained day blocks; endMinuteOfDay (u16 LE) → et=midnight+min*60; from offset 6 pairs (type,durMin) → DetailBean; st=et−Σd*60 | Night sleep (new protocol). |
+| SleepNewProtoResp (night) | `0x27` (Ch B) | — | watch→ | H59MA live shape: `[recordCount, {dayDelta, blockLen, startMinLE, endMinLE, (type,durMin)*}...]`; older captures may use `[dayOffset, endMinBE, (type,durMin)*]` | `blockLen` includes the 4 start/end bytes plus pair bytes; pair durations sum to `end-start` modulo midnight | Night sleep (new protocol). |
 | SleepNewProtoResp (lunch) | `0x3e` (Ch B) | — | watch→ | Ch-B `[BC,3e,len,crc,payload]` | parseDaySleepLunch: lunchBreak=true, lunchSt/Et, lunchList[LunchSleepBean] | Lunch/nap sleep. |
 | AppSport (notify) | `0x77` | — | watch→ | n/a | `b0`=gpsStatus; if==6 ts=`bytesToInt(b[2..6])` LE | Watch requests phone GPS-sport sync. |
 | AppGps (notify) | `0x74` | — | watch→ | n/a | same as AppSport | Watch GPS sync notify. |

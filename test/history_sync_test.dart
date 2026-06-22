@@ -893,7 +893,7 @@ void main() {
       },
     );
 
-    test('syncAll clears persisted sleep for re-fetched wake window', () async {
+    test('syncAll preserves persisted sleep when sleep fetch has no response', () async {
       final t = _StubTransport();
       final d = ChannelADispatcher(t);
       final bParser = ChannelBParser(t);
@@ -923,16 +923,46 @@ void main() {
       );
       await sync.bindStore(fakeStore);
 
-      // No 0x27/0x3e responses are injected. The re-fetch still covers
-      // wake offset 0, whose bedtime bucket is yesterday, so stale sleep
-      // from older parser versions must be removed instead of preserved.
+      // No 0x27/0x3e responses are injected. A missed or malformed sleep
+      // response must not erase a previously stored night.
       await sync.syncAll(daysBack: 1);
 
       final restored = sync.dayOf(yesterday);
       expect(restored, isNotNull);
-      expect(restored!.sleep, isEmpty);
+      expect(restored!.sleep, [staleSleep]);
       expect(restored.hr, hasLength(1));
       expect(restored.steps, 4321);
+      expect((await fakeStore.readDay(yesterday)).sleep, [staleSleep]);
+
+      sync.dispose();
+      d.dispose();
+    });
+
+    test('explicit empty sleep response clears persisted wake window', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      final bParser = ChannelBParser(t);
+      d.bind();
+      final sync = _testSync(t, d, bParser: bParser);
+
+      final today = DateOnly.today();
+      final yesterday = today.addDays(-1);
+      final staleSleep = SleepSegment(
+        yesterday.midnight.add(const Duration(hours: 21)),
+        const Duration(minutes: 45),
+        SleepStage.deep,
+      );
+      final fakeStore = _FakeHistoryStore(
+        seed: {
+          yesterday: DailyHistory(day: yesterday, sleep: [staleSleep]),
+        },
+      );
+      await sync.bindStore(fakeStore);
+
+      t.inB.add(Codec.buildChannelB(OpB.sleepNew));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      expect(sync.dayOf(yesterday)!.sleep, isEmpty);
       expect((await fakeStore.readDay(yesterday)).sleep, isEmpty);
 
       sync.dispose();

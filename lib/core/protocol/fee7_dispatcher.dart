@@ -110,6 +110,15 @@ class Fee7Dispatcher {
     // Use rxOpcodeRaw (no error-flag strip) because the fee7 opcode table
     // is dense in the 0x80..0xff range where the high bit is part of the
     // opcode, not an error indicator. See GHIDRA_DECOMPILATION.md §8.
+    if (frame.length >= 2 && frame[1] == Fee7.modeControlCont) {
+      _modeCont.add(
+        ModeControlCont(
+          step: frame[0] & 0xFF,
+          payload: Uint8List.sublistView(frame, 2, 15),
+        ),
+      );
+      return;
+    }
     final opcode = Codec.rxOpcodeRaw(frame);
     final pl = Codec.rxPayload(frame);
 

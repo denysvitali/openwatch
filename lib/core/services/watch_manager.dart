@@ -48,11 +48,21 @@ class WatchManager extends ChangeNotifier {
   int? lastHrv;
   int? lastBloodPressureSystolic;
   int? lastBloodPressureDiastolic;
+  final Set<int> _measuringTypes = {};
+  String? lastMeasurementError;
   bool initialized = false;
 
   String get hardwareRevision => _transport.hardwareRevision;
   String get firmwareRevision => _transport.firmwareRevision;
   bool get isReady => _transport.isReady;
+  bool get measuringHeartRate => _measuringTypes.contains(
+    MeasureType.heartRate.id,
+  );
+  bool get measuringBloodPressure => _measuringTypes.contains(
+    MeasureType.bloodPressure.id,
+  );
+  bool get measuringStress => _measuringTypes.contains(MeasureType.pressure.id);
+  bool get measuringHrv => _measuringTypes.contains(MeasureType.hrv.id);
 
   void _onLinkState() {
     final s = _transport.state.value;
@@ -62,6 +72,8 @@ class WatchManager extends ChangeNotifier {
     if (s == LinkState.disconnected) {
       initialized = false;
       _handshaking = false;
+      _measuringTypes.clear();
+      lastMeasurementError = null;
       _stepTimer?.cancel();
       _batteryTimer?.cancel();
       _stepTimer = null;
@@ -197,23 +209,10 @@ class WatchManager extends ChangeNotifier {
               'value=${r?.value ?? '-'} bpm=${r?.bpm ?? '-'} '
               'bp=${r?.systolic ?? '-'}/${r?.diastolic ?? '-'}',
         );
-        if (r != null && r.err == 0) {
-          switch (r.type) {
-            case 1:
-            case 6:
-              if (r.bpm != null) lastHeartRate = r.bpm;
-            case 2:
-              if (r.systolic != null && r.diastolic != null) {
-                lastBloodPressureSystolic = r.systolic;
-                lastBloodPressureDiastolic = r.diastolic;
-              }
-            case 8:
-              if (r.value > 1 && r.value < 100) lastStress = r.value;
-            case 10:
-              if (r.value > 1 && r.value < 255) lastHrv = r.value;
-          }
-          notifyListeners();
-        }
+        if (r != null) _handleMeasureReply(r);
+      case OpA.stopMeasure:
+        final r = HrParser.parseStartMeasureReply(pl);
+        if (r != null) _handleMeasureReply(r, fromStop: true);
       case OpA.deviceNotify:
       case OpA.deviceSportNotify:
         // 0x73/0x78 carry `dataType + loadData`. Some firmwares push live
@@ -234,6 +233,60 @@ class WatchManager extends ChangeNotifier {
               'bytes=${AppLog.toHex(pl)}',
         );
     }
+  }
+
+  void _handleMeasureReply(
+    HrStartMeasureResult r, {
+    bool fromStop = false,
+  }) {
+    if (r.err != 0) {
+      _measuringTypes.remove(r.type);
+      lastMeasurementError =
+          'Measurement failed (0x${r.err.toRadixString(16)})';
+      notifyListeners();
+      return;
+    }
+    var finalValue = false;
+    switch (r.type) {
+      case 1:
+      case 6:
+        if (r.bpm != null) {
+          lastHeartRate = r.bpm;
+          finalValue = true;
+        }
+      case 2:
+        final sbp = r.systolic;
+        final dbp = r.diastolic;
+        if (sbp != null &&
+            dbp != null &&
+            sbp >= 60 &&
+            sbp <= 250 &&
+            dbp >= 30 &&
+            dbp <= 150) {
+          lastBloodPressureSystolic = sbp;
+          lastBloodPressureDiastolic = dbp;
+          finalValue = true;
+        }
+      case 8:
+        if (r.value > 1 && r.value < 100) {
+          lastStress = r.value;
+          finalValue = true;
+        }
+      case 10:
+        if (r.value > 1 && r.value < 255) {
+          lastHrv = r.value;
+          finalValue = true;
+        }
+    }
+    if (finalValue) {
+      _measuringTypes.remove(r.type);
+      lastMeasurementError = null;
+    } else if (fromStop) {
+      _measuringTypes.remove(r.type);
+    } else if (r.value <= 1) {
+      _measuringTypes.add(r.type);
+    }
+    notifyListeners();
   }
 
   // --- Actions ---
@@ -328,7 +381,7 @@ class WatchManager extends ChangeNotifier {
   /// Start a heart-rate measurement.
   ///
   /// Sends both the explicit session start (`0x69` type=heartRate=1) AND the
-  /// realtime toggle (`0x1e` type=realtimeHeartRate=6). Different firmware
+  /// realtime toggle (`0x1e` action=start). Different firmware
   /// variants honor one or the other — sending both means the device picks
   /// whichever path it actually implements. Replies from either path feed
   /// into `_onFrame` and update `lastHeartRate`.
@@ -336,49 +389,86 @@ class WatchManager extends ChangeNotifier {
     'start_heart_rate',
     () async {
       AppLog.instance.info('hr', 'Starting HR (0x69 session + 0x1e realtime)');
-      await _transport.sendA(Commands.startMeasure(MeasureType.heartRate));
-      await _transport.sendA(
-        Commands.startContinuousHr(MeasureType.realtimeHeartRate),
-      );
+      _markMeasureStarted(MeasureType.heartRate);
+      try {
+        await _transport.sendA(Commands.startMeasure(MeasureType.heartRate));
+        await _transport.sendA(Commands.startContinuousHr());
+      } catch (_) {
+        _markMeasureStopped(MeasureType.heartRate);
+        rethrow;
+      }
     },
   );
 
   /// Stop every HR measurement path that [startHeartRate] may have started.
   Future<void> stopHeartRate() => _withActionSpan('stop_heart_rate', () async {
     AppLog.instance.info('hr', 'Stopping HR (0x6a session + 0x1e stop)');
-    await _transport.sendA(Commands.stopMeasure(MeasureType.heartRate));
-    await _transport.sendA(Commands.stopContinuousHr());
+    try {
+      await _transport.sendA(Commands.stopMeasure(MeasureType.heartRate));
+      await _transport.sendA(Commands.stopContinuousHr());
+    } finally {
+      _markMeasureStopped(MeasureType.heartRate);
+    }
   });
 
   Future<void> startBloodPressure() => _withActionSpan(
     'start_blood_pressure',
-    () => _transport.sendA(Commands.startMeasure(MeasureType.bloodPressure)),
+    () => _startMeasure(MeasureType.bloodPressure),
   );
 
   Future<void> stopBloodPressure() => _withActionSpan(
     'stop_blood_pressure',
-    () => _transport.sendA(Commands.stopMeasure(MeasureType.bloodPressure)),
+    () => _stopMeasure(MeasureType.bloodPressure),
   );
 
   Future<void> startStress() => _withActionSpan(
     'start_stress',
-    () => _transport.sendA(Commands.startMeasure(MeasureType.pressure)),
+    () => _startMeasure(MeasureType.pressure),
   );
 
   Future<void> stopStress() => _withActionSpan(
     'stop_stress',
-    () => _transport.sendA(Commands.stopMeasure(MeasureType.pressure)),
+    () => _stopMeasure(MeasureType.pressure),
   );
 
   Future<void> startHrv() => _withActionSpan(
     'start_hrv',
-    () => _transport.sendA(Commands.startMeasure(MeasureType.hrv)),
+    () => _startMeasure(MeasureType.hrv),
   );
 
   Future<void> stopHrv() => _withActionSpan(
     'stop_hrv',
-    () => _transport.sendA(Commands.stopMeasure(MeasureType.hrv)),
+    () => _stopMeasure(MeasureType.hrv),
   );
+
+  Future<void> _startMeasure(MeasureType type) async {
+    _markMeasureStarted(type);
+    try {
+      await _transport.sendA(Commands.startMeasure(type));
+    } catch (_) {
+      _markMeasureStopped(type);
+      rethrow;
+    }
+  }
+
+  Future<void> _stopMeasure(MeasureType type) async {
+    try {
+      await _transport.sendA(Commands.stopMeasure(type));
+    } finally {
+      _markMeasureStopped(type);
+    }
+  }
+
+  void _markMeasureStarted(MeasureType type) {
+    _measuringTypes.add(type.id);
+    lastMeasurementError = null;
+    notifyListeners();
+  }
+
+  void _markMeasureStopped(MeasureType type) {
+    _measuringTypes.remove(type.id);
+    notifyListeners();
+  }
 
   Future<void> enableNotifications(String phoneModel) =>
       _withActionSpan('enable_notifications', () async {

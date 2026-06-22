@@ -150,6 +150,68 @@ void main() {
       expect(segs.last.duration.inMinutes, 16);
     });
 
+    test('parses live H59MA record-list payload with LE start/end minutes', () {
+      // From H59MA_1.00.13_251230 live log:
+      //   count=1, dayDelta=0, blockLen=0x28,
+      //   startMin=0x001e (00:30), endMin=0x01f2 (08:18),
+      //   followed by 18 (stage,duration) pairs totalling 468 minutes.
+      final pl = Uint8List.fromList([
+        0x01,
+        0x00,
+        0x28,
+        0x1e,
+        0x00,
+        0xf2,
+        0x01,
+        0x02,
+        0x1b,
+        0x03,
+        0x16,
+        0x02,
+        0x1d,
+        0x03,
+        0x15,
+        0x04,
+        0x09,
+        0x03,
+        0x19,
+        0x04,
+        0x0d,
+        0x02,
+        0x15,
+        0x04,
+        0x0d,
+        0x02,
+        0x31,
+        0x04,
+        0x13,
+        0x03,
+        0x37,
+        0x04,
+        0x11,
+        0x03,
+        0x3a,
+        0x04,
+        0x1a,
+        0x02,
+        0x1a,
+        0x04,
+        0x0b,
+        0x02,
+        0x1b,
+      ]);
+      expect(SleepParser.isH59maNightRecordPayload(pl), isTrue);
+      expect(SleepParser.h59maNightRecordDayDeltas(pl), [0]);
+
+      final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
+      expect(segs, hasLength(18));
+      expect(segs.first.start, DateTime(2026, 6, 20, 0, 30));
+      expect(segs.first.stage, SleepStage.deep);
+      expect(segs.first.duration.inMinutes, 27);
+      expect(segs.last.start, DateTime(2026, 6, 20, 7, 51));
+      expect(segs.last.duration.inMinutes, 27);
+    });
+
     test('returns an empty list when BE endMin > 1439 (malformed)', () {
       // After the dayOffset byte is unconditionally stripped, the
       // first two bytes of the remaining payload are read as a

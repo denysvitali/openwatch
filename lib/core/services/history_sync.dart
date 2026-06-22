@@ -642,11 +642,10 @@ class HistorySync extends ChangeNotifier {
       // each. Re-fetching is safe because the merge logic deduplicates
       // by start timestamp, so we always poll every requested day to
       // catch new sleep sessions that may have arrived after a prior
-      // sync (HS-3). Before polling, clear the affected sleep buckets
-      // so parser fixes and empty watch replies can remove bad data
-      // already persisted by older app versions.
+      // sync (HS-3). Sleep buckets are cleared only when a replacement
+      // response is actually decoded; a missed or malformed reply must
+      // not erase the user's previously-stored night.
       if (_bParser != null) {
-        await _clearSleepForWakeOffsets(todayD, wantsDays);
         for (final d in wantsDays) {
           final day = todayD.addDays(-d);
           _currentSyncDay = day;
@@ -684,20 +683,9 @@ class HistorySync extends ChangeNotifier {
     }
   }
 
-  Future<void> _clearSleepForWakeOffsets(
-    DateOnly today,
-    Iterable<int> wakeOffsets,
-  ) async {
-    final affected = <DateOnly>{};
-    for (final offset in wakeOffsets) {
-      final wakeDay = today.addDays(-offset);
-      affected
-        ..add(wakeDay)
-        ..add(wakeDay.addDays(-1));
-    }
-
+  void _clearSleepDays(Iterable<DateOnly> days, {bool persist = true}) {
     var changed = false;
-    for (final day in affected) {
+    for (final day in days) {
       final previous = _days[day];
       if (previous == null || previous.sleep.isEmpty) continue;
       final updated = previous.copyWith(
@@ -706,7 +694,9 @@ class HistorySync extends ChangeNotifier {
       );
       _days[day] = updated;
       changed = true;
-      await _store?.writeDay(updated);
+      if (persist) {
+        unawaited(_store?.writeDay(updated));
+      }
     }
     if (!changed) return;
     _sleep
@@ -1176,13 +1166,35 @@ class HistorySync extends ChangeNotifier {
       attributes: {'sync.sleep.kind': 'night'},
     );
     try {
-      final wakeDay = _dayFromSleepPayload(payload, isNight: true);
+      final isH59maRecordList = SleepParser.isH59maNightRecordPayload(payload);
+      final today = DateOnly.today();
+      final wakeDay = isH59maRecordList
+          ? today
+          : _dayFromSleepPayload(payload, isNight: true);
       final anchor = wakeDay.midnight;
       final added = SleepParser.parseNightSleepSegments(
         payload,
         anchor: anchor,
       );
-      if (added.isEmpty) return 0;
+      final replaceDays = <DateOnly>{};
+      if (isH59maRecordList) {
+        for (final offset in SleepParser.h59maNightRecordDayDeltas(payload)) {
+          final day = today.addDays(-offset);
+          replaceDays
+            ..add(day)
+            ..add(day.addDays(-1));
+        }
+      } else {
+        replaceDays
+          ..add(wakeDay)
+          ..add(wakeDay.addDays(-1));
+      }
+      if (added.isEmpty) {
+        if (payload.isEmpty) {
+          _clearSleepDays(replaceDays);
+        }
+        return 0;
+      }
       // The parser re-keys segments to the BEDTIME day when a
       // block wraps midnight (e.g. wakeDay=2026-06-19, segments
       // start at 2026-06-18T20:33). Group by the segment's
@@ -1195,6 +1207,9 @@ class HistorySync extends ChangeNotifier {
         final d = DateOnly.fromDateTime(s.start);
         addedByDay.putIfAbsent(d, () => []).add(s);
       }
+      final daysWithNewSleep = addedByDay.keys.toSet();
+      _clearSleepDays(replaceDays.difference(daysWithNewSleep));
+      _clearSleepDays(daysWithNewSleep, persist: false);
       for (final entry in addedByDay.entries) {
         final day = entry.key;
         final segments = entry.value;

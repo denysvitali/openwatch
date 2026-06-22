@@ -304,6 +304,22 @@ void main() {
       await svc.dispose();
     });
 
+    test('routes reversed 0x6a mode-control continuation response', () async {
+      final host = _StubHost();
+      final svc = Fee7Service.attach(host);
+      final d = Fee7Dispatcher(svc);
+      d.bind();
+
+      final got = d.onModeControlCont.first;
+      final frame = Codec.buildChannelA(0x08, [Fee7.modeControlCont, 0x42]);
+      host.inbound.add(frame);
+
+      final m = await got.timeout(const Duration(seconds: 1));
+      expect(m.step, 0x08);
+      expect(m.payload.first, 0x42);
+      await svc.dispose();
+    });
+
     test('routes 0xc3 OTA trigger and detects routesToOta flag', () async {
       final host = _StubHost();
       final svc = Fee7Service.attach(host);

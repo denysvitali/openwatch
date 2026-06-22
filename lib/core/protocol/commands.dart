@@ -253,20 +253,24 @@ class Commands {
 
   /// `StopHeartRateReq` (0x6a): stop a measurement of [type].
   static Uint8List stopMeasure(MeasureType type) =>
-      Codec.buildChannelA(OpA.stopMeasure, [type.id, 0x00, 0x00]);
+      Codec.buildChannelA(OpA.stopMeasure, [type.id, 0x04, 0x00]);
 
-  /// `RealTimeHeartRate` (0x1e): sub `[type]` (1 = start, 2 = stop,
+  /// `RealTimeHeartRate` (0x1e): sub `[action]` (1 = start, 2 = stop,
   /// 3 = reset — see `GHIDRA_DECOMPILATION.md` §3.13 / `FUN_0082d20c`).
   /// On H59MA v14 this is **fire-and-forget** — the handler never
   /// sends a response. The continuous bpm stream travels on
   /// `0x73 deviceNotify` / `0x78 deviceSportNotify`, NOT on `0x1e`
   /// (the pre-RE APK-derived assumption was wrong for v14).
-  static Uint8List startContinuousHr(MeasureType type) =>
-      Codec.buildChannelA(OpA.realTimeHeartRate, [type.id]);
+  static Uint8List startContinuousHr() =>
+      Codec.buildChannelA(OpA.realTimeHeartRate, [0x01]);
 
-  /// `RealTimeHeartRate` (0x1e) with type=0: stop the continuous stream.
+  /// `RealTimeHeartRate` (0x1e) with action=2: stop the continuous stream.
   static Uint8List stopContinuousHr() =>
-      Codec.buildChannelA(OpA.realTimeHeartRate, [0x00]);
+      Codec.buildChannelA(OpA.realTimeHeartRate, [0x02]);
+
+  /// `RealTimeHeartRate` (0x1e) with action=3: extend the 60 s window.
+  static Uint8List resetContinuousHrWindow() =>
+      Codec.buildChannelA(OpA.realTimeHeartRate, [0x03]);
 
   /// `SetANCSReq` (0x60): subscribe to (near-)all ANCS categories.
   static Uint8List enableAncs() =>

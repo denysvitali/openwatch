@@ -31,6 +31,7 @@ class HealthScreen extends ConsumerWidget {
             bpm: manager.lastHeartRate,
             supported: hrSupported,
             ready: ready,
+            measuring: manager.measuringHeartRate,
             start: manager.startHeartRate,
             stop: manager.stopHeartRate,
           ),
@@ -54,6 +55,7 @@ class HealthScreen extends ConsumerWidget {
                   unit: 'mmHg',
                   tint: Color(0xFFFF3B30),
                   ready: ready,
+                  measuring: manager.measuringBloodPressure,
                   start: manager.startBloodPressure,
                   stop: manager.stopBloodPressure,
                 ),
@@ -71,6 +73,7 @@ class HealthScreen extends ConsumerWidget {
                   value: manager.lastStress?.toString() ?? '-',
                   tint: Color(0xFFFF9500),
                   ready: ready,
+                  measuring: manager.measuringStress,
                   start: manager.startStress,
                   stop: manager.stopStress,
                 ),
@@ -82,6 +85,7 @@ class HealthScreen extends ConsumerWidget {
                   unit: 'ms',
                   tint: Color(0xFF34C759),
                   ready: ready,
+                  measuring: manager.measuringHrv,
                   start: manager.startHrv,
                   stop: manager.stopHrv,
                 ),
@@ -105,6 +109,7 @@ class _HeartRateCard extends StatelessWidget {
     required this.bpm,
     required this.supported,
     required this.ready,
+    required this.measuring,
     required this.start,
     required this.stop,
   });
@@ -112,6 +117,7 @@ class _HeartRateCard extends StatelessWidget {
   final int? bpm;
   final bool supported;
   final bool ready;
+  final bool measuring;
   final VoidCallback start;
   final VoidCallback stop;
 
@@ -171,7 +177,9 @@ class _HeartRateCard extends StatelessWidget {
             const SizedBox(height: 12),
             Text(
               supported
-                  ? (ready ? 'Ready to measure' : 'Connect your watch')
+                  ? (ready
+                        ? (measuring ? 'Measuring' : 'Ready to measure')
+                        : 'Connect your watch')
                   : 'Not supported on this device',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
@@ -182,7 +190,9 @@ class _HeartRateCard extends StatelessWidget {
               children: [
                 Expanded(
                   child: FilledButton.icon(
-                    onPressed: (ready && supported) ? start : null,
+                    onPressed: (ready && supported && !measuring)
+                        ? start
+                        : null,
                     icon: const Icon(CupertinoIcons.play_fill),
                     label: const Text('Start'),
                   ),
@@ -190,7 +200,7 @@ class _HeartRateCard extends StatelessWidget {
                 const SizedBox(width: 10),
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: (ready && supported) ? stop : null,
+                    onPressed: (ready && supported && measuring) ? stop : null,
                     icon: const Icon(CupertinoIcons.stop_fill),
                     label: const Text('Stop'),
                   ),
@@ -238,7 +248,9 @@ class _MetricList extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    metrics[i].value,
+                    metrics[i].measuring && metrics[i].value == '-'
+                        ? 'Measuring'
+                        : metrics[i].value,
                     style: theme.textTheme.titleMedium?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
@@ -248,12 +260,16 @@ class _MetricList extends StatelessWidget {
                     IconButton(
                       tooltip: 'Start',
                       icon: const Icon(CupertinoIcons.play_fill),
-                      onPressed: metrics[i].ready ? metrics[i].start : null,
+                      onPressed: metrics[i].ready && !metrics[i].measuring
+                          ? metrics[i].start
+                          : null,
                     ),
                     IconButton(
                       tooltip: 'Stop',
                       icon: const Icon(CupertinoIcons.stop_fill),
-                      onPressed: metrics[i].ready ? metrics[i].stop : null,
+                      onPressed: metrics[i].ready && metrics[i].measuring
+                          ? metrics[i].stop
+                          : null,
                     ),
                   ],
                 ],
@@ -279,6 +295,7 @@ class _HealthMetric {
     required this.tint,
     this.unit,
     this.ready = false,
+    this.measuring = false,
     this.start,
     this.stop,
   });
@@ -289,6 +306,7 @@ class _HealthMetric {
   final Color tint;
   final String? unit;
   final bool ready;
+  final bool measuring;
   final VoidCallback? start;
   final VoidCallback? stop;
 }

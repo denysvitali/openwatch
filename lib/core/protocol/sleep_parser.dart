@@ -26,10 +26,8 @@ class SleepSegment {
 ///   * Ch-B `[BC,27,len,crc,dayOffset, …]`
 ///     dayOffset = first byte of the *payload* (relative to the BC
 ///     container), i.e. the byte at index 0 of the parser input.
-///     Always present — see `firmwares/GHIDRA_DECOMPILATION.md`
-///     §2.3 (H59MA v13/v14 firmware) which packs the day-of-record as
-///     the first byte of every record. After that the frame carries
-///     one or more chained day blocks. Each block:
+///     Present on older captures. After that the frame carries one or
+///     more chained day blocks. Each block:
 ///       bytes 0..1   endMinuteOfDay (u16 **big-endian**) — wake-up
 ///                    minute-of-day. The Oudmon convention is BE; LE
 ///                    produces out-of-range values (e.g. `0x00 0x34`
@@ -40,6 +38,12 @@ class SleepSegment {
 ///     `stageByte` is the Oudmon stage id; the mapping is documented
 ///     in [stageFor] below. Stages are emitted as [SleepStage]; pair
 ///     durations are minutes.
+///   * H59MA v13/v14 also emits a record-list shape on `0x27`:
+///     `[recordCount, record...]`, where each record is
+///     `[dayDelta, blockLen, startMinLE, endMinLE, (stage,durMin)*]`.
+///     `blockLen` includes the 4 start/end bytes plus the pair bytes.
+///     This is the shape seen in live `H59MA_1.00.13_251230` captures
+///     and matches the firmware's count-prefixed record writer.
 ///   * Ch-B `[BC,3e,len,crc,payload]`
 ///     Lunch/nap payload **does not** carry the dayOffset prefix (only
 ///     `0x27` does). It is just the alternating shape: u16 **BE**
@@ -93,6 +97,49 @@ class SleepParser {
   /// [parseLunchSleepSegments].
   static int stageFor(int typeByte) => typeByte & 0xFF;
 
+  /// Returns true when [pl] matches the H59MA `0x27` record-list shape:
+  /// `[count, dayDelta, blockLen, startMinLE, endMinLE, pairs...]`.
+  static bool isH59maNightRecordPayload(Uint8List pl) {
+    if (pl.isEmpty) return false;
+    final count = pl[0] & 0xFF;
+    if (count == 0 || count > 10) return false;
+    var i = 1;
+    for (var rec = 0; rec < count; rec++) {
+      if (i + 6 > pl.length) return false;
+      final dayDelta = pl[i] & 0xFF;
+      final blockLen = pl[i + 1] & 0xFF;
+      if (dayDelta > 31 || blockLen < 4 || blockLen.isOdd) return false;
+      final end = i + 2 + blockLen;
+      if (end > pl.length) return false;
+      final startMin = _u16le(pl, i + 2);
+      final endMin = _u16le(pl, i + 4);
+      if (startMin >= 24 * 60 || endMin >= 24 * 60) return false;
+      var total = 0;
+      for (var p = i + 6; p + 1 < end; p += 2) {
+        final dur = pl[p + 1] & 0xFF;
+        if (dur == 0) return false;
+        total += dur;
+      }
+      var span = endMin - startMin;
+      if (span <= 0) span += 24 * 60;
+      if (total != span) return false;
+      i = end;
+    }
+    return i == pl.length;
+  }
+
+  /// Day deltas carried by a valid H59MA record-list payload.
+  static List<int> h59maNightRecordDayDeltas(Uint8List pl) {
+    if (!isH59maNightRecordPayload(pl)) return const [];
+    final out = <int>[];
+    var i = 1;
+    for (var rec = 0; rec < pl[0]; rec++) {
+      out.add(pl[i] & 0xFF);
+      i += 2 + (pl[i + 1] & 0xFF);
+    }
+    return out;
+  }
+
   /// Parses a `0x27` night-sleep payload into [SleepStage] segments.
   ///
   /// [anchor] is the calendar day the record refers to — typically
@@ -102,11 +149,9 @@ class SleepParser {
   /// it to attach absolute timestamps to the segments.
   ///
   /// The night frame carries a 1-byte `dayOffset` prefix at
-  /// `pl[0]` (per `PROTOCOL.md` §4.4 + H59MA v13/v14 RE — see
-  /// `firmwares/GHIDRA_DECOMPILATION.md` §2.3). It is always
-  /// present on H59MA firmware and is unconditionally stripped
-  /// here so the chained-block walker sees a pure
-  /// `(endMin, pairs…)` stream.
+  /// `pl[0]` in older captures. H59MA v13/v14 live frames may instead
+  /// use a count-prefixed record-list; that shape is auto-detected before
+  /// falling back to the older chained-block walker.
   ///
   /// Returns an empty list when [pl] is empty or shorter than the
   /// minimum block (1 B dayOffset + 2 B end-minute + 2 B one pair).
@@ -118,7 +163,47 @@ class SleepParser {
       AppLog.instance.debug('sleep', 'night payload empty — no sleep record');
       return const [];
     }
+    if (isH59maNightRecordPayload(pl)) {
+      return _parseH59maNightRecords(pl, anchor: anchor);
+    }
     return _parseChained(pl.sublist(1), anchor: anchor, source: 'night');
+  }
+
+  static List<SleepSegment> _parseH59maNightRecords(
+    Uint8List pl, {
+    required DateTime anchor,
+  }) {
+    final out = <SleepSegment>[];
+    final today = DateTime(anchor.year, anchor.month, anchor.day);
+    var i = 1;
+    for (var rec = 0; rec < pl[0]; rec++) {
+      final dayDelta = pl[i] & 0xFF;
+      final blockLen = pl[i + 1] & 0xFF;
+      final end = i + 2 + blockLen;
+      final endMin = _u16le(pl, i + 4);
+      final wakeDay = today.subtract(Duration(days: dayDelta));
+      final wakeAt = wakeDay.add(Duration(minutes: endMin));
+      final pairs = <_SleepPair>[];
+      var total = 0;
+      for (var p = i + 6; p + 1 < end; p += 2) {
+        final pair = _SleepPair(pl[p] & 0xFF, pl[p + 1] & 0xFF);
+        pairs.add(pair);
+        total += pair.durMin;
+      }
+      var cursor = wakeAt.subtract(Duration(minutes: total));
+      for (final p in pairs) {
+        out.add(
+          SleepSegment(
+            cursor,
+            Duration(minutes: p.durMin),
+            _toStage(p.stageByte),
+          ),
+        );
+        cursor = cursor.add(Duration(minutes: p.durMin));
+      }
+      i = end;
+    }
+    return out;
   }
 
   /// Parses a `0x3e` lunch/nap-sleep payload. Same wire shape as the
@@ -131,10 +216,9 @@ class SleepParser {
   /// Walks [pl] as a sequence of chained day blocks; each block is
   /// `u16 BE endMin` + `(stageByte, durMin)*`.
   ///
-  /// For the night frame (`0x27`) the very first byte of [pl] is the
-  /// `dayOffset` prefix from `PROTOCOL.md` §4.4 (always present on
-  /// H59MA v13/v14 — see `firmwares/GHIDRA_DECOMPILATION.md` §2.3)
-  /// and is unconditionally skipped. The lunch frame (`0x3e`) has
+  /// For the older night frame (`0x27`) the very first byte of [pl] is the
+  /// `dayOffset` prefix from `PROTOCOL.md` §4.4 and is unconditionally
+  /// skipped before this helper is called. The lunch frame (`0x3e`) has
   /// **no** dayOffset prefix, so the caller (`parseNightSleepSegments`)
   /// must NOT strip the leading byte — `parseLunchSleepSegments`
   /// therefore just delegates here with the byte still in place
@@ -391,6 +475,8 @@ class SleepParser {
         return SleepStage.awake;
     }
   }
+
+  static int _u16le(Uint8List b, int off) => b[off] | (b[off + 1] << 8);
 }
 
 class _SleepPair {

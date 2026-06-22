@@ -199,6 +199,27 @@ void main() {
       expect(Codec.rxChannelBPayload(f), [0x02]);
     });
 
+    test('start/stop measurement encode documented action bytes', () {
+      final start = Commands.startMeasure(MeasureType.pressure);
+      final stop = Commands.stopMeasure(MeasureType.pressure);
+      expect(start[0], OpA.startMeasure);
+      expect(start.sublist(1, 3), [MeasureType.pressure.id, 0x01]);
+      expect(stop[0], OpA.stopMeasure);
+      expect(stop.sublist(1, 4), [MeasureType.pressure.id, 0x04, 0x00]);
+    });
+
+    test('realtime HR uses 0x1e action bytes from firmware', () {
+      final start = Commands.startContinuousHr();
+      final reset = Commands.resetContinuousHrWindow();
+      final stop = Commands.stopContinuousHr();
+      expect(start[0], OpA.realTimeHeartRate);
+      expect(start[1], 0x01);
+      expect(reset[0], OpA.realTimeHeartRate);
+      expect(reset[1], 0x03);
+      expect(stop[0], OpA.realTimeHeartRate);
+      expect(stop[1], 0x02);
+    });
+
     test('readSugarLipids defaults to sub 0x03 sugar read', () {
       final f = Commands.readSugarLipids();
       expect(f[0], OpA.sugarLipidsSetting);

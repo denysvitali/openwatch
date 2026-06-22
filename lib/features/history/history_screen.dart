@@ -7,6 +7,7 @@ import '../../core/ble/ble_transport.dart';
 import '../../core/providers/app_providers.dart';
 import '../../core/services/history_sync.dart';
 import 'widgets/hr_chart.dart';
+import 'widgets/scalar_chart.dart';
 import 'widgets/sleep_chart.dart';
 
 /// Local-first history view.
@@ -382,6 +383,35 @@ class _DayDetailPage extends StatelessWidget {
               const SizedBox(height: 20),
               _ChartHeader(title: 'Other metrics', detail: 'Synced values'),
               const SizedBox(height: 10),
+              if (day.stress.isNotEmpty) ...[
+                _ChartHeader(
+                  title: 'Stress',
+                  detail: _scalarRange(day.stress),
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  height: 132,
+                  child: ScalarMetricChart(
+                    samples: day.stress,
+                    color: const Color(0xFFFF9500),
+                    minValue: 0,
+                    maxValue: 100,
+                  ),
+                ),
+                const SizedBox(height: 14),
+              ],
+              if (day.hrv.isNotEmpty) ...[
+                _ChartHeader(title: 'HRV', detail: _scalarRange(day.hrv)),
+                const SizedBox(height: 8),
+                SizedBox(
+                  height: 132,
+                  child: ScalarMetricChart(
+                    samples: day.hrv,
+                    color: const Color(0xFF34C759),
+                  ),
+                ),
+                const SizedBox(height: 14),
+              ],
               _MetricValueList(day: day),
             ],
           ],
