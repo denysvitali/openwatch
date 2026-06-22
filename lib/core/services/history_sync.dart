@@ -841,10 +841,18 @@ class HistorySync extends ChangeNotifier {
     );
     try {
       // Stitch the 13-byte chunks into a flat record, then walk 5-min
-      // BPM slots. 288 slots * 1 byte (BPM) = 288 bytes; the first
-      // 4 bytes of the assembled record are the day timestamp (LE
-      // u32) and the rest is the 5-min sample series. 0xFF = no
-      // sample.
+      // BPM slots. 288 slots * 1 byte (BPM) = 288 bytes; per
+      // GHIDRA §3.12 the first 4 bytes of the assembled record are
+      // the firmware's echo of the request index (LE u32 — NOT a
+      // host-readable day timestamp), and the rest is the 5-min
+      // sample series. 0xFF = no sample.
+      //
+      // We DO NOT use the echoed u32 as a date — its unit (seconds
+      // vs ms) and timezone are not documented and vary across
+      // firmware builds, so trusting it as UTC has historically
+      // produced "samples in the future" near midnight. Anchor
+      // every sample on the day we asked for (HS-8) and bound the
+      // slot index so off-the-end bytes cannot spill past 23:55.
       final buf = BytesBuilder();
       for (final c in _hrChunks) {
         buf.add(c);
@@ -855,11 +863,22 @@ class HistorySync extends ChangeNotifier {
         _hrExpectedChunks = null;
         return;
       }
-      final dayStart = DateTime.fromMillisecondsSinceEpoch(
-        Codec.readU32le(rec, 0) * 1000,
-      );
+      // No header → drop the record. (The HS-8 fix already captures
+      // the day at header-arrival time, so reaching here with no
+      // day means the header was lost; trusting the echoed u32 as
+      // a fallback has caused cross-day pollution in the wild.)
+      final resolvedDay = day;
+      if (resolvedDay == null) {
+        _hrChunks.clear();
+        _hrExpectedChunks = null;
+        return;
+      }
+      final dayStart = resolvedDay.midnight;
       final samples = <HrSample>[];
-      for (var i = 4; i < rec.length; i++) {
+      // 288 × 5-min slots = 24h; bound the slot index so any trailing
+      // padding bytes from the firmware cannot create samples past
+      // 23:55 on the target day.
+      for (var i = 4; i < rec.length && (i - 4) < 288; i++) {
         final bpm = rec[i];
         if (bpm == 0xff || bpm == 0x00) continue;
         if (bpm < 30 || bpm > 240) continue;
@@ -869,17 +888,6 @@ class HistorySync extends ChangeNotifier {
       }
       _hrChunks.clear();
       _hrExpectedChunks = null;
-
-      // Attribute to the day we asked for, not whatever the device
-      // echoed back — the firmware's BCD date echo may differ by a
-      // timezone near midnight, but we already know what we asked for.
-      //
-      // If the entry has no stored day (should not happen after the
-      // HS-8 fix), the fallback parses the firmware's echoed Unix
-      // timestamp as UTC.  This is a best-effort safety net; the
-      // timestamp format is not documented and may be local time on
-      // some firmware builds.
-      final resolvedDay = day ?? DateOnly.fromDateTime(dayStart);
       final previous = _days[resolvedDay] ?? DailyHistory(day: resolvedDay);
       final mergedByTs = <int, HrSample>{
         for (final h in previous.hr) h.timestamp.millisecondsSinceEpoch: h,
