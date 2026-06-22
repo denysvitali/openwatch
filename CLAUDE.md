@@ -13,9 +13,10 @@ Hard product principles (must be preserved):
 
 ## Development commands
 
-The repo uses Nix and the `sdk-links` Flutter wrapper (the plain `flutter` wrapper cannot write to the Nix store). On a non-Nix host a standard Flutter ≥ 3.38 + Dart ≥ 3.10 will work.
+The repo uses [mise](https://mise.jdx.dev/) to pin Flutter. With mise activated in your shell, `flutter` and `dart` are available automatically when you `cd` into the repo; otherwise prefix commands with `mise x --`.
 
 ```bash
+mise install                              # install the pinned Flutter SDK (one-time per machine)
 flutter pub get
 flutter analyze
 dart format --output=none --set-exit-if-changed .
