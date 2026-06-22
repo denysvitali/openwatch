@@ -237,6 +237,16 @@ class Commands {
   static Uint8List readLatestHeartRate() =>
       Codec.buildChannelA(OpA.readHeartRate, Codec.u32le(0));
 
+  /// `PressureReq` / stress history (`0x37`): request the fixed-slot
+  /// stress record for [dayOffset] (`0` = today).
+  static Uint8List readStressHistory({int dayOffset = 0}) =>
+      Codec.buildChannelA(OpA.pressure, [dayOffset & 0xFF]);
+
+  /// `HRVReq` (`0x39`): request the fixed-slot HRV record for [dayOffset]
+  /// (`0` = today).
+  static Uint8List readHrvHistory({int dayOffset = 0}) =>
+      Codec.buildChannelA(OpA.hrv, [dayOffset & 0xFF]);
+
   /// `StartHeartRateReq` (0x69): start a live measurement of [type].
   static Uint8List startMeasure(MeasureType type) =>
       Codec.buildChannelA(OpA.startMeasure, [type.id, 0x01]);

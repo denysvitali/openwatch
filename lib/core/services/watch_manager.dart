@@ -44,6 +44,10 @@ class WatchManager extends ChangeNotifier {
   int? todayCalories;
   int? todayDistanceMeters;
   int? lastHeartRate;
+  int? lastStress;
+  int? lastHrv;
+  int? lastBloodPressureSystolic;
+  int? lastBloodPressureDiastolic;
   bool initialized = false;
 
   String get hardwareRevision => _transport.hardwareRevision;
@@ -190,10 +194,24 @@ class WatchManager extends ChangeNotifier {
         AppLog.instance.debug(
           'hr',
           '0x69 reply type=${r?.type ?? -1} err=${r?.err ?? -1} '
-              'bpm=${r?.bpm ?? '-'}',
+              'value=${r?.value ?? '-'} bpm=${r?.bpm ?? '-'} '
+              'bp=${r?.systolic ?? '-'}/${r?.diastolic ?? '-'}',
         );
-        if (r?.bpm != null) {
-          lastHeartRate = r!.bpm;
+        if (r != null && r.err == 0) {
+          switch (r.type) {
+            case 1:
+            case 6:
+              if (r.bpm != null) lastHeartRate = r.bpm;
+            case 2:
+              if (r.systolic != null && r.diastolic != null) {
+                lastBloodPressureSystolic = r.systolic;
+                lastBloodPressureDiastolic = r.diastolic;
+              }
+            case 8:
+              if (r.value > 1 && r.value < 100) lastStress = r.value;
+            case 10:
+              if (r.value > 1 && r.value < 255) lastHrv = r.value;
+          }
           notifyListeners();
         }
       case OpA.deviceNotify:
@@ -331,6 +349,36 @@ class WatchManager extends ChangeNotifier {
     await _transport.sendA(Commands.stopMeasure(MeasureType.heartRate));
     await _transport.sendA(Commands.stopContinuousHr());
   });
+
+  Future<void> startBloodPressure() => _withActionSpan(
+    'start_blood_pressure',
+    () => _transport.sendA(Commands.startMeasure(MeasureType.bloodPressure)),
+  );
+
+  Future<void> stopBloodPressure() => _withActionSpan(
+    'stop_blood_pressure',
+    () => _transport.sendA(Commands.stopMeasure(MeasureType.bloodPressure)),
+  );
+
+  Future<void> startStress() => _withActionSpan(
+    'start_stress',
+    () => _transport.sendA(Commands.startMeasure(MeasureType.pressure)),
+  );
+
+  Future<void> stopStress() => _withActionSpan(
+    'stop_stress',
+    () => _transport.sendA(Commands.stopMeasure(MeasureType.pressure)),
+  );
+
+  Future<void> startHrv() => _withActionSpan(
+    'start_hrv',
+    () => _transport.sendA(Commands.startMeasure(MeasureType.hrv)),
+  );
+
+  Future<void> stopHrv() => _withActionSpan(
+    'stop_hrv',
+    () => _transport.sendA(Commands.stopMeasure(MeasureType.hrv)),
+  );
 
   Future<void> enableNotifications(String phoneModel) =>
       _withActionSpan('enable_notifications', () async {

@@ -100,7 +100,7 @@ class ChannelADispatcher {
   /// `sub=0` advance. See `GHIDRA_DECOMPILATION.md` §3.19.
   Stream<BpRecordChunk> get onBpRecord => _bpRecord.stream;
 
-  /// Pressure config (`0x37`) — header discriminator (`pl[3] == 0x1E`).
+  /// Stress history (`0x37`) — header discriminator (`pl[3] == 0x1E`).
   ///
   /// Per `GHIDRA_DECOMPILATION.md` §3.20 the read response is a
   /// two-phase fragmenter pattern: a single 16-byte header frame
@@ -112,7 +112,7 @@ class ChannelADispatcher {
   Stream<PressureSettingHeader> get onPressureSettingHeader =>
       _pressureSettingHeader.stream;
 
-  /// Pressure config (`0x37`) — payload chunk after the header.
+  /// Stress history (`0x37`) — payload chunk after the header.
   ///
   /// See [onPressureSettingHeader] for the full two-phase flow.
   /// Each chunk is up to 13 payload bytes; the firmware emits
@@ -120,7 +120,7 @@ class ChannelADispatcher {
   Stream<PressureSettingChunk> get onPressureSettingChunk =>
       _pressureSettingChunk.stream;
 
-  /// Pressure reading / unit (`0x38`).
+  /// Stress auto-measure enabled flag (`0x36`).
   Stream<PressureReading> get onPressure => _pressure.stream;
 
   /// HRV config (`0x39`) — header discriminator (`pl[2] == 0x1E`).
@@ -130,8 +130,8 @@ class ChannelADispatcher {
   /// (the literal dword `0x1E050039` little-endian → `pl[2] == 0x1E`)
   /// followed by up to four 13-byte-chunk payload frames via the
   /// shared `FUN_0082c988`. **Note**: the 0x1E feature id is the
-  /// same as `0x37 pressureSetting` — disambiguate by cmd byte
-  /// (`OpA.hrv` 0x39 vs `OpA.pressureSetting` 0x37).
+  /// same as `0x37 pressure` — disambiguate by cmd byte
+  /// (`OpA.hrv` 0x39 vs `OpA.pressure` 0x37).
   Stream<HrvSettingHeader> get onHrvHeader => _hrvHeader.stream;
 
   /// HRV config (`0x39`) — payload chunk after the header.
@@ -249,9 +249,9 @@ class ChannelADispatcher {
         _decodeHeartRateSetting(pl);
       case OpA.bpData:
         _decodeBpRecord(pl);
-      case OpA.pressure:
-        _decodePressure(pl);
       case OpA.pressureSetting:
+        _decodePressure(pl);
+      case OpA.pressure:
         _decodePressureSetting(pl);
       case OpA.hrv:
         _decodeHrv(pl);
@@ -510,7 +510,7 @@ class ChannelADispatcher {
     _bpRecord.add(BpRecordChunk(seq: _bpRecordSeq++, payload: pl));
   }
 
-  /// `pressure` (0x38): 1-bit on/off setting (analogous to 0x2c SpO2).
+  /// `pressureSetting` (0x36): 1-bit on/off setting (analogous to 0x2c SpO2).
   ///
   /// Per `FUN_0082ca54` / `GHIDRA_DECOMPILATION.md` §3.17:
   ///   `pl[0]` = sub-opcode echo (0x01 read / 0x02+ write)
@@ -520,13 +520,13 @@ class ChannelADispatcher {
   /// The H59MA pressure sensor (if present) is either enabled or
   /// disabled — not a continuous reading. A host that wants the
   /// actual mmHg / kPa must subscribe to a push channel (likely
-  /// 0x2B-routed event) rather than poll 0x38.
+  /// 0x2B-routed event) rather than poll 0x36.
   void _decodePressure(Uint8List pl) {
     if (pl.length < 2) return;
     _pressure.add(PressureReading(enabled: pl[1] != 0));
   }
 
-  /// `pressureSetting` (0x37): two-phase read response.
+  /// `pressure` (0x37): stress-history two-phase read response.
   ///
   /// Per `GHIDRA_DECOMPILATION.md` §3.20 the response is identical
   /// in shape to the `0x7a muslim` handler — a single 16-byte
@@ -551,15 +551,14 @@ class ChannelADispatcher {
     );
   }
 
-  /// `hrv` (0x39): read/write HRV config.
-  /// `hrvSetting` (0x39): two-phase read response.
+  /// `hrv` (0x39): HRV-history two-phase read response.
   ///
   /// Per `GHIDRA_DECOMPILATION.md` §3.21 the response is
-  /// structurally identical to `0x37 pressureSetting` — a single
+  /// structurally identical to `0x37 stress history` — a single
   /// 16-byte header frame followed by up to four 13-byte-chunk
   /// payload frames via `FUN_0082c988`. The header discriminator
   /// is `pl[2] == 0x1E` (the `0x1E050039` little-endian dword);
-  /// the *same* 0x1E feature id as `0x37 pressureSetting`, so
+  /// the *same* 0x1E feature id as `0x37 stress history`, so
   /// the cmd byte is the only reliable route discriminator.
   void _decodeHrv(Uint8List pl) {
     if (pl.length < 4) return;
@@ -1014,7 +1013,7 @@ class BloodOxygenSetting {
   final bool enabled;
 }
 
-/// Pressure enabled flag (`0x38`). The H59MA pressure sensor is
+/// Stress auto-measure enabled flag (`0x36`). The H59MA pressure sensor is
 /// either on or off — there is no continuous reading on this
 /// opcode. See `GHIDRA_DECOMPILATION.md` §3.17 / `FUN_0082ca54`.
 /// One chunk of a blood-pressure record (`0x0d`).
@@ -1039,7 +1038,7 @@ class PressureReading {
   final bool enabled;
 }
 
-/// Header frame of a `0x37` pressure-setting read (`pl[3] == 0x1E`).
+/// Header frame of a `0x37` stress-history read (`pl[3] == 0x1E`).
 /// [slotId] echoes `req[1]` (today = 0, yesterday = 1, ...).
 /// See `GHIDRA_DECOMPILATION.md` §3.20.
 class PressureSettingHeader {
@@ -1047,7 +1046,7 @@ class PressureSettingHeader {
   final int slotId;
 }
 
-/// Payload chunk of a `0x37` pressure-setting read (frames 2..N
+/// Payload chunk of a `0x37` stress-history read (frames 2..N
 /// of the two-phase response). Each chunk carries up to 13
 /// payload bytes of the 49-byte pressure record (4-byte header
 /// + 45-byte body per `FUN_008344fe`). There is no end-of-message
@@ -1088,7 +1087,7 @@ class HeartRateSetting {
   final int tooHigh;
 }
 
-/// Header frame of a `0x39` hrvSetting read (`pl[2] == 0x1E`).
+/// Header frame of a `0x39` HRV history read (`pl[2] == 0x1E`).
 /// [slotId] echoes `req[1]` (today = 0, yesterday = 1, ...).
 /// See `GHIDRA_DECOMPILATION.md` §3.21.
 class HrvSettingHeader {
@@ -1096,7 +1095,7 @@ class HrvSettingHeader {
   final int slotId;
 }
 
-/// Payload chunk of a `0x39` hrvSetting read (frames 2..N of
+/// Payload chunk of a `0x39` HRV history read (frames 2..N of
 /// the two-phase response). Each chunk carries up to 13 payload
 /// bytes of the 49-byte HRV record (4-byte header + 45-byte
 /// body per `FUN_0083468e`). There is no end-of-message

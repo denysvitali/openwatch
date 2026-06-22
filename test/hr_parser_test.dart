@@ -103,6 +103,8 @@ void main() {
       );
       expect(r?.type, 0x02);
       expect(r?.bpm, 78);
+      expect(r?.systolic, 120);
+      expect(r?.diastolic, 80);
     });
   });
 

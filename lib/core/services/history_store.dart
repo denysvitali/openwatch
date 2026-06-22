@@ -8,7 +8,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../protocol/sleep_parser.dart';
 import 'app_log.dart';
-import 'history_sync.dart' show HrSample;
+import 'history_sync.dart'
+    show BloodPressureSample, HealthMetricSample, HrSample;
 import 'opentelemetry_service.dart';
 
 /// One calendar day, normalised to local midnight.
@@ -107,6 +108,9 @@ class DailyHistory {
     required this.day,
     this.hr = const [],
     this.sleep = const [],
+    this.stress = const [],
+    this.hrv = const [],
+    this.bloodPressure = const [],
     this.steps,
     this.energyKcal,
     this.distanceMeters,
@@ -116,6 +120,9 @@ class DailyHistory {
   final DateOnly day;
   final List<HrSample> hr;
   final List<SleepSegment> sleep;
+  final List<HealthMetricSample> stress;
+  final List<HealthMetricSample> hrv;
+  final List<BloodPressureSample> bloodPressure;
 
   /// Today's step total (from `0x48 todaySport`). Stored alongside HR so
   /// the day-summary card doesn't have to make a second IPC round-trip.
@@ -131,6 +138,34 @@ class DailyHistory {
   /// were never touched (not currently reachable but reserved).
   final DateTime? lastUpdated;
 
+  DailyHistory copyWith({
+    List<HrSample>? hr,
+    List<SleepSegment>? sleep,
+    List<HealthMetricSample>? stress,
+    List<HealthMetricSample>? hrv,
+    List<BloodPressureSample>? bloodPressure,
+    int? steps,
+    bool clearSteps = false,
+    int? energyKcal,
+    bool clearEnergyKcal = false,
+    int? distanceMeters,
+    bool clearDistanceMeters = false,
+    DateTime? lastUpdated,
+  }) => DailyHistory(
+    day: day,
+    hr: hr ?? this.hr,
+    sleep: sleep ?? this.sleep,
+    stress: stress ?? this.stress,
+    hrv: hrv ?? this.hrv,
+    bloodPressure: bloodPressure ?? this.bloodPressure,
+    steps: clearSteps ? null : steps ?? this.steps,
+    energyKcal: clearEnergyKcal ? null : energyKcal ?? this.energyKcal,
+    distanceMeters: clearDistanceMeters
+        ? null
+        : distanceMeters ?? this.distanceMeters,
+    lastUpdated: lastUpdated ?? this.lastUpdated,
+  );
+
   Map<String, dynamic> toJson() => {
     'day': day.iso,
     'hr': [
@@ -143,6 +178,22 @@ class DailyHistory {
           'start': s.start.toUtc().millisecondsSinceEpoch,
           'dur': s.duration.inMinutes,
           'stage': s.stage.name,
+        },
+    ],
+    'stress': [
+      for (final s in stress)
+        {'t': s.timestamp.toUtc().millisecondsSinceEpoch, 'v': s.value},
+    ],
+    'hrv': [
+      for (final s in hrv)
+        {'t': s.timestamp.toUtc().millisecondsSinceEpoch, 'v': s.value},
+    ],
+    'bp': [
+      for (final b in bloodPressure)
+        {
+          't': b.timestamp.toUtc().millisecondsSinceEpoch,
+          'sbp': b.systolic,
+          'dbp': b.diastolic,
         },
     ],
     'steps': steps,
@@ -159,6 +210,9 @@ class DailyHistory {
     }
     final hrRaw = (j['hr'] as List?) ?? const [];
     final sleepRaw = (j['sleep'] as List?) ?? const [];
+    final stressRaw = (j['stress'] as List?) ?? const [];
+    final hrvRaw = (j['hrv'] as List?) ?? const [];
+    final bpRaw = (j['bp'] as List?) ?? const [];
     final updatedRaw = j['updated'];
     // Sanitize the totals at the read boundary — old app versions
     // (before commit fd28b07 added the WRITE-time clamp in
@@ -212,6 +266,19 @@ class DailyHistory {
       sleep: sleepTotalMinutes > kMaxSaneSleepMinutes
           ? const <SleepSegment>[]
           : sleepSegments,
+      stress: _parseScalarSamples(stressRaw),
+      hrv: _parseScalarSamples(hrvRaw),
+      bloodPressure: [
+        for (final b in bpRaw.cast<Map>())
+          BloodPressureSample(
+            timestamp: DateTime.fromMillisecondsSinceEpoch(
+              (b['t'] as num).toInt(),
+              isUtc: true,
+            ).toLocal(),
+            systolic: (b['sbp'] as num).toInt(),
+            diastolic: (b['dbp'] as num).toInt(),
+          ),
+      ],
       steps: (rawSteps != null && rawSteps > kMaxSaneSteps) ? null : rawSteps,
       energyKcal: (rawKcal != null && rawKcal > kMaxSaneKcal) ? null : rawKcal,
       distanceMeters: (rawDist != null && rawDist > kMaxSaneMeters)
@@ -241,6 +308,17 @@ SleepStage _stageFromName(String? name) {
       return SleepStage.light;
   }
 }
+
+List<HealthMetricSample> _parseScalarSamples(List raw) => [
+  for (final s in raw.cast<Map>())
+    HealthMetricSample(
+      DateTime.fromMillisecondsSinceEpoch(
+        (s['t'] as num).toInt(),
+        isUtc: true,
+      ).toLocal(),
+      (s['v'] as num).toInt(),
+    ),
+];
 
 /// On-device persistent store for daily health data.
 ///
@@ -492,13 +570,7 @@ class HistoryStore {
       attributes: {'store.day.iso': history.day.iso, 'store.op': 'write_day'},
     );
     try {
-      final stamped = DailyHistory(
-        day: history.day,
-        hr: history.hr,
-        sleep: history.sleep,
-        steps: history.steps,
-        energyKcal: history.energyKcal,
-        distanceMeters: history.distanceMeters,
+      final stamped = history.copyWith(
         lastUpdated: lastUpdated ?? DateTime.now(),
       );
       final raw = jsonEncode(stamped.toJson());
@@ -545,13 +617,8 @@ class HistoryStore {
         }
         final merged = byTs.values.toList()
           ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
-        final stamped = DailyHistory(
-          day: day,
+        final stamped = current.copyWith(
           hr: merged,
-          sleep: current.sleep,
-          steps: current.steps,
-          energyKcal: current.energyKcal,
-          distanceMeters: current.distanceMeters,
           lastUpdated: DateTime.now(),
         );
         final raw = jsonEncode(stamped.toJson());
@@ -589,13 +656,8 @@ class HistoryStore {
         }
         final merged = byStart.values.toList()
           ..sort((a, b) => a.start.compareTo(b.start));
-        final stamped = DailyHistory(
-          day: day,
-          hr: current.hr,
+        final stamped = current.copyWith(
           sleep: merged,
-          steps: current.steps,
-          energyKcal: current.energyKcal,
-          distanceMeters: current.distanceMeters,
           lastUpdated: DateTime.now(),
         );
         final raw = jsonEncode(stamped.toJson());
@@ -628,14 +690,107 @@ class HistoryStore {
     try {
       return await _enqueueForDayReturning<DailyHistory>(day.iso, () async {
         final current = await readDay(day);
-        final stamped = DailyHistory(
-          day: day,
-          hr: current.hr,
-          sleep: current.sleep,
+        final stamped = current.copyWith(
           steps: steps,
           energyKcal: energyKcal,
           distanceMeters: distanceMeters,
-          lastUpdated: current.lastUpdated,
+        );
+        final raw = jsonEncode(stamped.toJson());
+        await _fileFor(day).writeAsString(raw, flush: true);
+        return stamped;
+      });
+    } catch (e, st) {
+      span?.recordError(e, st);
+      rethrow;
+    } finally {
+      span?.end();
+    }
+  }
+
+  Future<DailyHistory> mergeStress(
+    DateOnly day,
+    Iterable<HealthMetricSample> samples,
+  ) => _mergeScalarSamples(
+    day,
+    samples,
+    metricName: 'stress',
+    select: (h) => h.stress,
+    copy: (h, merged) => h.copyWith(stress: merged),
+  );
+
+  Future<DailyHistory> mergeHrv(
+    DateOnly day,
+    Iterable<HealthMetricSample> samples,
+  ) => _mergeScalarSamples(
+    day,
+    samples,
+    metricName: 'hrv',
+    select: (h) => h.hrv,
+    copy: (h, merged) => h.copyWith(hrv: merged),
+  );
+
+  Future<DailyHistory> mergeBloodPressure(
+    DateOnly day,
+    Iterable<BloodPressureSample> samples,
+  ) async {
+    final span = OpenTelemetryService().startChildSpan(
+      'store.history.merge_bp',
+      attributes: {'store.day.iso': day.iso, 'store.op': 'merge_bp'},
+    );
+    try {
+      return await _enqueueForDayReturning<DailyHistory>(day.iso, () async {
+        final current = await readDay(day);
+        final byTs = <int, BloodPressureSample>{
+          for (final b in current.bloodPressure)
+            b.timestamp.millisecondsSinceEpoch: b,
+        };
+        for (final b in samples) {
+          byTs[b.timestamp.millisecondsSinceEpoch] = b;
+        }
+        final merged = byTs.values.toList()
+          ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+        final stamped = current.copyWith(
+          bloodPressure: merged,
+          lastUpdated: DateTime.now(),
+        );
+        final raw = jsonEncode(stamped.toJson());
+        await _fileFor(day).writeAsString(raw, flush: true);
+        return stamped;
+      });
+    } catch (e, st) {
+      span?.recordError(e, st);
+      rethrow;
+    } finally {
+      span?.end();
+    }
+  }
+
+  Future<DailyHistory> _mergeScalarSamples(
+    DateOnly day,
+    Iterable<HealthMetricSample> samples, {
+    required String metricName,
+    required List<HealthMetricSample> Function(DailyHistory) select,
+    required DailyHistory Function(DailyHistory, List<HealthMetricSample>) copy,
+  }) async {
+    final span = OpenTelemetryService().startChildSpan(
+      'store.history.merge_$metricName',
+      attributes: {'store.day.iso': day.iso, 'store.op': 'merge_$metricName'},
+    );
+    try {
+      return await _enqueueForDayReturning<DailyHistory>(day.iso, () async {
+        final current = await readDay(day);
+        final byTs = <int, HealthMetricSample>{
+          for (final s in select(current))
+            s.timestamp.millisecondsSinceEpoch: s,
+        };
+        for (final s in samples) {
+          byTs[s.timestamp.millisecondsSinceEpoch] = s;
+        }
+        final merged = byTs.values.toList()
+          ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+        final stamped = copy(
+          current.copyWith(lastUpdated: DateTime.now()),
+          merged,
         );
         final raw = jsonEncode(stamped.toJson());
         await _fileFor(day).writeAsString(raw, flush: true);

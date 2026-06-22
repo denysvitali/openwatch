@@ -61,6 +61,15 @@ void main() {
             SleepStage.deep,
           ),
         ],
+        stress: [HealthMetricSample(DateTime(2026, 6, 20, 8, 0), 42)],
+        hrv: [HealthMetricSample(DateTime(2026, 6, 20, 8, 30), 61)],
+        bloodPressure: [
+          BloodPressureSample(
+            timestamp: DateTime(2026, 6, 20, 9, 0),
+            systolic: 118,
+            diastolic: 76,
+          ),
+        ],
         steps: 8421,
         energyKcal: 320,
         distanceMeters: 6700,
@@ -74,6 +83,10 @@ void main() {
       expect(restored.hr.first.bpm, 62);
       expect(restored.hr.last.bpm, 64);
       expect(restored.sleep.single.stage, SleepStage.deep);
+      expect(restored.stress.single.value, 42);
+      expect(restored.hrv.single.value, 61);
+      expect(restored.bloodPressure.single.systolic, 118);
+      expect(restored.bloodPressure.single.diastolic, 76);
       expect(restored.steps, 8421);
       expect(restored.energyKcal, 320);
       expect(restored.distanceMeters, 6700);

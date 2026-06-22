@@ -327,6 +327,25 @@ class _DayDetailPage extends StatelessWidget {
                       : NumberFormat.compact().format(day.steps),
                   tint: theme.colorScheme.primary,
                 ),
+                _MetricPill(
+                  icon: CupertinoIcons.bolt_fill,
+                  label: day.stress.isEmpty
+                      ? '-'
+                      : '${_avgValue(day.stress)} stress',
+                  tint: const Color(0xFFFF9500),
+                ),
+                _MetricPill(
+                  icon: CupertinoIcons.chart_bar_fill,
+                  label: day.hrv.isEmpty ? '-' : '${_avgValue(day.hrv)} ms',
+                  tint: const Color(0xFF34C759),
+                ),
+                _MetricPill(
+                  icon: CupertinoIcons.waveform_path_ecg,
+                  label: day.bloodPressure.isEmpty
+                      ? '-'
+                      : _formatBp(day.bloodPressure.last),
+                  tint: const Color(0xFFFF3B30),
+                ),
               ],
             ),
             if (day.hr.isNotEmpty) ...[
@@ -357,6 +376,14 @@ class _DayDetailPage extends StatelessWidget {
               const SizedBox(height: 10),
               SleepTimeline(segments: day.sleep, height: 110),
             ],
+            if (day.stress.isNotEmpty ||
+                day.hrv.isNotEmpty ||
+                day.bloodPressure.isNotEmpty) ...[
+              const SizedBox(height: 20),
+              _ChartHeader(title: 'Other metrics', detail: 'Synced values'),
+              const SizedBox(height: 10),
+              _MetricValueList(day: day),
+            ],
           ],
         ],
       ),
@@ -365,7 +392,12 @@ class _DayDetailPage extends StatelessWidget {
 }
 
 bool _isEmpty(DailyHistory day) =>
-    day.hr.isEmpty && day.sleep.isEmpty && day.steps == null;
+    day.hr.isEmpty &&
+    day.sleep.isEmpty &&
+    day.stress.isEmpty &&
+    day.hrv.isEmpty &&
+    day.bloodPressure.isEmpty &&
+    day.steps == null;
 
 String _formatDayTab(DateOnly d) {
   final today = DateOnly.today();
@@ -388,6 +420,15 @@ int _avgBpm(List<HrSample> samples) {
   final sum = samples.fold<int>(0, (a, s) => a + s.bpm);
   return (sum / samples.length).round();
 }
+
+int _avgValue(List<HealthMetricSample> samples) {
+  if (samples.isEmpty) return 0;
+  final sum = samples.fold<int>(0, (a, s) => a + s.value);
+  return (sum / samples.length).round();
+}
+
+String _formatBp(BloodPressureSample sample) =>
+    '${sample.systolic}/${sample.diastolic}';
 
 String _sleepSummary(DailyHistory day) {
   if (day.sleep.isEmpty) return '-';
@@ -487,6 +528,103 @@ class _MetricPill extends StatelessWidget {
     );
   }
 }
+
+class _MetricValueList extends StatelessWidget {
+  const _MetricValueList({required this.day});
+
+  final DailyHistory day;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final rows = <Widget>[
+      if (day.stress.isNotEmpty)
+        _MetricValueRow(
+          icon: CupertinoIcons.bolt_fill,
+          title: 'Stress',
+          detail: _scalarRange(day.stress),
+          value: _latestScalar(day.stress),
+          tint: const Color(0xFFFF9500),
+        ),
+      if (day.hrv.isNotEmpty)
+        _MetricValueRow(
+          icon: CupertinoIcons.chart_bar_fill,
+          title: 'HRV',
+          detail: _scalarRange(day.hrv, unit: 'ms'),
+          value: '${day.hrv.last.value} ms',
+          tint: const Color(0xFF34C759),
+        ),
+      if (day.bloodPressure.isNotEmpty)
+        _MetricValueRow(
+          icon: CupertinoIcons.waveform_path_ecg,
+          title: 'Blood pressure',
+          detail: DateFormat.jm().format(day.bloodPressure.last.timestamp),
+          value: '${_formatBp(day.bloodPressure.last)} mmHg',
+          tint: const Color(0xFFFF3B30),
+        ),
+    ];
+
+    return Card(
+      child: Column(
+        children: [
+          for (var i = 0; i < rows.length; i++) ...[
+            rows[i],
+            if (i != rows.length - 1)
+              Divider(
+                height: 1,
+                indent: 56,
+                color: theme.colorScheme.outlineVariant.withValues(alpha: 0.7),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _MetricValueRow extends StatelessWidget {
+  const _MetricValueRow({
+    required this.icon,
+    required this.title,
+    required this.detail,
+    required this.value,
+    required this.tint,
+  });
+
+  final IconData icon;
+  final String title;
+  final String detail;
+  final String value;
+  final Color tint;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ListTile(
+      leading: Icon(icon, color: tint),
+      title: Text(title),
+      subtitle: Text(detail),
+      trailing: Text(
+        value,
+        style: theme.textTheme.titleMedium?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+      ),
+    );
+  }
+}
+
+String _scalarRange(List<HealthMetricSample> samples, {String unit = ''}) {
+  final values = samples.map((s) => s.value).toList();
+  final min = values.reduce((a, b) => a < b ? a : b);
+  final max = values.reduce((a, b) => a > b ? a : b);
+  final suffix = unit.isEmpty ? '' : ' $unit';
+  return '${samples.length} samples · min $min$suffix · '
+      'avg ${_avgValue(samples)}$suffix · max $max$suffix';
+}
+
+String _latestScalar(List<HealthMetricSample> samples) =>
+    '${samples.last.value} · ${DateFormat.jm().format(samples.last.timestamp)}';
 
 class _NewBadge extends StatelessWidget {
   @override

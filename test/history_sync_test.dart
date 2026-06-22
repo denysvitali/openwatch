@@ -541,12 +541,12 @@ void main() {
     });
 
     // ------------------------------------------------------------------
-    // 0x37 pressureSetting + 0x39 hrvSetting two-phase reassembly.
+    // 0x37 stress history + 0x39 HRV history two-phase reassembly.
     // Wired via FragmentReassembler — GHIDRA §3.20 / §3.21.
     // ------------------------------------------------------------------
 
     test(
-      'pressureSetting 0x37 header + 4 chunks assembles into one '
+      'stress history 0x37 header + 4 chunks assembles into one '
       'PressureRecord (regression for §3.20 two-phase wire format)',
       () async {
         final t = _StubTransport();
@@ -587,7 +587,7 @@ void main() {
 
         // Header: pl[2] == 0x1E discriminator, pl[0] = slotId = 0
         t.inA.add(
-          Codec.buildChannelA(OpA.pressureSetting, [
+          Codec.buildChannelA(OpA.pressure, [
             0x00, // slotId
             0x05, // padding for header literal
             0x1e, // discriminator
@@ -596,7 +596,7 @@ void main() {
         for (var i = 0; i < 4; i++) {
           t.inA.add(
             Codec.buildChannelA(
-              OpA.pressureSetting,
+              OpA.pressure,
               padded.sublist(i * chunkSize, (i + 1) * chunkSize),
             ),
           );
@@ -608,7 +608,7 @@ void main() {
       },
     );
 
-    test('hrvSetting 0x39 header + 4 chunks assembles into one '
+    test('HRV history 0x39 header + 4 chunks assembles into one '
         'HrvRecord (regression for §3.21 two-phase wire format)', () async {
       final t = _StubTransport();
       final d = ChannelADispatcher(t);
@@ -656,7 +656,7 @@ void main() {
       d.dispose();
     });
 
-    test('pressureSetting 0x37 two back-to-back records emit two '
+    test('stress history 0x37 two back-to-back records emit two '
         'PressureRecords (regression for reassembler over multiple '
         'phases)', () async {
       final t = _StubTransport();
@@ -667,7 +667,7 @@ void main() {
       final sub = sync.pressureRecords.listen(records.add);
 
       // Record #1
-      t.inA.add(Codec.buildChannelA(OpA.pressureSetting, [0x00, 0x05, 0x1e]));
+      t.inA.add(Codec.buildChannelA(OpA.pressure, [0x00, 0x05, 0x1e]));
       // 49-byte payload split across 4 frames of 14 subData bytes
       // (we send 56 total bytes — the test only asserts on the
       // header slot + first 45 body bytes, so over-padding with
@@ -686,7 +686,7 @@ void main() {
       for (var i = 0; i < 4; i++) {
         t.inA.add(
           Codec.buildChannelA(
-            OpA.pressureSetting,
+            OpA.pressure,
             rec1.sublist(i * chunkSize, (i + 1) * chunkSize),
           ),
         );
@@ -696,7 +696,7 @@ void main() {
       expect(records, hasLength(1));
 
       // Record #2 — different slotId so we can verify it carried.
-      t.inA.add(Codec.buildChannelA(OpA.pressureSetting, [0x01, 0x05, 0x1e]));
+      t.inA.add(Codec.buildChannelA(OpA.pressure, [0x01, 0x05, 0x1e]));
       const rec2 = [
         0xB1,
         0xB2,
@@ -764,7 +764,7 @@ void main() {
       for (var i = 0; i < 4; i++) {
         t.inA.add(
           Codec.buildChannelA(
-            OpA.pressureSetting,
+            OpA.pressure,
             rec2.sublist(i * chunkSize, (i + 1) * chunkSize),
           ),
         );
@@ -777,6 +777,46 @@ void main() {
       sync.dispose();
       d.dispose();
     });
+
+    test(
+      'stress history 0x37 fixed slots are stored on the matching day',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final sync = _testSync(t, d);
+
+        final samples = List<int>.filled(48, 0);
+        samples[0] = 21;
+        samples[12] = 44;
+        samples[47] = 68;
+        final raw = [0x00, ...samples, ...List<int>.filled(7, 0)];
+        const chunkSize = 14;
+
+        t.inA.add(Codec.buildChannelA(OpA.pressure, [0x00, 0x05, 0x1e]));
+        for (var i = 0; i < 4; i++) {
+          t.inA.add(
+            Codec.buildChannelA(
+              OpA.pressure,
+              raw.sublist(i * chunkSize, (i + 1) * chunkSize),
+            ),
+          );
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 80));
+
+        final today = DateOnly.today();
+        final history = sync.dayOf(today);
+        expect(history, isNotNull);
+        expect(history!.stress.map((s) => s.value), [21, 44, 68]);
+        expect(
+          history.stress[1].timestamp,
+          today.midnight.add(const Duration(hours: 6)),
+        );
+
+        sync.dispose();
+        d.dispose();
+      },
+    );
 
     // ------------------------------------------------------------------
     // HS-5: ChannelBParser null → skip sleep/activity commands.
@@ -1278,15 +1318,7 @@ class _FakeHistoryStore implements HistoryStore {
     }
     final merged = byTs.values.toList()
       ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
-    final updated = DailyHistory(
-      day: day,
-      hr: merged,
-      sleep: current.sleep,
-      steps: current.steps,
-      energyKcal: current.energyKcal,
-      distanceMeters: current.distanceMeters,
-      lastUpdated: DateTime.now(),
-    );
+    final updated = current.copyWith(hr: merged, lastUpdated: DateTime.now());
     _seed[day] = updated;
     return updated;
   }
@@ -1305,13 +1337,8 @@ class _FakeHistoryStore implements HistoryStore {
     }
     final merged = byStart.values.toList()
       ..sort((a, b) => a.start.compareTo(b.start));
-    final updated = DailyHistory(
-      day: day,
-      hr: current.hr,
+    final updated = current.copyWith(
       sleep: merged,
-      steps: current.steps,
-      energyKcal: current.energyKcal,
-      distanceMeters: current.distanceMeters,
       lastUpdated: DateTime.now(),
     );
     _seed[day] = updated;
@@ -1326,10 +1353,7 @@ class _FakeHistoryStore implements HistoryStore {
     required int distanceMeters,
   }) async {
     final current = _seed[day] ?? DailyHistory(day: day);
-    final updated = DailyHistory(
-      day: day,
-      hr: current.hr,
-      sleep: current.sleep,
+    final updated = current.copyWith(
       steps: steps,
       energyKcal: energyKcal,
       distanceMeters: distanceMeters,
@@ -1337,6 +1361,66 @@ class _FakeHistoryStore implements HistoryStore {
     );
     _seed[day] = updated;
     return updated;
+  }
+
+  @override
+  Future<DailyHistory> mergeStress(
+    DateOnly day,
+    Iterable<HealthMetricSample> samples,
+  ) async {
+    final current = _seed[day] ?? DailyHistory(day: day);
+    final updated = current.copyWith(
+      stress: _mergeScalar(current.stress, samples),
+      lastUpdated: DateTime.now(),
+    );
+    _seed[day] = updated;
+    return updated;
+  }
+
+  @override
+  Future<DailyHistory> mergeHrv(
+    DateOnly day,
+    Iterable<HealthMetricSample> samples,
+  ) async {
+    final current = _seed[day] ?? DailyHistory(day: day);
+    final updated = current.copyWith(
+      hrv: _mergeScalar(current.hrv, samples),
+      lastUpdated: DateTime.now(),
+    );
+    _seed[day] = updated;
+    return updated;
+  }
+
+  @override
+  Future<DailyHistory> mergeBloodPressure(
+    DateOnly day,
+    Iterable<BloodPressureSample> samples,
+  ) async {
+    final current = _seed[day] ?? DailyHistory(day: day);
+    final byTs = <int, BloodPressureSample>{
+      for (final s in current.bloodPressure)
+        s.timestamp.millisecondsSinceEpoch: s,
+      for (final s in samples) s.timestamp.millisecondsSinceEpoch: s,
+    };
+    final updated = current.copyWith(
+      bloodPressure: byTs.values.toList()
+        ..sort((a, b) => a.timestamp.compareTo(b.timestamp)),
+      lastUpdated: DateTime.now(),
+    );
+    _seed[day] = updated;
+    return updated;
+  }
+
+  List<HealthMetricSample> _mergeScalar(
+    List<HealthMetricSample> existing,
+    Iterable<HealthMetricSample> incoming,
+  ) {
+    final byTs = <int, HealthMetricSample>{
+      for (final s in existing) s.timestamp.millisecondsSinceEpoch: s,
+      for (final s in incoming) s.timestamp.millisecondsSinceEpoch: s,
+    };
+    return byTs.values.toList()
+      ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
   }
 
   @override

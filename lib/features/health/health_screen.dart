@@ -16,6 +16,11 @@ class HealthScreen extends ConsumerWidget {
     final ready = (ref.watch(linkStateProvider).value) == LinkState.ready;
     final caps = manager.capabilities;
     final hrSupported = caps.heart;
+    final bpValue =
+        manager.lastBloodPressureSystolic == null ||
+            manager.lastBloodPressureDiastolic == null
+        ? '-'
+        : '${manager.lastBloodPressureSystolic}/${manager.lastBloodPressureDiastolic}';
 
     return Scaffold(
       appBar: AppBar(title: const Text('Health')),
@@ -38,36 +43,53 @@ class HealthScreen extends ConsumerWidget {
                 const _HealthMetric(
                   icon: CupertinoIcons.drop_fill,
                   title: 'Blood oxygen',
+                  value: '-',
                   tint: Color(0xFF007AFF),
                 ),
               if (caps.bloodPressure)
-                const _HealthMetric(
+                _HealthMetric(
                   icon: CupertinoIcons.waveform_path_ecg,
                   title: 'Blood pressure',
+                  value: bpValue,
+                  unit: 'mmHg',
                   tint: Color(0xFFFF3B30),
+                  ready: ready,
+                  start: manager.startBloodPressure,
+                  stop: manager.stopBloodPressure,
                 ),
               if (caps.sleep)
                 const _HealthMetric(
                   icon: CupertinoIcons.moon_fill,
                   title: 'Sleep',
+                  value: 'History',
                   tint: Color(0xFF5856D6),
                 ),
               if (caps.stress)
-                const _HealthMetric(
+                _HealthMetric(
                   icon: CupertinoIcons.bolt_fill,
                   title: 'Stress',
+                  value: manager.lastStress?.toString() ?? '-',
                   tint: Color(0xFFFF9500),
+                  ready: ready,
+                  start: manager.startStress,
+                  stop: manager.stopStress,
                 ),
               if (caps.hrv)
-                const _HealthMetric(
+                _HealthMetric(
                   icon: CupertinoIcons.chart_bar_fill,
                   title: 'HRV',
+                  value: manager.lastHrv?.toString() ?? '-',
+                  unit: 'ms',
                   tint: Color(0xFF34C759),
+                  ready: ready,
+                  start: manager.startHrv,
+                  stop: manager.stopHrv,
                 ),
               if (caps.temperature)
                 const _HealthMetric(
                   icon: CupertinoIcons.thermometer,
                   title: 'Temperature',
+                  value: '-',
                   tint: Color(0xFFFF2D55),
                 ),
             ],
@@ -211,11 +233,30 @@ class _MetricList extends StatelessWidget {
             ListTile(
               leading: Icon(metrics[i].icon, color: metrics[i].tint),
               title: Text(metrics[i].title),
-              trailing: Text(
-                '-',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
+              subtitle: metrics[i].unit == null ? null : Text(metrics[i].unit!),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    metrics[i].value,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  if (metrics[i].start != null) ...[
+                    const SizedBox(width: 8),
+                    IconButton(
+                      tooltip: 'Start',
+                      icon: const Icon(CupertinoIcons.play_fill),
+                      onPressed: metrics[i].ready ? metrics[i].start : null,
+                    ),
+                    IconButton(
+                      tooltip: 'Stop',
+                      icon: const Icon(CupertinoIcons.stop_fill),
+                      onPressed: metrics[i].ready ? metrics[i].stop : null,
+                    ),
+                  ],
+                ],
               ),
             ),
             if (i != metrics.length - 1)
@@ -234,12 +275,22 @@ class _HealthMetric {
   const _HealthMetric({
     required this.icon,
     required this.title,
+    required this.value,
     required this.tint,
+    this.unit,
+    this.ready = false,
+    this.start,
+    this.stop,
   });
 
   final IconData icon;
   final String title;
+  final String value;
   final Color tint;
+  final String? unit;
+  final bool ready;
+  final VoidCallback? start;
+  final VoidCallback? stop;
 }
 
 class _SectionTitle extends StatelessWidget {

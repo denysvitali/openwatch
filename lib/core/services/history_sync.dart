@@ -28,7 +28,29 @@ class HrSample {
   final int bpm;
 }
 
-/// An assembled `0x37 pressureSetting` record (GHIDRA §3.20).
+/// A fixed-slot scalar health sample such as stress or HRV.
+@immutable
+class HealthMetricSample {
+  const HealthMetricSample(this.timestamp, this.value);
+  final DateTime timestamp;
+  final int value;
+}
+
+/// A blood-pressure sample.
+@immutable
+class BloodPressureSample {
+  const BloodPressureSample({
+    required this.timestamp,
+    required this.systolic,
+    required this.diastolic,
+  });
+
+  final DateTime timestamp;
+  final int systolic;
+  final int diastolic;
+}
+
+/// An assembled `0x37` stress-history record (GHIDRA §3.20).
 ///
 /// The firmware fragments each `FUN_008344fe` read into a single
 /// header frame + four 13-byte payload chunks via `FUN_0082c988`.
@@ -45,7 +67,7 @@ class PressureRecord {
     required this.body,
   });
 
-  /// Echo of `req[1]` from the pressureSetting request (today = 0,
+  /// Echo of `req[1]` from the stress-history request (today = 0,
   /// yesterday = 1, ...). See GHIDRA §3.20.
   final int slotId;
 
@@ -57,7 +79,7 @@ class PressureRecord {
   final Uint8List body;
 }
 
-/// An assembled `0x39 hrvSetting` record (GHIDRA §3.21).
+/// An assembled `0x39` HRV history record (GHIDRA §3.21).
 ///
 /// Structurally identical to [PressureRecord] but sourced from
 /// `FUN_0083468e` and the HRV record table
@@ -70,7 +92,7 @@ class HrvRecord {
     required this.body,
   });
 
-  /// Echo of `req[1]` from the hrvSetting request (today = 0,
+  /// Echo of `req[1]` from the HRV history request (today = 0,
   /// yesterday = 1, ...). See GHIDRA §3.21.
   final int slotId;
 
@@ -162,6 +184,7 @@ class HistorySync extends ChangeNotifier {
     if (p != null) {
       _bCmdSub = p.commands.listen(_onChannelBCommand);
     }
+    _ensureMetricRecordListeners();
   }
 
   /// Settle window used after each command before draining the RX queue.
@@ -171,7 +194,7 @@ class HistorySync extends ChangeNotifier {
   /// Short extra delay after draining before moving to the next command.
   final Duration postCommandDelay;
 
-  /// Quiet window passed to the pressure/HRV fragment reassemblers.
+  /// Quiet window passed to the stress/HRV fragment reassemblers.
   final Duration fragmentQuietWindow;
   final BleTransport transport;
   final ChannelADispatcher? _dispatcher;
@@ -205,11 +228,11 @@ class HistorySync extends ChangeNotifier {
   /// The UI can highlight these so the user sees exactly what changed.
   final Set<DateOnly> _fetchedDays = {};
 
-  // Lazily-allocated FragmentReassemblers for the two-phase
-  // `0x37 pressureSetting` (§3.20) and `0x39 hrvSetting` (§3.21)
-  // streams. Constructing one wires two broadcast subscriptions on
-  // the dispatcher — defer until the first listener so a host that
-  // never reads pressure/HRV records pays zero cost.
+  // FragmentReassemblers for the two-phase `0x37` stress history (§3.20)
+  // and `0x39` HRV history (§3.21) streams. They are still allocated
+  // through the public getters, but HistorySync subscribes during
+  // construction when a dispatcher is present so sync results land in
+  // DailyHistory without a UI-side listener.
   FragmentReassembler<
     PressureSettingHeader,
     PressureSettingChunk,
@@ -221,10 +244,10 @@ class HistorySync extends ChangeNotifier {
   StreamSubscription<PressureRecord>? _pressureRecordsSub;
   StreamSubscription<HrvRecord>? _hrvRecordsSub;
 
-  /// Lazily-built single-subscription stream of assembled
-  /// `0x37 pressureSetting` records. Wires [FragmentReassembler]
+  /// Broadcast stream of assembled
+  /// `0x37` stress history records. Wires [FragmentReassembler]
   /// against `dispatcher.onPressureSettingHeader` /
-  /// `dispatcher.onPressureSettingChunk` on first listen. The
+  /// `dispatcher.onPressureSettingChunk` when first created. The
   /// quiet window is 250 ms (matches the helper default) —
   /// short enough for responsive UI, long enough to coalesce
   /// the 4-chunk sequence the firmware emits. Requires the
@@ -266,8 +289,8 @@ class HistorySync extends ChangeNotifier {
     return reassembler.assembled;
   }
 
-  /// Lazily-built single-subscription stream of assembled
-  /// `0x39 hrvSetting` records. Same lazy-wire semantics as
+  /// Broadcast stream of assembled
+  /// `0x39` HRV history records. Same reassembly semantics as
   /// [pressureRecords]; see GHIDRA §3.21.
   Stream<HrvRecord> get hrvRecords {
     final r = _hrvReassembler;
@@ -297,6 +320,12 @@ class HistorySync extends ChangeNotifier {
         );
     _hrvReassembler = reassembler;
     return reassembler.assembled;
+  }
+
+  void _ensureMetricRecordListeners() {
+    if (_dispatcher == null) return;
+    _pressureRecordsSub ??= pressureRecords.listen(_onStressRecord);
+    _hrvRecordsSub ??= hrvRecords.listen(_onHrvRecord);
   }
 
   List<HrSample> get hr => List.unmodifiable(_hr);
@@ -571,6 +600,18 @@ class HistorySync extends ChangeNotifier {
         }
       }
 
+      if (_dispatcher != null) {
+        _ensureMetricRecordListeners();
+        for (final d in wantsDays.toList()..sort()) {
+          await transport.sendA(Commands.readStressHistory(dayOffset: d));
+          await _drainRx(drainDuration);
+          await Future<void>.delayed(postCommandDelay);
+          await transport.sendA(Commands.readHrvHistory(dayOffset: d));
+          await _drainRx(drainDuration);
+          await Future<void>.delayed(postCommandDelay);
+        }
+      }
+
       // Activity summary is the cheap v14 sport-motion probe (Channel-B
       // `0x2a`, GHIDRA §2.8). It returns entries only for day offsets
       // 0..2, so older history still relies on HR/sleep until a live
@@ -659,13 +700,8 @@ class HistorySync extends ChangeNotifier {
     for (final day in affected) {
       final previous = _days[day];
       if (previous == null || previous.sleep.isEmpty) continue;
-      final updated = DailyHistory(
-        day: day,
-        hr: previous.hr,
+      final updated = previous.copyWith(
         sleep: const [],
-        steps: previous.steps,
-        energyKcal: previous.energyKcal,
-        distanceMeters: previous.distanceMeters,
         lastUpdated: DateTime.now(),
       );
       _days[day] = updated;
@@ -861,13 +897,8 @@ class HistorySync extends ChangeNotifier {
       };
       final mergedHr = mergedByTs.values.toList()
         ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
-      final updated = DailyHistory(
-        day: resolvedDay,
+      final updated = previous.copyWith(
         hr: mergedHr,
-        sleep: previous.sleep,
-        steps: previous.steps,
-        energyKcal: previous.energyKcal,
-        distanceMeters: previous.distanceMeters,
         lastUpdated: DateTime.now(),
       );
       _days[resolvedDay] = updated;
@@ -898,6 +929,67 @@ class HistorySync extends ChangeNotifier {
     if (previous.hr.isNotEmpty) return; // already persisted
     _days[day] = previous;
     unawaited(_store?.writeDay(previous, lastUpdated: DateTime.now()));
+  }
+
+  void _onStressRecord(PressureRecord record) {
+    final day = DateOnly.today().addDays(-record.slotId.clamp(0, 31).toInt());
+    final samples = _decodeFixedSlotMetric(record.header, record.body, day);
+    if (samples.isEmpty) return;
+    final previous = _days[day] ?? DailyHistory(day: day);
+    final merged = _mergeScalar(previous.stress, samples);
+    final updated = previous.copyWith(
+      stress: merged,
+      lastUpdated: DateTime.now(),
+    );
+    _days[day] = updated;
+    unawaited(_store?.mergeStress(day, merged));
+    notifyListeners();
+  }
+
+  void _onHrvRecord(HrvRecord record) {
+    final day = DateOnly.today().addDays(-record.slotId.clamp(0, 31).toInt());
+    final samples = _decodeFixedSlotMetric(record.header, record.body, day);
+    if (samples.isEmpty) return;
+    final previous = _days[day] ?? DailyHistory(day: day);
+    final merged = _mergeScalar(previous.hrv, samples);
+    final updated = previous.copyWith(hrv: merged, lastUpdated: DateTime.now());
+    _days[day] = updated;
+    unawaited(_store?.mergeHrv(day, merged));
+    notifyListeners();
+  }
+
+  List<HealthMetricSample> _decodeFixedSlotMetric(
+    Uint8List header,
+    Uint8List body,
+    DateOnly day,
+  ) {
+    // H59MA v14 fragments 49 bytes: a slot-id echo followed by 48
+    // half-hour samples. Existing reassembly preserves the first four bytes
+    // as `header`, so rejoin and skip the echo byte here.
+    final raw = Uint8List.fromList([...header, ...body]);
+    if (raw.length < 2) return const [];
+    final samples = <HealthMetricSample>[];
+    final sampleBytes = raw.skip(1).take(48).toList();
+    for (var i = 0; i < sampleBytes.length; i++) {
+      final value = sampleBytes[i] & 0xff;
+      if (value == 0 || value == 0xff) continue;
+      samples.add(
+        HealthMetricSample(day.midnight.add(Duration(minutes: i * 30)), value),
+      );
+    }
+    return samples;
+  }
+
+  List<HealthMetricSample> _mergeScalar(
+    List<HealthMetricSample> existing,
+    List<HealthMetricSample> incoming,
+  ) {
+    final byTs = <int, HealthMetricSample>{
+      for (final s in existing) s.timestamp.millisecondsSinceEpoch: s,
+      for (final s in incoming) s.timestamp.millisecondsSinceEpoch: s,
+    };
+    return byTs.values.toList()
+      ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
   }
 
   @override
@@ -1046,13 +1138,13 @@ class HistorySync extends ChangeNotifier {
 
   void _upsertTotals(DateOnly day, DailyTotals totals) {
     final previous = _days[day] ?? DailyHistory(day: day);
-    final updated = DailyHistory(
-      day: day,
-      hr: previous.hr,
-      sleep: previous.sleep,
+    final updated = previous.copyWith(
       steps: totals.steps,
+      clearSteps: totals.steps == null,
       energyKcal: totals.calories,
+      clearEnergyKcal: totals.calories == null,
       distanceMeters: totals.distanceMeters,
+      clearDistanceMeters: totals.distanceMeters == null,
       lastUpdated: DateTime.now(),
     );
     _days[day] = updated;
@@ -1128,13 +1220,8 @@ class HistorySync extends ChangeNotifier {
         }
         final merged = mergedByStart.values.toList()
           ..sort((a, b) => a.start.compareTo(b.start));
-        final updated = DailyHistory(
-          day: day,
-          hr: previous.hr,
+        final updated = previous.copyWith(
           sleep: merged,
-          steps: previous.steps,
-          energyKcal: previous.energyKcal,
-          distanceMeters: previous.distanceMeters,
           lastUpdated: DateTime.now(),
         );
         _days[day] = updated;
@@ -1203,13 +1290,8 @@ class HistorySync extends ChangeNotifier {
         }
         final merged = mergedByStart.values.toList()
           ..sort((a, b) => a.start.compareTo(b.start));
-        final updated = DailyHistory(
-          day: day,
-          hr: previous.hr,
+        final updated = previous.copyWith(
           sleep: merged,
-          steps: previous.steps,
-          energyKcal: previous.energyKcal,
-          distanceMeters: previous.distanceMeters,
           lastUpdated: DateTime.now(),
         );
         _days[day] = updated;

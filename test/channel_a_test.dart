@@ -301,30 +301,33 @@ void main() {
     });
 
     test(
-      'pressure 0x38 decodes 1-bit on/off setting (sub echo + value)',
+      'pressureSetting 0x36 decodes 1-bit on/off setting (sub echo + value)',
       () async {
         final t = _StubTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final got = d.onPressure.first;
         // sub = 0x01 (read), value = 0x01 (enabled).
-        final f = Codec.buildChannelA(OpA.pressure, [0x01, 0x01]);
+        final f = Codec.buildChannelA(OpA.pressureSetting, [0x01, 0x01]);
         t.inA.add(f);
         final p = await got.timeout(const Duration(seconds: 1));
         expect(p.enabled, isTrue);
       },
     );
 
-    test('pressure 0x38 disabled maps value 0 to enabled=false', () async {
-      final t = _StubTransport();
-      final d = ChannelADispatcher(t);
-      d.bind();
-      final got = d.onPressure.first;
-      final f = Codec.buildChannelA(OpA.pressure, [0x01, 0x00]);
-      t.inA.add(f);
-      final p = await got.timeout(const Duration(seconds: 1));
-      expect(p.enabled, isFalse);
-    });
+    test(
+      'pressureSetting 0x36 disabled maps value 0 to enabled=false',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final got = d.onPressure.first;
+        final f = Codec.buildChannelA(OpA.pressureSetting, [0x01, 0x00]);
+        t.inA.add(f);
+        final p = await got.timeout(const Duration(seconds: 1));
+        expect(p.enabled, isFalse);
+      },
+    );
 
     test('touchControl 0x3b read decodes sub + batch + config byte', () async {
       final t = _StubTransport();
@@ -404,7 +407,7 @@ void main() {
     });
 
     test(
-      'pressureSetting 0x37 header (pl[2]==0x1E) routes to onPressureSettingHeader',
+      'stress history 0x37 header (pl[2]==0x1E) routes to onPressureSettingHeader',
       () async {
         final t = _StubTransport();
         final d = ChannelADispatcher(t);
@@ -412,7 +415,7 @@ void main() {
         final got = d.onPressureSettingHeader.first;
         // Header dword `0x1E050037` LE → frame bytes [0x37, slotId,
         // 0x05, 0x1E]; pl indexes shift down by one so pl[2] = 0x1E.
-        final f = Codec.buildChannelA(OpA.pressureSetting, [0x00, 0x05, 0x1e]);
+        final f = Codec.buildChannelA(OpA.pressure, [0x00, 0x05, 0x1e]);
         t.inA.add(f);
         final h = await got.timeout(const Duration(seconds: 1));
         expect(h.slotId, 0x00);
@@ -420,7 +423,7 @@ void main() {
     );
 
     test(
-      'pressureSetting 0x37 non-header frame routes to onPressureSettingChunk',
+      'stress history 0x37 non-header frame routes to onPressureSettingChunk',
       () async {
         final t = _StubTransport();
         final d = ChannelADispatcher(t);
@@ -428,7 +431,7 @@ void main() {
         final got = d.onPressureSettingChunk.first;
         // pl[3] != 0x1E → chunk frame.
         final payload = [0xde, 0xad, 0xbe, 0xef];
-        final f = Codec.buildChannelA(OpA.pressureSetting, [
+        final f = Codec.buildChannelA(OpA.pressure, [
           0x01,
           0x00,
           0x00,
@@ -443,13 +446,13 @@ void main() {
       },
     );
 
-    test('pressureSetting 0x37 firmware chunk strips seq byte', () async {
+    test('stress history 0x37 firmware chunk strips seq byte', () async {
       final t = _StubTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final got = d.onPressureSettingChunk.first;
       final data = List<int>.generate(13, (i) => 0x40 + i);
-      final f = Codec.buildChannelA(OpA.pressureSetting, [0x01, ...data]);
+      final f = Codec.buildChannelA(OpA.pressure, [0x01, ...data]);
       t.inA.add(f);
       final c = await got.timeout(const Duration(seconds: 1));
       expect(c.payload, data);

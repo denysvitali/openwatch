@@ -5,7 +5,7 @@ import 'dart:typed_data';
 /// typed record.
 ///
 /// The H59MA Channel-A protocol uses this pattern for several opcodes
-/// (e.g. `0x37` pressureSetting, `0x39` hrvSetting, `0x7a` muslim,
+/// (e.g. `0x37` stress history, `0x39` HRV history, `0x7a` muslim,
 /// `0x0d` BP record): a single header frame is emitted first, then
 /// zero or more payload chunks. There is no end-of-message marker on
 /// the wire — consumers close the current record after a quiet
@@ -64,7 +64,7 @@ class FragmentReassembler<Header, Chunk, T> {
   /// use ~100 ms, HR history ~250 ms, etc.
   final Duration _quietWindow;
 
-  final StreamController<T> _out = StreamController<T>();
+  final StreamController<T> _out = StreamController<T>.broadcast();
   late final StreamSubscription<_FragEvent> _subscription;
   Timer? _quietTimer;
 

@@ -35,7 +35,14 @@ class HrParser {
     final err = pl[1] & 0xFF;
     final raw = pl[2] & 0xFF;
     final bpm = (err == 0 && isPlausibleBpm(raw)) ? raw : null;
-    return HrStartMeasureResult(type: type, err: err, bpm: bpm);
+    return HrStartMeasureResult(
+      type: type,
+      err: err,
+      value: raw,
+      bpm: bpm,
+      systolic: pl.length >= 5 ? pl[3] & 0xFF : null,
+      diastolic: pl.length >= 5 ? pl[4] & 0xFF : null,
+    );
   }
 
   /// `deviceNotify` (0x73) / `deviceSportNotify` (0x78) carry
@@ -63,10 +70,24 @@ class HrParser {
 
 /// Parsed shape of a `StartHeartRateRsp` (0x69) reply.
 class HrStartMeasureResult {
-  const HrStartMeasureResult({required this.type, required this.err, this.bpm});
+  const HrStartMeasureResult({
+    required this.type,
+    required this.err,
+    required this.value,
+    this.bpm,
+    this.systolic,
+    this.diastolic,
+  });
   final int type;
   final int err;
+  final int value;
 
   /// The bpm, or `null` when [err] != 0 or the value isn't a plausible HR.
   final int? bpm;
+
+  /// Blood-pressure systolic value from `StartHeartRateRsp` when present.
+  final int? systolic;
+
+  /// Blood-pressure diastolic value from `StartHeartRateRsp` when present.
+  final int? diastolic;
 }
