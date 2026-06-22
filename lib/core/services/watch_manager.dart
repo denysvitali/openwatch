@@ -55,12 +55,10 @@ class WatchManager extends ChangeNotifier {
   String get hardwareRevision => _transport.hardwareRevision;
   String get firmwareRevision => _transport.firmwareRevision;
   bool get isReady => _transport.isReady;
-  bool get measuringHeartRate => _measuringTypes.contains(
-    MeasureType.heartRate.id,
-  );
-  bool get measuringBloodPressure => _measuringTypes.contains(
-    MeasureType.bloodPressure.id,
-  );
+  bool get measuringHeartRate =>
+      _measuringTypes.contains(MeasureType.heartRate.id);
+  bool get measuringBloodPressure =>
+      _measuringTypes.contains(MeasureType.bloodPressure.id);
   bool get measuringStress => _measuringTypes.contains(MeasureType.pressure.id);
   bool get measuringHrv => _measuringTypes.contains(MeasureType.hrv.id);
 

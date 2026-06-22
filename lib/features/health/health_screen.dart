@@ -16,11 +16,11 @@ class HealthScreen extends ConsumerWidget {
     final ready = (ref.watch(linkStateProvider).value) == LinkState.ready;
     final caps = manager.capabilities;
     final hrSupported = caps.heart;
-    final bpValue =
-        manager.lastBloodPressureSystolic == null ||
-            manager.lastBloodPressureDiastolic == null
+    final bpSystolic = manager.lastBloodPressureSystolic;
+    final bpDiastolic = manager.lastBloodPressureDiastolic;
+    final bpValue = bpSystolic == null || bpDiastolic == null
         ? '-'
-        : '${manager.lastBloodPressureSystolic}/${manager.lastBloodPressureDiastolic}';
+        : '$bpSystolic/$bpDiastolic';
 
     return Scaffold(
       appBar: AppBar(title: const Text('Health')),
@@ -124,6 +124,16 @@ class _HeartRateCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final String statusText;
+    if (!supported) {
+      statusText = 'Not supported on this device';
+    } else if (!ready) {
+      statusText = 'Connect your watch';
+    } else if (measuring) {
+      statusText = 'Measuring';
+    } else {
+      statusText = 'Ready to measure';
+    }
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(18),
@@ -176,11 +186,7 @@ class _HeartRateCard extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             Text(
-              supported
-                  ? (ready
-                        ? (measuring ? 'Measuring' : 'Ready to measure')
-                        : 'Connect your watch')
-                  : 'Not supported on this device',
+              statusText,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
@@ -190,9 +196,7 @@ class _HeartRateCard extends StatelessWidget {
               children: [
                 Expanded(
                   child: FilledButton.icon(
-                    onPressed: (ready && supported && !measuring)
-                        ? start
-                        : null,
+                    onPressed: ready && supported && !measuring ? start : null,
                     icon: const Icon(CupertinoIcons.play_fill),
                     label: const Text('Start'),
                   ),
@@ -200,7 +204,7 @@ class _HeartRateCard extends StatelessWidget {
                 const SizedBox(width: 10),
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: (ready && supported && measuring) ? stop : null,
+                    onPressed: ready && supported && measuring ? stop : null,
                     icon: const Icon(CupertinoIcons.stop_fill),
                     label: const Text('Stop'),
                   ),

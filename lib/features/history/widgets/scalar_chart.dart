@@ -65,12 +65,9 @@ class _ScalarMetricPainter extends CustomPainter {
       ..drawLine(rect.bottomLeft, rect.topLeft, axis);
 
     if (samples.isEmpty) return;
-    var min =
-        minValue ??
-        samples.map((s) => s.value).reduce((a, b) => a < b ? a : b);
-    var max =
-        maxValue ??
-        samples.map((s) => s.value).reduce((a, b) => a > b ? a : b);
+    final values = samples.map((s) => s.value);
+    var min = minValue ?? values.reduce((a, b) => a < b ? a : b);
+    var max = maxValue ?? values.reduce((a, b) => a > b ? a : b);
     if (min == max) {
       min -= 1;
       max += 1;
