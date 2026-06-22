@@ -58,6 +58,16 @@ class _HrLineChartState extends State<HrLineChart> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final selected = _selected;
+    // The watch stores a fixed 288-slot HR record per day, so on a freshly-
+    // started day the chart would otherwise paint a wall of "future" samples
+    // anchored at e.g. 23:55 while the actual local time is 00:58. Clip to
+    // `now` so only past samples are drawn — anything beyond now is slot
+    // padding the watch hasn't actually measured yet.
+    final now = DateTime.now();
+    final visible = <HrSample>[
+      for (final s in widget.samples)
+        if (!s.timestamp.isAfter(now)) s,
+    ];
     return LayoutBuilder(
       builder: (context, constraints) {
         final size = Size(
@@ -82,7 +92,7 @@ class _HrLineChartState extends State<HrLineChart> {
                 child: ClipRect(
                   child: CustomPaint(
                     painter: _HrPainter(
-                      samples: widget.samples,
+                      samples: visible,
                       color: theme.colorScheme.primary,
                       axisColor: theme.colorScheme.outlineVariant,
                       textColor: theme.colorScheme.onSurfaceVariant,

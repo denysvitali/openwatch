@@ -40,11 +40,23 @@ class HistoryDebugExport {
     }
     b.writeln();
 
-    _writeHr(b, day.hr);
+    // The watch stores a fixed 288-slot 24h record per day; on a freshly-
+    // started day the raw list contains "future" timestamps the watch
+    // hasn't measured yet, plus duplicate-per-slot entries from earlier
+    // sync runs that anchored on different byte offsets. Snap to the
+    // 5-min slot grid (HH:MM:00 LOCAL), keep the latest sample per slot,
+    // and clip anything > now so the exported text reflects what the user
+    // can plausibly have measured.
+    final clippedHr = _clipAndDedupeHr(day.hr, generated);
+    final clippedStress = _clipScalar(day.stress, generated);
+    final clippedHrv = _clipScalar(day.hrv, generated);
+    final clippedBp = _clipBp(day.bloodPressure, generated);
+
+    _writeHr(b, clippedHr);
     _writeSleep(b, day.sleep);
-    _writeStress(b, day.stress);
-    _writeHrv(b, day.hrv);
-    _writeBp(b, day.bloodPressure);
+    _writeStress(b, clippedStress);
+    _writeHrv(b, clippedHrv);
+    _writeBp(b, clippedBp);
     _writeTotals(b, day);
     return b.toString();
   }
@@ -175,6 +187,56 @@ class HistoryDebugExport {
     return 'UTC$sign'
         '${abs.inHours.toString().padLeft(2, '0')}:'
         '${abs.inMinutes.remainder(60).toString().padLeft(2, '0')}';
+  }
+
+  /// Snap each HR timestamp down to its 5-min slot start (HH:MM:00 LOCAL),
+  /// drop samples whose slot is in the future relative to [now], and
+  /// dedupe by snapped timestamp keeping the latest bpm — this collapses
+  /// the per-slot 11x duplicates that accumulate when the disk holds
+  /// records anchored on multiple byte offsets from earlier syncs.
+  static List<HrSample> _clipAndDedupeHr(List<HrSample> samples, DateTime now) {
+    final bySlot = <int, HrSample>{};
+    for (final s in samples) {
+      final snapped = _snapToSlot(s.timestamp);
+      if (snapped.isAfter(now)) continue;
+      final key = snapped.millisecondsSinceEpoch;
+      final existing = bySlot[key];
+      if (existing == null || s.timestamp.isAfter(existing.timestamp)) {
+        bySlot[key] = HrSample(snapped, s.bpm);
+      }
+    }
+    final out = bySlot.values.toList()
+      ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    return out;
+  }
+
+  /// Drop scalar samples (stress/HRV) whose timestamp is after [now].
+  static List<HealthMetricSample> _clipScalar(
+    List<HealthMetricSample> samples,
+    DateTime now,
+  ) {
+    return [
+      for (final s in samples)
+        if (!s.timestamp.isAfter(now)) s,
+    ];
+  }
+
+  /// Drop BP samples whose timestamp is after [now].
+  static List<BloodPressureSample> _clipBp(
+    List<BloodPressureSample> samples,
+    DateTime now,
+  ) {
+    return [
+      for (final s in samples)
+        if (!s.timestamp.isAfter(now)) s,
+    ];
+  }
+
+  static DateTime _snapToSlot(DateTime t) {
+    // DateOnly.midnight convention is local-midnight with zero h/m/s/ms;
+    // mirror that by constructing from components so the snapped value
+    // compares equal across merge keys.
+    return DateTime(t.year, t.month, t.day, t.hour, (t.minute ~/ 5) * 5);
   }
 }
 
