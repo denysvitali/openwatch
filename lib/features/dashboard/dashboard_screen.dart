@@ -8,6 +8,7 @@ import '../../core/ble/ble_transport.dart';
 import '../../core/providers/app_providers.dart';
 import '../../core/services/history_sync.dart';
 import '../history/widgets/hr_chart.dart';
+import '../history/widgets/sleep_trend_chart.dart';
 import '../history/widgets/steps_chart.dart';
 
 /// Device overview: connection state, firmware, battery, steps + quick actions.
@@ -399,9 +400,8 @@ class _RecentActivityCard extends StatelessWidget {
       );
     }
 
-    final recent = sync.days.length <= 7
-        ? sync.days
-        : sync.days.sublist(sync.days.length - 7);
+    final recent = _recentWeek(sync.days);
+    final sleepSummary = SleepTrendSummary.fromDays(recent);
     final today = sync.days.last;
 
     return _InsetCard(
@@ -428,10 +428,25 @@ class _RecentActivityCard extends StatelessWidget {
             MiniHrSpark(samples: today.hr, height: 58),
             const SizedBox(height: 14),
           ],
+          if (sleepSummary.hasData) ...[
+            _SleepTrendHeader(summary: sleepSummary),
+            const SizedBox(height: 8),
+            SleepTrendChart(days: recent, height: 104),
+            const SizedBox(height: 14),
+          ],
           StepsBarChart(days: recent),
         ],
       ),
     );
+  }
+
+  List<DailyHistory> _recentWeek(List<DailyHistory> days) {
+    final byDay = {for (final day in days) day.day: day};
+    final end = days.last.day;
+    return [
+      for (var offset = -6; offset <= 0; offset++)
+        byDay[end.addDays(offset)] ?? DailyHistory(day: end.addDays(offset)),
+    ];
   }
 
   String _subtitle(DailyHistory today) {
@@ -457,6 +472,68 @@ class _RecentActivityCard extends StatelessWidget {
     if (samples.isEmpty) return 0;
     final sum = samples.fold<int>(0, (a, s) => a + s.bpm);
     return (sum / samples.length).round();
+  }
+}
+
+class _SleepTrendHeader extends StatelessWidget {
+  const _SleepTrendHeader({required this.summary});
+
+  final SleepTrendSummary summary;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final trend = summary.trendMinutes;
+    final trendText = trend == null
+        ? 'Daily sleep time'
+        : '${trend >= 0 ? '+' : '-'}${_formatTrendMinutes(trend.abs())} vs prior';
+    return Row(
+      children: [
+        Icon(
+          CupertinoIcons.moon_fill,
+          size: 17,
+          color: const Color(0xFF5856D6),
+        ),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Sleep trend', style: theme.textTheme.titleSmall),
+              Text(
+                trendText,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+        Text(
+          'Week avg ${_formatDuration(summary.average)}',
+          style: theme.textTheme.labelMedium?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ],
+    );
+  }
+
+  static String _formatDuration(Duration d) {
+    final h = d.inMinutes ~/ 60;
+    final m = d.inMinutes.remainder(60);
+    if (m == 0) return '${h}h';
+    return '${h}h ${m}m';
+  }
+
+  static String _formatTrendMinutes(int minutes) {
+    if (minutes < 60) return '${minutes}m';
+    final h = minutes ~/ 60;
+    final m = minutes.remainder(60);
+    if (m == 0) return '${h}h';
+    return '${h}h ${m}m';
   }
 }
 
