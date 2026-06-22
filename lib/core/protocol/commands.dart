@@ -340,6 +340,379 @@ class Commands {
   /// the Channel-B DFU flow.
   static Uint8List switchToOta() => Codec.buildChannelA(OpA.switchOta);
 
+  // ---------------------------------------------------------------------------
+  // Display / theme / wallpaper / unit settings (Channel A — `0x12..0x3f`).
+  // All layouts follow `PROTOCOL.md` §4.2 exactly. The default boolean
+  // encoding is the documented `1 = on, 2 = off` — see `OpA.mixWrite`.
+  // ---------------------------------------------------------------------------
+
+  /// `DeviceThemeReq` (0x3d): get or set the active UI theme id.
+  ///
+  /// `theme` is an opaque device-defined id (e.g. `0` = default, `1..N` =
+  /// vendor themes). The read response layout is `[01, pl[1] = type]`
+  /// followed by a UTF-8 name when `type == 1`.
+  static Uint8List readTheme() =>
+      Codec.buildChannelA(OpA.deviceTheme, [OpA.mixRead]);
+  static Uint8List setTheme(int theme) =>
+      Codec.buildChannelA(OpA.deviceTheme, [OpA.mixWrite, theme & 0xFF]);
+
+  /// `DeviceWallpaperReq` (0x3f): get or set the active wallpaper id.
+  /// Same shape as [readTheme]/[setTheme].
+  static Uint8List readWallpaper() =>
+      Codec.buildChannelA(OpA.deviceWallpaper, [OpA.mixRead]);
+  static Uint8List setWallpaper(int wallpaper) => Codec.buildChannelA(
+    OpA.deviceWallpaper,
+    [OpA.mixWrite, wallpaper & 0xFF],
+  );
+
+  /// `DeviceAvatarReq` (0x32): query the on-device avatar canvas
+  /// geometry. Bare-opcode read; response is
+  /// `[screenType, widthLo, widthHi, heightLo, heightHi]` (LE).
+  static Uint8List readAvatar() => Codec.buildChannelA(OpA.deviceAvatar);
+
+  /// `DisplayClockReq` (0x12): toggle the always-on / display clock.
+  /// `enabled` is a plain bool; the wire byte is `1 = on, 2 = off`.
+  static Uint8List setDisplayClock({required bool enabled}) =>
+      Codec.buildChannelA(OpA.displayClock, [OpA.mixWrite, enabled ? 1 : 2]);
+
+  /// `DisplayOrientationReq` (0x29): set screen orientation /
+  /// auto-rotate. When [autoRotate] is `true`, the watch chooses
+  /// between portrait (`p1 = 0`) and landscape (`p1 = 1`) based on
+  /// its accelerometer.
+  static Uint8List setDisplayOrientation({
+    required bool autoRotate,
+    bool landscape = false,
+  }) => Codec.buildChannelA(OpA.displayOrientation, [
+    OpA.mixWrite,
+    autoRotate ? 1 : 2,
+    landscape ? 1 : 2,
+  ]);
+
+  /// `DisplayStyleReq` (0x2a): set the display style id. The id space
+  /// is device-defined; the same ids the legacy Oudmon SDK exposes.
+  static Uint8List setDisplayStyle(int style) =>
+      Codec.buildChannelA(OpA.displayStyle, [OpA.mixWrite, style & 0xFF]);
+
+  /// `DisplayTimeReq` (0x1f): screen-on duration / brightness profile
+  /// (read / write / delete).
+  ///
+  /// The H59MA handler treats this as a Mixture sub-cmd (1=read,
+  /// 2=write, 3=delete) with a small fixed-shape payload.
+  /// [displayTime] and [displayType] are 1-byte fields; [alpha] is the
+  /// brightness 0..255; [total] and [current] are the active index
+  /// for a multi-profile dial.
+  static Uint8List readDisplayTime() =>
+      Codec.buildChannelA(OpA.displayTime, [OpA.mixRead]);
+  static Uint8List setDisplayTime({
+    required int displayTime,
+    required int displayType,
+    required int alpha,
+    int total = 0,
+    int current = 0,
+  }) => Codec.buildChannelA(OpA.displayTime, [
+    OpA.mixWrite,
+    displayTime & 0xFF,
+    displayType & 0xFF,
+    alpha & 0xFF,
+    0x00, // reserved (idx4 per PROTOCOL §4.2)
+    total & 0xFF,
+    current & 0xFF,
+  ]);
+
+  /// `DegreeSwitchReq` (0x19): temperature unit + display style.
+  /// [isCelsius] is the canonical "show in C" toggle; some firmwares
+  /// also gate a Fahrenheit secondary display behind the same byte.
+  static Uint8List setDegreeSwitch({
+    required bool enabled,
+    required bool isCelsius,
+  }) => Codec.buildChannelA(OpA.degreeSwitch, [
+    OpA.mixWrite,
+    enabled ? 1 : 2,
+    isCelsius ? 1 : 2,
+  ]);
+
+  /// `TimeFormatReq` (0x0a): 12/24-hour + metric toggle. Per
+  /// `PROTOCOL.md` §3.1 the `is24` boolean is **inverted** on the
+  /// wire (`is24^1`), so we XOR here.
+  static Uint8List setTimeFormat({required bool is24, required bool metric}) =>
+      Codec.buildChannelA(OpA.timeFormat, [
+        OpA.mixWrite,
+        is24 ? 0 : 1, // XOR-1
+        metric ? 0 : 1, // XOR-1 (only on the $3 profile variant)
+      ]);
+
+  /// `DndReq` (0x06) write: enable/disable the do-not-disturb window.
+  /// Mirrors the read response layout: `[02, en?1:2, sH, sM, eH, eM]`.
+  static Uint8List setDnd({
+    required bool enabled,
+    required int startHour,
+    required int startMinute,
+    required int endHour,
+    required int endMinute,
+  }) => Codec.buildChannelA(OpA.dnd, [
+    OpA.mixWrite,
+    enabled ? 1 : 2,
+    _clamp(startHour, 0, 23),
+    _clamp(startMinute, 0, 59),
+    _clamp(endHour, 0, 23),
+    _clamp(endMinute, 0, 59),
+  ]);
+  static Uint8List readDnd() => Codec.buildChannelA(OpA.dnd, [OpA.mixRead]);
+
+  /// `PalmScreenReq` (0x05) write: palm/cover gesture config.
+  /// [p3] is the "always commit" flag (factory default is `true`).
+  static Uint8List setPalmScreen({
+    required bool enabled,
+    bool p2 = false,
+    bool p3 = true,
+  }) => Codec.buildChannelA(OpA.palmScreen, [
+    OpA.mixWrite,
+    enabled ? 1 : 2,
+    p2 ? 1 : 2,
+    (p2 ? 1 : 2) | (p3 ? 4 : 0),
+  ]);
+
+  /// `IntellReq` (0x09) write: smart-feature toggle + delay (seconds).
+  static Uint8List setIntell({required bool enabled, int delaySeconds = 5}) =>
+      Codec.buildChannelA(OpA.intell, [
+        OpA.mixWrite,
+        enabled ? 1 : 2,
+        delaySeconds & 0xFF,
+      ]);
+
+  // ---------------------------------------------------------------------------
+  // Targets (0x21) — daily step / calorie / distance / sport / sleep goals.
+  // 24-bit LE for s/c/d; 16-bit LE for sport/sleep minutes.
+  // ---------------------------------------------------------------------------
+
+  /// `TargetSettingReq` (0x21) read: query the current daily goals.
+  static Uint8List readTarget() =>
+      Codec.buildChannelA(OpA.targetSetting, [OpA.mixRead]);
+
+  /// `TargetSettingReq` (0x21) write: 24-bit LE step/calorie/distance.
+  /// The watch echoes the request back on success.
+  static Uint8List setTarget({
+    required int steps,
+    required int calories,
+    required int distanceMeters,
+  }) => Codec.buildChannelA(OpA.targetSetting, [
+    OpA.mixWrite,
+    ...Codec.u24le(steps),
+    ...Codec.u24le(calories),
+    ...Codec.u24le(distanceMeters),
+  ]);
+
+  // ---------------------------------------------------------------------------
+  // Phone-side sport / GPS sync (0x74, 0x77).
+  // ---------------------------------------------------------------------------
+
+  /// `PhoneSportReq` (0x77): tell the watch the phone's app-side
+  /// sport status. [sportType] is the legacy Oudmon sport-id enum
+  /// (`0 = idle, 1 = running, 2 = cycling, ...`).
+  static Uint8List phoneSport({required int status, required int sportType}) =>
+      Codec.buildChannelA(OpA.phoneSport, [status & 0xFF, sportType & 0xFF]);
+
+  /// `PhoneGpsReq` (0x74) gps sync request: `[status, 0x00]`.
+  static Uint8List phoneGpsStatus(int status) =>
+      Codec.buildChannelA(OpA.phoneGps, [status & 0xFF, 0x00]);
+
+  /// `PhoneGpsReq` (0x74) phone data push: `[0x05, 0x00] + dist LE u32 +
+  /// cal LE u32` (the protocol packs 4-byte LE fields per §3.1).
+  static Uint8List phoneGpsData({
+    required int distanceMeters,
+    required int calories,
+  }) => Codec.buildChannelA(OpA.phoneGps, [
+    0x05,
+    0x00,
+    ...Codec.u32le(distanceMeters),
+    ...Codec.u32le(calories),
+  ]);
+
+  // ---------------------------------------------------------------------------
+  // Daily history (Channel A read only — 0x13 / 0x14 / 0x15 / 0x37 / 0x39).
+  // ---------------------------------------------------------------------------
+
+  /// `ReadBandSportReq` (0x13): one stored exercise session,
+  /// identified by 32-bit LE start timestamp.
+  static Uint8List readBandSport(DateTime startUtc) => Codec.buildChannelA(
+    OpA.readBandSport,
+    Codec.u32le(startUtc.toUtc().millisecondsSinceEpoch ~/ 1000),
+  );
+
+  /// `ReadPressureReq` (0x14): historical BLE-pressure measured
+  /// values. `[ts u32 LE, 0x00, 0x32]` — the last byte is the
+  /// protocol-defined page-size hint (50 records max).
+  static Uint8List readPressureHistory(DateTime startUtc) =>
+      Codec.buildChannelA(OpA.readPressure, [
+        ...Codec.u32le(startUtc.toUtc().millisecondsSinceEpoch ~/ 1000),
+        0x00,
+        0x32,
+      ]);
+
+  /// `UltraVioletReq` (0x7d): historical UV-index samples for
+  /// [dayOffset] (0 = today, 1 = yesterday, ...).
+  static Uint8List readUvHistory({int dayOffset = 0}) =>
+      Codec.buildChannelA(OpA.ultraViolet, [dayOffset & 0xFF]);
+
+  /// `BpReadConformReq` (0x0e): advance the BP record queue.
+  /// Sub-byte 0 = next record; 0xFF = fail. See [advanceBpRecord].
+  static Uint8List ackBpRecord({bool ok = true}) =>
+      Codec.buildChannelA(OpA.bpReadConform, [ok ? 0x00 : 0xFF]);
+
+  // ---------------------------------------------------------------------------
+  // Settings (0x2c / 0x38 / 0x3e — feature enable bits).
+  // ---------------------------------------------------------------------------
+
+  /// `BloodOxygenSettingReq` (0x2c) write: enable the SpO2
+  /// auto-measure. The handler stores the bit at `DAT_0082d1c2`
+  /// (see `GHIDRA_DECOMPILATION.md` §3.10).
+  static Uint8List setBloodOxygenSetting({required bool enabled}) =>
+      Codec.buildChannelA(OpA.bloodOxygenSetting, [
+        OpA.mixWrite,
+        enabled ? 1 : 0,
+      ]);
+  static Uint8List readBloodOxygenSetting() =>
+      Codec.buildChannelA(OpA.bloodOxygenSetting, [OpA.mixRead]);
+
+  /// `HrvSettingReq` (0x38) write: HRV auto-measure toggle + interval.
+  static Uint8List setHrvSetting({
+    required bool enabled,
+    int intervalMinutes = 30,
+  }) => Codec.buildChannelA(OpA.hrvSetting, [
+    OpA.mixWrite,
+    enabled ? 1 : 0,
+    intervalMinutes & 0xFF,
+  ]);
+  static Uint8List readHrvSetting() =>
+      Codec.buildChannelA(OpA.hrvSetting, [OpA.mixRead]);
+
+  /// `PressureSettingReq` (0x36) write: stress (pressure) auto-measure.
+  static Uint8List setPressureSetting({required bool enabled}) =>
+      Codec.buildChannelA(OpA.pressureSetting, [OpA.mixWrite, enabled ? 1 : 0]);
+  static Uint8List readPressureSetting() =>
+      Codec.buildChannelA(OpA.pressureSetting, [OpA.mixRead]);
+
+  /// `UVSettingReq` (0x3e) write: UV auto-measure toggle.
+  static Uint8List setUvSetting({required bool enabled}) =>
+      Codec.buildChannelA(OpA.uvSetting, [OpA.mixWrite, enabled ? 1 : 0]);
+  static Uint8List readUvSetting() =>
+      Codec.buildChannelA(OpA.uvSetting, [OpA.mixRead]);
+
+  // ---------------------------------------------------------------------------
+  // BP / DND / SitLong / Drink-alarm setters — full Mixture write path.
+  // ---------------------------------------------------------------------------
+
+  /// `BpSettingReq` (0x0c) write: configure the BP auto-measure window
+  /// and "multiple" (samples per window). [multiple] must be `1`, `2`,
+  /// or `3` per the legacy Oudmon SDK.
+  static Uint8List setBpSetting({
+    required bool enabled,
+    required int startHour,
+    required int startMinute,
+    required int endHour,
+    required int endMinute,
+    int multiple = 1,
+  }) => Codec.buildChannelA(OpA.bpSetting, [
+    OpA.mixWrite,
+    enabled ? 1 : 0,
+    _clamp(startHour, 0, 23),
+    _clamp(startMinute, 0, 59),
+    _clamp(endHour, 0, 23),
+    _clamp(endMinute, 0, 59),
+    _clamp(multiple, 1, 3),
+  ]);
+  static Uint8List readBpSetting() =>
+      Codec.buildChannelA(OpA.bpSetting, [OpA.mixRead]);
+
+  /// `SetSitLongReq` (0x25): sedentary reminder window. BCD time
+  /// fields + a 7-bit weekday mask + a cycle byte. The protocol
+  /// clamps the cycle to {30, 60, 90} s; anything else falls back to
+  /// 30 s in the firmware.
+  static Uint8List setSitLong({
+    required bool enabled,
+    required int startHour,
+    required int startMinute,
+    required int endHour,
+    required int endMinute,
+    int weekMask = 0,
+    int cycleSeconds = 30,
+  }) {
+    final c = (cycleSeconds == 60 || cycleSeconds == 90) ? cycleSeconds : 30;
+    return Codec.buildChannelA(OpA.setSitLong, [
+      Codec.toBcd(_clamp(startHour, 0, 23)),
+      Codec.toBcd(_clamp(startMinute, 0, 59)),
+      Codec.toBcd(_clamp(endHour, 0, 23)),
+      Codec.toBcd(_clamp(endMinute, 0, 59)),
+      weekMask & 0x7F,
+      c,
+    ]);
+  }
+
+  /// `SetDrinkAlarmReq` (0x27): drink/sedentary reminder slot.
+  /// Same 11-byte layout as [setAlarm] but with an extended index
+  /// range (0..7). ⚠ Channel-B sleep also uses cmd `0x27` —
+  /// this builder targets the Channel-A alarm path.
+  static Uint8List setDrinkAlarm({
+    required int index,
+    required bool enabled,
+    required int hour,
+    required int minute,
+    List<bool> weekdays = const [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+    ],
+  }) {
+    final days = List<int>.generate(7, (i) => (weekdays[i]) ? 1 : 0);
+    return Codec.buildChannelA(OpA.setDrinkAlarm, [
+      _clamp(index, 0, 7),
+      enabled ? 1 : 0,
+      Codec.toBcd(hour),
+      Codec.toBcd(minute),
+      ...days,
+    ]);
+  }
+
+  static Uint8List readDrinkAlarm(int index) =>
+      Codec.buildChannelA(OpA.readDrinkAlarm, [_clamp(index, 0, 7)]);
+
+  // ---------------------------------------------------------------------------
+  // Channel-B helpers — DIY watch face and other LargeData actions.
+  // ---------------------------------------------------------------------------
+
+  /// `readCustomWatch` (0x3a, action `0x01`): read the current
+  /// DIY watch-face definition. See `PROTOCOL.md` §4.7 / §5.2.
+  /// Response is dispatched to `respMap[0x3a]` and contains
+  /// `N × {type, x u16 LE, y u16 LE, R, G, B}` elements.
+  static Uint8List readCustomWatchFace() =>
+      Codec.buildChannelB(OpB.customWatchFace, [0x01]);
+
+  /// `writeCustomWatch` (0x3a, action `0x02`): upload a DIY
+  /// watch-face definition. Each element is 8 bytes:
+  ///   `[type, x u16 LE, y u16 LE, R, G, B]`.
+  ///
+  /// [elements] is a list of (type, x, y, r, g, b) tuples. The
+  /// firmware caps the count at 32; longer lists are silently
+  /// truncated by the Oudmon SDK.
+  static Uint8List writeCustomWatchFace(
+    List<({int type, int x, int y, int r, int g, int b})> elements,
+  ) {
+    final body = <int>[0x02];
+    for (final e in elements.take(32)) {
+      body.add(e.type & 0xFF);
+      body.addAll(Codec.u16le(e.x));
+      body.addAll(Codec.u16le(e.y));
+      body.add(e.r & 0xFF);
+      body.add(e.g & 0xFF);
+      body.add(e.b & 0xFF);
+    }
+    return Codec.buildChannelB(OpB.customWatchFace, body);
+  }
+
   /// `SugarLipidsSetting` read (`0x3a`): asks the watch to read one of the
   /// two 1-bit flags packed into the shared config byte at
   /// `DAT_008277f0 + 0x2D` (sugar = bit 5, lipids = bit 7). Per

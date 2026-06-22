@@ -253,4 +253,248 @@ void main() {
       },
     );
   });
+
+  group('commands: settings (display / theme / wallpaper / unit)', () {
+    test('read/set theme carry the Mixture sub-opcodes', () {
+      final r = Commands.readTheme();
+      final w = Commands.setTheme(2);
+      expect(r[0], OpA.deviceTheme);
+      expect(r[1], OpA.mixRead);
+      expect(w[0], OpA.deviceTheme);
+      expect(w[1], OpA.mixWrite);
+      expect(w[2], 0x02);
+    });
+
+    test('read/set wallpaper share the same envelope as theme', () {
+      final r = Commands.readWallpaper();
+      final w = Commands.setWallpaper(7);
+      expect(r[0], OpA.deviceWallpaper);
+      expect(r[1], OpA.mixRead);
+      expect(w[0], OpA.deviceWallpaper);
+      expect(w[1], OpA.mixWrite);
+      expect(w[2], 0x07);
+    });
+
+    test('readAvatar is a bare 0x32 opcode with no payload', () {
+      final f = Commands.readAvatar();
+      expect(f[0], OpA.deviceAvatar);
+      expect(f.sublist(1, 15).every((b) => b == 0), isTrue);
+    });
+
+    test('setDisplayClock emits enabled as 1 (on) / 2 (off)', () {
+      final on = Commands.setDisplayClock(enabled: true);
+      final off = Commands.setDisplayClock(enabled: false);
+      expect(on[0], OpA.displayClock);
+      expect(on[1], OpA.mixWrite);
+      expect(on[2], 0x01);
+      expect(off[2], 0x02);
+    });
+
+    test('setDisplayOrientation encodes auto-rotate + landscape', () {
+      final auto = Commands.setDisplayOrientation(autoRotate: true);
+      final fixed = Commands.setDisplayOrientation(
+        autoRotate: false,
+        landscape: true,
+      );
+      expect(auto[0], OpA.displayOrientation);
+      expect(auto[2], 0x01); // autoRotate on
+      expect(auto[3], 0x02); // landscape off
+      expect(fixed[2], 0x02); // autoRotate off
+      expect(fixed[3], 0x01); // landscape on
+    });
+
+    test('setDegreeSwitch emits enabled + C/F toggle', () {
+      final c = Commands.setDegreeSwitch(enabled: true, isCelsius: true);
+      final f = Commands.setDegreeSwitch(enabled: true, isCelsius: false);
+      expect(c[0], OpA.degreeSwitch);
+      expect(c[2], 0x01);
+      expect(c[3], 0x01); // C
+      expect(f[3], 0x02); // F
+    });
+
+    test('setTimeFormat XOR-1 inverts the is24 / metric booleans', () {
+      // Per PROTOCOL.md §3.1 the on-wire byte is `bool XOR 1`, so
+      // `is24: true` packs as 0 and `is24: false` packs as 1.
+      final f = Commands.setTimeFormat(is24: true, metric: false);
+      expect(f[0], OpA.timeFormat);
+      expect(f[1], OpA.mixWrite);
+      expect(f[2], 0x00); // !is24
+      expect(f[3], 0x01); // !metric
+
+      final f2 = Commands.setTimeFormat(is24: false, metric: true);
+      expect(f2[2], 0x01); // !is24
+      expect(f2[3], 0x00); // !metric
+    });
+
+    test('setPalmScreen packs two booleans into the third byte', () {
+      final f = Commands.setPalmScreen(enabled: true, p2: true, p3: true);
+      expect(f[0], OpA.palmScreen);
+      expect(f[2], 0x01);
+      expect(f[3], 0x01);
+      expect(f[4], 0x05); // (1 | 4)
+    });
+
+    test('setIntell writes enabled + delay', () {
+      final f = Commands.setIntell(enabled: true, delaySeconds: 12);
+      expect(f[0], OpA.intell);
+      expect(f[2], 0x01);
+      expect(f[3], 12);
+    });
+  });
+
+  group('commands: DND / targets / alarms', () {
+    test('setDnd packs hour/minute endpoints in BCD-free form', () {
+      final f = Commands.setDnd(
+        enabled: true,
+        startHour: 22,
+        startMinute: 0,
+        endHour: 7,
+        endMinute: 30,
+      );
+      expect(f[0], OpA.dnd);
+      expect(f[1], OpA.mixWrite);
+      expect(f[2], 0x01);
+      expect(f[3], 22);
+      expect(f[4], 0);
+      expect(f[5], 7);
+      expect(f[6], 30);
+    });
+
+    test('setTarget encodes 24-bit LE for steps/calories/distance', () {
+      final f = Commands.setTarget(
+        steps: 0x010203,
+        calories: 0xabcdef,
+        distanceMeters: 0x123456,
+      );
+      expect(f[0], OpA.targetSetting);
+      expect(f[1], OpA.mixWrite);
+      expect(f.sublist(2, 5), [0x03, 0x02, 0x01]); // LE 0x010203
+      expect(f.sublist(5, 8), [0xEF, 0xCD, 0xAB]); // LE 0xABCDEF
+      expect(f.sublist(8, 11), [0x56, 0x34, 0x12]); // LE 0x123456
+    });
+
+    test('setSitLong emits BCD time + 7-bit weekday mask + cycle', () {
+      final f = Commands.setSitLong(
+        enabled: true,
+        startHour: 9,
+        startMinute: 30,
+        endHour: 18,
+        endMinute: 0,
+        weekMask: 0x1F, // weekdays only
+        cycleSeconds: 60,
+      );
+      expect(f[0], OpA.setSitLong);
+      expect(Codec.fromBcd(f[1]), 9);
+      expect(Codec.fromBcd(f[2]), 30);
+      expect(Codec.fromBcd(f[3]), 18);
+      expect(Codec.fromBcd(f[4]), 0);
+      expect(f[5], 0x1F);
+      expect(f[6], 60);
+    });
+
+    test('setSitLong clamps unsupported cycle values to 30s', () {
+      final f = Commands.setSitLong(
+        enabled: true,
+        startHour: 9,
+        startMinute: 0,
+        endHour: 18,
+        endMinute: 0,
+        cycleSeconds: 45,
+      );
+      expect(f[6], 30);
+    });
+
+    test('setDrinkAlarm indexes from 0..7 with weekday bitmap', () {
+      final f = Commands.setDrinkAlarm(
+        index: 3,
+        enabled: true,
+        hour: 14,
+        minute: 25,
+        weekdays: const [true, false, true, false, true, false, true],
+      );
+      expect(f[0], OpA.setDrinkAlarm);
+      expect(f[1], 3); // index
+      expect(f[2], 0x01); // enabled
+      expect(Codec.fromBcd(f[3]), 14);
+      expect(Codec.fromBcd(f[4]), 25);
+      expect(f.sublist(5, 12), [1, 0, 1, 0, 1, 0, 1]);
+    });
+
+    test('readDrinkAlarm carries the requested index', () {
+      final f = Commands.readDrinkAlarm(5);
+      expect(f[0], OpA.readDrinkAlarm);
+      expect(f[1], 5);
+    });
+  });
+
+  group('commands: phone-side sport / GPS', () {
+    test('phoneSport carries status + sportType', () {
+      final f = Commands.phoneSport(status: 0x01, sportType: 0x02);
+      expect(f[0], OpA.phoneSport);
+      expect(f[1], 0x01);
+      expect(f[2], 0x02);
+    });
+
+    test('phoneGpsStatus writes [status, 0x00]', () {
+      final f = Commands.phoneGpsStatus(0x03);
+      expect(f[0], OpA.phoneGps);
+      expect(f[1], 0x03);
+      expect(f[2], 0x00);
+    });
+
+    test('phoneGpsData packs distance + calories as u32 LE', () {
+      final f = Commands.phoneGpsData(
+        distanceMeters: 0x12345678,
+        calories: 0xAABBCCDD,
+      );
+      expect(f[0], OpA.phoneGps);
+      expect(f[1], 0x05);
+      expect(f[2], 0x00);
+      expect(f.sublist(3, 7), [0x78, 0x56, 0x34, 0x12]);
+      expect(f.sublist(7, 11), [0xDD, 0xCC, 0xBB, 0xAA]);
+    });
+  });
+
+  group('commands: Channel-B custom watch face', () {
+    test('readCustomWatchFace uses 0x3a with action 0x01', () {
+      final f = Commands.readCustomWatchFace();
+      expect(Codec.rxChannelBCmd(f), OpB.customWatchFace);
+      expect(Codec.rxChannelBPayload(f), [0x01]);
+    });
+
+    test('writeCustomWatchFace packs 8-byte elements after action 0x02', () {
+      final f = Commands.writeCustomWatchFace([
+        (type: 1, x: 0x12, y: 0x34, r: 0xAA, g: 0xBB, b: 0xCC),
+        (type: 2, x: 0x0040, y: 0x0080, r: 0x11, g: 0x22, b: 0x33),
+      ]);
+      expect(Codec.rxChannelBCmd(f), OpB.customWatchFace);
+      final payload = Codec.rxChannelBPayload(f)!;
+      expect(payload[0], 0x02);
+      // Element 1
+      expect(payload[1], 1);
+      expect(payload.sublist(2, 4), [0x12, 0x00]); // x LE
+      expect(payload.sublist(4, 6), [0x34, 0x00]); // y LE
+      expect(payload[6], 0xAA);
+      expect(payload[7], 0xBB);
+      expect(payload[8], 0xCC);
+      // Element 2 (offset 9)
+      expect(payload[9], 2);
+      expect(payload.sublist(10, 12), [0x40, 0x00]);
+      expect(payload.sublist(12, 14), [0x80, 0x00]);
+      expect(payload[14], 0x11);
+      expect(payload[15], 0x22);
+      expect(payload[16], 0x33);
+    });
+
+    test('writeCustomWatchFace truncates to 32 elements', () {
+      final elements = List.generate(
+        50,
+        (i) => (type: 1, x: i, y: 0, r: 0xFF, g: 0xFF, b: 0xFF),
+      );
+      final f = Commands.writeCustomWatchFace(elements);
+      final payload = Codec.rxChannelBPayload(f)!;
+      // 1 action byte + 32 × 8 element bytes = 257
+      expect(payload.length, 1 + 32 * 8);
+    });
+  });
 }
