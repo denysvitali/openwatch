@@ -1,6 +1,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/ble/ble_transport.dart';
 import '../../core/providers/app_providers.dart';
@@ -41,11 +42,12 @@ class HealthScreen extends ConsumerWidget {
           _MetricList(
             metrics: [
               if (caps.bloodOxygen)
-                const _HealthMetric(
+                _HealthMetric(
                   icon: CupertinoIcons.drop_fill,
                   title: 'Blood oxygen',
                   value: '-',
-                  tint: Color(0xFF007AFF),
+                  tint: const Color(0xFF007AFF),
+                  onTap: () => context.push('/history'),
                 ),
               if (caps.bloodPressure)
                 _HealthMetric(
@@ -60,11 +62,12 @@ class HealthScreen extends ConsumerWidget {
                   stop: manager.stopBloodPressure,
                 ),
               if (caps.sleep)
-                const _HealthMetric(
+                _HealthMetric(
                   icon: CupertinoIcons.moon_fill,
                   title: 'Sleep',
                   value: 'History',
-                  tint: Color(0xFF5856D6),
+                  tint: const Color(0xFF5856D6),
+                  onTap: () => context.push('/history'),
                 ),
               if (caps.stress)
                 _HealthMetric(
@@ -90,11 +93,12 @@ class HealthScreen extends ConsumerWidget {
                   stop: manager.stopHrv,
                 ),
               if (caps.temperature)
-                const _HealthMetric(
+                _HealthMetric(
                   icon: CupertinoIcons.thermometer,
                   title: 'Temperature',
                   value: '-',
-                  tint: Color(0xFFFF2D55),
+                  tint: const Color(0xFFFF2D55),
+                  onTap: () => context.push('/history'),
                 ),
             ],
           ),
@@ -275,9 +279,15 @@ class _MetricList extends StatelessWidget {
                           ? metrics[i].stop
                           : null,
                     ),
-                  ],
+                  ] else if (metrics[i].onTap != null)
+                    IconButton(
+                      tooltip: 'Open history',
+                      icon: const Icon(CupertinoIcons.chevron_right),
+                      onPressed: metrics[i].onTap,
+                    ),
                 ],
               ),
+              onTap: metrics[i].onTap,
             ),
             if (i != metrics.length - 1)
               Divider(
@@ -302,6 +312,7 @@ class _HealthMetric {
     this.measuring = false,
     this.start,
     this.stop,
+    this.onTap,
   });
 
   final IconData icon;
@@ -313,6 +324,7 @@ class _HealthMetric {
   final bool measuring;
   final VoidCallback? start;
   final VoidCallback? stop;
+  final VoidCallback? onTap;
 }
 
 class _SectionTitle extends StatelessWidget {
