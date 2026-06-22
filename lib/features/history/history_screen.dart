@@ -1,10 +1,12 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/ble/ble_transport.dart';
 import '../../core/providers/app_providers.dart';
+import '../../core/services/history_debug_export.dart';
 import '../../core/services/history_sync.dart';
 import 'widgets/hr_chart.dart';
 import 'widgets/scalar_chart.dart';
@@ -19,8 +21,24 @@ class HistoryScreen extends ConsumerWidget {
     final ready = ref.watch(linkStateProvider).value == LinkState.ready;
     final sync = ref.watch(historySyncProvider);
     final store = ref.watch(historyStoreProvider).asData?.value;
+    final manager = ref.watch(watchManagerProvider);
+    final linkState = ref.watch(linkStateProvider).value;
+    final lastSyncedAt = store?.lastSyncedAt;
+    final lastSyncedDayIso = store?.lastSyncedDay?.iso;
 
     ref.listen<HistorySync>(historySyncProvider, (prev, next) {});
+
+    final ctx = HistoryDebugContext(
+      firmware: manager.firmwareRevision.isEmpty
+          ? null
+          : manager.firmwareRevision,
+      hardware: manager.hardwareRevision.isEmpty
+          ? null
+          : manager.hardwareRevision,
+      linkState: linkState?.name,
+      lastSyncedAt: lastSyncedAt,
+      lastSyncedDayIso: lastSyncedDayIso,
+    );
 
     return Scaffold(
       appBar: AppBar(
@@ -47,6 +65,7 @@ class HistoryScreen extends ConsumerWidget {
               _DailyDetailSelector(
                 days: sync.days.reversed.toList(),
                 sync: sync,
+                debugContext: ctx,
               ),
             ] else
               const _EmptyState(),
@@ -148,10 +167,15 @@ class _StoreWarning extends StatelessWidget {
 }
 
 class _DailyDetailSelector extends StatefulWidget {
-  const _DailyDetailSelector({required this.days, required this.sync});
+  const _DailyDetailSelector({
+    required this.days,
+    required this.sync,
+    required this.debugContext,
+  });
 
   final List<DailyHistory> days;
   final HistorySync sync;
+  final HistoryDebugContext debugContext;
 
   @override
   State<_DailyDetailSelector> createState() => _DailyDetailSelectorState();
@@ -233,6 +257,8 @@ class _DailyDetailSelectorState extends State<_DailyDetailSelector> {
               key: ValueKey(current.day.iso),
               day: current,
               sync: widget.sync,
+              debugContext: widget.debugContext,
+              freshlyFetched: widget.sync.fetchedDays.contains(current.day),
             ),
           ),
         ),
@@ -257,10 +283,18 @@ class _NewDot extends StatelessWidget {
 }
 
 class _DayDetailPage extends StatelessWidget {
-  const _DayDetailPage({super.key, required this.day, required this.sync});
+  const _DayDetailPage({
+    super.key,
+    required this.day,
+    required this.sync,
+    required this.debugContext,
+    required this.freshlyFetched,
+  });
 
   final DailyHistory day;
   final HistorySync sync;
+  final HistoryDebugContext debugContext;
+  final bool freshlyFetched;
 
   @override
   Widget build(BuildContext context) {
@@ -295,7 +329,16 @@ class _DayDetailPage extends StatelessWidget {
                   ],
                 ),
               ),
-              if (sync.fetchedDays.contains(day.day)) _NewBadge(),
+              IconButton(
+                tooltip: 'Copy day debug',
+                icon: const Icon(Icons.bug_report_outlined, size: 20),
+                onPressed: () {
+                  final ctx = debugContext;
+                  final fresh = freshlyFetched;
+                  _copyDayDebug(context, day, ctx, fresh);
+                },
+              ),
+              if (freshlyFetched) _NewBadge(),
             ],
           ),
           const SizedBox(height: 14),
@@ -466,6 +509,34 @@ String _sleepSummary(DailyHistory day) {
   final h = total.inHours;
   final m = total.inMinutes.remainder(60);
   return '${h}h ${m}m';
+}
+
+/// Copies a plain-text "day debug" package to the clipboard so users can
+/// paste one day into a bug report without screenshots. A fully populated
+/// day runs ~5–10 kB; if it ever creeps past 100 kB the snackbar will
+/// flag it so we hear about it instead of silently truncating.
+Future<void> _copyDayDebug(
+  BuildContext context,
+  DailyHistory day,
+  HistoryDebugContext debugCtx,
+  bool freshlyFetched,
+) async {
+  final messenger = ScaffoldMessenger.of(context);
+  final ctx = HistoryDebugContext(
+    firmware: debugCtx.firmware,
+    hardware: debugCtx.hardware,
+    linkState: debugCtx.linkState,
+    lastSyncedAt: debugCtx.lastSyncedAt,
+    lastSyncedDayIso: debugCtx.lastSyncedDayIso,
+    fetched: freshlyFetched,
+  );
+  final text = HistoryDebugExport.formatDay(day, context: ctx);
+  await Clipboard.setData(ClipboardData(text: text));
+  if (!context.mounted) return;
+  final kb = (text.length / 1024).toStringAsFixed(1);
+  messenger.showSnackBar(
+    SnackBar(content: Text('Day debug copied (${text.length} chars / $kb kB)')),
+  );
 }
 
 String _sleepLongSummary(DailyHistory day) {

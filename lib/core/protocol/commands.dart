@@ -170,17 +170,19 @@ class Commands {
   /// `ReadHeartRate` (0x15): requests the 5-minute BPM history for a
   /// specific calendar day.
   ///
-  /// The request index is the UTC day-start timestamp in seconds, encoded as
-  /// a 32-bit little-endian integer. This matches the public protocol table
-  /// (`PROTOCOL.md` §4.3) and live H59MAX behaviour: packed BCD dates such as
-  /// `26 06 21 00` are accepted as bytes but the watch replies with `0xff`
-  /// ("no record").
+  /// The watch stores HR records keyed by its **local** clock's day-start
+  /// epoch seconds — `setTime()` sends the host's local BCD bytes, so the
+  /// firmware's day-rollover is at LOCAL midnight, not UTC. The request
+  /// index must therefore be the LOCAL epoch seconds for `day.midnight`,
+  /// NOT a UTC rebuild of the year/month/day components, or users in
+  /// non-UTC timezones get a TZ-offset-shifted record back (e.g. UTC-12
+  /// user asks for "today", watch returns yesterday, the chart shows
+  /// yesterday's data anchored to today's `DateOnly` — looks like the
+  /// day is "already filled" the moment it starts).
   ///
-  /// * [day] — calendar day to query. Only the year/month/day fields are used;
-  ///   the command sends `DateTime.utc(year, month, day)` as epoch seconds.
-  /// * [slot] — optional 5-minute sample slot offset within the day. The app
-  ///   uses `0` for full-day reads; non-zero values advance the timestamp by
-  ///   `slot * 5 minutes`.
+  /// * [day] — calendar day to query. Pass `DateOnly.midnight` (LOCAL
+  ///   midnight) so the epoch matches what `setTime()` produced.
+  /// * [slot] — optional 5-minute sample slot offset within the day.
   ///
   /// Sending `0x00000000` (all bytes zero) is the firmware's "current/latest"
   /// sentinel and bypasses the date lookup entirely — useful for a "give me
@@ -194,8 +196,7 @@ class Commands {
   /// index, so `HistorySync` should ignore the first 4 bytes when
   /// walking the 5-min BPM slots.
   static Uint8List readHeartRateHistory({required DateTime day, int slot = 0}) {
-    final utcDayStart = DateTime.utc(day.year, day.month, day.day);
-    final seconds = utcDayStart.millisecondsSinceEpoch ~/ 1000;
+    final seconds = day.millisecondsSinceEpoch ~/ 1000;
     final start = seconds + (slot * 5 * 60);
     return Codec.buildChannelA(OpA.readHeartRate, Codec.u32le(start));
   }

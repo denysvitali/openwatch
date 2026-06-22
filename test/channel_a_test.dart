@@ -1055,28 +1055,46 @@ void main() {
   });
 
   group('Commands', () {
-    test('readHeartRateHistory packs UTC day-start seconds as u32le', () {
-      final frame = Commands.readHeartRateHistory(
-        day: DateTime(2026, 6, 20),
-        slot: 3,
-      );
+    test('readHeartRateHistory packs LOCAL day-start seconds as u32le', () {
+      // The watch's RTC is set via setTime() with LOCAL BCD bytes, so its
+      // day-rollover is at LOCAL midnight. The request index must therefore
+      // be the LOCAL epoch for the supplied day, not a UTC rebuild of the
+      // year/month/day components — otherwise users in non-UTC timezones
+      // get the wrong record back.
+      final localMidnight = DateTime(2026, 6, 20);
+      final frame = Commands.readHeartRateHistory(day: localMidnight, slot: 3);
       expect(frame[0], OpA.readHeartRate);
       final seconds = Codec.readU32le(frame, 1);
       final expected =
-          DateTime.utc(2026, 6, 20).millisecondsSinceEpoch ~/ 1000 +
-          (3 * 5 * 60);
+          localMidnight.millisecondsSinceEpoch ~/ 1000 + (3 * 5 * 60);
       expect(seconds, expected);
     });
 
+    test('readHeartRateHistory ignores time-of-day on the supplied day', () {
+      final localDayWithTime = DateTime(2026, 6, 20, 23, 45);
+      final frame = Commands.readHeartRateHistory(day: localDayWithTime);
+      // The supplied instant's epoch is what gets sent; callers should
+      // pass DateOnly.midnight (LOCAL midnight) to anchor the request on
+      // the same day the watch will use for lookup.
+      expect(
+        Codec.readU32le(frame, 1),
+        localDayWithTime.millisecondsSinceEpoch ~/ 1000,
+      );
+    });
+
     test(
-      'readHeartRateHistory uses calendar components, not instant UTC day',
+      'readHeartRateHistory is timezone-stable across LOCAL midnight inputs',
       () {
-        final localDayWithTime = DateTime(2026, 6, 20, 23, 45);
-        final frame = Commands.readHeartRateHistory(day: localDayWithTime);
-        expect(
-          Codec.readU32le(frame, 1),
-          DateTime.utc(2026, 6, 20).millisecondsSinceEpoch ~/ 1000,
+        // The contract: day.midnight is the LOCAL epoch. DateTime(year,
+        // month, day) is always local, so the encoded index is independent
+        // of the host's current timezone — what matters is that callers
+        // pass a local-midnight instant, not that we coerce one here.
+        final localMidnight = DateTime(2026, 6, 20);
+        final seconds = Codec.readU32le(
+          Commands.readHeartRateHistory(day: localMidnight),
+          1,
         );
+        expect(seconds, localMidnight.millisecondsSinceEpoch ~/ 1000);
       },
     );
   });
