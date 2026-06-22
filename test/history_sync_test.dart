@@ -941,36 +941,39 @@ void main() {
       },
     );
 
-    test('explicit empty sleep response clears persisted wake window', () async {
-      final t = _StubTransport();
-      final d = ChannelADispatcher(t);
-      final bParser = ChannelBParser(t);
-      d.bind();
-      final sync = _testSync(t, d, bParser: bParser);
+    test(
+      'explicit empty sleep response clears persisted wake window',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        final bParser = ChannelBParser(t);
+        d.bind();
+        final sync = _testSync(t, d, bParser: bParser);
 
-      final today = DateOnly.today();
-      final yesterday = today.addDays(-1);
-      final staleSleep = SleepSegment(
-        yesterday.midnight.add(const Duration(hours: 21)),
-        const Duration(minutes: 45),
-        SleepStage.deep,
-      );
-      final fakeStore = _FakeHistoryStore(
-        seed: {
-          yesterday: DailyHistory(day: yesterday, sleep: [staleSleep]),
-        },
-      );
-      await sync.bindStore(fakeStore);
+        final today = DateOnly.today();
+        final yesterday = today.addDays(-1);
+        final staleSleep = SleepSegment(
+          yesterday.midnight.add(const Duration(hours: 21)),
+          const Duration(minutes: 45),
+          SleepStage.deep,
+        );
+        final fakeStore = _FakeHistoryStore(
+          seed: {
+            yesterday: DailyHistory(day: yesterday, sleep: [staleSleep]),
+          },
+        );
+        await sync.bindStore(fakeStore);
 
-      t.inB.add(Codec.buildChannelB(OpB.sleepNew));
-      await Future<void>.delayed(const Duration(milliseconds: 50));
+        t.inB.add(Codec.buildChannelB(OpB.sleepNew));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
 
-      expect(sync.dayOf(yesterday)!.sleep, isEmpty);
-      expect((await fakeStore.readDay(yesterday)).sleep, isEmpty);
+        expect(sync.dayOf(yesterday)!.sleep, isEmpty);
+        expect((await fakeStore.readDay(yesterday)).sleep, isEmpty);
 
-      sync.dispose();
-      d.dispose();
-    });
+        sync.dispose();
+        d.dispose();
+      },
+    );
 
     test('activity summary 0x2a terminator with non-zero padding stops at '
         'first dayOffset==0 (HS-7)', () async {

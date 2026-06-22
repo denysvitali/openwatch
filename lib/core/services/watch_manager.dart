@@ -233,10 +233,7 @@ class WatchManager extends ChangeNotifier {
     }
   }
 
-  void _handleMeasureReply(
-    HrStartMeasureResult r, {
-    bool fromStop = false,
-  }) {
+  void _handleMeasureReply(HrStartMeasureResult r, {bool fromStop = false}) {
     if (r.err != 0) {
       _measuringTypes.remove(r.type);
       lastMeasurementError =
@@ -424,20 +421,14 @@ class WatchManager extends ChangeNotifier {
     () => _startMeasure(MeasureType.pressure),
   );
 
-  Future<void> stopStress() => _withActionSpan(
-    'stop_stress',
-    () => _stopMeasure(MeasureType.pressure),
-  );
+  Future<void> stopStress() =>
+      _withActionSpan('stop_stress', () => _stopMeasure(MeasureType.pressure));
 
-  Future<void> startHrv() => _withActionSpan(
-    'start_hrv',
-    () => _startMeasure(MeasureType.hrv),
-  );
+  Future<void> startHrv() =>
+      _withActionSpan('start_hrv', () => _startMeasure(MeasureType.hrv));
 
-  Future<void> stopHrv() => _withActionSpan(
-    'stop_hrv',
-    () => _stopMeasure(MeasureType.hrv),
-  );
+  Future<void> stopHrv() =>
+      _withActionSpan('stop_hrv', () => _stopMeasure(MeasureType.hrv));
 
   Future<void> _startMeasure(MeasureType type) async {
     _markMeasureStarted(type);

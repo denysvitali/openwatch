@@ -384,10 +384,7 @@ class _DayDetailPage extends StatelessWidget {
               _ChartHeader(title: 'Other metrics', detail: 'Synced values'),
               const SizedBox(height: 10),
               if (day.stress.isNotEmpty) ...[
-                _ChartHeader(
-                  title: 'Stress',
-                  detail: _scalarRange(day.stress),
-                ),
+                _ChartHeader(title: 'Stress', detail: _scalarRange(day.stress)),
                 const SizedBox(height: 8),
                 SizedBox(
                   height: 132,
