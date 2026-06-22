@@ -161,5 +161,29 @@ void main() {
         isNull,
       );
     });
+
+    test('dataType gate is enforced by the caller, not by this parser '
+        '(footgun: ECG/PPG frames with a plausible bpm byte would be '
+        'mis-classified without WatchManager._hrNotifyDataTypes gating)', () {
+      // This test documents the contract between the parser and
+      // WatchManager: parseDeviceNotify intentionally probes pl[1..4]
+      // for any plausible bpm and does NOT filter on the dataType at
+      // pl[0]. A non-HR dataType (e.g. an unconfirmed ECG id like
+      // 0x09) that happens to carry a byte in 30..240 at pl[1] would
+      // therefore return that byte as a bpm.
+      //
+      // The fix is in WatchManager: it gates the call on
+      // `_hrNotifyDataTypes.contains(dataType)` (HR-class ids
+      // observed on H59MA: 0x05, 0x06) so a mis-classified frame
+      // updates _observedUnknownNotifyTypes instead of
+      // lastHeartRate. The parser itself stays permissive so a
+      // future OEM dataType doesn't silently break HR.
+      final pl = Uint8List.fromList([0x09, 80]); // hypothetical ECG id
+      expect(
+        HrParser.parseDeviceNotify(pl),
+        80,
+        reason: 'parser is intentionally permissive — caller must gate',
+      );
+    });
   });
 }

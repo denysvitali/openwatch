@@ -9,6 +9,7 @@ import '../protocol/capabilities.dart';
 import '../protocol/channel_a.dart';
 import '../protocol/codec.dart';
 import '../protocol/commands.dart';
+import '../protocol/fee7_dispatcher.dart';
 import '../protocol/hr_parser.dart';
 import '../protocol/opcodes.dart';
 import 'app_log.dart';
@@ -25,12 +26,25 @@ class WatchManager extends ChangeNotifier {
     _inboundSub = _transport.inboundA.listen(_onFrame);
     _hub = ProtocolHub(_transport);
     _hub.ancs.events.listen(_onAncsEvent);
+    // Battery push on the vendor 0xFEE7 channel: H59MA v14 emits a
+    // 'a' status response (0x61) whenever the battery state changes,
+    // plus a one-shot 'H' handshake (0x48) at link-up that carries the
+    // same percent + a charge flag. Both streams are optional — only
+    // available when the watch advertises 0xFEE7 — so null-check
+    // before subscribing.
+    final fee7 = _hub.fee7;
+    if (fee7 != null) {
+      _fee7StatusSub = fee7.onStatus.listen(_onFee7Status);
+      _fee7HandshakeSub = fee7.onHandshake.listen(_onFee7Handshake);
+    }
     _onLinkState();
   }
 
   final BleTransport _transport;
   bool autoSyncTime;
   StreamSubscription<Uint8List>? _inboundSub;
+  StreamSubscription<StatusResponse>? _fee7StatusSub;
+  StreamSubscription<HandshakeResponse>? _fee7HandshakeSub;
   late final ProtocolHub _hub;
   LinkState _last = LinkState.disconnected;
   bool _handshaking = false;
@@ -49,6 +63,22 @@ class WatchManager extends ChangeNotifier {
   int? lastBloodPressureSystolic;
   int? lastBloodPressureDiastolic;
   final Set<int> _measuringTypes = {};
+
+  /// DataType ids on 0x73/0x78 known to carry a bpm. Anything outside
+  /// this set is forwarded as an opaque notify log so ECG/PPG (and
+  /// future sensor additions) cannot silently corrupt [lastHeartRate].
+  /// Pinned to the H59MA-class ids observed in live capture — expand
+  /// when a new id is verified.
+  static const Set<int> _hrNotifyDataTypes = {0x05, 0x06};
+
+  /// dataType ids seen on 0x73/0x78 that we did NOT recognise as
+  /// HR-class. Surfaced for diagnostics — a future ECG/PPG capture
+  /// will land here until the right decoder lands.
+  final Set<int> _observedUnknownNotifyTypes = {};
+  Uint8List? _lastUnknownNotifyPayload;
+  Set<int> get observedUnknownNotifyTypes =>
+      Set.unmodifiable(_observedUnknownNotifyTypes);
+  Uint8List? get lastUnknownNotifyPayload => _lastUnknownNotifyPayload;
   String? lastMeasurementError;
   bool initialized = false;
 
@@ -213,24 +243,83 @@ class WatchManager extends ChangeNotifier {
         if (r != null) _handleMeasureReply(r, fromStop: true);
       case OpA.deviceNotify:
       case OpA.deviceSportNotify:
-        // 0x73/0x78 carry `dataType + loadData`. Some firmwares push live
-        // HR on these opcodes when the canonical 0x1e path is unsupported —
-        // try the parser, then log the raw bytes for diagnostics either way.
-        final notifyBpm = HrParser.parseDeviceNotify(pl);
-        if (notifyBpm != null) {
-          AppLog.instance.debug(
-            'hr',
-            '0x${op.toRadixString(16)} hr=$notifyBpm',
-          );
-          lastHeartRate = notifyBpm;
-          notifyListeners();
+        // 0x73/0x78 carry `dataType + loadData`. The dataType byte at
+        // pl[0] discriminates which sensor is producing the frame:
+        //   * HR-class ids (e.g. 0x05, 0x06 on H59MA) carry a bpm.
+        //   * ECG/PPG/blood-oxygen/etc. share these opcodes but have
+        //     a different payload shape — see PROTOCOL.md §4.3 TODO
+        //     on `HealthEcgRsp` / `PpgDataRspCmd`.
+        //
+        // HrParser.parseDeviceNotify deliberately probes pl[1..4] for
+        // any plausible bpm; without a dataType gate that probe
+        // would silently mis-classify an ECG/PPG frame as HR when a
+        // byte in 30..240 happens to fall at one of those offsets.
+        // Gate on the dataType here so only HR-class ids update
+        // [lastHeartRate]; everything else is surfaced as an opaque
+        // log so the next live capture can index unknown dataTypes.
+        final dataType = pl.isEmpty ? null : pl[0] & 0xFF;
+        if (dataType != null && _hrNotifyDataTypes.contains(dataType)) {
+          final notifyBpm = HrParser.parseDeviceNotify(pl);
+          if (notifyBpm != null) {
+            AppLog.instance.debug(
+              'hr',
+              '0x${op.toRadixString(16)} hr=$notifyBpm',
+            );
+            lastHeartRate = notifyBpm;
+            notifyListeners();
+          }
+        } else {
+          // Unknown or non-HR dataType — record so a future live
+          // capture of ECG/PPG (PROTOCOL.md §4.3 TODO) can fill in
+          // the right decoder without losing data.
+          _observedUnknownNotifyTypes.add(dataType ?? -1);
+          _lastUnknownNotifyPayload = pl;
         }
         AppLog.instance.debug(
           'rx',
-          'Notify op=0x${op.toRadixString(16)} dataType=${pl.isNotEmpty ? pl[0] : -1} '
+          'Notify op=0x${op.toRadixString(16)} dataType=${dataType ?? -1} '
               'bytes=${AppLog.toHex(pl)}',
         );
     }
+  }
+
+  /// `0x61` 'a' status push — battery + step counter. Updates the
+  /// shared [batteryPercent] field so the UI reflects the watch's
+  /// real-time state without waiting for the 15-minute poll.
+  void _onFee7Status(StatusResponse s) {
+    final pct = s.battery & 0xFF;
+    if (pct <= 100) {
+      batteryPercent = pct;
+      notifyListeners();
+    }
+    // Step counter is exposed via `s.stepsLowByte` for diagnostics.
+    AppLog.instance.debug(
+      'fee7',
+      'status battery=$pct stepsLow=0x${s.stepsLowByte.toRadixString(16)}',
+    );
+  }
+
+  /// `0x48` 'H' handshake — emits once at link-up with hw/fw version,
+  /// battery, and charge flags. We only consume the battery here;
+  /// hw/fw are surfaced through [hardwareRevision]/[firmwareRevision]
+  /// from the transport-level handshake.
+  void _onFee7Handshake(HandshakeResponse h) {
+    final pct = h.batteryPercent;
+    if (pct != null && pct <= 100) {
+      batteryPercent = pct;
+    }
+    // status: low byte = flags, high byte = state. Bit 0 of the low
+    // byte is the charge flag per GHIDRA §8.2 — invert our convention
+    // so `charging==true` means actively charging.
+    if (h.status != null) {
+      charging = (h.status! & 0x01) != 0;
+    }
+    notifyListeners();
+    AppLog.instance.debug(
+      'fee7',
+      'handshake battery=${pct ?? '-'} charging=$charging status=0x'
+          '${(h.status ?? 0).toRadixString(16)}',
+    );
   }
 
   void _handleMeasureReply(HrStartMeasureResult r, {bool fromStop = false}) {
@@ -676,6 +765,8 @@ class WatchManager extends ChangeNotifier {
     _batteryTimer?.cancel();
     _transport.state.removeListener(_onLinkState);
     unawaited(_inboundSub?.cancel());
+    unawaited(_fee7StatusSub?.cancel());
+    unawaited(_fee7HandshakeSub?.cancel());
     _hub.dispose();
     super.dispose();
   }
