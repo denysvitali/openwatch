@@ -31,9 +31,23 @@ Codegen (freezed / json_serializable):
 dart run build_runner build --delete-conflicting-outputs
 ```
 
+Release build (Android arm64):
+
+```bash
+flutter build apk --release --target-platform android-arm64
+```
+
 Platforms: Android (primary, signed release APK via CI), iOS, macOS, Linux, Windows. CI builds only the Android arm64 release APK; no iOS signing configured in CI.
 
+## Current status
+
+Working: device scan/connect, handshake, time sync, capability detection, find-device, today's steps/calories, live heart-rate, notification enable, factory reset, offline-first cloud toggle, firmware fetch-and-store + OTA flow.
+
+Needs live-capture verification (flagged in `PROTOCOL.md` §8.5): battery push opcode, exact Channel-B CRC16 variant, ECG/PPG notify opcodes, bind (`0x10`) layout. Health history reads (HR/sleep/sport) and watch-face upload are scaffolded but not yet surfaced in the UI.
+
 ## Codebase architecture
+
+The code is split into BLE transport, pure protocol codecs, services, and feature screens.
 
 ```
 lib/
@@ -41,13 +55,10 @@ lib/
   core/
     ble/                     # GATT transport (flutter_blue_plus)
     protocol/                # PURE codec — no BLE, no async, fully unit-testable
-    services/                # SettingsService, WatchManager, FirmwareService, HistoryStore, HistorySync, CloudApi, OTel, AppLog
+    services/                # business logic + stateful managers
     providers/               # Riverpod wiring (app_providers.dart)
-    routing/                 # go_router shell (StatefulShellRoute + root-level routes)
+    routing/                 # go_router shell
   features/                  # one folder per screen
-    scan/ dashboard/ health/ notifications/ settings/ history/ firmware/ logs/ home/
-firmwares/                   # RE notes + raw .bin firmware + fwtool helper
-PROTOCOL.md                  # the spec — read this before touching the wire format
 ```
 
 ### The watch protocol in one paragraph

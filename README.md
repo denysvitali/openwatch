@@ -40,11 +40,12 @@ and firmware OTA. See `PROTOCOL.md` for every opcode.
 
 ## Development
 
-This repo uses Nix. Use the `sdk-links` Flutter wrapper (the plain `flutter`
-wrapper cannot write to the Nix store):
+This repo uses [mise](https://mise.jdx.dev/) to pin Flutter. With mise
+activated, `flutter` and `dart` are available automatically when you `cd` into
+the repo.
 
 ```bash
-export PATH="/nix/store/<hash>-flutter-wrapped-<ver>-sdk-links/bin:$PATH"
+mise install                              # install the pinned Flutter SDK
 flutter pub get
 flutter analyze
 dart format --output=none --set-exit-if-changed .
