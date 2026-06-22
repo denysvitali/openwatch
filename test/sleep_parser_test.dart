@@ -535,17 +535,20 @@ void main() {
       },
     );
     test('stale-buffer echo is skipped but genuine block is kept (SP-2)', () {
-      // Live H59MA v13 capture: the response for dayOffset=2 contained
-      // the previous dayOffset=1 record appended (stale buffer). The
-      // concatenated block totals 858 min (14.3 h) and would otherwise
-      // be filed as a single sleep session, producing a day with >24 h
-      // of sleep when combined with the real dayOffset=1 record.
+      // Legacy chained-block shape: the response contained the previous
+      // day's record appended (stale buffer). The concatenated block
+      // totals 858 min (14.3 h) and would otherwise be filed as a single
+      // sleep session, producing a day with >24 h of sleep when combined
+      // with the real previous-day record.
+      //
+      // Use dayOffset=7 so this old-shape fallback fixture cannot also
+      // be interpreted as a valid H59MA count-prefixed record list.
       // With `continue` (not `break`) only the malformed block is
-      // skipped; the genuine dayOffset=2 record is preserved.
+      // skipped; the genuine current block is preserved.
       final pl = Uint8List.fromList([
-        0x02, // dayOffset = 2
+        0x07, // legacy dayOffset; parser strips it before chained decode
         0x01, 0x18, // endMin BE = 280 (04:40)
-        // Genuine dayOffset=2 block (12 pairs, 230 min):
+        // Genuine current block (12 pairs, 230 min):
         0x2d, 0x01, 0x10, 0x02, 0x02, 0x26, 0x04, 0x0e, 0x03, 0x18, 0x04,
         0x0f, 0x02, 0x1f, 0x03, 0x25, 0x04, 0x0b, 0x03, 0x21, 0x04, 0x11,
         0x02, 0x07,
