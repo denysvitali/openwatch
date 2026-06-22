@@ -478,6 +478,189 @@ class WatchManager extends ChangeNotifier {
     _hub.notifyFactoryResetAccepted();
   });
 
+  // -- Display / theme / wallpaper -----------------------------------------
+
+  Future<void> setTheme(int theme) => _withActionSpan(
+    'set_theme',
+    () => _transport.sendA(Commands.setTheme(theme)),
+  );
+
+  Future<void> setWallpaper(int wallpaper) => _withActionSpan(
+    'set_wallpaper',
+    () => _transport.sendA(Commands.setWallpaper(wallpaper)),
+  );
+
+  Future<void> setDisplayClock({required bool enabled}) => _withActionSpan(
+    'set_display_clock',
+    () => _transport.sendA(Commands.setDisplayClock(enabled: enabled)),
+  );
+
+  Future<void> setTimeFormat({required bool is24, required bool metric}) =>
+      _withActionSpan(
+        'set_time_format',
+        () => _transport.sendA(
+          Commands.setTimeFormat(is24: is24, metric: metric),
+        ),
+      );
+
+  Future<void> setDegreeSwitch({
+    required bool enabled,
+    required bool isCelsius,
+  }) => _withActionSpan(
+    'set_degree_switch',
+    () => _transport.sendA(
+      Commands.setDegreeSwitch(enabled: enabled, isCelsius: isCelsius),
+    ),
+  );
+
+  // -- DND / targets / sedentary / drink -----------------------------------
+
+  Future<void> setDnd({
+    required bool enabled,
+    required int startHour,
+    required int startMinute,
+    required int endHour,
+    required int endMinute,
+  }) => _withActionSpan(
+    'set_dnd',
+    () => _transport.sendA(
+      Commands.setDnd(
+        enabled: enabled,
+        startHour: startHour,
+        startMinute: startMinute,
+        endHour: endHour,
+        endMinute: endMinute,
+      ),
+    ),
+  );
+
+  Future<void> setTarget({
+    required int steps,
+    required int calories,
+    required int distanceMeters,
+  }) => _withActionSpan(
+    'set_target',
+    () => _transport.sendA(
+      Commands.setTarget(
+        steps: steps,
+        calories: calories,
+        distanceMeters: distanceMeters,
+      ),
+    ),
+  );
+
+  Future<void> setSitLong({
+    required bool enabled,
+    required int startHour,
+    required int startMinute,
+    required int endHour,
+    required int endMinute,
+    int weekMask = 0,
+    int cycleSeconds = 30,
+  }) => _withActionSpan(
+    'set_sit_long',
+    () => _transport.sendA(
+      Commands.setSitLong(
+        enabled: enabled,
+        startHour: startHour,
+        startMinute: startMinute,
+        endHour: endHour,
+        endMinute: endMinute,
+        weekMask: weekMask,
+        cycleSeconds: cycleSeconds,
+      ),
+    ),
+  );
+
+  Future<void> setDrinkAlarm({
+    required int index,
+    required bool enabled,
+    required int hour,
+    required int minute,
+    List<bool> weekdays = const [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+    ],
+  }) => _withActionSpan(
+    'set_drink_alarm',
+    () => _transport.sendA(
+      Commands.setDrinkAlarm(
+        index: index,
+        enabled: enabled,
+        hour: hour,
+        minute: minute,
+        weekdays: weekdays,
+      ),
+    ),
+  );
+
+  // -- Auto-measure settings -----------------------------------------------
+
+  Future<void> setHrvSetting({
+    required bool enabled,
+    int intervalMinutes = 30,
+  }) => _withActionSpan(
+    'set_hrv_setting',
+    () => _transport.sendA(
+      Commands.setHrvSetting(
+        enabled: enabled,
+        intervalMinutes: intervalMinutes,
+      ),
+    ),
+  );
+
+  Future<void> setPressureSetting({required bool enabled}) => _withActionSpan(
+    'set_pressure_setting',
+    () => _transport.sendA(Commands.setPressureSetting(enabled: enabled)),
+  );
+
+  Future<void> setBloodOxygenSetting({required bool enabled}) =>
+      _withActionSpan(
+        'set_blood_oxygen_setting',
+        () =>
+            _transport.sendA(Commands.setBloodOxygenSetting(enabled: enabled)),
+      );
+
+  Future<void> setBpSetting({
+    required bool enabled,
+    required int startHour,
+    required int startMinute,
+    required int endHour,
+    required int endMinute,
+    int multiple = 1,
+  }) => _withActionSpan(
+    'set_bp_setting',
+    () => _transport.sendA(
+      Commands.setBpSetting(
+        enabled: enabled,
+        startHour: startHour,
+        startMinute: startMinute,
+        endHour: endHour,
+        endMinute: endMinute,
+        multiple: multiple,
+      ),
+    ),
+  );
+
+  // -- Channel-B custom watch face -----------------------------------------
+
+  /// Send a DIY watch-face definition to the watch via Channel-B 0x3a.
+  ///
+  /// Each element is a 6-tuple `(type, x, y, r, g, b)`. The Oudmon SDK
+  /// caps the list at 32; [Commands.writeCustomWatchFace] truncates
+  /// silently so callers don't have to.
+  Future<void> writeCustomWatchFace(
+    List<({int type, int x, int y, int r, int g, int b})> elements,
+  ) => _withActionSpan(
+    'write_custom_watch_face',
+    () => _transport.sendB(Commands.writeCustomWatchFace(elements)),
+  );
+
   /// Direct accessor for the underlying typed-streams hub. Exposed so a
   /// diagnostic UI can observe everything the firmware emits without having
   /// to re-subscribe to the transport.

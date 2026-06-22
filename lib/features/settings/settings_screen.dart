@@ -66,6 +66,22 @@ class SettingsScreen extends ConsumerWidget {
             onTap: () => context.push('/sensor-settings'),
           ),
           ListTile(
+            leading: const Icon(Icons.tune),
+            title: const Text('Watch preferences'),
+            subtitle: const Text(
+              'Display, theme, DND, daily goals, sedentary alarms',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => context.push('/preferences'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.brush_outlined),
+            title: const Text('Custom watch face'),
+            subtitle: const Text('Designer + DIY upload (Channel-B 0x3a)'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => context.push('/watchface'),
+          ),
+          ListTile(
             leading: const Icon(Icons.restart_alt, color: Colors.redAccent),
             title: const Text('Factory reset watch'),
             enabled: ready,
