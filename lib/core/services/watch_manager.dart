@@ -69,7 +69,7 @@ class WatchManager extends ChangeNotifier {
   /// future sensor additions) cannot silently corrupt [lastHeartRate].
   /// Pinned to the H59MA-class ids observed in live capture — expand
   /// when a new id is verified.
-  static const Set<int> _hrNotifyDataTypes = {0x05, 0x06};
+  static const Set<int> _hrNotifyDataTypes = {0x05, 0x06, 0x12};
 
   /// dataType ids seen on 0x73/0x78 that we did NOT recognise as
   /// HR-class. Surfaced for diagnostics — a future ECG/PPG capture
@@ -245,7 +245,7 @@ class WatchManager extends ChangeNotifier {
       case OpA.deviceSportNotify:
         // 0x73/0x78 carry `dataType + loadData`. The dataType byte at
         // pl[0] discriminates which sensor is producing the frame:
-        //   * HR-class ids (e.g. 0x05, 0x06 on H59MA) carry a bpm.
+        //   * HR-class ids (e.g. 0x05/0x06/0x12 on H59MA) carry a bpm.
         //   * ECG/PPG/blood-oxygen/etc. share these opcodes but have
         //     a different payload shape — see PROTOCOL.md §4.3 TODO
         //     on `HealthEcgRsp` / `PpgDataRspCmd`.

@@ -174,7 +174,7 @@ void main() {
       //
       // The fix is in WatchManager: it gates the call on
       // `_hrNotifyDataTypes.contains(dataType)` (HR-class ids
-      // observed on H59MA: 0x05, 0x06) so a mis-classified frame
+      // observed on H59MA: 0x05, 0x06, 0x12) so a mis-classified frame
       // updates _observedUnknownNotifyTypes instead of
       // lastHeartRate. The parser itself stays permissive so a
       // future OEM dataType doesn't silently break HR.
