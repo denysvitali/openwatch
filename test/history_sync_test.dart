@@ -324,7 +324,7 @@ void main() {
       },
     );
 
-    test('readHeartRate 0x15 drops future slots for today', () async {
+    test('readHeartRate 0x15 rejects today record with future slots', () async {
       final now = DateTime(2026, 6, 23, 9);
       final t = _StubTransport();
       final d = ChannelADispatcher(t);
@@ -357,15 +357,17 @@ void main() {
 
       await Future<void>.delayed(const Duration(milliseconds: 150));
 
-      expect(sync.hr.map((s) => s.bpm), contains(80));
+      await syncFuture;
+
+      expect(sync.hr.map((s) => s.bpm), isNot(contains(80)));
       expect(sync.hr.map((s) => s.bpm), isNot(contains(120)));
       expect(
         sync.hr.any((s) => s.timestamp.isAfter(now)),
         isFalse,
         reason: 'future fixed slots are invalid data, not UI-only data',
       );
+      expect(sync.lastSyncError, contains('Watch clock mismatch'));
 
-      await syncFuture;
       sync.dispose();
       d.dispose();
     });

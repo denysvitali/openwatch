@@ -879,6 +879,7 @@ class HistorySync extends ChangeNotifier {
       final dayStart = resolvedDay.midnight;
       final now = _clock();
       final samples = <HrSample>[];
+      DateTime? firstFutureSlot;
       // 288 × 5-min slots = 24h; bound the slot index so any trailing
       // padding bytes from the firmware cannot create samples past
       // 23:55 on the target day.
@@ -887,11 +888,24 @@ class HistorySync extends ChangeNotifier {
         if (bpm == 0xff || bpm == 0x00) continue;
         if (bpm < 30 || bpm > 240) continue;
         final timestamp = dayStart.add(Duration(minutes: (i - 4) * 5));
-        if (timestamp.isAfter(now)) continue;
+        if (timestamp.isAfter(now)) {
+          firstFutureSlot ??= timestamp;
+          continue;
+        }
         samples.add(HrSample(timestamp, bpm));
       }
       _hrChunks.clear();
       _hrExpectedChunks = null;
+      if (firstFutureSlot != null) {
+        throw StateError(
+          _clockMismatchMessage(
+            'heart-rate',
+            resolvedDay,
+            firstFutureSlot,
+            now,
+          ),
+        );
+      }
       final previous = _days[resolvedDay] ?? DailyHistory(day: resolvedDay);
       final mergedByTs = <int, HrSample>{
         for (final h in previous.hr)
@@ -977,16 +991,46 @@ class HistorySync extends ChangeNotifier {
     if (raw.length < 2) return const [];
     final samples = <HealthMetricSample>[];
     final now = _clock();
+    DateTime? firstFutureSlot;
     final sampleBytes = raw.skip(1).take(48).toList();
     for (var i = 0; i < sampleBytes.length; i++) {
       final value = sampleBytes[i] & 0xff;
       if (value == 0 || value == 0xff) continue;
       final timestamp = day.midnight.add(Duration(minutes: i * 30));
-      if (timestamp.isAfter(now)) continue;
+      if (timestamp.isAfter(now)) {
+        firstFutureSlot ??= timestamp;
+        continue;
+      }
       samples.add(HealthMetricSample(timestamp, value));
+    }
+    if (firstFutureSlot != null) {
+      lastSyncError = _clockMismatchMessage(
+        'fixed-slot metric',
+        day,
+        firstFutureSlot,
+        now,
+      );
+      AppLog.instance.warn('history', lastSyncError!);
+      notifyListeners();
+      return const [];
     }
     return samples;
   }
+
+  String _clockMismatchMessage(
+    String metric,
+    DateOnly day,
+    DateTime futureSlot,
+    DateTime now,
+  ) {
+    return 'Watch clock mismatch: $metric history for ${day.iso} included '
+        '${_formatClock(futureSlot)}, after phone time ${_formatClock(now)}. '
+        'Sync watch time, then sync history again.';
+  }
+
+  static String _formatClock(DateTime time) =>
+      '${time.hour.toString().padLeft(2, '0')}:'
+      '${time.minute.toString().padLeft(2, '0')}';
 
   List<HealthMetricSample> _mergeScalar(
     List<HealthMetricSample> existing,
