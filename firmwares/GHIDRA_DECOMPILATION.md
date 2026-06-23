@@ -42,8 +42,9 @@ Key data labels added in the same pass: `channel_a_command_queue_state`
 `health_metric_clamp_constants` (`0x0084630c`).
 
 Second pass on the same date expanded Channel-B/OTA/storage coverage. Later
-correction/sensor, boot/BLE, and protocol-adjacent helper passes brought the
-saved Ghidra project to 196 named functions and 976 remaining auto-named
+correction/sensor, boot/BLE, protocol-adjacent helper, runtime, FEE7 switch,
+GPIO/sensor-bus, and persistent-history passes brought the saved Ghidra project
+to 1,205 function entries: 268 named functions and 937 remaining auto-named
 `FUN_`/`thunk_FUN_` entries. New high-confidence names:
 
 | Address | New name | Role |
@@ -147,6 +148,44 @@ Seventh pass added FEE7 vendor-service names:
 | `0x0082be90` / `0x0082bee6` | `fee7_store_pending_u32_60` / `fee7_read_pending_u32_61` | Vendor status/pending 32-bit value pair. |
 | `0x0082bf40` | `fee7_send_today_sport_totals` | Opcode `0x48`; sends current step/distance/calorie-style counters plus two state bytes. |
 | `0x0082c50e` / `0x0082c550` / `0x0082c5b8` | `fee7_send_fixed_capability_3c` / `fee7_handle_lipids_flag_3e` / `fee7_handle_test_request_51` | Fixed capability, lipids flag, and vendor alert/test request handlers. |
+
+Eighth pass added runtime, RTC/settings, sensor-bus, FEE7 switch-table, and
+persistent-history names:
+
+| Address | New name | Role |
+|---|---|---|
+| `0x0083dfba` / `0x0083dfd6` | `__aeabi_uidivmod` / `__aeabi_idivmod` | ARM EABI integer divmod helpers; callers use `r0` quotient and `r1` remainder. |
+| `0x0083df8c` / `0x0083dfa4` | `strcat_simple` / `read_u32_le_unaligned` | Small libc-style string append and unaligned little-endian u32 load helpers. |
+| `0x0083deb0` / `0x008267cc` | `prng_seed` / `prng_next31` | 0x37-word additive PRNG ring seed and next-value helper. |
+| `0x00827948` / `0x00827956` | `rtc_set_epoch_seconds` / `rtc_get_epoch_seconds` | RTC epoch setter/getter used by Channel-A time sync and daily-history indexing. |
+| `0x00828176` / `0x00828390` / `0x0082840e` / `0x0082841e` | `calendar_fields_to_day_index` / `calendar_fields_to_epoch_seconds` / `rtc_get_day_index` / `rtc_get_minute_of_day` | Calendar conversion and current day/minute helpers. |
+| `0x008276ac` / `0x008276b6` / `0x008276d2` | `settings_time_is_initialized` / `settings_mark_time_initialized` / `settings_store_time_extra_field` | Time-initialisation latch and request-byte-7 side field in settings blob1. |
+| `0x00827720`..`0x00827756` | `settings_get_target_*`, `settings_store_target_triplet`, `settings_store_target_pair` | Daily target getters/setters used by FEE7 `0x21`. |
+| `0x008381a2` / `0x008381c0` / `0x00838fae` | `gpio_set_pin_mux_byte` / `gpio_configure_pin` / `gpio_index_to_bitmask` | GPIO mux/config helpers used by button/DLPS and factory-test paths. |
+| `0x00829c50` | `timer_stop_and_delete` | Shared timer teardown helper: stop then delete if a timer handle exists. |
+| `0x00828af4` | `health_sensor_session_is_active` | Busy gate shared by camera/control, time sync, and health paths. |
+| `0x0083361c` / `0x008336e8` | `sensor_bus_write_payload` / `sensor_bus_read_payload` | Low-level mutex callers for the sensor/peripheral command bus. |
+| `0x00831f18`..`0x008320aa`, `0x0083712e` / `0x00837166` | `sensor_bus_*_reg_0x19/0x1f/0x20/0x33` | Opcode-specific sensor/peripheral bus wrappers for motor, accelerometer, and factory paths. |
+| `0x00831b0c`..`0x00831d58` | `sport_state_get_*`, `sport_state_set_*_flag` | Current sport/session state getters and target-reached flag setters. |
+| `0x0082c4d4`..`0x0082bfd8` | `fee7_handle_*_02/03/04/0a/0c/10/16/19/21`, `bp_history_prepare_recent_days`, `bp_history_send_next_chunks` | Low-range FEE7 switch handlers for camera, battery, bind, settings, BP history, short alert, HR setting, degree unit, and target setting. |
+| `0x00827ba4`..`0x00827d1a` | `fee7_noop_97`, `fee7_set_session_mode*_ack_*`, `fee7_send_session_mode_status_9b`, `fee7_stop_factory_test_9c`, `fee7_send_model_name_9e`, `fee7_send_status_frame_a0` | High-range FEE7 `0x97..0xa0` switch handlers. |
+| `0x00827ba6` / `0x00827bb8` / `0x00827dba` / `0x008280da` | `fee7_set_session_mode_and_commit` / `fee7_set_session_mode_ack_98_9a` / `factory_test_poll_timer_cb` / `factory_test_restart_reset_timer` | Shared high-range FEE7 session/factory-test state helpers. |
+| `0x008296e8` / `0x008295c6` / `0x00829582` / `0x00829778` | `history_ring_find_or_allocate_slot` / `history_ring_upsert_record_body` / `history_ring_format_table` / `history_ring_erase_preserve_unit` | Persistent-history ring allocation, body upsert, table format, and erase/preserve helpers. |
+
+New data aliases from this pass: `fee7_low_switch_default_index`
+(`0x0082c61c`), `fee7_low_switch8_table` (`0x0082c61d`),
+`fee7_high_switch_default_index` (`0x0082c6e0`),
+`fee7_high_switch8_table` (`0x0082c6e1`),
+`PTR_fee7_test_state_plus2` (`0x00827e88`), `factory_test_state_ptr`
+(`0x00828108`), and the persistent-history descriptors
+`history_desc_hourly_detail_24x12` (`0x00845a44`),
+`history_desc_sleep_summary_100b` (`0x00845a50`),
+`history_desc_sleep_nap_100b` (`0x00845a5c`),
+`history_desc_activity_daily_24x2` (`0x00845a98`),
+`history_desc_heart_rate_5min` (`0x00845aac`),
+`history_desc_bp_hourly` (`0x00845ae4`),
+`history_desc_pressure_30min` (`0x00845af0`), and
+`history_desc_hrv_30min` (`0x00845afc`).
 
 ---
 
@@ -1211,13 +1250,14 @@ like "+2" in decompiled pointer arithmetic, but handlers receive the copied
 
 ### Common response path
 
-Most handlers build a 16-byte response buffer, compute an additive checksum with `FUN_0082b0c4`, and send it via `FUN_0082ebdc`:
+Most handlers build a 16-byte response buffer, compute an additive checksum
+with `checksum8_additive`, and send it via `channel_a_queue_notify_frame`:
 
 | Address | Function | Role |
 |---|---|---|
-| `0x0082b0c4` | `FUN_0082b0c4` | Additive byte checksum (sum of first 15 bytes → byte 15) |
-| `0x0082ebdc` | `FUN_0082ebdc` | Queue 16-byte response into Channel A notify ring |
-| `0x0082b938` | `FUN_0082b938` | Send a long response fragmented into 14-byte chunks |
+| `0x0082b0c4` | `checksum8_additive` | Additive byte checksum (sum of first 15 bytes → byte 15) |
+| `0x0082ebdc` | `channel_a_queue_notify_frame` | Queue 16-byte response into Channel A notify ring |
+| `0x0082b938` | `channel_a_send_fragmented_response` | Send a long response fragmented into 14-byte chunks |
 | `0x0082c988` | `FUN_0082c988` | Stream large data for opcodes `0x37`, `0x39`, `0x7a` |
 
 `FUN_0082b986(opcode, isNotify)` sends a simple 1-byte opcode response (with `0x80` flag for notify-only opcodes).
@@ -1956,27 +1996,27 @@ the 16-byte request, passed through the caller's saved register slots
 #### Behavior
 
 * If `presence == 0` (stop path):
-  * mode `'#'` → `FUN_00831fde(pattern_id, duration)` — stop pulse-pattern
-  * mode `'D'` → `FUN_00832044(pattern_id, duration)` — stop duration-pattern
+  * mode `'#'` → `sensor_bus_write_reg_0x1f(pattern_id, duration)` — stop pulse-pattern
+  * mode `'D'` → `sensor_bus_write_reg_0x19_b(pattern_id, duration)` — stop duration-pattern
   * No response frame is sent.
 * If `presence != 0` (play path, `length = min(duration, 6)`):
-  * mode `'#'` → `FUN_00831faa(pattern_id | 0x80, &pattern, length)` — play pulse-pattern
-  * mode `'D'` → `FUN_00832010(pattern_id | 0x80, &pattern, length)` — play duration-pattern
+  * mode `'#'` → `sensor_bus_read_reg_0x1f(pattern_id | 0x80, &pattern, length)` — play pulse-pattern
+  * mode `'D'` → `sensor_bus_read_reg_0x19_b(pattern_id | 0x80, &pattern, length)` — play duration-pattern
   * In both cases, the response is a **fragmented** `0xC7` frame sent
-    via `FUN_0082b938(0xC7, &pattern, length)`. The fragmentation
+    via `channel_a_send_fragmented_response(0xC7, &pattern, length)`. The fragmentation
     helper packs at most 14 payload bytes per 16-byte notify frame
     with additive checksum.
 
-#### `FUN_0082b938` (fragmented response)
+#### `channel_a_send_fragmented_response` (fragmented response)
 
 ```c
-void FUN_0082b938(byte cmd, int payload, uint length) {
+void channel_a_send_fragmented_response(byte cmd, int payload, uint length) {
   do {
     chunk = min(length, 0xe);     // 14 payload bytes per frame
     frame[0] = cmd;
     memcpy(&frame[1], payload, chunk);
-    frame[15] = FUN_0082b0c4(frame, 0xf);   // additive checksum
-    FUN_0082ebdc(frame);
+    frame[15] = checksum8_additive(frame, 0xf);
+    channel_a_queue_notify_frame(frame);
     payload += chunk;
     length  -= chunk;
   } while (length != 0);
@@ -1987,23 +2027,24 @@ The fragmenter is shared with `0x18 displayClock`, `0xc1 0xFEE7 long`
 and any handler that needs to send a >14-byte response (e.g. the
 `0x40..0x42` file-list responses and the `0x27/0x3e` sleep records).
 
-#### `FUN_00831faa` (mode `#` play, returns success bool)
+#### `sensor_bus_read_reg_0x1f` (mode `#` play, returns success bool)
 
 ```c
-uint FUN_00831faa(id, payload, length) {
+uint sensor_bus_read_reg_0x1f(id, payload, length) {
   if (func_0x000133f4(*DAT_0083230c, 100) == 0) return 0;  // mutex acquire
-  ok = (FUN_008336e8(0x1f, id, payload, length) == 0);     // 0x1F = "play pattern" motor cmd
+  ok = (sensor_bus_read_payload(0x1f, id, payload, length) == 0);
   func_0x0001341c(*DAT_0083230c);                          // mutex release
   return ok;
 }
 ```
 
-The `0x1F` value pushed to `FUN_008336e8` is the motor-driver
-sub-command for "play pattern"; `0x20` is its "stop" counterpart used
-by the no-presence path. The `*DAT_0083230c` mutex pointer is the same
-serialising lock used by all motor-handler routines (`FUN_00831fde`,
-`FUN_00832010`, `FUN_00832044`), so two patterns cannot be active at
-once.
+The `0x1f`, `0x19`, and `0x20` selector values are sensor/peripheral-bus
+commands used here by the motor-pattern code. The helper names describe the
+bus primitive Ghidra sees; in this handler the user-visible semantics are still
+"play" or "stop" a motor pattern. The `*DAT_0083230c` mutex pointer is the same
+serialising lock used by all pattern routines (`sensor_bus_write_reg_0x1f`,
+`sensor_bus_read_reg_0x1f`, `sensor_bus_write_reg_0x19_b`,
+`sensor_bus_read_reg_0x19_b`), so two patterns cannot be active at once.
 
 ### 3.3 Opcode `0x72` push-message / Unicode notifier (`FUN_00829e92`)
 
@@ -4044,6 +4085,50 @@ Stable blob1 fields confirmed from Channel-A handlers:
 | `+0x294..+0x299` | Sedentary config | `[start_h,start_m,end_h,end_m,enable,duration]`; times are BCD on Channel A and stored as decoded bytes. |
 | `+0x29a..+0x2a6` | Menstruation config | Marker `0xca`, copied fields, and current-day-relative u16 values. |
 
+#### Persistent-history descriptor rings
+
+The history tables use 12-byte descriptors:
+
+```
+u32 flash_base
+u32 span_bytes
+u16 erase_unit_bytes
+u16 record_stride
+```
+
+`history_ring_find_record_by_key` scans existing slots by the u32 key at record
+offset `+0`; `history_ring_find_or_allocate_slot` finds the matching key or an
+empty `0xffffffff` slot, formatting the table if no free slot remains.
+`history_ring_upsert_record_body(desc, cursor, key, body_offset, src, len)`
+writes the key first and then writes the selected body range, preserving the
+surrounding 4 KiB sector when an existing record needs to be cleared.
+
+| Descriptor | Flash range | Stride | Slots | Key | Primary consumers |
+|---|---:|---:|---:|---|---|
+| `history_desc_hourly_detail_24x12` (`0x00845a44`) | `0x00874000..0x00875fff` | `0x200` | 16 | day index | Channel-A `0x43`, Channel-B `0x12` sleep detail. |
+| `history_desc_sleep_summary_100b` (`0x00845a50`) | `0x00876800..0x00876fff` | `0x80` | 16 | day index | Channel-B `0x11`, `0x27`. |
+| `history_desc_sleep_nap_100b` (`0x00845a5c`) | `0x00876000..0x008767ff` | `0x80` | 16 | `day \| 0x00bb0000` | Channel-B `0x27` nap path. |
+| `history_desc_activity_daily_24x2` (`0x00845a98`) | `0x00877000..0x00877fff` | `0x80` | 32 | day index | Channel-B `0x2a` activity summary. |
+| `history_desc_heart_rate_5min` (`0x00845aac`) | `0x00878000..0x00879fff` | `0x200` | 16 | `seconds / 86400` | Channel-A `0x15` HR history. |
+| `history_desc_bp_hourly` (`0x00845ae4`) | `0x0087a000..0x0087afff` | `0x80` | 32 | day index | Channel-A `0x0e` / `0x0d` BP chunks. |
+| `history_desc_pressure_30min` (`0x00845af0`) | `0x0087b000..0x0087bfff` | `0x100` | 16 | day index | Channel-A `0x37`. |
+| `history_desc_hrv_30min` (`0x00845afc`) | `0x0087c000..0x0087cfff` | `0x100` | 16 | day index | Channel-A `0x39`. |
+
+Record bodies are compact and fixed-width:
+
+| Descriptor | Body layout |
+|---|---|
+| `history_desc_hourly_detail_24x12` | key at `+0`, then 24 hourly slots x 12 bytes at `+4`. |
+| `history_desc_sleep_summary_100b` / `history_desc_sleep_nap_100b` | 100-byte payload copied from offset `0`, so the copied source includes the key/header. |
+| `history_desc_activity_daily_24x2` | key at `+0`, then 24 activity samples x 2 bytes at `+4`; Channel-B `0x2a` sends the 48-byte body. |
+| `history_desc_heart_rate_5min` | key at `+0`, then 288 5-minute HR samples at `+4`; out-of-range values outside `0x28..0xdc` are zeroed before the `0x15` response. |
+| `history_desc_bp_hourly` | key at `+0`, then 24 hourly 4-byte BP slots at `+4`; current reader emits the first byte of each slot in compact `0x0d` fragments. |
+| `history_desc_pressure_30min` / `history_desc_hrv_30min` | key at `+0`, then 48 half-hour one-byte samples at `+4`; responses send `[day_offset] + 48 samples` after the `0x1e050037` / `0x1e050039` header. |
+
+No SpO2 history descriptor was found in this cluster. Channel-A `0x2c` only
+reads/writes the SpO2 enable bit in blob1, while `spo2_current_value` reports
+the current live measurement value for stop/result frames.
+
 #### Channel-B `0x5a` TLV storage
 
 `channel_b_handle_device_info_config` subcmd `2` accepts
@@ -4082,8 +4167,8 @@ bootloader-side.
 | `0x0082a144` | `FUN_0082a144` | Button/DLPS init — sets up long-press, debounce, DLPS timers — see §6.1 |
 | `0x008275d8` | `FUN_008275d8` | System reset / re-initialize: stops sensors, resets BLE, restarts main task |
 | `0x0082a460` | `FUN_0082a460` | Delays via a 1000 ms timer (used in reboot paths) |
-| `0x008267cc` | `FUN_008267cc` | PRNG — linear-feedback style random generator |
-| `0x0082ebdc` | `FUN_0082ebdc` | Queue manager for Channel A notifications |
+| `0x0083deb0` / `0x008267cc` | `prng_seed` / `prng_next31` | 0x37-word additive PRNG ring seed and next-value helper. |
+| `0x0082ebdc` | `channel_a_queue_notify_frame` | Queue manager for Channel A notifications |
 | `0x0082eb8a` | `FUN_0082eb8a` | Kicks BLE notify transmission |
 
 ### 6.1 Button / DLPS init (`FUN_0082a144`)
@@ -4095,32 +4180,32 @@ power-state) wakeup logic.
 
 ```c
 void FUN_0082a144() {
-    FUN_008381a2(9, 0x5A);                                   // vendor write: reg 9 = 0x5A
-    FUN_008381c0(9, 1, 1, 0, 0, 0);                          // vendor write: reg 9 multi-arg
+    gpio_set_pin_mux_byte(9, 0x5A);                           // mux byte for pin/index 9
+    gpio_configure_pin(9, 1, 1, 0, 0, 0);                     // configure pin/index 9
     FUN_00838738(DAT_0082a330, 0x21000000, 1);               // vendor init: reg + mode + flag
     func_0x00013634(DAT_0082a320 + 4, long_press_cb,  1, 2000, 0, ...);  // 2-sec timer
     func_0x00013634(DAT_0082a320 + 8, debounce_cb,   1, 0x3c, 0, ...);  // 60-ms timer
     func_0x00013634(DAT_0082a320 + 0xC, dlps_allow_cb, 1, 500,  0, ...);  // 500-ms timer
     FUN_00838f68(&local_28);                                  // read vendor reg
-    local_28 = FUN_00838fae(9);
+    local_28 = gpio_index_to_bitmask(9);
     local_24 = 0; local_23 = 1; local_22 = 0; local_21 = 0;
     FUN_00838eb0(&local_28);                                  // vendor write: reg + 4 byte config
     local_18[0] = 0x1D;
     local_14 = 3;
     local_10 = 1;
     FUN_008380ac(local_18);                                   // GPIO config: 0x1D = ?
-    uVar1 = FUN_00838fae(9);   FUN_00838f9c(uVar1, 1);       // vendor reg 9 write: 1
-    uVar1 = FUN_00838fae(9);   FUN_00838f82(uVar1, 1);       // vendor reg 9 write: 1
-    FUN_00838fae(9);           FUN_00838f94();               // vendor reg 9 read-back
-    uVar1 = FUN_00838fae(9);   FUN_00838f9c(uVar1, 0);       // vendor reg 9 write: 0
+    uVar1 = gpio_index_to_bitmask(9);   FUN_00838f9c(uVar1, 1);
+    uVar1 = gpio_index_to_bitmask(9);   FUN_00838f82(uVar1, 1);
+    gpio_index_to_bitmask(9);           FUN_00838f94();       // read-back
+    uVar1 = gpio_index_to_bitmask(9);   FUN_00838f9c(uVar1, 0);
     FUN_00838294(9, 1, 0);                                   // vendor call: reg 9 with 2 args
 }
 ```
 
 The handler does three things:
 
-1. **Vendor register setup** — multiple `FUN_008381a2` /
-   `FUN_008381c0` / `FUN_00838738` / `FUN_00838eb0` /
+1. **GPIO/vendor register setup** — multiple `gpio_set_pin_mux_byte` /
+   `gpio_configure_pin` / `FUN_00838738` / `FUN_00838eb0` /
    `FUN_00838f9c` calls configure the button-interrupt
    controller's registers (the values are vendor-specific
    — the function names suggest this is the same vendor
@@ -4504,7 +4589,7 @@ and marks the Channel-B receive side busy.
 
 | Opcode(s) | Handler | Notes |
 |---|---|---|
-| `0x00..0x2a` | Low-range `switch8` at `0x82c61c` (39 cases + default) | Per-entry thunk — detailed below |
+| `0x00..0x2a` | Low-range `switch8` at `fee7_low_switch_default_index` / `fee7_low_switch8_table` | Per-entry thunk — detailed below |
 | `0x2b, 0x37, 0x38, 0x3a, 0x3b, 0x43 'C', 0x72, 0x77, 0x7a, 0x7d, 0x81, 0xa1, 0xc6, 0xc7, 0xff` | Deferred-command ring | `enqueue_deferred_command_frame` |
 | `0x36` | Heart-rate related read/set | `FUN_0082c112` — see §8.8 |
 | `0x39` | HRV setting/history path | `channel_a_handle_hrv_history` |
@@ -4525,7 +4610,7 @@ and marks the Channel-B receive side busy.
 | `0x94` | Set vendor test state `1` and restart 1000 ms timer | `fee7_start_test_mode_94` | see §8.19 |
 | `0x95` | Set vendor test state `3` and restart 1000 ms timer | `fee7_start_test_mode_95` | see §8.19 |
 | `0x96` | Sends `[0x96,0,0,0x96,…]`, sets vendor test state `4`, restarts timer | `fee7_start_test_mode_96` — see §8.4 |
-| `0x97..0xa0` | High-range `switch8` at `0x82c6e0` (10 cases + default) | Per-entry thunk — detailed below |
+| `0x97..0xa0` | High-range `switch8` at `fee7_high_switch_default_index` / `fee7_high_switch8_table` | Per-entry thunk — detailed below |
 | `0xbf` | Vendor memory write (host→watch, arbitrary addr, max 8 bytes) | `fee7_vendor_memory_write` | see §8.17 |
 | `0xc0` | Vendor memory read (watch→host, max 0x200 bytes fragmented) | `fee7_vendor_memory_read` | see §8.17 |
 | `0xc1` | Starts/queries one health/sensor mask through `health_post_start_measure_event` path and sends a 1-byte fragmented response | inline |
@@ -4608,7 +4693,7 @@ Both tables use the shared `__ARM_common_switch8` helper at
 `target = (return_address + 2 * offset) & ~1`. Offsets are
 **unsigned**.
 
-##### Low-range table (`0x82c61c`) — opcodes `0x00..0x2a`
+##### Low-range table (`fee7_low_switch_default_index`, `0x82c61c`) — opcodes `0x00..0x2a`
 
 Count byte at `0x82c61c` is `0x27` (39 cases); cases
 `0x27..0x2a` fall through to the default offset and are treated as
@@ -4617,31 +4702,31 @@ NAK.
 | Opcode | Target / action | Notes |
 |---|---|---|
 | `0x00` | Vendor NAK (`0x82c74e`) | |
-| `0x01` | Deferred (`0x82c662` → `FUN_0082be64`) | Channel-A `setTime` |
-| `0x02` | `FUN_0082c4d4` | Camera / motor-mode request |
-| `0x03` | `FUN_0082bc7e` | Battery response |
-| `0x04` | `FUN_0082c432` | ANCS bind |
+| `0x01` | Deferred (`0x82c662` → `enqueue_deferred_command_frame`) | Channel-A `setTime` |
+| `0x02` | `fee7_handle_camera_control_02` | Camera/control request; ignored while a health sensor session is active. |
+| `0x03` | `fee7_send_battery_status_03` | Battery/status frame plus health-busy bit. |
+| `0x04` | `fee7_handle_bind_ancs_04` | Bind/ANCS-style state update. |
 | `0x05` | Vendor NAK | |
 | `0x06` | Deferred | Channel-A `dnd` |
 | `0x07`–`0x09` | Vendor NAK | |
-| `0x0a` | `FUN_0082b9c6` | Time-format read/set |
+| `0x0a` | `fee7_handle_time_format_0a` | Time/unit-format read/set. |
 | `0x0b` | Vendor NAK | |
-| `0x0c` | `FUN_0082c0de` | BP setting |
-| `0x0d` | `FUN_00834252` + `FUN_0082c0a4` | Read BP records |
+| `0x0c` | `fee7_handle_bp_setting_0c` | BP setting read/write. |
+| `0x0d` | `bp_history_prepare_recent_days` + `bp_history_send_next_chunks` | Read BP records. |
 | `0x0e` | Deferred | Channel-A `bpReadConform` |
 | `0x0f` | Vendor NAK | |
-| `0x10` | `FUN_0082b9a8` | Vibration / display trigger |
+| `0x10` | `fee7_handle_short_alert_10` | Starts short alert pattern and ACKs `0x10`. |
 | `0x11`–`0x13` | Vendor NAK | |
 | `0x14` | Early return (`0x82c752`) | No-op |
 | `0x15` | Deferred | Channel-A `readHeartRate` |
-| `0x16` | `FUN_0082c164` | Heart-rate setting |
+| `0x16` | `fee7_handle_heart_rate_setting_16` | Heart-rate setting read/write. |
 | `0x17` | Vendor NAK | |
 | `0x18` | Deferred | Channel-A `realTimeHeartRate` |
-| `0x19` | `FUN_0082c484` | Degree (°C/°F) switch |
+| `0x19` | `fee7_handle_degree_unit_19` | Degree (C/F) switch read/write. |
 | `0x1a`–`0x1d` | Vendor NAK | |
 | `0x1e` | Deferred | |
 | `0x1f`–`0x20` | Vendor NAK | |
-| `0x21` | `FUN_0082bfd8` | Daily target setting |
+| `0x21` | `fee7_handle_target_setting_21` | Daily target setting; also refreshes current target-reached flags. |
 | `0x22`–`0x24` | Vendor NAK | |
 | `0x25`–`0x26` | Deferred | |
 | `0x27`–`0x2a` | Default → Vendor NAK | |
@@ -4650,23 +4735,23 @@ The "deferred" entries in this range are the same opcodes handled
 by the Channel-A deferred path (`FUN_0082be64`), so the FEE7
 service can also be used to trigger them.
 
-##### High-range table (`0x82c6e0`) — opcodes `0x97..0xa0`
+##### High-range table (`fee7_high_switch_default_index`, `0x82c6e0`) — opcodes `0x97..0xa0`
 
 Count byte at `0x82c6e0` is `0x0a` (10 cases); the default slot
 also points to the vendor-NAK path.
 
 | Opcode | Handler | Notes |
 |---|---|---|
-| `0x97` | `FUN_00827ba4` | No-op |
-| `0x98` | `FUN_00827be6` | Sets `DAT_00827e8c[4] = 1`, sends `[0x98]` |
-| `0x99` | `FUN_00827bea` | No-op |
-| `0x9a` | `FUN_00827bec` | Sets `DAT_00827e8c[4] = 2`, sends `[0x9a]` |
-| `0x9b` | `FUN_00827bf0` | Sends `[0x9b, state_byte]` where state byte is `0x77` if `DAT_00827e8c[4] != 2`, else `0x88` |
-| `0x9c` | `FUN_00827c1e` | Sends `[0x9c,0,0,0x9c]`, stops a timer and powers off related subsystems |
+| `0x97` | `fee7_noop_97` | No response. |
+| `0x98` | `fee7_set_session_mode1_ack_98` | Sets session mode `1` via `fee7_set_session_mode_ack_98_9a`, commits blob0 if changed, sends `[0x98]`. |
+| `0x99` | `fee7_noop_99` | No response. |
+| `0x9a` | `fee7_set_session_mode2_ack_9a` | Sets session mode `2`, commits blob0 if changed, sends `[0x9a]`. |
+| `0x9b` | `fee7_send_session_mode_status_9b` | Sends `[0x9b, state_byte]`; `state_byte` is `0x88` in mode `2`, otherwise `0x77`. |
+| `0x9c` | `fee7_stop_factory_test_9c` | Sends `[0x9c,0,0,0x9c]`, stops factory-test timer, clears related state, and calls the `0x08` cancel path. |
 | `0x9d` | Default → Vendor NAK | |
-| `0x9e` | `FUN_00827cc8` | Conditional 10-byte copy from `DAT_00827e8c + 0x7a` or the literal `"H59MA_V1.0"` |
-| `0x9f` | `FUN_00827b16` | No-op |
-| `0xa0` | `FUN_00827d1a` | Multi-byte status frame built from `FUN_008289bc`, `FUN_00828fae`, `FUN_00832bd2`, `FUN_00837b90`/`FUN_008289a2`, and fields from `DAT_00827e8c` |
+| `0x9e` | `fee7_send_model_name_9e` | Sends custom blob0 string at `DAT_00827e8c + 0x7a` when enabled, otherwise literal `"H59MA_V1.0"`. |
+| `0x9f` | `fee7_noop_9f` | No response. |
+| `0xa0` | `fee7_send_status_frame_a0` | Multi-byte status frame built from battery/sensor/session state and fields from `DAT_00827e8c`. |
 
 A host should treat both ranges as *reserved* unless it can match
 a specific response shape from the watch.
@@ -4695,7 +4780,10 @@ If `opcode` is not `'C'` (`0x43`) or `'H'` (`0x48`) the firmware first runs
 `fee7_abort_active_ota_before_vendor_cmd`, which aborts active Channel-B OTA
 state `2`/`3` before dispatching the vendor opcode.
 
-Responses are built with `FUN_0082b0c4` (additive checksum) and queued through `FUN_0082ebdc` / `FUN_0082eb8a` into the same 16-byte notify ring used by Channel A. Many commands are simply copied into a deferred command ring (`FUN_0082be64`) and processed later.
+Responses are built with `checksum8_additive` and queued through
+`channel_a_queue_notify_frame` / `FUN_0082eb8a` into the same 16-byte notify
+ring used by Channel A. Many commands are simply copied into the deferred
+command ring (`enqueue_deferred_command_frame`) and processed later.
 
 ### Opcode → handler map (from `FUN_0082c944`)
 
@@ -4704,17 +4792,17 @@ entries decoded from the two `switch8` tables:
 
 | Opcode | Handler | Notes |
 |---|---|---|
-| `0x02` | `FUN_0082c4d4` | Camera / motor-mode request |
-| `0x03` | `FUN_0082bc7e` | Battery response (`[0x03, percent, charging]`) |
-| `0x04` | `FUN_0082c432` | ANCS bind |
-| `0x0a` | `FUN_0082b9c6` | Time-format read/set |
-| `0x0c` | `FUN_0082c0de` | BP setting |
-| `0x0d` | `FUN_00834252` + `FUN_0082c0a4` | Read BP records |
-| `0x10` | `FUN_0082b9a8` | Vibration / display trigger |
+| `0x02` | `fee7_handle_camera_control_02` | Camera/control request |
+| `0x03` | `fee7_send_battery_status_03` | Battery response (`[0x03, percent, charging]`) |
+| `0x04` | `fee7_handle_bind_ancs_04` | ANCS bind |
+| `0x0a` | `fee7_handle_time_format_0a` | Time-format read/set |
+| `0x0c` | `fee7_handle_bp_setting_0c` | BP setting |
+| `0x0d` | `bp_history_prepare_recent_days` + `bp_history_send_next_chunks` | Read BP records |
+| `0x10` | `fee7_handle_short_alert_10` | Vibration / display trigger |
 | `0x14` | — | Explicit no-op (early `pop {r4,pc}`) |
-| `0x16` | `FUN_0082c164` | Heart-rate setting |
-| `0x19` | `FUN_0082c484` | Degree (°C/°F) switch |
-| `0x21` | `FUN_0082bfd8` | Daily target setting |
+| `0x16` | `fee7_handle_heart_rate_setting_16` | Heart-rate setting |
+| `0x19` | `fee7_handle_degree_unit_19` | Degree (C/F) switch |
+| `0x21` | `fee7_handle_target_setting_21` | Daily target setting |
 | `0x36` | `FUN_0082c112` | Heart-rate related read/set — see §8.8 |
 | `0x3c` | `fee7_send_fixed_capability_3c` | Returns fixed capability block `[0x3c,0,0x40,0xa0,0x20,...]` — see §8.12 |
 | `0x3e` | `fee7_handle_lipids_flag_3e` | Lipids read/set (bit 7 of shared config byte) — see §8.15 |
@@ -4732,16 +4820,16 @@ entries decoded from the two `switch8` tables:
 | `0x94` | `fee7_start_test_mode_94` | Set vendor test state 1 and restart timer — see §8.19 |
 | `0x95` | `fee7_start_test_mode_95` | Set vendor test state 3 and restart timer — see §8.19 |
 | `0x96` | `fee7_start_test_mode_96` | Sends `[0x96,0,0,0x96,...]`, sets state 4, restarts timer — see §8.4 |
-| `0x97` | `FUN_00827ba4` | No-op |
-| `0x98` | `FUN_00827be6` | Sets state to `1`, sends `[0x98]` |
-| `0x99` | `FUN_00827bea` | No-op |
-| `0x9a` | `FUN_00827bec` | Sets state to `2`, sends `[0x9a]` |
-| `0x9b` | `FUN_00827bf0` | Sends `[0x9b, state_byte]` |
-| `0x9c` | `FUN_00827c1e` | Sends `[0x9c,0,0,0x9c]`, stops timer / power-off related |
+| `0x97` | `fee7_noop_97` | No response |
+| `0x98` | `fee7_set_session_mode1_ack_98` | Sets state to `1`, sends `[0x98]` |
+| `0x99` | `fee7_noop_99` | No response |
+| `0x9a` | `fee7_set_session_mode2_ack_9a` | Sets state to `2`, sends `[0x9a]` |
+| `0x9b` | `fee7_send_session_mode_status_9b` | Sends `[0x9b, state_byte]` |
+| `0x9c` | `fee7_stop_factory_test_9c` | Sends `[0x9c,0,0,0x9c]`, stops timer / power-off related |
 | `0x9d` | — | Vendor NAK (default slot) |
-| `0x9e` | `FUN_00827cc8` | Conditional 10-byte copy from `DAT_00827e8c + 0x7a` |
-| `0x9f` | `FUN_00827b16` | No-op |
-| `0xa0` | `FUN_00827d1a` | Multi-byte status frame builder |
+| `0x9e` | `fee7_send_model_name_9e` | Conditional 10-byte copy from `DAT_00827e8c + 0x7a` or `"H59MA_V1.0"` |
+| `0x9f` | `fee7_noop_9f` | No response |
+| `0xa0` | `fee7_send_status_frame_a0` | Multi-byte status frame builder |
 | `0xbf` | `fee7_vendor_memory_write` | Vendor memory write, arbitrary address, max 8 bytes — see §8.17 |
 | `0xc0` | `fee7_vendor_memory_read` | Vendor memory read, arbitrary address, max 0x200 bytes — see §8.17 |
 | `0xc1` | inline health/sensor response | Starts/queries one health/sensor mask and sends a 1-byte fragmented response |
@@ -4756,12 +4844,12 @@ entries decoded from the two `switch8` tables:
 
 Opcodes `0x2b`, `0x37`, `0x38`, `0x3a`, `0x3b`, `0x43`, `0x72`,
 `0x77`, `0x7a`, `0x7d`, `0x81`, `0xa1`, `0xc6`, `0xc7`, `0xff`
-are routed to `FUN_0082be64` (deferred). Within the `0x00`–`0x2a`
+are routed to `enqueue_deferred_command_frame` (deferred). Within the `0x00`–`0x2a`
 `switch8` range, only `0x01`, `0x06`, `0x0e`, `0x15`, `0x18`,
 `0x1e`, `0x25`, `0x26` are deferred; the rest are either immediate
 thunks, the explicit no-op at `0x14`, or vendor NAK. Opcodes
 `0x7b`, `0xb0`, `0xc2`, `0xcc`, `0xf0`, `0xf1` are explicit no-ops.
-Unrecognized opcodes fall through to `FUN_0082bcba`.
+Unrecognized opcodes fall through to `fee7_send_vendor_nak`.
 
 ### Take-away
 
@@ -5681,8 +5769,8 @@ config writers and vendor-specific self-test loops.
 | `0x01` | `FUN_008336e8(local_1c, cVar2, &local_28, local_18)` — write 10-byte config chunk | `FUN_008336e8` |
 | `0x02` | `FUN_0083361c(local_1c, cVar2, &local_28, local_18)` — read 10-byte config chunk | `FUN_0083361c` |
 | `' '` (0x20) | **Hardware self-test loop** (see below) | `FUN_00838bc0` + 9×`(*puVar3)()` + `FUN_00833400` |
-| `'!'` (0x21) | **Bit-test** — `local_28 = ((*(uint*)(DAT_0082bfc8 + 0x10) & FUN_00838fae(local_1c)) != 0); local_18 = 1` | `FUN_00838fae` |
-| `'"'` (0x22) | `FUN_008381a2(local_1c, 0x5A); FUN_008381c0(local_1c, 0, 1, cVar2 == 0)` | `FUN_008381a2` + `FUN_008381c0` |
+| `'!'` (0x21) | **Bit-test** — `local_28 = ((*(uint*)(DAT_0082bfc8 + 0x10) & gpio_index_to_bitmask(local_1c)) != 0); local_18 = 1` | `gpio_index_to_bitmask` |
+| `'"'` (0x22) | `gpio_set_pin_mux_byte(local_1c, 0x5A); gpio_configure_pin(local_1c, 0, 1, cVar2 == 0)` | GPIO mux/config helpers |
 | other | falls through to response copy only | — |
 
 #### `' '` (0x20) hardware self-test
@@ -5691,14 +5779,14 @@ config writers and vendor-specific self-test loops.
 FUN_00838bc0(DAT_0082bfc0);              // reset vendor test context
 puVar3 = DAT_0082bfc4;                  // function pointer table
 for (i = 0; i < 9; i++) {
-    FUN_008381c0(0x14, 0, 1);          // vendor write 1
+    gpio_configure_pin(0x14, 0, 1);    // vendor write 1
     (*puVar3)(1);                        // call test routine
-    FUN_008381c0(0x14, 0, 1);          // vendor write 1 again
+    gpio_configure_pin(0x14, 0, 1);    // vendor write 1 again
     (*puVar3)(1);                        // call test routine
 }
-FUN_008381c0(0x15, 0, 1);              // vendor write 2
+gpio_configure_pin(0x15, 0, 1);        // vendor write 2
 (*puVar3)(1);                            // call test routine
-FUN_008381c0(0x15, 0, 1);              // vendor write 2 again
+gpio_configure_pin(0x15, 0, 1);        // vendor write 2 again
 (*puVar3)(1);                            // call test routine
 FUN_00833400();                          // finalise test
 ```
@@ -5730,35 +5818,29 @@ normal OpenWatch host should never send `' '`.
 #### `'!'` (0x21) bit-test
 
 ```c
-uVar5 = FUN_00838fae(local_1c);          // read a vendor status u32
+uVar5 = gpio_index_to_bitmask(local_1c);
 local_28 = ((*(uint*)(DAT_0082bfc8 + 0x10) & uVar5) != 0);
 local_18 = 1;
 ```
 
-A **mask + bit-test**: the handler reads a 4-byte vendor
-status register via `FUN_00838fae(local_1c)`, AND-masks it
-against the value stored at `DAT_0082bfc8 + 0x10`, and
-writes a single byte (`0x00` or `0x01`) into `local_28[0]`
-based on whether the masked result is non-zero. `local_18`
-is set to `1` so the response carries exactly one byte of
-result. The host supplies `local_1c` (the status index) and
-reads back a single boolean.
+A **mask + bit-test**: the handler maps the host-supplied index to a
+GPIO/peripheral bit mask via `gpio_index_to_bitmask(local_1c)`, AND-masks it
+against the value stored at `DAT_0082bfc8 + 0x10`, and writes a single byte
+(`0x00` or `0x01`) into `local_28[0]` based on whether the masked result is
+non-zero. `local_18` is set to `1` so the response carries exactly one byte of
+result.
 
 #### `'"'` (0x22) generic vendor write + check
 
 ```c
-FUN_008381a2(local_1c, 0x5A);            // vendor write with mode 0x5A
-FUN_008381c0(local_1c, 0, 1, cVar2 == 0); // vendor write with check
+gpio_set_pin_mux_byte(local_1c, 0x5A);
+gpio_configure_pin(local_1c, 0, 1, cVar2 == 0);
 ```
 
-Two vendor helper calls. `FUN_008381a2` writes the
-"diagnostic mode" value `0x5A` to the vendor register
-indexed by `local_1c`. `FUN_008381c0` then writes a
-"check" value (the second arg `0`, third arg `1`, fourth
-arg is `cVar2 == '\0'`) to the same register. The
-`cVar2 == '\0'` flag is the "fail-on-error" toggle: the
-host's `req[3]` selects whether the check is allowed to
-fail.
+Two GPIO helper calls. `gpio_set_pin_mux_byte` writes the diagnostic mux byte
+`0x5A` for the host-supplied index, then `gpio_configure_pin` applies the
+pin/config bits. The `cVar2 == '\0'` flag is the fail-on-error toggle: the
+host's `req[3]` selects whether the check is allowed to fail.
 
 #### Response layout
 
@@ -6079,8 +6161,9 @@ host-driven operation.
 | 0x14.. | `pattern[]` (u8 array) | up to 40 entries, each a `level` (0..5) |
 | 0x3C.. | `durations[]` (u8 array) | corresponding tick durations for each entry |
 
-The `FUN_0083dfd6(time, ticks)` helper adds `ticks` to the
-running RTC. The `FUN_008267cc()` helper reads the current RTC.
+The record is timestamped from the RTC path (`rtc_get_epoch_seconds`); the
+duration arithmetic uses the ARM EABI divmod helpers before the pattern table
+is committed.
 
 #### Why no response
 
