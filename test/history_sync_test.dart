@@ -324,57 +324,70 @@ void main() {
       },
     );
 
-    test('readHeartRate 0x15 rejects today record with future slots', () async {
-      final now = DateTime(2026, 6, 23, 9);
-      final t = _StubTransport();
-      final d = ChannelADispatcher(t);
-      d.bind();
-      final sync = _testSync(t, d, clock: () => now);
-      final syncFuture = sync.syncAll(daysBack: 1);
-      await Future<void>.delayed(const Duration(milliseconds: 20));
+    test(
+      'readHeartRate 0x15 soft-clips today record with future slots (HS-9)',
+      () async {
+        // The 0x01 setTime ACK is a fixed capability shape (§3.4), so the
+        // watch never echoes its RTC. The sync soft-clips samples whose
+        // inferred wall-clock is still in the future — no throw, no
+        // lastSyncError — and lets the next pass re-pull them once the
+        // watch's RTC catches up. See history_sync._flushHrChunks.
+        final now = DateTime(2026, 6, 23, 9);
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final sync = _testSync(t, d, clock: () => now);
+        final syncFuture = sync.syncAll(daysBack: 1);
+        await Future<void>.delayed(const Duration(milliseconds: 20));
 
-      // Header variant where pl[1] declares total chunks + 1. 24 means
-      // 23 data chunks, enough to carry the full 288-slot HR record.
-      t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x00, 0x18, 0x05]));
+        // Header variant where pl[1] declares total chunks + 1. 24 means
+        // 23 data chunks, enough to carry the full 288-slot HR record.
+        t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x00, 0x18, 0x05]));
 
-      final record = Uint8List(23 * 13);
-      record.fillRange(0, record.length, 0xff);
-      for (var i = 0; i < 4; i++) {
-        record[i] = 0;
-      }
-      record[4 + (8 * 12)] = 80; // 08:00, before now.
-      record[4 + (23 * 12 + 11)] = 120; // 23:55, impossible today.
+        final record = Uint8List(23 * 13);
+        record.fillRange(0, record.length, 0xff);
+        for (var i = 0; i < 4; i++) {
+          record[i] = 0;
+        }
+        record[4 + (8 * 12)] = 80; // 08:00 watch-time, before now → kept.
+        record[4 + (23 * 12 + 11)] =
+            120; // 23:55 watch-time, far future → dropped.
 
-      for (var chunk = 0; chunk < 23; chunk++) {
-        final start = chunk * 13;
-        t.inA.add(
-          Codec.buildChannelA(OpA.readHeartRate, [
-            chunk + 1,
-            ...record.sublist(start, start + 13),
-          ]),
-        );
-      }
+        for (var chunk = 0; chunk < 23; chunk++) {
+          final start = chunk * 13;
+          t.inA.add(
+            Codec.buildChannelA(OpA.readHeartRate, [
+              chunk + 1,
+              ...record.sublist(start, start + 13),
+            ]),
+          );
+        }
 
-      await Future<void>.delayed(const Duration(milliseconds: 150));
+        await Future<void>.delayed(const Duration(milliseconds: 150));
 
-      await syncFuture;
+        await syncFuture;
 
-      expect(sync.hr.map((s) => s.bpm), isNot(contains(80)));
-      expect(sync.hr.map((s) => s.bpm), isNot(contains(120)));
-      expect(
-        sync.hr.any((s) => s.timestamp.isAfter(now)),
-        isFalse,
-        reason: 'future fixed slots are invalid data, not UI-only data',
-      );
-      expect(sync.lastSyncError, contains('Watch clock mismatch'));
+        // Past samples survive, future ones are silently dropped.
+        expect(sync.hr.map((s) => s.bpm), contains(80));
+        expect(sync.hr.map((s) => s.bpm), isNot(contains(120)));
+        expect(sync.hr.any((s) => s.timestamp.isAfter(now)), isFalse);
+        // Critical: sync must not surface a hard "Watch clock mismatch"
+        // error any more — the user is repeatedly hitting this in the
+        // wild because the watch RTC drifts ~7 min ahead of phone.
+        expect(sync.lastSyncError, isNull);
 
-      sync.dispose();
-      d.dispose();
-    });
+        sync.dispose();
+        d.dispose();
+      },
+    );
 
     test(
-      'readHeartRate 0x15 ignores current trailing bucket without failing',
+      'readHeartRate 0x15 keeps trailing bucket whose offset-shift lands in the past',
       () async {
+        // A trailing slot whose raw timestamp would land slightly in the
+        // future gets pulled into the past by the inferred watch offset
+        // (lastValidIdx × 5 min ≈ watch-now). Sync must accept it
+        // instead of dropping it on the floor.
         final now = DateTime(2026, 6, 23, 17, 34, 13);
         final t = _StubTransport();
         final d = ChannelADispatcher(t);
@@ -391,7 +404,7 @@ void main() {
           record[i] = 0;
         }
         record[4 + (17 * 12 + 6)] = 80; // 17:30, completed slot.
-        record[4 + (17 * 12 + 7)] = 120; // 17:35, current trailing slot.
+        record[4 + (17 * 12 + 7)] = 120; // 17:35, the trailing bucket.
 
         for (var chunk = 0; chunk < 23; chunk++) {
           final start = chunk * 13;
@@ -406,8 +419,10 @@ void main() {
         await Future<void>.delayed(const Duration(milliseconds: 150));
         await syncFuture;
 
+        // The inferred offset pulls slot 211 (17:35 watch) into the past,
+        // so both samples land before "now" and are accepted.
         expect(sync.hr.map((s) => s.bpm), contains(80));
-        expect(sync.hr.map((s) => s.bpm), isNot(contains(120)));
+        expect(sync.hr.map((s) => s.bpm), contains(120));
         expect(sync.hr.any((s) => s.timestamp.isAfter(now)), isFalse);
         expect(sync.lastSyncError, isNull);
 

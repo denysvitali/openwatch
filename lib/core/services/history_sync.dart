@@ -880,8 +880,53 @@ class HistorySync extends ChangeNotifier {
       }
       final dayStart = resolvedDay.midnight;
       final now = _clock();
+
+      // Best-effort watch-vs-phone clock offset, derived from the
+      // record itself: find the highest slot index with a plausible
+      // BPM and assume it was sampled "just now" in the watch's clock.
+      // The watch never echoes its RTC over BLE (the `0x01` setTime ACK
+      // is a fixed capability shape per §3.4, not a time echo), so this
+      // is the only signal we have. When the gap is unreasonable
+      // (watch not worn → no recent sample, or the data is from a stale
+      // day) we fall back to a zero offset and keep the dayStart anchor.
+      var watchOffsetMinutes = 0;
+      var lastValidIdx = -1;
+      for (var j = rec.length - 1; j >= 4; j--) {
+        if (j - 4 >= 288) continue;
+        final bpm = rec[j];
+        if (bpm >= 30 && bpm <= 240) {
+          lastValidIdx = j - 4;
+          break;
+        }
+      }
+      if (lastValidIdx >= 0) {
+        final phoneMinOfDay = now.hour * 60 + now.minute;
+        final watchMinOfDay = lastValidIdx * 5;
+        var delta = watchMinOfDay - phoneMinOfDay;
+        // Normalise into [-12h, +12h] so a "23:55 watch, 00:05 phone"
+        // pair maps to -10 min rather than +1430 min.
+        if (delta > 12 * 60) delta -= 24 * 60;
+        if (delta < -12 * 60) delta += 24 * 60;
+        // Cap at 4 h — anything bigger means the watch probably wasn't
+        // being worn when the record was captured, and shifting by a
+        // half-day would silently mis-attribute every sample.
+        if (delta.abs() <= 4 * 60) {
+          watchOffsetMinutes = delta;
+        }
+      }
+      if (watchOffsetMinutes != 0) {
+        span?.setAttribute('sync.watch_offset_minutes', watchOffsetMinutes);
+        AppLog.instance.debug(
+          'history',
+          'watch clock offset inferred: '
+              '${watchOffsetMinutes >= 0 ? '+' : ''}$watchOffsetMinutes min '
+              '(last valid HR slot $lastValidIdx, '
+              'phone-now ${_formatClock(now)})',
+        );
+      }
+
       final samples = <HrSample>[];
-      DateTime? firstFutureSlot;
+      var droppedFuture = 0;
       // 288 × 5-min slots = 24h; bound the slot index so any trailing
       // padding bytes from the firmware cannot create samples past
       // 23:55 on the target day.
@@ -889,25 +934,36 @@ class HistorySync extends ChangeNotifier {
         final bpm = rec[i];
         if (bpm == 0xff || bpm == 0x00) continue;
         if (bpm < 30 || bpm > 240) continue;
-        final timestamp = dayStart.add(_hrSlotDuration * (i - 4));
+        // Watch stores samples at its own minute-of-day. Subtract the
+        // inferred drift so the timestamp lands on wall-clock at the
+        // moment the watch actually recorded the BPM (rather than on
+        // the watch's clock reading, which may have drifted ahead).
+        final slotTimestamp = dayStart.add(_hrSlotDuration * (i - 4));
+        final timestamp = slotTimestamp.subtract(
+          Duration(minutes: watchOffsetMinutes),
+        );
         if (timestamp.isAfter(now)) {
-          if (_futureSlotBeyondTolerance(timestamp, now, _hrSlotDuration)) {
-            firstFutureSlot ??= timestamp;
-          }
+          // Watch still has not caught up to phone clock at this slot.
+          // Silently drop — the watch will resync these on the next
+          // pass once its RTC catches up. We deliberately do NOT throw
+          // here: the watch's RTC legitimately drifts faster than the
+          // host's on cheap crystals, and aborting the entire sync
+          // because a handful of trailing samples cannot yet be
+          // attributed is the wrong call (HS-9).
+          droppedFuture++;
           continue;
         }
         samples.add(HrSample(timestamp, bpm));
       }
       _hrChunks.clear();
       _hrExpectedChunks = null;
-      if (firstFutureSlot != null) {
-        throw StateError(
-          _clockMismatchMessage(
-            'heart-rate',
-            resolvedDay,
-            firstFutureSlot,
-            now,
-          ),
+      if (droppedFuture > 0) {
+        span?.setAttribute('sync.hr_dropped_future', droppedFuture);
+        AppLog.instance.debug(
+          'history',
+          'dropped $droppedFuture HR slot(s) still in the watch\'s '
+              'future (offset=${watchOffsetMinutes}m, '
+              'lastValid=$lastValidIdx)',
         );
       }
       final previous = _days[resolvedDay] ?? DailyHistory(day: resolvedDay);
