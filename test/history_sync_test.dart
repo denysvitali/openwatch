@@ -51,6 +51,7 @@ HistorySync _testSync(
   _StubTransport t,
   ChannelADispatcher d, {
   ChannelBParser? bParser,
+  DateTime Function()? clock,
 }) {
   // Bind the Channel-B parser to the stub transport so test-injected
   // Channel-B frames are actually reassembled and dispatched.
@@ -63,6 +64,7 @@ HistorySync _testSync(
     drainDuration: const Duration(milliseconds: 50),
     postCommandDelay: Duration.zero,
     fragmentQuietWindow: const Duration(milliseconds: 50),
+    clock: clock,
   );
 }
 
@@ -95,7 +97,8 @@ void main() {
         final t = _StubTransport();
         final d = ChannelADispatcher(t);
         d.bind();
-        final sync = _testSync(t, d);
+        final now = DateTime(2026, 6, 23, 23, 59);
+        final sync = _testSync(t, d, clock: () => now);
         final future = sync.syncAll(daysBack: 2);
         await Future<void>.delayed(const Duration(milliseconds: 20));
         await future;
@@ -107,7 +110,7 @@ void main() {
         );
         // Activity summary fires on Channel-B (clamped to dayOffset ≤ 2).
         expect(t.sentB.map(Codec.rxChannelBCmd), contains(OpB.activitySummary));
-        final today = DateOnly.today();
+        final today = DateOnly.fromDateTime(now);
         expect(sync.fetchedDays, containsAll([today, today.addDays(-1)]));
         sync.dispose();
         d.dispose();
@@ -195,7 +198,8 @@ void main() {
         final t = _StubTransport();
         final d = ChannelADispatcher(t);
         d.bind();
-        final sync = _testSync(t, d);
+        final now = DateTime(2026, 6, 23, 23, 59);
+        final sync = _testSync(t, d, clock: () => now);
         final future = sync.syncAll(daysBack: 1);
         await Future<void>.delayed(const Duration(milliseconds: 20));
         // Some firmware builds push 0x46 unsolicited — the decoder
@@ -319,6 +323,52 @@ void main() {
         d.dispose();
       },
     );
+
+    test('readHeartRate 0x15 drops future slots for today', () async {
+      final now = DateTime(2026, 6, 23, 9);
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final sync = _testSync(t, d, clock: () => now);
+      final syncFuture = sync.syncAll(daysBack: 1);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      // Header variant where pl[1] declares total chunks + 1. 24 means
+      // 23 data chunks, enough to carry the full 288-slot HR record.
+      t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x00, 0x18, 0x05]));
+
+      final record = Uint8List(23 * 13);
+      record.fillRange(0, record.length, 0xff);
+      for (var i = 0; i < 4; i++) {
+        record[i] = 0;
+      }
+      record[4 + (8 * 12)] = 80; // 08:00, before now.
+      record[4 + (23 * 12 + 11)] = 120; // 23:55, impossible today.
+
+      for (var chunk = 0; chunk < 23; chunk++) {
+        final start = chunk * 13;
+        t.inA.add(
+          Codec.buildChannelA(OpA.readHeartRate, [
+            chunk + 1,
+            ...record.sublist(start, start + 13),
+          ]),
+        );
+      }
+
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+
+      expect(sync.hr.map((s) => s.bpm), contains(80));
+      expect(sync.hr.map((s) => s.bpm), isNot(contains(120)));
+      expect(
+        sync.hr.any((s) => s.timestamp.isAfter(now)),
+        isFalse,
+        reason: 'future fixed slots are invalid data, not UI-only data',
+      );
+
+      await syncFuture;
+      sync.dispose();
+      d.dispose();
+    });
 
     test('syncAll sends UTC day-start seconds for 0x15 HR history', () async {
       final t = _StubTransport();
@@ -784,7 +834,8 @@ void main() {
         final t = _StubTransport();
         final d = ChannelADispatcher(t);
         d.bind();
-        final sync = _testSync(t, d);
+        final now = DateTime(2026, 6, 23, 23, 59);
+        final sync = _testSync(t, d, clock: () => now);
 
         final samples = List<int>.filled(48, 0);
         samples[0] = 21;
@@ -804,7 +855,7 @@ void main() {
         }
         await Future<void>.delayed(const Duration(milliseconds: 80));
 
-        final today = DateOnly.today();
+        final today = DateOnly.fromDateTime(now);
         final history = sync.dayOf(today);
         expect(history, isNotNull);
         expect(history!.stress.map((s) => s.value), [21, 44, 68]);

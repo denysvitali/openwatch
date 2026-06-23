@@ -320,6 +320,58 @@ List<HealthMetricSample> _parseScalarSamples(List raw) => [
     ),
 ];
 
+DailyHistory _withoutFutureSamples(DailyHistory history, DateTime now) {
+  return history.copyWith(
+    hr: _clipHrSamples(history.hr, now),
+    stress: _clipScalarSamples(history.stress, now),
+    hrv: _clipScalarSamples(history.hrv, now),
+    bloodPressure: _clipBpSamples(history.bloodPressure, now),
+  );
+}
+
+List<HrSample> _clipHrSamples(Iterable<HrSample> samples, DateTime now) {
+  final bySlot = <int, HrSample>{};
+  for (final sample in samples) {
+    final snapped = _snapToHrSlot(sample.timestamp);
+    if (snapped.isAfter(now)) continue;
+    final key = snapped.millisecondsSinceEpoch;
+    final existing = bySlot[key];
+    if (existing == null || sample.timestamp.isAfter(existing.timestamp)) {
+      bySlot[key] = HrSample(snapped, sample.bpm);
+    }
+  }
+  return bySlot.values.toList()
+    ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+}
+
+List<HealthMetricSample> _clipScalarSamples(
+  Iterable<HealthMetricSample> samples,
+  DateTime now,
+) {
+  return [
+    for (final sample in samples)
+      if (!sample.timestamp.isAfter(now)) sample,
+  ];
+}
+
+List<BloodPressureSample> _clipBpSamples(
+  Iterable<BloodPressureSample> samples,
+  DateTime now,
+) {
+  return [
+    for (final sample in samples)
+      if (!sample.timestamp.isAfter(now)) sample,
+  ];
+}
+
+DateTime _snapToHrSlot(DateTime timestamp) => DateTime(
+  timestamp.year,
+  timestamp.month,
+  timestamp.day,
+  timestamp.hour,
+  (timestamp.minute ~/ 5) * 5,
+);
+
 /// On-device persistent store for daily health data.
 ///
 /// Files are written under `<app docs>/history/<yyyy-mm-dd>.json` — one
@@ -473,7 +525,7 @@ class HistoryStore {
         final raw = await f.readAsString();
         if (raw.isEmpty) return DailyHistory(day: day);
         final j = jsonDecode(raw) as Map<String, dynamic>;
-        return DailyHistory.fromJson(j);
+        return _withoutFutureSamples(DailyHistory.fromJson(j), DateTime.now());
       } catch (e) {
         AppLog.instance.warn(
           'history',
@@ -570,9 +622,10 @@ class HistoryStore {
       attributes: {'store.day.iso': history.day.iso, 'store.op': 'write_day'},
     );
     try {
-      final stamped = history.copyWith(
-        lastUpdated: lastUpdated ?? DateTime.now(),
-      );
+      final stamped = _withoutFutureSamples(
+        history,
+        DateTime.now(),
+      ).copyWith(lastUpdated: lastUpdated ?? DateTime.now());
       final raw = jsonEncode(stamped.toJson());
       // Serialize the file write per day so concurrent callers
       // (e.g. `_upsertTotals` for the 0x2a activity summary and
@@ -608,11 +661,13 @@ class HistoryStore {
       // our write, losing the parallel call's updates. See the
       // [_writeQueue] rationale.
       return await _enqueueForDayReturning<DailyHistory>(day.iso, () async {
+        final now = DateTime.now();
         final current = await readDay(day);
         final byTs = <int, HrSample>{
-          for (final h in current.hr) h.timestamp.millisecondsSinceEpoch: h,
+          for (final h in _clipHrSamples(current.hr, now))
+            h.timestamp.millisecondsSinceEpoch: h,
         };
-        for (final h in hrSamples) {
+        for (final h in _clipHrSamples(hrSamples, now)) {
           byTs[h.timestamp.millisecondsSinceEpoch] = h;
         }
         final merged = byTs.values.toList()
@@ -739,12 +794,13 @@ class HistoryStore {
     );
     try {
       return await _enqueueForDayReturning<DailyHistory>(day.iso, () async {
+        final now = DateTime.now();
         final current = await readDay(day);
         final byTs = <int, BloodPressureSample>{
-          for (final b in current.bloodPressure)
+          for (final b in _clipBpSamples(current.bloodPressure, now))
             b.timestamp.millisecondsSinceEpoch: b,
         };
-        for (final b in samples) {
+        for (final b in _clipBpSamples(samples, now)) {
           byTs[b.timestamp.millisecondsSinceEpoch] = b;
         }
         final merged = byTs.values.toList()
@@ -778,12 +834,13 @@ class HistoryStore {
     );
     try {
       return await _enqueueForDayReturning<DailyHistory>(day.iso, () async {
+        final now = DateTime.now();
         final current = await readDay(day);
         final byTs = <int, HealthMetricSample>{
-          for (final s in select(current))
+          for (final s in _clipScalarSamples(select(current), now))
             s.timestamp.millisecondsSinceEpoch: s,
         };
-        for (final s in samples) {
+        for (final s in _clipScalarSamples(samples, now)) {
           byTs[s.timestamp.millisecondsSinceEpoch] = s;
         }
         final merged = byTs.values.toList()

@@ -172,9 +172,11 @@ class HistorySync extends ChangeNotifier {
     this.drainDuration = const Duration(milliseconds: 600),
     this.postCommandDelay = const Duration(milliseconds: 50),
     this.fragmentQuietWindow = const Duration(milliseconds: 250),
+    DateTime Function()? clock,
   }) : _dispatcher = dispatcher,
        _bParser = bParser,
-       _store = store {
+       _store = store,
+       _clock = clock ?? DateTime.now {
     _inbound = transport.inboundA.listen(_collectRx);
     // Channel-B sleep responses (`0x27` night + `0x3e` lunch per
     // PROTOCOL.md §4.4) only flow through the BC-fragmented
@@ -200,6 +202,7 @@ class HistorySync extends ChangeNotifier {
   final ChannelADispatcher? _dispatcher;
   final ChannelBParser? _bParser;
   HistoryStore? _store;
+  final DateTime Function() _clock;
   final void Function(DailyTotals) onTotals;
   StreamSubscription<ChannelBCommand>? _bCmdSub;
 
@@ -529,7 +532,7 @@ class HistorySync extends ChangeNotifier {
       // Live H59MAX firmware replies 0xff to packed BCD dates such as
       // `26 06 21 00`; `Commands.readHeartRateHistory` converts the
       // DateOnly-style day to epoch seconds.
-      final today = DateTime.now();
+      final today = _clock();
       final todayD = DateOnly.fromDateTime(today);
       // Always blind-poll the last `effectiveDaysBack` days; the
       // watch's per-day reads are idempotent and `HistoryStore.merge*`
@@ -874,6 +877,7 @@ class HistorySync extends ChangeNotifier {
         return;
       }
       final dayStart = resolvedDay.midnight;
+      final now = _clock();
       final samples = <HrSample>[];
       // 288 × 5-min slots = 24h; bound the slot index so any trailing
       // padding bytes from the firmware cannot create samples past
@@ -882,15 +886,16 @@ class HistorySync extends ChangeNotifier {
         final bpm = rec[i];
         if (bpm == 0xff || bpm == 0x00) continue;
         if (bpm < 30 || bpm > 240) continue;
-        samples.add(
-          HrSample(dayStart.add(Duration(minutes: (i - 4) * 5)), bpm),
-        );
+        final timestamp = dayStart.add(Duration(minutes: (i - 4) * 5));
+        if (timestamp.isAfter(now)) continue;
+        samples.add(HrSample(timestamp, bpm));
       }
       _hrChunks.clear();
       _hrExpectedChunks = null;
       final previous = _days[resolvedDay] ?? DailyHistory(day: resolvedDay);
       final mergedByTs = <int, HrSample>{
-        for (final h in previous.hr) h.timestamp.millisecondsSinceEpoch: h,
+        for (final h in previous.hr)
+          if (!h.timestamp.isAfter(now)) h.timestamp.millisecondsSinceEpoch: h,
         for (final h in samples) h.timestamp.millisecondsSinceEpoch: h,
       };
       final mergedHr = mergedByTs.values.toList()
@@ -930,7 +935,9 @@ class HistorySync extends ChangeNotifier {
   }
 
   void _onStressRecord(PressureRecord record) {
-    final day = DateOnly.today().addDays(-record.slotId.clamp(0, 31).toInt());
+    final day = DateOnly.fromDateTime(
+      _clock(),
+    ).addDays(-record.slotId.clamp(0, 31).toInt());
     final samples = _decodeFixedSlotMetric(record.header, record.body, day);
     if (samples.isEmpty) return;
     final previous = _days[day] ?? DailyHistory(day: day);
@@ -945,7 +952,9 @@ class HistorySync extends ChangeNotifier {
   }
 
   void _onHrvRecord(HrvRecord record) {
-    final day = DateOnly.today().addDays(-record.slotId.clamp(0, 31).toInt());
+    final day = DateOnly.fromDateTime(
+      _clock(),
+    ).addDays(-record.slotId.clamp(0, 31).toInt());
     final samples = _decodeFixedSlotMetric(record.header, record.body, day);
     if (samples.isEmpty) return;
     final previous = _days[day] ?? DailyHistory(day: day);
@@ -967,13 +976,14 @@ class HistorySync extends ChangeNotifier {
     final raw = Uint8List.fromList([...header, ...body]);
     if (raw.length < 2) return const [];
     final samples = <HealthMetricSample>[];
+    final now = _clock();
     final sampleBytes = raw.skip(1).take(48).toList();
     for (var i = 0; i < sampleBytes.length; i++) {
       final value = sampleBytes[i] & 0xff;
       if (value == 0 || value == 0xff) continue;
-      samples.add(
-        HealthMetricSample(day.midnight.add(Duration(minutes: i * 30)), value),
-      );
+      final timestamp = day.midnight.add(Duration(minutes: i * 30));
+      if (timestamp.isAfter(now)) continue;
+      samples.add(HealthMetricSample(timestamp, value));
     }
     return samples;
   }
