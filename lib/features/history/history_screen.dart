@@ -8,6 +8,7 @@ import '../../core/ble/ble_transport.dart';
 import '../../core/providers/app_providers.dart';
 import '../../core/services/history_debug_export.dart';
 import '../../core/services/history_sync.dart';
+import 'sleep_session_summary.dart';
 import 'widgets/hr_chart.dart';
 import 'widgets/scalar_chart.dart';
 import 'widgets/sleep_chart.dart';
@@ -416,7 +417,21 @@ class _DayDetailPage extends StatelessWidget {
             ],
             if (day.sleep.isNotEmpty) ...[
               const SizedBox(height: 20),
-              _ChartHeader(title: 'Sleep', detail: _sleepLongSummary(day)),
+              _ChartHeader(
+                title: 'Sleep',
+                detail: 'Total ${_sleepSummary(day)}',
+              ),
+              const SizedBox(height: 8),
+              _SleepSessionRows(
+                sessions: SleepSessionSummary.fromSegments(day.sleep),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _sleepLongSummary(day),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
               const SizedBox(height: 10),
               SleepTimeline(segments: day.sleep, height: 110),
             ],
@@ -506,9 +521,7 @@ String _sleepSummary(DailyHistory day) {
     Duration.zero,
     (a, s) => a + s.duration,
   );
-  final h = total.inHours;
-  final m = total.inMinutes.remainder(60);
-  return '${h}h ${m}m';
+  return _formatDuration(total);
 }
 
 /// Copies a plain-text "day debug" package to the clipboard so users can
@@ -553,11 +566,17 @@ String _sleepLongSummary(DailyHistory day) {
   ]) {
     final d = byStage[s];
     if (d == null || d == Duration.zero) continue;
-    final h = d.inMinutes ~/ 60;
-    final m = d.inMinutes.remainder(60);
-    parts.add('${_label(s)} ${h}h ${m}m');
+    parts.add('${_label(s)} ${_formatDuration(d)}');
   }
   return parts.join(' · ');
+}
+
+String _formatDuration(Duration duration) {
+  final h = duration.inMinutes ~/ 60;
+  final m = duration.inMinutes.remainder(60);
+  if (h == 0) return '${m}m';
+  if (m == 0) return '${h}h';
+  return '${h}h ${m}m';
 }
 
 String _label(SleepStage s) => switch (s) {
@@ -590,6 +609,66 @@ class _ChartHeader extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
           ),
         ),
+      ],
+    );
+  }
+}
+
+class _SleepSessionRows extends StatelessWidget {
+  const _SleepSessionRows({required this.sessions});
+
+  final List<SleepSessionSummary> sessions;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final timeFormat = DateFormat.jm();
+    return Column(
+      children: [
+        for (var i = 0; i < sessions.length; i++) ...[
+          if (i > 0) const SizedBox(height: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  CupertinoIcons.moon_fill,
+                  size: 16,
+                  color: const Color(0xFF5856D6),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${timeFormat.format(sessions[i].start)} - ${timeFormat.format(sessions[i].end)}',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      if (sessions.length > 1)
+                        Text(
+                          'Session ${i + 1}',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                Text(
+                  _formatDuration(sessions[i].duration),
+                  style: theme.textTheme.labelLarge,
+                ),
+              ],
+            ),
+          ),
+        ],
       ],
     );
   }
