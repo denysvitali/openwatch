@@ -51,34 +51,41 @@ class DashboardScreen extends ConsumerWidget {
           ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-        children: [
-          _DeviceHeroCard(
-            name: name,
-            status: _describe(link),
-            connected: link == LinkState.ready,
-            batteryPercent: manager.batteryPercent,
-            charging: manager.charging,
-            firmware: manager.firmwareRevision,
-            hardware: manager.hardwareRevision,
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 860),
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+            children: [
+              _DeviceHeroCard(
+                name: name,
+                status: _describe(link),
+                connected: link == LinkState.ready,
+                batteryPercent: manager.batteryPercent,
+                charging: manager.charging,
+                firmware: manager.firmwareRevision,
+                hardware: manager.hardwareRevision,
+              ),
+              const SizedBox(height: 12),
+              _MetricGrid(
+                steps: manager.todaySteps ?? today?.steps,
+                calories: manager.todayCalories ?? today?.energyKcal,
+                heartRate: heartRate == 0 ? null : heartRate,
+                distanceMeters: today?.distanceMeters,
+              ),
+              const SizedBox(height: 12),
+              _RecentActivityCard(sync: sync),
+              const SizedBox(height: 12),
+              _QuickActions(
+                ready: link == LinkState.ready,
+                syncingHistory: sync.syncing,
+                findDevice: manager.findDevice,
+                syncTime: manager.syncTime,
+                syncHistory: sync.syncAll,
+              ),
+            ],
           ),
-          const SizedBox(height: 12),
-          _MetricGrid(
-            steps: manager.todaySteps ?? today?.steps,
-            calories: manager.todayCalories ?? today?.energyKcal,
-            heartRate: heartRate == 0 ? null : heartRate,
-            distanceMeters: today?.distanceMeters,
-          ),
-          const SizedBox(height: 12),
-          _RecentActivityCard(sync: sync),
-          const SizedBox(height: 12),
-          _QuickActions(
-            ready: link == LinkState.ready,
-            findDevice: manager.findDevice,
-            syncTime: manager.syncTime,
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -540,42 +547,59 @@ class _SleepTrendHeader extends StatelessWidget {
 class _QuickActions extends StatelessWidget {
   const _QuickActions({
     required this.ready,
+    required this.syncingHistory,
     required this.findDevice,
     required this.syncTime,
+    required this.syncHistory,
   });
 
   final bool ready;
+  final bool syncingHistory;
   final VoidCallback findDevice;
   final VoidCallback syncTime;
+  final VoidCallback syncHistory;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: FilledButton.tonalIcon(
-            onPressed: ready ? findDevice : null,
-            icon: const Icon(CupertinoIcons.waveform),
-            label: const Text('Find'),
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: FilledButton.tonalIcon(
-            onPressed: ready ? syncTime : null,
-            icon: const Icon(CupertinoIcons.clock),
-            label: const Text('Time'),
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: FilledButton.tonalIcon(
-            onPressed: () => context.push('/history'),
-            icon: const Icon(CupertinoIcons.chart_bar),
-            label: const Text('History'),
-          ),
-        ),
-      ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final wide = constraints.maxWidth >= 560;
+        return GridView.count(
+          crossAxisCount: wide ? 4 : 2,
+          crossAxisSpacing: 10,
+          mainAxisSpacing: 10,
+          childAspectRatio: wide ? 2.55 : 3.2,
+          physics: const NeverScrollableScrollPhysics(),
+          shrinkWrap: true,
+          children: [
+            FilledButton.tonalIcon(
+              onPressed: ready ? findDevice : null,
+              icon: const Icon(CupertinoIcons.waveform),
+              label: const Text('Find'),
+            ),
+            FilledButton.tonalIcon(
+              onPressed: ready ? syncTime : null,
+              icon: const Icon(CupertinoIcons.clock),
+              label: const Text('Time'),
+            ),
+            FilledButton.tonalIcon(
+              onPressed: ready && !syncingHistory ? syncHistory : null,
+              icon: syncingHistory
+                  ? const SizedBox.square(
+                      dimension: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(CupertinoIcons.arrow_2_circlepath),
+              label: Text(syncingHistory ? 'Syncing' : 'Sync'),
+            ),
+            FilledButton.tonalIcon(
+              onPressed: () => context.push('/history'),
+              icon: const Icon(CupertinoIcons.chart_bar),
+              label: const Text('History'),
+            ),
+          ],
+        );
+      },
     );
   }
 }

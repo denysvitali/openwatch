@@ -11,6 +11,62 @@ class HomeShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final wide = MediaQuery.sizeOf(context).width >= 720;
+
+    if (wide) {
+      return Scaffold(
+        body: Row(
+          children: [
+            SafeArea(
+              right: false,
+              child: NavigationRail(
+                selectedIndex: navigationShell.currentIndex,
+                onDestinationSelected: _goBranch,
+                labelType: NavigationRailLabelType.all,
+                minWidth: 86,
+                groupAlignment: -0.82,
+                leading: Padding(
+                  padding: const EdgeInsets.only(top: 8, bottom: 18),
+                  child: Icon(
+                    Icons.watch_rounded,
+                    color: theme.colorScheme.primary,
+                    size: 30,
+                  ),
+                ),
+                destinations: const [
+                  NavigationRailDestination(
+                    icon: Icon(Icons.watch_outlined),
+                    selectedIcon: Icon(Icons.watch_rounded),
+                    label: Text('Device'),
+                  ),
+                  NavigationRailDestination(
+                    icon: Icon(CupertinoIcons.heart),
+                    selectedIcon: Icon(CupertinoIcons.heart_fill),
+                    label: Text('Health'),
+                  ),
+                  NavigationRailDestination(
+                    icon: Icon(CupertinoIcons.bell),
+                    selectedIcon: Icon(CupertinoIcons.bell_fill),
+                    label: Text('Alerts'),
+                  ),
+                  NavigationRailDestination(
+                    icon: Icon(CupertinoIcons.gear_alt),
+                    selectedIcon: Icon(CupertinoIcons.gear_alt_fill),
+                    label: Text('Settings'),
+                  ),
+                ],
+              ),
+            ),
+            VerticalDivider(
+              width: 1,
+              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.6),
+            ),
+            Expanded(child: navigationShell),
+          ],
+        ),
+      );
+    }
+
     return Scaffold(
       body: navigationShell,
       bottomNavigationBar: DecoratedBox(
@@ -23,46 +79,43 @@ class HomeShell extends StatelessWidget {
             ),
           ),
         ),
-        child: BottomNavigationBar(
-          type: BottomNavigationBarType.fixed,
-          elevation: 0,
-          backgroundColor: Colors.transparent,
-          selectedItemColor: theme.colorScheme.primary,
-          unselectedItemColor: theme.colorScheme.onSurfaceVariant,
-          selectedLabelStyle: theme.textTheme.labelSmall?.copyWith(
-            fontWeight: FontWeight.w700,
+        child: SafeArea(
+          top: false,
+          child: NavigationBar(
+            selectedIndex: navigationShell.currentIndex,
+            onDestinationSelected: _goBranch,
+            destinations: const [
+              NavigationDestination(
+                icon: Icon(Icons.watch_outlined),
+                selectedIcon: Icon(Icons.watch_rounded),
+                label: 'Device',
+              ),
+              NavigationDestination(
+                icon: Icon(CupertinoIcons.heart),
+                selectedIcon: Icon(CupertinoIcons.heart_fill),
+                label: 'Health',
+              ),
+              NavigationDestination(
+                icon: Icon(CupertinoIcons.bell),
+                selectedIcon: Icon(CupertinoIcons.bell_fill),
+                label: 'Alerts',
+              ),
+              NavigationDestination(
+                icon: Icon(CupertinoIcons.gear_alt),
+                selectedIcon: Icon(CupertinoIcons.gear_alt_fill),
+                label: 'Settings',
+              ),
+            ],
           ),
-          unselectedLabelStyle: theme.textTheme.labelSmall,
-          showUnselectedLabels: true,
-          currentIndex: navigationShell.currentIndex,
-          onTap: (i) => navigationShell.goBranch(
-            i,
-            initialLocation: i == navigationShell.currentIndex,
-          ),
-          items: const [
-            BottomNavigationBarItem(
-              icon: Icon(Icons.watch_outlined),
-              activeIcon: Icon(Icons.watch_rounded),
-              label: 'Device',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(CupertinoIcons.heart),
-              activeIcon: Icon(CupertinoIcons.heart_fill),
-              label: 'Health',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(CupertinoIcons.bell),
-              activeIcon: Icon(CupertinoIcons.bell_fill),
-              label: 'Alerts',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(CupertinoIcons.gear_alt),
-              activeIcon: Icon(CupertinoIcons.gear_alt_fill),
-              label: 'Settings',
-            ),
-          ],
         ),
       ),
+    );
+  }
+
+  void _goBranch(int i) {
+    navigationShell.goBranch(
+      i,
+      initialLocation: i == navigationShell.currentIndex,
     );
   }
 }

@@ -149,6 +149,51 @@ ThemeData _buildTheme(Brightness brightness) {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ),
     ),
+    navigationBarTheme: NavigationBarThemeData(
+      height: 68,
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      indicatorColor: scheme.primary.withValues(alpha: 0.12),
+      labelTextStyle: WidgetStateProperty.resolveWith((states) {
+        final selected = states.contains(WidgetState.selected);
+        return base.textTheme.labelSmall?.copyWith(
+          color: selected ? scheme.primary : scheme.onSurfaceVariant,
+          fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+        );
+      }),
+      iconTheme: WidgetStateProperty.resolveWith((states) {
+        final selected = states.contains(WidgetState.selected);
+        return IconThemeData(
+          color: selected ? scheme.primary : scheme.onSurfaceVariant,
+          size: 24,
+        );
+      }),
+    ),
+    navigationRailTheme: NavigationRailThemeData(
+      backgroundColor: scheme.surface.withValues(alpha: 0.94),
+      elevation: 0,
+      selectedIconTheme: IconThemeData(color: scheme.primary),
+      unselectedIconTheme: IconThemeData(color: scheme.onSurfaceVariant),
+      selectedLabelTextStyle: base.textTheme.labelMedium?.copyWith(
+        color: scheme.primary,
+        fontWeight: FontWeight.w700,
+      ),
+      unselectedLabelTextStyle: base.textTheme.labelMedium?.copyWith(
+        color: scheme.onSurfaceVariant,
+      ),
+      indicatorColor: scheme.primary.withValues(alpha: 0.12),
+    ),
+    chipTheme: base.chipTheme.copyWith(
+      side: BorderSide(color: scheme.outlineVariant),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      labelStyle: base.textTheme.labelMedium?.copyWith(
+        color: scheme.onSurfaceVariant,
+      ),
+    ),
+    snackBarTheme: SnackBarThemeData(
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+    ),
     listTileTheme: ListTileThemeData(
       iconColor: scheme.primary,
       minLeadingWidth: 28,
