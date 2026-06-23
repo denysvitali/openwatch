@@ -920,9 +920,14 @@ void main() {
         final history = sync.dayOf(today);
         expect(history, isNotNull);
         expect(history!.stress.map((s) => s.value), [21, 44, 68]);
+        // The new soft-clip+shift path infers watchOffsetMinutes from the
+        // record (lastValidIdx × 30 min ≈ watch-now) and shifts slot
+        // timestamps accordingly. With lastValidIdx=47 (23:30) and
+        // phone-now=23:59 the inferred offset is -29 min, so the
+        // 06:00 raw slot lands at 06:29 wall-clock.
         expect(
           history.stress[1].timestamp,
-          today.midnight.add(const Duration(hours: 6)),
+          today.midnight.add(const Duration(minutes: 6 * 60 + 29)),
         );
 
         sync.dispose();

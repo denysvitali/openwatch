@@ -247,7 +247,6 @@ class HistorySync extends ChangeNotifier {
   StreamSubscription<PressureRecord>? _pressureRecordsSub;
   StreamSubscription<HrvRecord>? _hrvRecordsSub;
   static const _hrSlotDuration = Duration(minutes: 5);
-  static const _fixedSlotMetricDuration = Duration(minutes: 30);
 
   /// Broadcast stream of assembled
   /// `0x37` stress history records. Wires [FragmentReassembler]
@@ -1051,60 +1050,61 @@ class HistorySync extends ChangeNotifier {
     if (raw.length < 2) return const [];
     final samples = <HealthMetricSample>[];
     final now = _clock();
-    DateTime? firstFutureSlot;
-    final sampleBytes = raw.skip(1).take(48).toList();
-    for (var i = 0; i < sampleBytes.length; i++) {
-      final value = sampleBytes[i] & 0xff;
+
+    // Best-effort watch-vs-phone clock offset, derived from the record
+    // itself: find the highest slot index with a plausible sample and
+    // assume it was captured "just now" in the watch's clock. Same
+    // heuristic as _flushHrChunks — the 0x01 setTime ACK is a fixed
+    // capability shape (§3.4) so the watch never echoes its RTC, and
+    // this is the only signal we have. Cap at 4 h so a half-day drift
+    // does not silently mis-attribute every sample.
+    var watchOffsetMinutes = 0;
+    var lastValidIdx = -1;
+    final rawSampleBytes = raw.skip(1).take(48).toList();
+    for (var j = rawSampleBytes.length - 1; j >= 0; j--) {
+      final v = rawSampleBytes[j] & 0xff;
+      if (v != 0 && v != 0xff) {
+        lastValidIdx = j;
+        break;
+      }
+    }
+    if (lastValidIdx >= 0) {
+      final phoneMinOfDay = now.hour * 60 + now.minute;
+      final watchMinOfDay = lastValidIdx * 30;
+      var delta = watchMinOfDay - phoneMinOfDay;
+      if (delta > 12 * 60) delta -= 24 * 60;
+      if (delta < -12 * 60) delta += 24 * 60;
+      if (delta.abs() <= 4 * 60) {
+        watchOffsetMinutes = delta;
+      }
+    }
+
+    for (var i = 0; i < rawSampleBytes.length; i++) {
+      final value = rawSampleBytes[i] & 0xff;
       if (value == 0 || value == 0xff) continue;
-      final timestamp = day.midnight.add(Duration(minutes: i * 30));
+      // Watch stores samples at its own minute-of-day. Subtract the
+      // inferred drift so the timestamp lands on wall-clock at the
+      // moment the watch actually recorded the sample.
+      final slotTimestamp = day.midnight.add(Duration(minutes: i * 30));
+      final timestamp = slotTimestamp.subtract(
+        Duration(minutes: watchOffsetMinutes),
+      );
       if (timestamp.isAfter(now)) {
-        if (_futureSlotBeyondTolerance(
-          timestamp,
-          now,
-          _fixedSlotMetricDuration,
-        )) {
-          firstFutureSlot ??= timestamp;
-        }
+        // Silently drop — the watch will resync these on the next pass
+        // once its RTC catches up. We deliberately do NOT return empty
+        // here: throwing the entire day's fixed-slot data because a
+        // handful of trailing samples can't be attributed is the wrong
+        // call (matches HS-9 for the HR path).
         continue;
       }
       samples.add(HealthMetricSample(timestamp, value));
     }
-    if (firstFutureSlot != null) {
-      lastSyncError = _clockMismatchMessage(
-        'fixed-slot metric',
-        day,
-        firstFutureSlot,
-        now,
-      );
-      AppLog.instance.warn('history', lastSyncError!);
-      notifyListeners();
-      return const [];
-    }
     return samples;
-  }
-
-  String _clockMismatchMessage(
-    String metric,
-    DateOnly day,
-    DateTime futureSlot,
-    DateTime now,
-  ) {
-    return 'Watch clock mismatch: $metric history for ${day.iso} included '
-        '${_formatClock(futureSlot)}, after phone time ${_formatClock(now)}. '
-        'Sync watch time, then sync history again.';
   }
 
   static String _formatClock(DateTime time) =>
       '${time.hour.toString().padLeft(2, '0')}:'
       '${time.minute.toString().padLeft(2, '0')}';
-
-  static bool _futureSlotBeyondTolerance(
-    DateTime slot,
-    DateTime now,
-    Duration slotDuration,
-  ) {
-    return slot.difference(now) > slotDuration;
-  }
 
   List<HealthMetricSample> _mergeScalar(
     List<HealthMetricSample> existing,
