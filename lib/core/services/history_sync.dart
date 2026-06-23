@@ -246,6 +246,8 @@ class HistorySync extends ChangeNotifier {
   _hrvReassembler;
   StreamSubscription<PressureRecord>? _pressureRecordsSub;
   StreamSubscription<HrvRecord>? _hrvRecordsSub;
+  static const _hrSlotDuration = Duration(minutes: 5);
+  static const _fixedSlotMetricDuration = Duration(minutes: 30);
 
   /// Broadcast stream of assembled
   /// `0x37` stress history records. Wires [FragmentReassembler]
@@ -887,9 +889,11 @@ class HistorySync extends ChangeNotifier {
         final bpm = rec[i];
         if (bpm == 0xff || bpm == 0x00) continue;
         if (bpm < 30 || bpm > 240) continue;
-        final timestamp = dayStart.add(Duration(minutes: (i - 4) * 5));
+        final timestamp = dayStart.add(_hrSlotDuration * (i - 4));
         if (timestamp.isAfter(now)) {
-          firstFutureSlot ??= timestamp;
+          if (_futureSlotBeyondTolerance(timestamp, now, _hrSlotDuration)) {
+            firstFutureSlot ??= timestamp;
+          }
           continue;
         }
         samples.add(HrSample(timestamp, bpm));
@@ -998,7 +1002,13 @@ class HistorySync extends ChangeNotifier {
       if (value == 0 || value == 0xff) continue;
       final timestamp = day.midnight.add(Duration(minutes: i * 30));
       if (timestamp.isAfter(now)) {
-        firstFutureSlot ??= timestamp;
+        if (_futureSlotBeyondTolerance(
+          timestamp,
+          now,
+          _fixedSlotMetricDuration,
+        )) {
+          firstFutureSlot ??= timestamp;
+        }
         continue;
       }
       samples.add(HealthMetricSample(timestamp, value));
@@ -1031,6 +1041,14 @@ class HistorySync extends ChangeNotifier {
   static String _formatClock(DateTime time) =>
       '${time.hour.toString().padLeft(2, '0')}:'
       '${time.minute.toString().padLeft(2, '0')}';
+
+  static bool _futureSlotBeyondTolerance(
+    DateTime slot,
+    DateTime now,
+    Duration slotDuration,
+  ) {
+    return slot.difference(now) > slotDuration;
+  }
 
   List<HealthMetricSample> _mergeScalar(
     List<HealthMetricSample> existing,

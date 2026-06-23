@@ -372,6 +372,50 @@ void main() {
       d.dispose();
     });
 
+    test(
+      'readHeartRate 0x15 ignores current trailing bucket without failing',
+      () async {
+        final now = DateTime(2026, 6, 23, 17, 34, 13);
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final sync = _testSync(t, d, clock: () => now);
+        final syncFuture = sync.syncAll(daysBack: 1);
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+
+        t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x00, 0x18, 0x05]));
+
+        final record = Uint8List(23 * 13);
+        record.fillRange(0, record.length, 0xff);
+        for (var i = 0; i < 4; i++) {
+          record[i] = 0;
+        }
+        record[4 + (17 * 12 + 6)] = 80; // 17:30, completed slot.
+        record[4 + (17 * 12 + 7)] = 120; // 17:35, current trailing slot.
+
+        for (var chunk = 0; chunk < 23; chunk++) {
+          final start = chunk * 13;
+          t.inA.add(
+            Codec.buildChannelA(OpA.readHeartRate, [
+              chunk + 1,
+              ...record.sublist(start, start + 13),
+            ]),
+          );
+        }
+
+        await Future<void>.delayed(const Duration(milliseconds: 150));
+        await syncFuture;
+
+        expect(sync.hr.map((s) => s.bpm), contains(80));
+        expect(sync.hr.map((s) => s.bpm), isNot(contains(120)));
+        expect(sync.hr.any((s) => s.timestamp.isAfter(now)), isFalse);
+        expect(sync.lastSyncError, isNull);
+
+        sync.dispose();
+        d.dispose();
+      },
+    );
+
     test('syncAll sends UTC day-start seconds for 0x15 HR history', () async {
       final t = _StubTransport();
       final d = ChannelADispatcher(t);
