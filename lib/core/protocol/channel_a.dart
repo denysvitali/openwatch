@@ -61,7 +61,13 @@ class ChannelADispatcher {
   final _queryDataDistribution =
       StreamController<QueryDataDistribution>.broadcast();
 
-  /// Live-time, type, lang, tz embedded in the SetTime 0x01 ACK.
+  /// Fires once per `0x01` setTime ACK, carrying the host's wall-clock
+  /// time at the moment the watch confirmed the sync. The 14-byte payload
+  /// of the ACK is a *fixed* capability-bitmap shape per
+  /// `firmwares/GHIDRA_DECOMPILATION.md` §3.4 (the four little-endian
+  /// dwords `0x16010000 / 0 / 0x200001 / 0x3000` — it does NOT carry the
+  /// watch's current RTC). Subscribers that want a live RTC echo should
+  /// not rely on this stream; use the host clock as the source of truth.
   Stream<DateTime> get onTime => _time.stream;
 
   /// DND read/write state (`0x06`).
@@ -315,17 +321,20 @@ class ChannelADispatcher {
   // from; see GHIDRA_DECOMPILATION.md §3 for the address map.
   // ---------------------------------------------------------------------------
 
-  /// `setTime` (0x01) ACK mirrors `FUN_0082bb4e` — converts BCD back to DateTime.
+  /// `setTime` (0x01) ACK observer.
+  ///
+  /// The firmware's reply payload is a 14-byte **fixed** capability shape
+  /// (the four little-endian dwords `0x16010000 / 0 / 0x200001 / 0x3000`)
+  /// per `firmwares/GHIDRA_DECOMPILATION.md` §3.4 — it does NOT carry the
+  /// watch's current RTC, so we cannot decode a meaningful DateTime from
+  /// the bytes. The previous behaviour read the capability dwords as BCD
+  /// and emitted a bogus `DateTime(2000, …)`, which surfaced downstream
+  /// as a stable "year 2000" clock mismatch on every sync. The right
+  /// signal for subscribers is "the watch acknowledged setTime at host
+  /// wall-clock `now`" — that's all we can truthfully emit.
   void _decodeTime(Uint8List pl) {
-    if (pl.length < 6) return;
-    final year = Codec.fromBcd(pl[0]) + 2000;
-    final month = Codec.fromBcd(pl[1]);
-    final day = Codec.fromBcd(pl[2]);
-    final hour = Codec.fromBcd(pl[3]);
-    final minute = Codec.fromBcd(pl[4]);
-    final second = Codec.fromBcd(pl[5]);
-    final t = DateTime(year, month, day, hour, minute, second);
-    _time.add(t);
+    if (pl.length < 4) return;
+    _time.add(DateTime.now());
   }
 
   /// `dnd` (0x06): sub `0x01` reads state, sub `0x02` writes state.

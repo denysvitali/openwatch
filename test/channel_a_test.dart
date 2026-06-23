@@ -26,27 +26,43 @@ class _StubTransport implements BleTransport {
 
 void main() {
   group('ChannelADispatcher', () {
-    test('setTime ACK decodes BCD back to DateTime', () async {
+    test('setTime ACK fires onTime with host wall-clock', () async {
+      // Per `firmwares/GHIDRA_DECOMPILATION.md` §3.4 the 14-byte setTime
+      // reply is a *fixed* capability-bitmap shape (the four LE dwords
+      // 0x16010000 / 0 / 0x200001 / 0x3000). It does NOT carry the
+      // watch's current RTC — the host wall-clock is the only truthful
+      // signal we have for "setTime acknowledged".
       final t = _StubTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final got = d.onTime.first;
-      final f = Codec.buildChannelA(OpA.setTime, [
-        Codec.toBcd(26), // year % 100
-        Codec.toBcd(6),
-        Codec.toBcd(20),
-        Codec.toBcd(14),
-        Codec.toBcd(30),
-        Codec.toBcd(45),
-        0, // lang
-        ((2 + 24) % 24) * 2 + 1, // tz
+      final before = DateTime.now();
+      // Realistic H59MA v14 setTime ack payload (the fixed capability
+      // dwords from §3.4). The payload content is ignored — only the
+      // opcode matters.
+      final f = Codec.buildChannelA(OpA.setTime, const [
+        0x00,
+        0x00,
+        0x01,
+        0x16,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x01,
+        0x00,
+        0x20,
+        0x00,
+        0x00,
+        0x00,
       ]);
       t.inA.add(f);
       final ts = await got.timeout(const Duration(seconds: 1));
-      expect(ts.year, 2026);
-      expect(ts.month, 6);
-      expect(ts.day, 20);
-      expect(ts.hour, 14);
+      final after = DateTime.now();
+      // The emitted time is the host wall-clock at ack receipt — must
+      // fall within the window we bracketed around the injection.
+      expect(ts.isAfter(before.subtract(const Duration(seconds: 1))), isTrue);
+      expect(ts.isBefore(after.add(const Duration(seconds: 1))), isTrue);
     });
 
     test('realTimeHeartRate emits plausible bpm only', () async {
