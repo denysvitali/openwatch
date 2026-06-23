@@ -54,7 +54,7 @@ the same connection (see §2). The cloud layer is a separate HTTPS/JSON + WebSoc
 | `00002A27-…` | READ Hardware Revision | — | `CHAR_HW_REVISION`. First handshake read. |
 | `00002A26-…` | READ Firmware Revision | — | `CHAR_FIRMWARE_REVISION`. Second read (+200 ms); completion → `setReady(true)`. |
 | `00002A23-…` | READ System ID | — | DevInfo. |
-| `0000FEE7-…` | SERVICE Vendor "fee7" | — | Chinese-vendor profile. `fea1` write + CCCD, `fec9` read, `fea2` notify + CCCD, plus `2a00` Device Name. **Probe-only** in this app — see `firmwares/R2_ANALYSIS.md` §7. |
+| `0000FEE7-…` | SERVICE Vendor "fee7" | — | Chinese-vendor profile. `fea1` write + CCCD, `fec9` read, `fea2` notify + CCCD, plus `2a00` Device Name. Firmware implements this as an active second 16-byte command channel; OpenWatch treats it as optional. See `firmwares/GHIDRA_DECOMPILATION.md` §8. |
 | `00002A28-…` | — | — | **Phantom.** Bytes at v13 `0x20faf` / v14 `0x1f363` look like `0x2a28` but are a `0x2803` char-decl followed by value-UUID `0x2a00` (Device Name, inside the `0xFEE7` service). The firmware does **not** declare a SW Revision characteristic. |
 
 H59MA firmware stores the BLE UUIDs as little-endian table data and confirms both logical channels
@@ -282,7 +282,7 @@ Year = `BCD(byte) + 2000` (`0x7d0`).
 |---|---|---|---|---|---|---|
 | WriteRequest | n/a | — | →watch | 16B `[op][subData][crc8]` to `6e400002` | 16B notify on `6e400003` by opcode | Channel-A command write. `WRITE_TYPE_DEFAULT(2)`, or `NO_RESPONSE(1)` when noRsp. |
 | LocalWriteRequest | n/a | — | →watch | same 16B frame | `BeanFactory.createBean(op,type).acceptData(bytes[1..14])` | WriteRequest + `ICommandResponse` waiter + type; correlates response by opcode. |
-| ReadRequest | n/a | — | →watch | `readCharacteristic(180A, 2A27/2A26/2A28)` | raw ASCII revision string | Device-Info reads during handshake only. |
+| ReadRequest | n/a | — | ->watch | `readCharacteristic(180A, 2A27/2A26)` plus optional DevInfo reads (`2A25`/`2A23`) | raw ASCII / binary DevInfo values | Device-Info reads during handshake only. `2A28` is a field-seam phantom on H59MA, not a real SW Revision characteristic. |
 | EnableNotifyRequest | n/a | — | →watch | CCCD(`00002902`)=ENABLE; `writeDescriptor` | `onDescriptorWrite → enable(bool)` | Enable notify on `6e400003` and `de5bf729`. |
 | Large-data write | `0xBC` | cmd@[1] | →watch | `[BC][cmd][len16LE][crc16LE][payload]`; empty⇒`FF FF FF FF` | inbound on `de5bf729`, routed by cmd id | Channel-B framed write, sliced into `subLength` chunks. |
 
@@ -825,22 +825,54 @@ the H59MA OTA images (`firmwares/H59MA_1.00.13_251230.bin` and
 (add `0x450` for the container file offset, add `0x826400` for the Realtek
 flash load address).
 
-### 9.1 Channel-A framing & dispatch
+### 9.1 Channel-A framing & firmware dispatch
 
-The H59MA firmware **does not implement a 16-byte frame parser or an
-opcode-driven dispatch routine** for Channel A. It exposes the Nordic-UART-style
-GATT service (`6e40fff0`) and delegates all command interpretation to the
-phone-side Oudmon SDK (`BeanFactory`, `SparseArray`, `parserAndDispatchReqData`,
-etc.). This matches the observation that:
+Ghidra confirms that H59MA v14 contains a real firmware-side Channel-A command
+dispatcher at **`0x0082d2dc`**, now named
+`channel_a_dispatch_queued_frame` in the saved Ghidra project. The handler
+drains `channel_a_command_queue_state` (`0x0082d440`), a ring of 16-byte queued
+requests, and reads the logical opcode from queued-frame offset `2`. Bytes
+`0..1` are queue metadata in this internal representation, so do **not** confuse
+that layout with the on-wire Channel-A frame where `byte 0` is the opcode.
 
-- No routine strips the `0x80` error flag and indexes a handler table.
-- No 14-byte payload accumulator keyed by opcode exists in the body.
-- The `0x10` frame-length constant appears in connection-parameter tables but
-  is not annotated as a command-frame size.
+The phone-side Oudmon SDK still owns on-wire framing and response correlation:
+it builds `[opcode][subData][checksum]`, validates notify checksums, strips the
+`0x80` Channel-A error flag from response opcodes, and dispatches decoded
+responses through `BeanFactory` / `SparseArray`. The watch firmware owns the
+device-side execution of a subset of commands once the BLE write path has queued
+the 16-byte request.
 
-The **phone-side dispatch** (already described in §3.1) is therefore the live
-dispatch path. The watch only has to deliver the 16-byte notify bytes
-verbatim.
+Documented v14 dispatcher targets include:
+
+| Opcode | Handler | Role |
+|---|---|---|
+| `0x01` | `0x0082bb4e` | set time / capability ack |
+| `0x06` | `0x0082d298` | DND read/write |
+| `0x08` | inline branch | camera / find-device / long-press |
+| `0x0e` | `0x0082cb28` | BP read confirm |
+| `0x15` | `0x0082cf48` | read heart-rate history |
+| `0x18` | `0x0082ccb6` | display-clock / watch-face selection |
+| `0x1e` | `0x0082d20c` | real-time heart-rate start/stop |
+| `0x25`/`0x26` | `0x0082d284` / `0x0082d258` | sedentary config write/read |
+| `0x2b` | `0x0082ba54` | menstruation mixture container |
+| `0x2c` | `0x0082d1c2` | SpO2 setting |
+| `0x37`/`0x39` | `0x0082caa6` / `0x0082c9da` | pressure / HRV settings |
+| `0x38` | `0x0082ca54` | pressure value/unit bit |
+| `0x3a`/`0x3b` | `0x0082cc1e` / `0x0082cbc8` | sugar/lipids and UV/touch settings |
+| `0x43` | `0x0082d034` | detailed sport records |
+| `0x72` | `0x00829e92` | Unicode notification text |
+| `0x77` | `0x0082ce0c` | phone-sport sub-dispatch |
+| `0x7a` | `0x0082cb3a` | Muslim/prayer config |
+| `0x81` | `0x0082cdac` | 6-byte config chunk |
+| `0xa1` | `0x00827f5c` | factory/test commands |
+| `0xc6` | inline branch | reboot / restore key |
+| `0xc7` | `0x00832ebc` | vibration pattern player |
+| `0xff` | `0x0082cde8` | factory reset |
+
+The common response path uses `checksum8_additive` (`0x0082b0c4`) over bytes
+`0..14` and queues a 16-byte notify through `channel_a_queue_notify_frame`
+(`0x0082ebdc`). Long responses are split by
+`channel_a_send_fragmented_response` (`0x0082b938`) into 14-byte payload slices.
 
 ### 9.2 Watch-side opcode → bucket table (v13 only, unused)
 
@@ -869,8 +901,9 @@ phone-side opcode families in §4:
 | `0x90` | `0x42..0x47` | sub-opcode family (detail sport / sleep) |
 
 The bucket ids line up with the families used by the Android SDK, confirming
-that the H59MA was built from the same Oudmon command model even though the
-watch itself does not dispatch by opcode.
+that the H59MA was built from the same Oudmon command model. This dead table is
+not the v14 firmware dispatcher; v14 uses the explicit queued-frame dispatcher
+in §9.1.
 
 ### 9.3 Channel-B parser & dispatcher
 
@@ -879,12 +912,12 @@ surface in the firmware. Both builds implement the same state machine.
 
 | Function | v13 body | v14 body | Role |
 |---|---|---|---|
-| First-fragment parser | `0x8c32..0x8cae` | `0x8bea..0x8c66` | Checks `len >= 6`, magic `0xBC`, copies `cmd`, reads `len16LE` from bytes 2/3, reads `crc16LE` from bytes 4/5, copies payload from byte 6. |
+| First-fragment parser | `0x8c32..0x8cae` | `0x8bea..0x8c66` (`channel_b_parse_reassembly_frame`) | Checks `len >= 6`, magic `0xBC`, copies `cmd`, reads `len16LE` from bytes 2/3, reads `crc16LE` from bytes 4/5, copies payload from byte 6. |
 | Continuation-fragment path | `0x8cb4..0x8cde` | `0x8c6c..0x8c96` | Appends later notify fragments until accumulated length reaches header length. |
 | Packet timer | `0x8d44` (label) | `0x8cfc` (label) | `m_ble_packet_timer_id`; timeout hardcoded `0x7d0` (2000 ms). |
-| CRC helper | `0x8d5c..0x8d9a` | `0x8d14..0x8d52` | CRC-16/MODBUS over a caller-supplied buffer. |
+| CRC helper | `0x8d5c..0x8d9a` | `0x8d14..0x8d52` (`crc16_modbus_update`) | CRC-16/MODBUS over a caller-supplied buffer. |
 | CRC table | `0x2100c` | `0x1f3c0` | 512-byte reflected-`0xA001` lookup table. |
-| Command dispatcher | `0x8b2e..0x8b96` | `0x8ae6..0x8b4e` | Compares `cmd` byte and routes to file/OTA handlers. |
+| Command dispatcher | `0x8b2e..0x8b96` | `0x8ae6..0x8b4e` (`channel_b_dispatch_complete_frame`) | Verifies payload CRC, compares `cmd` byte, routes OTA/file commands, or stores the command for async handling. |
 
 The dispatcher confirms that commands `0x01`, `0x02`, `0x31`, `0x35`, `0x36`,
 `0x61` are handled as a special group (likely OTA / file-init / avatar),
@@ -916,22 +949,20 @@ in `lib/core/protocol/codec.dart` is therefore bit-exact with the watch.
 
 ### 9.5 Literal-pool opcode coverage
 
-The ARM-Thumb literal pool at v13 `0x21b58` (v14 `0x1ff0c`) contains the
-small integer constants used by a health-metric range-clamp routine; it is
-**not** a command table. Within that pool, however, the values
-`0x50..0x53, 0x55, 0x56, 0x58, 0x5A` appear contiguously, and
-`0x60..0x63` appear nearby. These are the only opcodes in the `0x50..0x95`
-range that the H59MA materialises as compile-time constants, which means the
-watch implements a **subset** of the full Oudmon opcode space:
+The ARM-Thumb literal pool at v13 `0x21b58` (v14 `0x1ff0c`, now labelled
+`health_metric_clamp_constants` in Ghidra) contains small integer constants
+used by a health-metric range-clamp routine; it is **not** a command table.
+Within that pool, however, the values `0x50..0x53, 0x55, 0x56, 0x58, 0x5A`
+appear contiguously, and `0x60..0x63` appear nearby:
 
 ```text
 0x50 0x51 0x52 0x53 0x55 0x56 0x58 0x5A 0x60 0x61 0x62 0x63
 ```
 
-All other `0x54..0x95` opcodes the Android SDK may emit are either handled
-by generic paths or are reserved on H59MA hardware. `0x60` and `0x61` are
-already known (`SetANCSReq`, `SetMessagePushReq`); `0x62` and `0x63` are
-watch-pushed events with no known Android decoder yet.
+Because Ghidra/r2 show this pool's consumer is a range clamp rather than a BLE
+dispatcher, these constants are weak evidence only. Use the firmware dispatcher
+tables in §9.1, §9.3, and the `0xFEE7` notes in
+`firmwares/GHIDRA_DECOMPILATION.md` for live opcode coverage.
 
 ### 9.6 ANCS client
 
@@ -950,7 +981,7 @@ layout. Key take-aways relevant to protocol work:
 |---|---|---|
 | `0x00` | `magic` | `e5c3bd81` |
 | `0x04` / `0x08` | `load_size` / `firmware_size` | `body_size + 0x400` |
-| `0x0c` | `image_hash_a` | 24-bit additive checksum (not CRC32) |
+| `0x0c` | `image_chk_a` | additive checksum: `sum(container[0x50:]) & 0xffffffff` (observed high byte `0x00`) |
 | `0x10` | `version_string` | e.g. `H59MA_1.00.13_251230` |
 | `0x58` | `body_size` | exact body length |
 | `0x6c` | `flash_app_start` | `0x00826400` (both builds) |

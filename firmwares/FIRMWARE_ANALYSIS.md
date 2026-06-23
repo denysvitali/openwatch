@@ -1,6 +1,6 @@
 # H59MA / Oudmon Smartwatch Firmware — Consolidated Analysis
 
-This document consolidates and **supersedes** `RE_FIRMWARE.md` and `R2_ANALYSIS.md`. Every load-bearing numeric claim was independently re-verified against the bytes using radare2 and Python against both `v13` (`H59MA_1.00.13_251230`) and `v14` (`H59MA_1.00.14_260508`). Known factual errors in the prior docs are flagged inline. See the companion `firmwares/_re/` evidence tree for raw extractor / scan / string-mining outputs, and `PROTOCOL.md` for the APK-derived protocol spec this firmware corroborates.
+This document consolidates and **supersedes** `RE_FIRMWARE.md` and `R2_ANALYSIS.md` for byte-level layout and radare2 evidence. Ghidra later resolved several higher-level control-flow questions; where this file and `firmwares/GHIDRA_DECOMPILATION.md` disagree about live dispatchers or OTA control flow, prefer the Ghidra notes. Every load-bearing numeric claim was independently re-verified against the bytes using radare2 and Python against both `v13` (`H59MA_1.00.13_251230`) and `v14` (`H59MA_1.00.14_260508`). Known factual errors in the prior docs are flagged inline. See the companion `firmwares/_re/` evidence tree for raw extractor / scan / string-mining outputs, and `PROTOCOL.md` for the APK-derived protocol spec this firmware corroborates.
 
 ## Scope
 
@@ -90,7 +90,7 @@ The `0x450`-byte container header is byte-stable except for the version string, 
 | `0x00` | 4 | `magic` | `e5c3bd81` | `e5c3bd81` | C | File magic `E5 C3 BD 81`. |
 | `0x04` | 4 | `load_size` | `0x00023840` | `0x000219fc` | V | = `body_size + 0x400`. Duplicated at `0x08`. |
 | `0x08` | 4 | `firmware_size` | `0x00023840` | `0x000219fc` | V | Always equal to `load_size`. |
-| `0x0c` | 4 | **`image_chk_a`** | `0x00ce90ee` | `0x00c43671` | V | 24-bit additive checksum (high byte always `0x00`). **Not** CRC32, not size, not time. fwtool still annotates it `always 0x00CE90EE` — wrong. |
+| `0x0c` | 4 | **`image_chk_a`** | `0x00ce90ee` | `0x00c43671` | V | Additive checksum: `sum(container[0x50:]) & 0xffffffff` (observed high byte `0x00`). **Not** CRC32, not size, not time. |
 | `0x10` | 24 | `version_string` | `H59MA_1.00.13_251230` | `H59MA_1.00.14_260508` | V | ASCII, NUL-padded. |
 | `0x30` | 16 | `hw_id` | `H59MA_V1.0` | `H59MA_V1.0` | C | ASCII, NUL-padded. |
 | `0x40..0x4f` | 16 | reserved | `00…` | `00…` | C | zero pad. |
@@ -322,7 +322,19 @@ The bucket table is not referenced from anywhere in v13 either (no pointer in th
 
 ### Bottom line on Channel A
 
-There is **no single firmware routine that strips bit `0x80` from `data[0]` and indexes an opcode table to dispatch**. The fixed 16-byte framing, the `data[0] & ~0x80` opcode strip, the additive CRC8, and the `BeanFactory`/`SparseArray`-style dispatch are all **phone-side** (Oudmon Android SDK). The H59MA receives 16-byte fixed frames over Channel A; the firmware's role for Channel A is essentially "GATT pass-through to a high-level handler" — the detailed framing rules live in `PROTOCOL.md`.
+The radare2 pass correctly ruled out the dead v13 bucket table and the
+`0x21b58` / `0x1ff0c` literal pool as live dispatch tables, but its final
+"phone-side only" conclusion is superseded by Ghidra. H59MA v14 contains a
+real firmware dispatcher at device address `0x0082d2dc`, now named
+`channel_a_dispatch_queued_frame` in the saved Ghidra project. That routine
+drains a deferred 16-byte request ring (`channel_a_command_queue_state` at
+`0x0082d440`) and dispatches the logical opcode stored at queued-frame offset
+`2` to per-opcode handlers.
+
+The on-wire Channel-A frame remains the SDK format documented in `PROTOCOL.md`
+(`byte 0 = opcode`, bytes `1..14 = payload`, byte `15 = additive checksum`).
+The Ghidra queued-frame layout is an internal firmware representation with
+metadata in bytes `0..1`; it should not be used as a replacement wire format.
 
 ---
 
@@ -447,13 +459,13 @@ The watch implements an **ANCS client** that subscribes to the iPhone's `7905F43
 - The OTA payload is loaded into flash starting at the **app region** (`flash_base + 0x400 = 0x826400`) by the bootloader; the trampoline at the start of the body is then jumped to.
 - The `load_size` field = `body_size + 0x400` (`0x23840` / `0x219fc`); `flash_app_end` (`0x47860` / `0x45c14`) is the load region's upper bound (also = `flash_app_start + load_size`).
 - Channel-B DfuHandle flow (`PROTOCOL.md` §4.9 / §5.4) sends file data via `bc` frames through `de5bf72a`. The watch reassembles, writes each chunk to flash, and on completion reboots into the new image.
-- The header's `image_chk_a @0x0c` (additive byte-sum) and `image_digest @0x1c4` (32-byte, vendor-proprietary) are the only integrity fields. **No asymmetric signature is present in the container** — the image can be **flashed but not authenticated**. Forgery is trivially possible: recompute `0x0c` (additive sum) and replace the digest slot with any 32-byte value (since its algorithm is unknown / vendor-proprietary, the bootloader likely cannot verify it without leaking it). See §9.
+- The header's `image_chk_a @0x0c` is `sum(container[0x50:]) & 0xffffffff`. The 32-byte `image_digest @0x1c4` is the other apparent integrity field, but `body.bin` itself does not validate it; Ghidra only finds an OTA staged-image magic check for `0x8721bee2` (`ota_check_image_magic` at `0x00840724`). Bootloader-side digest validation remains outside this OTA body.
 
 ---
 
 ## 8. Embedded Assets — There Are None (correction)
 
-There is **NO embedded JPEG, PNG, GIF or BMP** in either firmware image, despite `fwtool info` reporting `embedded_jpeg@0x21EEF` (v13) / `embedded_jpeg@0x202A3` (v14).
+There is **NO embedded JPEG, PNG, GIF or BMP** in either firmware image, despite older extractor output reporting `embedded_jpeg@0x21EEF` (v13) / `embedded_jpeg@0x202A3` (v14).
 
 Image-signature search in both bodies:
 
@@ -481,7 +493,7 @@ r2 -2 -q -a arm -b 16 -e asm.cpu=cortex -e scr.color=0 -c 'px 64 @ 0x21eef' _re/
 
 The `53 63 65 6e 65 5f 42` ("Scene_B") at v13 `0x21f25` is the first visible ASCII string in this region; further on (v14 `0x202a3`) we see "Telegraph", "com.facebook.Facebook", "com.google.Gmail", "com.burbn.instagram", "com.facebook.Messenger" — the **iOS ANCS notification filter list** (§6). These are string-table data, not image blobs.
 
-**Correction to `fwtool info`:** the section `embedded_jpeg@0x21EEF` / `embedded_jpeg@0x202A3` is a spurious section guess — the tool assumes anything between two const-data boundaries might be an embedded image. The bytes are clearly not JPEG.
+**Correction to older extractor output:** the section `embedded_jpeg@0x21EEF` / `embedded_jpeg@0x202A3` was a spurious section guess. The bytes are clearly not JPEG.
 
 ---
 
@@ -550,7 +562,7 @@ Code regions shifted by exactly `-0x48`; the GATT/CRC/const regions shifted by e
 | §3.2 — empty-payload ⇒ `ff ff ff ff` CRC field | `ff ff ff ff` follows `0xbc` 17 times in v13, 15 in v14 (cross-checked against CRC of zero bytes). | **Confirmed** |
 | §3.3 — per-channel CRC difference | Chan A: additive 8-bit (CRC8); Chan B: CRC-16/MODBUS. | **Confirmed** |
 | §3 — 256-opcode Channel A dispatch | Bucket table at v13 `0x22490` (v14: absent). The flag is a range-classifier, not a r/w/d/notify permission map — **spec misread on this point**. | **Confirmed structurally, reframed** |
-| §4 — opcode families (e.g. `0x40` plain, `0x41` mixture) | Bucket assignments in v13 match spec categories (loose); the literal pool `0x50..0x5a` (and `0x60..0x63`) confirms the H59MA implements a **subset** of the full Oudmon opcode space. | **Confirmed** |
+| §4 — opcode families (e.g. `0x40` plain, `0x41` mixture) | Bucket assignments in v13 match spec categories loosely. The literal pool `0x50..0x5a` (and `0x60..0x63`) is now known to be health-clamp data, not live opcode coverage. | **Partial + correction** |
 | §4.2.1 — 14-byte SetTimeRsp capability bitmap | Built at runtime from per-device manifest; not statically recoverable. | **Cannot verify** |
 | §2.3 — handshake (read FW/HW rev → ready) | `0x2a27` HW rev + `0x2a26` FW rev chars present and readable; no explicit handshake code path recovered. | **Partially confirmed** |
 
@@ -559,48 +571,48 @@ Code regions shifted by exactly `-0x48`; the GATT/CRC/const regions shifted by e
 1. **Realtek RTL8762x "Bee"** SoC + SDK (§SoC section).
 2. **Flash load base** `0x00826400`, not `0x800000` (`load_size = body_size + 0x400`).
 3. **Real per-build 32-byte image digest at container `0x1c4`** (§1) — not the 16-byte "nonce2" at `0x1c0`.
-4. **The `0x5c` word is a fixed GUID, not a build timestamp** — fwtool still misrenders it as `2037-03-18T03:54:33Z`.
+4. **The `0x5c` word is a fixed GUID, not a build timestamp** — older `fwtool`/`header.json` output misrendered it as `2037-03-18T03:54:33Z`.
 5. **Channel B fragment timeout = `0x7d0` (2000 ms)** hardcoded (`movs r3,0x7d; lsls r3,r3,4`).
 6. **The bucket table is dead const data, unreferenced from any code**, and entirely absent in v14.
 7. **The `0x21b58`/`0x1ff0c` literal pool is health-clamp, not opcode-dispatch.**
 8. **ANCS client** — the watch subscribes to iPhone notifications via Apple's ANCS GATT service (§6).
 9. **`0xfee7` vendor GATT service** + 3 chars + Device Name (§3) — previously omitted from all docs.
 10. **No `0x2a28` SW revision char** — DevInfo has 4 chars, not 5.
-11. **No embedded image** — `fwtool info`'s `embedded_jpeg@0x21EEF` / `@0x202A3` is a false positive on the ANCS notification string table (§8).
+11. **No embedded image** — older extractor output reported `embedded_jpeg@0x21EEF` / `@0x202A3`, a false positive on the ANCS notification string table (§8).
 
 ---
 
-## 11. `fwtool` Bugs (action list)
+## 11. `fwtool` Parser Status
 
-| # | `tool/fwtool/` location | Bug | Suggested fix |
-|--:|---|---|---|
-| 1 | `internal/format/format.go:222` (`BuildTime` field) | Renders constant `0x7e6b4cf9` as `2037-03-18T03:54:33Z` | Rename to `const_5c`; drop the `time.Unix` interpretation |
-| 2 | `internal/format/format.go:216` (`Unknown32a` note) | Annotated "always 0x00CE90EE in observed samples" — wrong (v14 is `0x00c43671`) | Update note to "varies per build; 24-bit additive byte-sum" |
-| 3 | `internal/format/format.go:73-76` | `signature_a` reads 16 B starting at `0x60` — should be 12 B; the trailing 4 B are `flash_app_start` | Split into `signature_a` (12 B) and `flash_app_start` (u32) |
-| 4 | `internal/format/format.go:76` | `NonceOrKey` reads 16 B at `0x70` — should be 16 B but ANNOTATED wrong ("looks like a key/nonce"); it's a flash pointer cluster | Rename to `flash_ptrs` with a `flash_app_start` (u32) + `reserved` (u32) + `flash_base` (u32) split |
-| 5 | `internal/format/format.go:227` | `nonce2` reads 16 B at `0x1c0` — should be **32 B at `0x1c4`** (the real `image_digest`) | Move the field to `0x1c4`, size 32, rename `image_digest` |
-| 6 | `internal/format/format.go:228-229` | `crc2 @0x220` and `crc3 @0x340` are zero-pad slots, not "checksum slots" | Remove (or relabel to `reserved_zero`) |
-| 7 | `internal/format/format.go:240-247` | `secondary_signature @0x440` is the all-`0xFF` erase marker, NOT a signature | Rename to `erase_marker2` with note "all 0xFF" |
-| 8 | `internal/format/extract.go` (section detection) | Adds a spurious `embedded_jpeg@0x21EEF` (v13) / `@0x202A3` (v14) section — the bytes are const data and string table, not an image | Drop the JPEG heuristic for this region (verify with `ffd8`/`ffd9` signature first) |
-| 9 | `internal/format/format.go` | Missing fields: `const_b4 @0xb4`, `const_228 @0x228`, `flash_app_end @0x22c` | Add the three |
-| 10 | `internal/format/format.go:67` (`Unknown32b` at `0x58`) | Should be renamed `body_size`; value is exact (container − `0x450`) | Rename |
-| 11 | `internal/format/format.go:74` (`Nonce2`) | Even if it WERE intended as a nonce, it overlaps the 32-byte digest slot at `0x1c4` | See #5 |
-| 12 | `internal/format/format.go:111` | `Format string` json field is documented as "png, jpeg, riff, utf16le" — but no actual format detection routine is wired to it | Either implement signature-based detection (favour CRC/CRC-fingerprints over the speculative JPEG ranges) or remove the field |
+The current `tool/fwtool` parser already incorporates the major header fixes
+listed by the earlier radare2 notes:
 
-These are read-side bugs in `info` / `header.json` output; they do not affect `unpack` (which writes `body.bin` correctly).
+- `image_chk_a`, `body_size`, `const_5c`, `const_b4`, `const_228`,
+  `flash_app_start`, `flash_base`, `flash_app_end`, and the 32-byte
+  `image_digest @0x1c4` are first-class fields.
+- The old `build_time`, `nonce2`, `crc2`, `crc3`, and
+  `secondary_signature` names have been replaced with reserved/constant fields.
+- `signature_a` is correctly 12 bytes at `0x60..0x6b`; the following word is
+  `flash_app_start`.
+- `unpack` writes only the source `body.bin` section; stale ignored
+  `_re/.../assets/embedded_jpeg@...` artifacts were false positives and are no
+  longer source evidence.
+
+`image_chk_a` is documented in `tool/fwtool` with the exact formula
+`sum(container[0x50:]) & 0xffffffff`.
 
 ---
 
 ## 12. Open Questions / TODO
 
 1. **Algorithm behind the 32-byte `image_digest @0x1c4`.** Not SHA-256 of any contiguous window; not MD5, not CRC32; not truncated SHA-1. Likely a vendor-proprietary keyed MAC using `signature_a` or `0x5C` GUID as key. Required to determine whether the bootloader verifies the digest or ignores it.
-2. **Algorithm behind the `image_chk_a @0x0c` 24-bit additive byte-sum.** R2_ANALYSIS notes it tracks `sum(body)` but the exact region is unverified.
-3. **Exact Channel A dispatch path** — phone-side vs watch-side. No firmware routine indexes the bucket table; the dispatch logic appears entirely in the Oudmon Android SDK (`BaseReqCmd`, `parserAndDispatchReqData`). What does the watch firmware do with a received 16-byte frame?
-4. **Channel A additive 8-bit checksum algorithm** — too small to recover statically without a live trace.
-5. **Channel B sub-cmd bytes that the watch accepts beyond `PROTOCOL.md` §3.2** (R2 lists `0x06, 0x20, 0x25..0x82`; the spec covers a subset).
-6. **Whether the OTA bootloader validates `image_digest` and `signature_a`** at flash time. If neither, the firmware can be trivially flashed with a custom payload (full reverse-engineering potential).
+2. ~~Algorithm behind the `image_chk_a @0x0c` additive byte-sum.~~ **Resolved:** it is `sum(container[0x50:]) & 0xffffffff` for both v13 and v14.
+3. ~~Exact Channel A dispatch path — phone-side vs watch-side.~~ **Resolved by Ghidra:** v14 drains an internal 16-byte queued-frame ring in `channel_a_dispatch_queued_frame` (`0x0082d2dc`). The phone-side SDK still owns wire framing and response correlation.
+4. ~~Channel A additive 8-bit checksum algorithm.~~ **Resolved by Ghidra:** `checksum8_additive` (`0x0082b0c4`) sums caller-specified bytes; Channel-A/FEE7 responses use bytes `0..14`.
+5. **Channel B sub-cmd bytes that the watch accepts beyond `PROTOCOL.md` §3.2** (R2 lists `0x06`, `0x20`, and `0x25..0x82`; the spec covers a subset).
+6. **Whether the OTA bootloader validates `image_digest` and `signature_a`** at flash time. Ghidra shows `body.bin` only checks staged image magic `0x8721bee2`; bootloader validation remains outside this OTA body.
 7. **GATT attribute table is laid out in fixed 28-byte records** — but the precise record fields (perm byte, value-handle byte, flash-value-pointer semantics) need a runnable emulator to confirm.
-8. **`0xfee7` vendor service** — what does it carry? Likely a vendor-proprietary command channel (write `0xfea1`, read `0xfec9`, notify `0xfea2`) used for watch-face upload or vendor diagnostics; no Android-side reverse-engineered equivalent found in `PROTOCOL.md`.
+8. **`0xfee7` high/vendor command semantics** — Ghidra confirms the service is an active second 16-byte command channel, but several handlers still need semantic naming, especially raw memory read/write (`0xbf`/`0xc0`), OTA hooks (`0xc1`/`0xc3`), and the `0x93..0xa0` vendor range.
 
 ---
 
@@ -641,7 +653,7 @@ python3 firmwares/_re/ble-hunt/scan.py
 | Dir / file | Contents |
 |---|---|
 | `firmwares/_re/v13/body.bin` | header-stripped body of v13 (.gitignored, regenerable) |
-| `firmwares/_re/v13/header.json` | raw header decode by `fwtool info` (contains the bugs catalogued in §11) |
+| `firmwares/_re/v13/header.json` | older raw header decode by `fwtool info`; superseded by current `tool/fwtool` parser output and §1 |
 | `firmwares/_re/v13/strings.txt` | ASCII string extraction from v13 body |
 | `firmwares/_re/v14/*` | same as v13 |
 | `firmwares/_re/ble-hunt/` | `scan_results.json` (every constant hit, both firmwares), `key_regions.txt` (labelled offsets), `scan.py` (reproducible) |

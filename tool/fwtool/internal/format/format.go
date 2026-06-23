@@ -72,8 +72,9 @@ type Header struct {
 	Magic        string `json:"magic"`
 	LoadSize     uint32 `json:"load_size"`
 	FirmwareSize uint32 `json:"firmware_size"`
-	// ImageChkA is a 24-bit additive byte-sum (high byte always 0x00),
-	// NOT a CRC32 and not a build timestamp. See FIRMWARE_ANALYSIS.md §1.
+	// ImageChkA is an additive byte-sum:
+	// sum(container[0x50:]) & 0xffffffff. It is NOT a CRC32 and not a
+	// build timestamp. See FIRMWARE_ANALYSIS.md §1.
 	ImageChkA uint32 `json:"image_chk_a"`
 
 	Version string `json:"version"` // e.g. "H59MA_1.00.13_251230"
@@ -243,7 +244,7 @@ func decodeHeader(buf []byte) (Header, []NamedField) {
 		{0x00, headerMagicSize, "magic", h.Magic, hex.EncodeToString(buf[0x00:0x04]), "H59MA signature E5 C3 BD 81"},
 		{0x04, 4, "load_size", h.LoadSize, hex.EncodeToString(buf[0x04:0x08]), "bytes the bootloader copies to RAM (= body_size + 0x400)"},
 		{0x08, 4, "firmware_size", h.FirmwareSize, hex.EncodeToString(buf[0x08:0x0C]), "total image size on disk (little-endian u32)"},
-		{0x0C, 4, "image_chk_a", h.ImageChkA, hex.EncodeToString(buf[0x0C:0x10]), "24-bit additive byte-sum (high byte always 0x00); NOT CRC32, NOT a timestamp"},
+		{0x0C, 4, "image_chk_a", h.ImageChkA, hex.EncodeToString(buf[0x0C:0x10]), "additive byte-sum: sum(container[0x50:]) & 0xffffffff; NOT CRC32, NOT a timestamp"},
 		{0x10, headerVersionSize, "version_string", h.Version, hex.EncodeToString(buf[0x10:0x10+headerVersionSize]), "ASCII, e.g. H59MA_1.00.13_251230"},
 		{0x30, headerHWIDSize, "hw_id", h.HWID, hex.EncodeToString(buf[0x30:0x30+headerHWIDSize]), "hardware identifier, e.g. H59MA_V1.0"},
 		{0x40, 16, "reserved", nil, hex.EncodeToString(buf[0x40:0x50]), "zero padding"},

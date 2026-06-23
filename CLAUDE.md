@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-OpenWatch is a **clean-room Flutter rewrite** of the proprietary `com.qcwireless.qcwatch` ("QWatch Pro") companion app, targeting **Oudmon-based BLE smartwatches** (firmware H59MA v13/v14). The BLE protocol was reverse-engineered by static analysis of the shipped APK — the full spec is in `PROTOCOL.md` and the decompilation notes in `firmwares/GHIDRA_DECOMPILATION.md` + `firmwares/RE_FIRMWARE.md`.
+OpenWatch is a **clean-room Flutter rewrite** of the proprietary `com.qcwireless.qcwatch` ("QWatch Pro") companion app, targeting **Oudmon-based BLE smartwatches** (firmware H59MA v13/v14). The BLE protocol was reverse-engineered by static analysis of the shipped APK and H59MA firmware — the full spec is in `PROTOCOL.md`; the current firmware reference is `firmwares/GHIDRA_DECOMPILATION.md` plus the consolidated byte-level notes in `firmwares/FIRMWARE_ANALYSIS.md`. Treat `firmwares/RE_FIRMWARE.md` and raw `_re/` outputs as older evidence logs unless a newer doc points back to them.
 
 Hard product principles (must be preserved):
 - **Offline-first.** Nothing leaves the device until the user explicitly enables cloud sync in Settings.
@@ -43,7 +43,7 @@ Platforms: Android (primary, signed release APK via CI), iOS, macOS, Linux, Wind
 
 Working: device scan/connect, handshake, time sync, capability detection, find-device, today's steps/calories, live heart-rate, notification enable, factory reset, offline-first cloud toggle, firmware fetch-and-store + OTA flow.
 
-Needs live-capture verification (flagged in `PROTOCOL.md` §8.5): battery push opcode, exact Channel-B CRC16 variant, ECG/PPG notify opcodes, bind (`0x10`) layout. Health history reads (HR/sleep/sport) and watch-face upload are scaffolded but not yet surfaced in the UI.
+Needs live-capture verification (flagged in `PROTOCOL.md` §8.5): battery push opcode, ECG/PPG notify opcodes, bind (`0x10`) layout, and remaining health-history field splits. Channel B CRC is resolved as CRC-16/MODBUS from firmware. Health history reads (HR/sleep/sport) and watch-face upload are scaffolded but not yet surfaced in the UI.
 
 ## Codebase architecture
 
@@ -65,10 +65,10 @@ lib/
 
 Two logical GATT channels on one connection:
 - **Channel A** (`6e40fff0`) — 16-byte command frames `[opcode][sub..14][checksum]` with an additive 8-bit sum; write-with-response, opcode-correlated responses, gated behind a handshake (read HW/FW revision → `ready`).
-- **Channel B** (`de5bf728`) — `0xBC`-magic, length-prefixed, CRC16-protected large payloads sliced into MTU-sized chunks; used for OTA, files, and custom watch faces.
+- **Channel B** (`de5bf728`) — `0xBC`-magic, length-prefixed, CRC-16/MODBUS-protected large payloads sliced into MTU-sized chunks; used for OTA, files, and custom watch faces.
 - **Vendor `0xFEE7`** (optional) — parallel 16-byte command path; SpO2, find-phone, vibration, OTA triggers. See `GHIDRA_DECOMPILATION.md` §8.
 
-`PROTOCOL.md` is the single source of truth for opcodes, encodings, and CRC variants. Do not invent fields — if a value isn't documented there, treat it as "needs live capture" (the §8.5 list calls out battery push, exact Channel-B CRC, ECG/PPG, bind layout).
+`PROTOCOL.md` is the single source of truth for opcodes, encodings, and CRC variants. Do not invent fields — if a value isn't documented there, treat it as "needs live capture" (the §8.5 list calls out battery push, ECG/PPG, bind layout, and remaining health-history splits).
 
 ### Layering (read top-to-bottom)
 

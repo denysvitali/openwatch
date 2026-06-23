@@ -5,6 +5,44 @@
 
 ---
 
+## 0.1 Current Ghidra Symbol Pass
+
+On 2026-06-23 the saved `openwatch_v14` Ghidra project was updated with
+high-confidence names and plate comments for the transport and OTA core. These
+renames are intentionally conservative and are reflected in fresh decompiler
+output:
+
+| Address | New name | Role |
+|---|---|---|
+| `0x0082d2dc` | `channel_a_dispatch_queued_frame` | Drains the deferred 16-byte Channel-A/FEE7 command ring. |
+| `0x0082c944` | `fee7_dispatch_vendor_command` | Active `0xFEE7` 16-byte vendor dispatcher. |
+| `0x0082efea` | `channel_b_parse_reassembly_frame` | Parses and reassembles Channel-B `0xBC` frames. |
+| `0x0082eee6` | `channel_b_dispatch_complete_frame` | Verifies CRC and routes complete Channel-B frames. |
+| `0x0082ece0` | `channel_b_queue_notify_frame` | Builds and MTU-slices Channel-B notify frames. |
+| `0x0082ee00` | `channel_b_send_nak` | Builds compact Channel-B NAK/error packets. |
+| `0x0082f114` | `crc16_modbus_update` | CRC-16/MODBUS helper using the reflected `0xA001` table. |
+| `0x0082ebdc` | `channel_a_queue_notify_frame` | Queues a 16-byte Channel-A/FEE7 notify frame. |
+| `0x0082b0c4` | `checksum8_additive` | Additive byte-sum helper used for 16-byte command responses. |
+| `0x0082b938` | `channel_a_send_fragmented_response` | Sends long Channel-A/FEE7 payloads as 14-byte chunks. |
+| `0x0082be64` | `enqueue_deferred_command_frame` | Copies incoming 16-byte requests into the deferred command ring. |
+| `0x0082ba94` | `fee7_vendor_memory_write` | Security-sensitive host-addressed memory write. |
+| `0x0082bb0c` | `fee7_vendor_memory_read` | Security-sensitive host-addressed memory read. |
+| `0x0082bcba` | `fee7_send_vendor_nak` | FEE7 unknown-command response (request opcode OR `0x80`, marker `0xee`). |
+| `0x0082fe52` | `ota_dfu_state_machine` | OTA/DFU state machine. |
+| `0x00840724` | `ota_check_image_magic` | Checks staged image magic `0x8721bee2`. |
+| `0x00833bbc` | `channel_b_send_activity_summary` | Channel-B `0x2a` activity-summary response builder. |
+| `0x00833334` | `lis3dh_accel_dispatch` | LIS3DH accelerometer dispatcher entry. |
+
+Key data labels added in the same pass: `channel_a_command_queue_state`
+(`0x0082d440`), `deferred_command_ring_state` (`0x0082bfcc`),
+`channel_a_notify_ring_state` (`0x0082edb8`),
+`channel_b_notify_ring_state` (`0x0082edbc`),
+`channel_b_rx_reassembly_state` (`0x0082f0f0`),
+`crc16_modbus_table` (`0x008457c0`), and
+`health_metric_clamp_constants` (`0x0084630c`).
+
+---
+
 ## 0. Reading order
 
 This document is structured for a host SDK author who needs to
