@@ -175,8 +175,9 @@ The SDK transport itself sends **no** automatic bind/SetTime; those are app-leve
 - **Always** 16 bytes. No fragmentation on this channel — long data must use Channel B.
 - **Channel-A framing is built phone-side, but dispatch is implemented on both sides.** The Oudmon
   SDK builds frames, computes the additive CRC8, and dispatches responses on the phone. The H59MA
-  v14 firmware also contains a real dispatcher at `FUN_0082d2dc` (`0x0082d2dc`) that reads the opcode
-  from a queued 16-byte frame and calls per-opcode handlers (see `firmwares/GHIDRA_DECOMPILATION.md`
+  v14 firmware also contains a real dispatcher at `channel_a_dispatch_queued_frame`
+  (`0x0082d2dc`) that reads the opcode from a queued 16-byte frame and calls per-opcode handlers
+  (see `firmwares/GHIDRA_DECOMPILATION.md`
   §3). The v13 bucket table at `0x22490` remains unreferenced dead code; the v14 dispatcher uses a
   direct switch/case instead. **v13 ↔ v14 are wire-compatible** — v14 is a debug-log strip +
   dead-table cleanup, no protocol change.
@@ -394,6 +395,8 @@ REALTIMEHEARTRATE=6, ECG=7, PRESSURE=8, BLOOD_SUGAR=9, HRV=0xa, BODY_TEMPERATURE
 | PhoneSportReq | `0x77` | — | →watch | `[status, sportType]` | **AppSportRsp**: `b0`=gpsStatus; if==6 `ts=bytesToInt(b[2..6])` u32 LE | Tell watch the phone's app-side sport status. |
 | PhoneGpsReq | `0x74` | — | →watch | gps:`[status,00]`; phoneData:`[05,00]+dist u32 LE+cal u32 LE` | **AppGpsRsp**: same shape as AppSport | GPS/outdoor-sport coordination. |
 | ReadSleepDetailsReq | `0x44` | `0x0F`@[1] | →watch | `[dayOffset,0F,startSeg,endSeg(≤0x5f)]` | paged BleSleepDetails: `0xFF`=clear, `0xF0`=init; data `[0]`yr-2000,`[1]`mo,`[2]`d,`[3]`idx, `sleepQualities[8]=b[5+i]`; `b4`/`b5` page/total | Legacy per-slot sleep detail. |
+| H59MA sleep summary | `0x11` (Ch B) | — | →watch | `[dayOffset]` | `0x11` payload `[dayOffset][100 B summary]` | Firmware-confirmed H59MA v14 sleep summary. No clamp seen. |
+| H59MA sleep detail | `0x12` (Ch B) | — | →watch | `[dayOffset]` | `0x12` payload `[dayOffset][288 B detail]`; no-data/error returns compact NAK for cmd `0x12` with status=`dayOffset` | Firmware-confirmed H59MA v14 detail; today overlays current hourly slot before send. |
 | SetAlarmReq | `0x23` | — | →watch | `[idx(0..4),en(0..2),hourBCD,minBCD, day0..day6]` (11B; 7 weekday flags from weekMask bits) | SimpleStatusRsp ack | Set clock alarm slot. |
 | ReadAlarmReq | `0x24` | — | →watch | `[idx(0..4)]` | **ReadAlarmRsp**: `weekMask=Σ(b[4+i]<<i)`; AlarmEntity(idx,en,BCD h/m,weekMask) | Read clock alarm slot. |
 | SetDrinkAlarmReq | `0x27` | — | →watch | same 11B layout as SetAlarm, idx 0..7 | ack | Drink/sedentary reminder slot. ⚠ Channel-B sleep also uses cmd `0x27`. |
@@ -405,7 +408,8 @@ REALTIMEHEARTRATE=6, ECG=7, PRESSURE=8, BLOOD_SUGAR=9, HRV=0xa, BODY_TEMPERATURE
 | TargetSettingReq (write +sport/sleep) | `0x21` | `0x02` | →watch | `…+sportMin u16 LE+sleepMin u16 LE` (14B) | echo | Extended goal write. |
 | TodaySportData | `0x48` | — | watch→ | (read) bare opcode | **TodaySportDataRsp**: 3B **BE** groups — totalSteps `b[0..2]`, running `b[3..5]`, calorie `b[6..8]`, walkDist `b[9..11]`, sportDur `b[12..13]`(2B) | Today's running step total. |
 | SleepNewProtoResp (night) | `0x27` (Ch B) | — | watch→ | H59MA live shape: `[recordCount, {dayDelta, blockLen, startMinLE, endMinLE, (type,durMin)*}...]`; older captures may use `[dayOffset, endMinBE, (type,durMin)*]` | `blockLen` includes the 4 start/end bytes plus pair bytes; pair durations sum to `end-start` modulo midnight | Night sleep (new protocol). |
-| SleepNewProtoResp (lunch) | `0x3e` (Ch B) | — | watch→ | Ch-B `[BC,3e,len,crc,payload]` | parseDaySleepLunch: lunchBreak=true, lunchSt/Et, lunchList[LunchSleepBean] | Lunch/nap sleep. |
+| SleepNewProtoReq/Resp (night+lunch) | `0x27` request, `0x27`/`0x3e` responses (Ch B) | — | both | request `[maxDayOffset, recordType?]`; maxDayOffset clamps to `6`; missing recordType defaults `0` | `recordType==1` first emits `0x3e` nap/lunch records, then firmware always emits `0x27` night records. Both are count-prefixed record lists. | H59MA v14 new sleep records. |
+| Activity summary | `0x2a` (Ch B) | — | both | request `[maxDayOffset]`, clamped to `2` | response is repeated 49-byte entries `[dayOffset][48 B activity body]`, max 3 entries (`2,1,0`) | Do not treat `dayOffset=0` as terminator; use Channel-B payload length. |
 | AppSport (notify) | `0x77` | — | watch→ | n/a | `b0`=gpsStatus; if==6 ts=`bytesToInt(b[2..6])` LE | Watch requests phone GPS-sport sync. |
 | AppGps (notify) | `0x74` | — | watch→ | n/a | same as AppSport | Watch GPS sync notify. |
 
@@ -466,6 +470,37 @@ REALTIMEHEARTRATE=6, ECG=7, PRESSURE=8, BLOOD_SUGAR=9, HRV=0xa, BODY_TEMPERATURE
 | Ebook delete | `0x81` | →watch | `id + UTF-8 name` | ack | Delete ebook/album entry. |
 | Record read | `0x82` | →watch | `id + UTF-8 name` | streamed content | Download a voice-record file. |
 
+**H59MA v14 firmware-specific file/list flow.** Ghidra shows the async
+Channel-B processor does **not** accept the APK-era `0x30`, `0x32`, `0x33`, or
+`0x39` file commands directly; `0x31` is routed to the OTA/file state machine
+before async handling. The implemented file table/list path is:
+
+| Cmd | Request | Response | Notes |
+|---|---|---|---|
+| `0x41` | `[cursorOrMinRecordId u32LE]` | `0x42` payload `[count, entries...]`, max 10 entries | Each entry is length-prefixed: `[entryLen, recordType, fieldTLVs...]`. Field TLVs are `[fieldLen, fieldId, value...]`; record types `0x04`, `0x07`, `0x08` use different field sets. |
+| `0x43` | `[selector, recordId u32LE]` | `0x44` metadata then `0x45` chunks | Found records emit metadata, then chunks shaped `[chunkIndex, 0x00, up to ~500 bytes]`. |
+| `0x46` | Routed through the same async file handler, but the v14 callee only has a visible `0x43` body | Treat as needs live capture before relying on delete semantics. |
+
+OpenWatch should treat this as an H59MA-specific file-table protocol, separate
+from the APK generic file upload commands above.
+
+**H59MA v14 device-info/config (`0x5a`).** The firmware handles this as a
+Channel-B command, not an APK generic large-data action:
+
+| Subcmd | Request | Response / effect |
+|---:|---|---|
+| `0x01` | `[01]` | Query enabled TLV slots; response starts `[01,01,count]` followed by TLVs. |
+| `0x02` | `[02,count,(id,len,data[len])*]` | Write blob0 TLV slots and commit settings blob0. Keep lengths within the firmware-cleared maxima below. |
+| `0x03` | `[03]` | Static info TLVs such as `H59MAX_`, `H59MA_V1.0`, `H59MA_`, `1.00.14_`, build `260508`. |
+| `0x04` | `[04]` | Clear blob0 device-info/config slots and commit settings blob0. |
+
+Writable TLV IDs: `1` max `0x18` custom advertised name/prefix; `2` max `6`
+BLE address override and config item `0x33` update; `3` max `0x14`, `4` max
+`0x10`, `5` max `0x10`, `6` max `0x08` device-info string slots; `7` one-byte
+name-format control. The decompiled writer clears fixed-size destinations but
+does not visibly clamp the supplied length before copy, so host code should
+enforce these maxima.
+
 ### 4.9 Channel-B OTA (DfuHandle)
 
 | Name | cmd | Dir | Request | Response | Meaning |
@@ -519,7 +554,7 @@ sequenceDiagram
     W-->>P: SwitchOTARsp stateMask
     P->>W: start (0x01)
     W-->>P: RSP_OK
-    P->>W: init (0x02) [01, size32LE, crc16LE, checksum16LE]
+    P->>W: init (0x02) [01 or 04, size32LE, crc16LE, checksum16LE]
     W-->>P: RSP_DATA_SIZE (or RSP_LOW_BATTERY ⇒ abort)
     loop each 1024-byte raw pocket
         P->>W: data (0x03) [idx16LE] + RAW(1024B)
@@ -532,6 +567,13 @@ sequenceDiagram
 ```
 
 `size ≤ 0xBB8000` (12 MB). `RSP_LOW_BATTERY (6)` at any point ⇒ device refuses; abort.
+
+H59MA v14 firmware details from Ghidra:
+
+- OTA init accepts a 9-byte payload: `[type, size u32LE, crc16 u16LE, checksum u16LE]`, with `type == 0x01` or `0x04`.
+- OTA data packets are `[u16LE 1-based packetIndex] + raw bytes`; unlike generic file pockets, the data is not zlib-compressed.
+- Packet 1 includes the 0x50-byte firmware container header. The firmware checks the first word against bytes `e5 c3 bd 81` (little-endian `0x81bdc3e5`) and then writes only `size - 0x50` bytes to OTA staging flash at `0x0084e000`.
+- `0x00840724` is **not** OTA validation; it checks persistent config-blob magic `0x8721bee2`. The 32-byte `image_digest @0x1c4` is not validated in `body.bin`.
 
 ### 5.5 Health-data prefetch
 
@@ -831,9 +873,12 @@ Ghidra confirms that H59MA v14 contains a real firmware-side Channel-A command
 dispatcher at **`0x0082d2dc`**, now named
 `channel_a_dispatch_queued_frame` in the saved Ghidra project. The handler
 drains `channel_a_command_queue_state` (`0x0082d440`), a ring of 16-byte queued
-requests, and reads the logical opcode from queued-frame offset `2`. Bytes
-`0..1` are queue metadata in this internal representation, so do **not** confuse
-that layout with the on-wire Channel-A frame where `byte 0` is the opcode.
+requests, and dispatches on byte `0` of the copied 16-byte frame. Ring metadata
+is outside the entry at `state+0x14/+0x16`; entries start at
+`state+0x18 + index*0x10`. The decompiler's halfword pointer arithmetic can
+look like a `+2` offset because it starts from the ring cursor pointer, but the
+queued entry itself matches the on-wire Channel-A layout: `byte 0` opcode,
+`byte 1..14` payload, `byte 15` checksum.
 
 The phone-side Oudmon SDK still owns on-wire framing and response correlation:
 it builds `[opcode][subData][checksum]`, validates notify checksums, strips the
@@ -919,11 +964,18 @@ surface in the firmware. Both builds implement the same state machine.
 | CRC table | `0x2100c` | `0x1f3c0` | 512-byte reflected-`0xA001` lookup table. |
 | Command dispatcher | `0x8b2e..0x8b96` | `0x8ae6..0x8b4e` (`channel_b_dispatch_complete_frame`) | Verifies payload CRC, compares `cmd` byte, routes OTA/file commands, or stores the command for async handling. |
 
-The dispatcher confirms that commands `0x01`, `0x02`, `0x31`, `0x35`, `0x36`,
-`0x61` are handled as a special group (likely OTA / file-init / avatar),
-`0x10` and `0x46` take a separate path (likely plate / navigation), and all
-other recognised commands fall through to a generic handler at
-`fcn.00009142` (v13) / `fcn.000090fa` (v14).
+The v14 dispatcher groups are now exact:
+
+- Direct `ota_dfu_state_machine(1, 0)` route: `0x01`, `0x02`, `0x21`,
+  `0x31`, `0x35`, `0x36`, `0x61`.
+- Bypass/no async store: `0x10`, `0x46`.
+- Async store: all other valid CRC frames call `channel_b_store_async_command`
+  and are later drained by `channel_b_async_command_processor`.
+
+The async processor then handles OTA low commands `0x01..0x07`, sleep
+`0x11/0x12/0x27`, activity `0x2a`, alarm `0x2c`, file table `0x41/0x43/0x46`,
+placeholders `0x47/0x4b`, and device-info/config `0x5a`; unrecognised commands
+fall through to `channel_b_send_nak(cmd, 0)`.
 
 ### 9.4 CRC-16/MODBUS verification
 
@@ -985,4 +1037,4 @@ layout. Key take-aways relevant to protocol work:
 | `0x10` | `version_string` | e.g. `H59MA_1.00.13_251230` |
 | `0x58` | `body_size` | exact body length |
 | `0x6c` | `flash_app_start` | `0x00826400` (both builds) |
-| `0x1c4` | `image_digest` | 32-byte per-build signature (SHA-256-like) |
+| `0x1c4` | `image_digest` | 32-byte per-build digest/signature field; algorithm and bootloader validation are still unresolved, and `body.bin` does not validate it. |

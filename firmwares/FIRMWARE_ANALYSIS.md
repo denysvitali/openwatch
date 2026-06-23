@@ -109,7 +109,7 @@ The `0x450`-byte container header is byte-stable except for the version string, 
 | `0xb8` | 8 | `sdk_string` | `sdk#####` | `sdk#####` | C | `73 64 6b 23 23 23 23 23`. |
 | `0xc0..0x1bf` | 256 | reserved | `00…` | `00…` | C | zero pad. |
 | `0x1c0` | 4 | reserved | `0x00000000` | `0x00000000` | C | Leading zeros of digest slot. |
-| `0x1c4` | **32** | **`image_digest`** | `8d50aa22…42178bb1` | `47d3b81a…0d354648` | V | Per-build 32-byte digest (SHA-256-sized, varies). **The real per-build signature.** `fwtool` reads only 16 B starting at `0x1c0` (4 bytes early) and labels it `nonce2` — wrong. |
+| `0x1c4` | **32** | **`image_digest`** | `8d50aa22…42178bb1` | `47d3b81a…0d354648` | V | Per-build 32-byte digest/signature field (SHA-256-sized, varies). Algorithm and bootloader validation are unresolved. `fwtool` reads only 16 B starting at `0x1c0` (4 bytes early) and labels it `nonce2` — wrong. |
 | `0x1e4..0x227` | 68 | reserved | `00…` | `00…` | C | zero pad. |
 | `0x228` | 4 | `const_228` | `0x0e85d101` | `0x0e85d101` | C | **New field**. |
 | `0x22c` | 4 | `flash_app_end` | `0x00847860` | `0x00845c14` | V | **New field**, varies. |
@@ -328,13 +328,13 @@ The radare2 pass correctly ruled out the dead v13 bucket table and the
 real firmware dispatcher at device address `0x0082d2dc`, now named
 `channel_a_dispatch_queued_frame` in the saved Ghidra project. That routine
 drains a deferred 16-byte request ring (`channel_a_command_queue_state` at
-`0x0082d440`) and dispatches the logical opcode stored at queued-frame offset
-`2` to per-opcode handlers.
+`0x0082d440`) and dispatches byte `0` of each queued 16-byte frame to
+per-opcode handlers. Ring metadata lives outside the copied entry at
+`state+0x14/+0x16`; entries start at `state+0x18 + index*0x10`.
 
 The on-wire Channel-A frame remains the SDK format documented in `PROTOCOL.md`
-(`byte 0 = opcode`, bytes `1..14 = payload`, byte `15 = additive checksum`).
-The Ghidra queued-frame layout is an internal firmware representation with
-metadata in bytes `0..1`; it should not be used as a replacement wire format.
+(`byte 0 = opcode`, bytes `1..14 = payload`, byte `15 = additive checksum`);
+the queued entry matches that layout.
 
 ---
 
@@ -459,7 +459,7 @@ The watch implements an **ANCS client** that subscribes to the iPhone's `7905F43
 - The OTA payload is loaded into flash starting at the **app region** (`flash_base + 0x400 = 0x826400`) by the bootloader; the trampoline at the start of the body is then jumped to.
 - The `load_size` field = `body_size + 0x400` (`0x23840` / `0x219fc`); `flash_app_end` (`0x47860` / `0x45c14`) is the load region's upper bound (also = `flash_app_start + load_size`).
 - Channel-B DfuHandle flow (`PROTOCOL.md` §4.9 / §5.4) sends file data via `bc` frames through `de5bf72a`. The watch reassembles, writes each chunk to flash, and on completion reboots into the new image.
-- The header's `image_chk_a @0x0c` is `sum(container[0x50:]) & 0xffffffff`. The 32-byte `image_digest @0x1c4` is the other apparent integrity field, but `body.bin` itself does not validate it; Ghidra only finds an OTA staged-image magic check for `0x8721bee2` (`ota_check_image_magic` at `0x00840724`). Bootloader-side digest validation remains outside this OTA body.
+- The header's `image_chk_a @0x0c` is `sum(container[0x50:]) & 0xffffffff`. The 32-byte `image_digest @0x1c4` is the other apparent integrity field, but `body.bin` itself does not validate it. The OTA data path checks the first container word (`e5 c3 bd 81`, little-endian `0x81bdc3e5`) and writes only bytes after the 0x50-byte header. The `0x8721bee2` check at `0x00840724` is persistent config-blob validation, not OTA validation. Bootloader-side digest validation remains outside this OTA body.
 
 ---
 
@@ -610,7 +610,7 @@ listed by the earlier radare2 notes:
 3. ~~Exact Channel A dispatch path — phone-side vs watch-side.~~ **Resolved by Ghidra:** v14 drains an internal 16-byte queued-frame ring in `channel_a_dispatch_queued_frame` (`0x0082d2dc`). The phone-side SDK still owns wire framing and response correlation.
 4. ~~Channel A additive 8-bit checksum algorithm.~~ **Resolved by Ghidra:** `checksum8_additive` (`0x0082b0c4`) sums caller-specified bytes; Channel-A/FEE7 responses use bytes `0..14`.
 5. **Channel B sub-cmd bytes that the watch accepts beyond `PROTOCOL.md` §3.2** (R2 lists `0x06`, `0x20`, and `0x25..0x82`; the spec covers a subset).
-6. **Whether the OTA bootloader validates `image_digest` and `signature_a`** at flash time. Ghidra shows `body.bin` only checks staged image magic `0x8721bee2`; bootloader validation remains outside this OTA body.
+6. **Whether the OTA bootloader validates `image_digest` and `signature_a`** at flash time. Ghidra shows `body.bin` only checks the OTA container magic `0x81bdc3e5` in packet 1 and stages `size - 0x50` bytes. The `0x8721bee2` magic belongs to the config blob.
 7. **GATT attribute table is laid out in fixed 28-byte records** — but the precise record fields (perm byte, value-handle byte, flash-value-pointer semantics) need a runnable emulator to confirm.
 8. **`0xfee7` high/vendor command semantics** — Ghidra confirms the service is an active second 16-byte command channel, but several handlers still need semantic naming, especially raw memory read/write (`0xbf`/`0xc0`), OTA hooks (`0xc1`/`0xc3`), and the `0x93..0xa0` vendor range.
 

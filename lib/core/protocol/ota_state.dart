@@ -8,18 +8,17 @@ final _log = AppLog.instance;
 
 /// OTA/DFU state machine driven by Channel-B command ids.
 ///
-/// Mirrors `FUN_0082fe52` (DFU state machine) and `FUN_00840724` (OTA signature
-/// check, which logs `"wrong signature! Read %8X != Requried %8X"` on
-/// mismatch) from the H59MA v14 firmware. The state table the firmware walks
-/// lives at `DAT_00830120`/`DAT_00830124`.
+/// Mirrors `ota_dfu_state_machine` (`0x0082fe52`) and the OTA command workers
+/// around `0x0082f1a4..0x0082f410` from the H59MA v14 firmware. The state table
+/// the firmware walks lives at `DAT_00830120`/`DAT_00830124`.
 ///
 /// On the wire the OTA flow runs over Channel-B:
 ///
 /// ```
 ///   start    (0x01)   — enter DFU mode
-///   init     (0x02)   — [01, size32LE, crc16LE, checksum16LE]
+///   init     (0x02)   — [01 or 04, size32LE, crc16LE, checksum16LE]
 ///   data     (0x03)   — [pocketIdx u16 LE, payload ...]
-///   check    (0x04)   — verify device-side hash
+///   check    (0x04)   — verify written byte count
 ///   end      (0x05)   — exit / reboot
 /// ```
 ///
@@ -40,9 +39,9 @@ class OtaSession {
   /// 16-bit additive checksum. Used as a second integrity check.
   int additive = 0;
 
-  /// 32-bit signature magic read from the container header (`0x0c`-area).
-  /// `FUN_00840724` compares this against a device-side expected value and
-  /// rejects mismatches.
+  /// 32-bit local signature/header value read from the container metadata.
+  /// Firmware packet 1 separately checks the container header's first word
+  /// against `0x81bdc3e5` before staging bytes after the 0x50-byte header.
   int signature = 0;
 
   /// Total pockets the firmware will receive (imageSize / 1024 rounded up).
@@ -60,9 +59,9 @@ class OtaStateMachine {
 
   final OtaSession session;
 
-  /// Mirrors `FUN_00840724`. Returns `true` if the signature is plausible; the
-  /// device-side `required` value isn't reachable from a static image so we
-  /// only do the local sanity check (non-zero).
+  /// Local sanity check before OTA init. The firmware's hard check happens on
+  /// data packet 1 against the container magic, so this only rejects obviously
+  /// missing local metadata.
   bool checkSignature() {
     if (session.signature == 0) {
       _log.warn('ota', 'signature missing; device will likely reject');

@@ -261,7 +261,7 @@ func decodeHeader(buf []byte) (Header, []NamedField) {
 		{0xB4, 4, "const_b4", h.ConstB4, hex.EncodeToString(buf[0xB4:0xB8]), "constant 0x1201a39e"},
 		{0xB8, 8, "sdk_string", h.SDKString, hex.EncodeToString(buf[0xB8:0xC0]), "ASCII, e.g. sdk#####"},
 		{0x1C0, 4, "reserved", nil, hex.EncodeToString(buf[0x1C0:0x1C4]), "zero (leading zero padding of image_digest slot)"},
-		{0x1C4, headerImageDigestSize, "image_digest", h.ImageDigest, hex.EncodeToString(buf[0x1C4:0x1C4+headerImageDigestSize]), "per-build 32-byte digest (SHA-256-sized); the real signature; NOT sha256 of any contiguous window of the image"},
+		{0x1C4, headerImageDigestSize, "image_digest", h.ImageDigest, hex.EncodeToString(buf[0x1C4:0x1C4+headerImageDigestSize]), "per-build 32-byte digest/signature field; algorithm and bootloader validation unresolved; NOT sha256 of any contiguous window of the image"},
 		{0x1E4, 68, "reserved", nil, hex.EncodeToString(buf[0x1E4:0x228]), "zero padding"},
 		{0x228, 4, "const_228", h.Const228, hex.EncodeToString(buf[0x228:0x22C]), "constant 0x0e85d101"},
 		{0x22C, 4, "flash_app_end", h.FlashAppEnd, hex.EncodeToString(buf[0x22C:0x230]), "app region end (= flash_app_start + load_size)"},

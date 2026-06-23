@@ -1,7 +1,7 @@
 # H59MA v14 Firmware — Ghidra Decompilation Notes
 
 > Generated from `firmwares/_re/v14/body.bin` loaded in Ghidra at base `0x00826400`.
-> Language: `ARM:LE:32:Cortex`, raw binary, ~136 KB, ~1139 functions.
+> Language: `ARM:LE:32:Cortex`, raw binary, ~136 KB, 1,172 function entries.
 
 ---
 
@@ -29,7 +29,7 @@ output:
 | `0x0082bb0c` | `fee7_vendor_memory_read` | Security-sensitive host-addressed memory read. |
 | `0x0082bcba` | `fee7_send_vendor_nak` | FEE7 unknown-command response (request opcode OR `0x80`, marker `0xee`). |
 | `0x0082fe52` | `ota_dfu_state_machine` | OTA/DFU state machine. |
-| `0x00840724` | `ota_check_image_magic` | Checks staged image magic `0x8721bee2`. |
+| `0x00840724` | `cfg_blob_magic_ok` | Checks persistent config-blob magic `0x8721bee2`. |
 | `0x00833bbc` | `channel_b_send_activity_summary` | Channel-B `0x2a` activity-summary response builder. |
 | `0x00833334` | `lis3dh_accel_dispatch` | LIS3DH accelerometer dispatcher entry. |
 
@@ -40,6 +40,113 @@ Key data labels added in the same pass: `channel_a_command_queue_state`
 `channel_b_rx_reassembly_state` (`0x0082f0f0`),
 `crc16_modbus_table` (`0x008457c0`), and
 `health_metric_clamp_constants` (`0x0084630c`).
+
+Second pass on the same date expanded Channel-B/OTA/storage coverage. Later
+correction/sensor, boot/BLE, and protocol-adjacent helper passes brought the
+saved Ghidra project to 196 named functions and 976 remaining auto-named
+`FUN_`/`thunk_FUN_` entries. New high-confidence names:
+
+| Address | New name | Role |
+|---|---|---|
+| `0x0082fc0c` | `channel_b_async_command_processor` | Drains async Channel-B command state and dispatches handlers. |
+| `0x0082f4fa` | `channel_b_store_async_command` | Stores parsed cmd/payload/length for async handling. |
+| `0x0082f4a6` | `channel_b_enqueue_async_command` | Appends `[cmd,len,payload]` records to the async queue. |
+| `0x0082f494` | `channel_b_init_async_command_context` | Clears and initialises the async command context. |
+| `0x0082f098` / `0x0082f0d4` | `channel_b_start_fragment_timeout` / `channel_b_cancel_fragment_timeout` | Arms/cancels the 2000 ms Channel-B fragment watchdog. |
+| `0x0082f1a4` / `0x0082f1b6` | `ota_cmd_start_ack` / `ota_cmd_init_metadata` | OTA start ack and 9-byte init metadata parser. |
+| `0x0082f240` | `ota_cmd_write_data_packet` | Validates OTA sequence and `0x81bdc3e5` container header, erases pages, writes image data. |
+| `0x0082f378` / `0x0082f3b4` / `0x0082f410` | `ota_cmd_check_complete` / `ota_cmd_end_reboot` / `ota_cmd_sub_ack` | OTA completion check, final reboot path, and state-7 ack. |
+| `0x0082f5a2` / `0x0082f50c` / `0x0082fada` | `channel_b_send_sleep_summary` / `channel_b_send_detailed_sleep` / `channel_b_send_sleep_records` | Channel-B sleep summary/detail/record responses. |
+| `0x0082f8ec` | `channel_b_handle_alarm_read_write` | Channel-B `0x2c` alarm read/write importer/exporter. |
+| `0x008311b8` | `channel_b_handle_file_command` | Channel-B `0x41` list and `0x43` file-transfer handler. |
+| `0x0082f6ec` | `channel_b_handle_device_info_config` | Channel-B `0x5a` device-info/config TLV handler. |
+| `0x0083105a` / `0x008310c8` / `0x008313ba` / `0x0083136a` | `file_format_list_entry` / `file_send_transfer_chunks` / `file_read_list_entry` / `file_find_record_by_id` | File-table serialisation, transfer, and lookup helpers. |
+| `0x00831230` / `0x0083124c` / `0x0083127e` / `0x00831292` | `file_table_format_all` / `file_load_recent_record` / `file_table_ensure_scanned` / `file_commit_record` | Two-sector circular file-table maintenance. |
+| `0x008318b0` / `0x008318c2` / `0x00831908` | `sleep_read_detail_record` / `sleep_read_summary_record` / `sleep_read_nap_record` | Persisted/live sleep record readers. |
+| `0x008315ba` / `0x008315f8` | `sleep_write_live_detail_slot` / `sleep_accumulate_live_detail_slot` | Live detailed-sleep slot update helpers. |
+| `0x00833b42` | `activity_read_day_summary_record` | Per-day activity summary reader and live-sample overlay. |
+
+Important data aliases from the second pass: `channel_b_async_state_ptr_primary`
+(`0x0082f894`) and `channel_b_async_state_ptr_alias` (`0x0082fcbc`) both point
+at the same async Channel-B context base (`0x0020b9a8` in this image), while
+`channel_b_async_payload_buffer_ptr` (`0x0082f898`) points at the backing
+payload/queue buffer.
+
+Third pass added correction and sensor coverage:
+
+| Address | New name | Role |
+|---|---|---|
+| `0x00840724` | `cfg_blob_magic_ok` | Persistent config blob header validator. |
+| `0x00840be0` / `0x0084415c` | `cfg_find_item` / `cfg_read_mac_item` | Config item scan and item `0x33` read. |
+| `0x00840568` / `0x00840774` | `cfg_update_mac_item` / `cfg_write_to_flash_preserve_sector` | Config item `0x33` writer and sector-preserving flash rewrite. |
+| `0x00829360` / `0x00829408` / `0x008293d2` | `flash_erase_sector_locked` / `flash_write_locked` / `flash_read_locked` | Locked flash erase/write/read wrappers. |
+| `0x0082ef50` | `channel_b_fragment_timeout_cb` | Channel-B reassembly/OTA timeout callback. |
+| `0x0082bb4e`..`0x0082cde8` | `channel_a_handle_*` names | High-confidence Channel-A handler names from the dispatcher. |
+| `0x008332dc`..`0x00832dd6` | `gsensor_*` names | Accelerometer probe/config/FIFO/service-state flow. |
+| `0x0082c2f4` / `0x0082c1e2` / `0x00833770` | `health_handle_start_measure` / `health_handle_stop_measure` / `health_module_event_dispatch` | Shared health measurement start/stop event path. |
+
+Fourth pass added boot, BLE, and offset-store names:
+
+| Address | New name | Role |
+|---|---|---|
+| `0x00826988` | `app_main_task` | Post-reset main task; loads persistent blobs, registers BLE profile/services, starts runtime tasks. |
+| `0x008294e0` / `0x008294cc` | `settings_blob0_load_or_init` / `settings_blob0_commit` | Offset-store slot `0`, length `0xe0`, magic byte `0x04`. |
+| `0x0082952a` / `0x0082954a` / `0x00829560` | `user_config_block_load_ok` / `user_config_block_commit` / `user_config_block_clear_persisted` | Offset-store slot `0x200`, length `0xa4`, user-visible config block used by reset/config paths. |
+| `0x00826904` | `user_config_load_or_init` | Loads/initialises the 164-byte user-config block, mirrors byte `+0x0d` to `+0xa6`, then starts feature initialisers. |
+| `0x0082696c` | `app_init_runtime_tasks_and_timers` | Creates runtime queues/tasks/timers and initialises Channel-B async state. |
+| `0x00827202` | `app_init_feature_modules` | Starts feature modules including health, gsensor, storage, alarms, and notification subsystems. |
+| `0x0082e28c` / `0x0082e464` | `ble_gap_profile_register` / `ble_services_init` | Builds advertising/name data, registers GAP/GATT profile values, registers Oudmon/FEE7 services. |
+| `0x0082e068` / `0x0082ecbc` | `ble_build_device_name_and_adv_data` / `ble_notify_rings_init` | Constructs device name/advertising fields and initialises Channel-A/B notify rings. |
+| `0x008272ec` | `create_qc_app_task` | Creates the `qc_app` RTOS task (`0xe00` stack, priority `1`). |
+
+Fifth pass added protocol-adjacent helper names from the feature-module tree:
+
+| Address | New name | Role |
+|---|---|---|
+| `0x00829c24` | `timer_create_or_restart_ms` | Shared timer helper: create named timer if absent, otherwise restart it with a millisecond period. |
+| `0x0082966e` / `0x008296b6` | `history_ring_find_record_by_key` / `history_ring_find_first_used_slot` | Shared persistent-history ring lookup helpers used by sleep/activity/BP/pressure/HRV tables. |
+| `0x0082a72a` / `0x0082a6cc` | `dnd_schedule_init` / `dnd_schedule_apply_current_state` | Initialises DND defaults and recomputes the live DND-enabled flag from current minute and configured window. |
+| `0x0082a7e4` / `0x0082a78e` | `dnd_schedule_encode_response` / `dnd_schedule_update_from_frame` | Channel-A `0x06` DND read/write helpers. |
+| `0x0082d4ce` | `channel_a_send_device_notify` | Builds opcode `0x73` device notify frames for sport/DND/sensor state changes. |
+| `0x0082adf4` / `0x0082ae84` | `sedentary_config_update_from_frame` / `sedentary_config_encode_response` | Channel-A `0x25/0x26` sedentary reminder encoding and validation. |
+| `0x0082adac` / `0x0082adca` / `0x0082ade0` | `sedentary_config_defaults_init` / `sedentary_config_mark_dirty` / `sedentary_module_init` | Sedentary defaults and dirty state. Default config is `08:00` to `18:00`, threshold `60` minutes. |
+| `0x0082ac50` / `0x0082ac72` | `alarm_module_init` / `alarm_defaults_normalize` | Normalises up to ten 0x29-byte alarm records, defaulting unset slots to enabled 08:15 daily. |
+| `0x0082b078` / `0x0082af28` / `0x0082aee4` | `menstruation_config_init` / `menstruation_config_encode_response` / `menstruation_config_update_from_frame` | Channel-A `0x2b` menstrual-cycle config helpers. |
+| `0x0082b92c` / `0x0082b21e` | `health_service_init` / `app_ring_sport_timer_init` | Creates health timers and a 1000 ms app-ring sport-data timer. |
+| `0x00833e56` | `health_metrics_init` | Fan-out health metric initialiser for HR, BP, SpO2, pressure, HRV, blood sugar, and body temperature stubs. |
+| `0x00834478` / `0x00834410` / `0x00834296` | `bp_history_module_init` / `bp_history_advance_read_cursor` / `bp_history_build_next_chunks` | Blood-pressure history state used by Channel-A `0x0e` confirm/read path. |
+| `0x0083462c` / `0x008344fe` / `0x00834556` | `pressure_history_table_init` / `pressure_history_read_day` / `pressure_current_value` | Pressure/stress history and current-value helpers for Channel-A `0x36/0x37` and health stop results. |
+| `0x008347bc` / `0x0083468e` / `0x008346e4` | `hrv_history_table_init` / `hrv_history_read_day` / `hrv_current_value` | HRV history/current helpers for Channel-A `0x39` and health stop results. |
+| `0x0083486a` / `0x0083485c` | `blood_sugar_metric_init` / `blood_sugar_current_value` | Blood-sugar metric default/current helpers. |
+| `0x00833a50` / `0x00837ade` | `spo2_current_value` / `heart_rate_current_bpm` | Current-value getters used by health stop/result frames. |
+| `0x0083371e` / `0x00833704` / `0x00837b96` / `0x00837c4e` | `health_post_start_measure_event` / `health_post_stop_measure_event` / `health_start_sensor_mask` / `health_stop_sensor_mask` | Event-bus and sensor-mask control around health measurements. |
+| `0x0082acf4` / `0x0082acf6` | `body_temperature_metric_init_stub` / `body_temperature_current_value_stub` | No-op body-temperature module initialiser and hardcoded-zero getter in this image. |
+| `0x00830f56` | `sport_mode_timer_init` | Ensures the file table is scanned and creates `sports_mode_timer` at 2000 ms. |
+
+Sixth pass added settings-persistence and sleep-refresh names:
+
+| Address | New name | Role |
+|---|---|---|
+| `0x00829456` / `0x0082946e` | `settings_blob1_commit` / `settings_blob1_commit_if_changed` | Offset-store slot `0x400`, length `0x2b0`, magic byte `0x07`; compare-before-write wrapper used by SpO2 settings. |
+| `0x0082edc4` / `0x0082ede2` | `bcd_to_u8` / `u8_to_bcd` | BCD conversion helpers used by time, sedentary, and DND settings. |
+| `0x00827660` | `settings_set_spo2_enabled_commit_if_changed` | Updates settings blob1 bit `+0x2d[1]` and commits blob1 if changed. |
+| `0x0082777e` / `0x0082779c` / `0x008277d8` | `settings_set_pressure_enabled_ram` / `settings_set_sugar_flag_ram` / `settings_set_lipids_flag_ram` | Update settings blob1 bits `+0x2d[3]`, `+0x2d[5]`, and `+0x2d[7]` in RAM. |
+| `0x008409f8` | `cfg_upsert_items_and_rewrite_blob` | Upserts config item records and rewrites the `0x8721bee2` config blob through the sector-preserving flash path. |
+| `0x00827624` / `0x008319dc` | `sleep_refresh_after_time_or_config_change` / `sleep_recompute_live_history_summary` | Refreshes live sleep detail/summary caches after time changes and touch/UV config writes. This is not a direct settings commit. |
+
+Seventh pass added FEE7 vendor-service names:
+
+| Address | New name | Role |
+|---|---|---|
+| `0x0082eebe` | `fee7_abort_active_ota_before_vendor_cmd` | Pre-dispatch FEE7 helper; if Channel-B OTA is active in state 2/3, aborts it before most vendor commands. |
+| `0x00827ad2` / `0x00827aee` / `0x00827b14` | `fee7_send_test_ack_90` / `fee7_send_test_ack_91` / `fee7_noop_92` | Low-cost vendor test/echo opcodes. |
+| `0x00827c4a` | `fee7_send_fw_version_build_info_93` | Sends firmware version/build strings, using blob0 overrides when enabled. |
+| `0x00827b2e` / `0x00827b54` / `0x00827b7c` / `0x00827b1a` | `fee7_start_test_mode_94` / `fee7_start_test_mode_95` / `fee7_start_test_mode_96` / `fee7_restart_test_state_timer` | Updates vendor test-state byte and restarts a 1000 ms timer. |
+| `0x0082bcde` | `fee7_handle_factory_test_ce` | Factory/test opcode `0xce`; subcommands read/write low-level bus registers and pulse GPIO/test routines. |
+| `0x0082be12` | `fee7_vendor_memory_read_small_cd` | Opcode `0xcd`; reads up to 14 bytes from a host-supplied absolute address and returns them in one 16-byte frame. |
+| `0x0082be90` / `0x0082bee6` | `fee7_store_pending_u32_60` / `fee7_read_pending_u32_61` | Vendor status/pending 32-bit value pair. |
+| `0x0082bf40` | `fee7_send_today_sport_totals` | Opcode `0x48`; sends current step/distance/calorie-style counters plus two state bytes. |
+| `0x0082c50e` / `0x0082c550` / `0x0082c5b8` | `fee7_send_fixed_capability_3c` / `fee7_handle_lipids_flag_3e` / `fee7_handle_test_request_51` | Fixed capability, lipids flag, and vendor alert/test request handlers. |
 
 ---
 
@@ -88,7 +195,7 @@ cover in isolation.
 
 The vector table at `0x00826400` contains the initial SP, reset handler, and ISR pointers.
 
-### 1.1 `app_main_task` boot sequence (`FUN_00826988`)
+### 1.1 `app_main_task` boot sequence
 
 The post-reset main-task routine. Runs after the reset
 handler sets the SP and calls system init. Performs 10
@@ -96,35 +203,34 @@ sequential steps to bring the firmware from "fresh-boot"
 to "ready-to-accept-BLE-traffic":
 
 ```c
-void FUN_00826988() {
+void app_main_task() {
     FUN_0083deb0(*DAT_008269dc);  // 1. write boot-state register
-    FUN_008294e0();              // 2. init (probably display / UI)
-    FUN_00826904();              // 3. peripheral init (likely BLE radio)
+    settings_blob0_load_or_init(); // 2. offset-store slot 0, len 0xe0, magic 0x04
+    user_config_load_or_init();    // 3. offset-store slot 0x200, len 0xa4
     FUN_0083b956(1);             // 4. spawn task id 1 (main loop?)
     FUN_0083b7c2();              // 5. init (probably sensor tasks)
-    FUN_0082e28c();              // 6. vendor setup (motor?)
-    FUN_0082e464();              // 7. BLE stack init (registers 0xFEE7 GATT — see §8)
+    ble_gap_profile_register();   // 6. BLE GAP/profile values, name, advertising data
+    ble_services_init();          // 7. BLE services + notify ring setup
     FUN_00826942();              // 8. clock init
-    FUN_0082696c();              // 9. timer init (button / DLPS — see §6.1)
+    app_init_runtime_tasks_and_timers(); // 9. queues/tasks/timers + Channel-B async state
     func_0x000131c2();            // 10. main-loop kickoff (task scheduler)
 }
 ```
 
 The 10 steps fall into **three layers**:
-* **Hardware init** (steps 1-3, 7-9) — write boot-state,
-  init peripherals (display, BLE radio, vendor), init clocks
-  + timers.
+* **Persistent/config init** (steps 1-3) — write boot-state,
+  load the 0xe0-byte settings blob and the 0xa4-byte user-config block.
 * **Task spawn** (step 4) — start the main event loop.
-* **Sensor init** (steps 5-6) — init the LIS3DH
-  accelerometer and the vibration motor (§7).
+* **Feature + BLE init** (steps 5-9) — initialise feature modules,
+  register GAP/GATT data, create tasks/timers, and clear Channel-B async state.
 * **Scheduler kickoff** (step 10) — enter the main event
   loop and start processing BLE traffic.
 
 The boot sequence takes ~1 second to complete — most of
-the steps are quick register writes, but `FUN_0082e464`
-(BLE stack init) and `FUN_008294e0` (display init) involve
-multiple millisecond delays. After step 10 the firmware is
-in the "ready" state and starts accepting BLE connections.
+the steps are quick register writes, but `ble_services_init`
+and the persistent offset-store reads can involve multiple
+millisecond delays. After step 10 the firmware is in the
+"ready" state and starts accepting BLE connections.
 
 #### Why step 4 *spawns* the main loop
 
@@ -294,15 +400,15 @@ a parameter, not a separate dispatch.
 
 | Address | Function | Role | Detailed in |
 |---|---|---|---|
-| `0x0082efea` | `FUN_0082efea` | **Parser / fragment reassembly** | §2.0.1 |
-| `0x0082eee6` | `FUN_0082eee6` | **Dispatcher** after full frame received | §2.0.1 |
-| `0x0082fc0c` | `FUN_0082fc0c` | **Async command processor** (runs from state stored by `FUN_0082f4fa`) | §2.0.1 |
-| `0x0082f114` | `FUN_0082f114` | **CRC-16/MODBUS** (init `0xFFFF`, poly `0xA001`) | §2.0.1 (disassembly) |
-| `0x0082ece0` | `FUN_0082ece0` | **Frame builder / sender** (queues `0xBC` notifications) | §2.0.1 |
-| `0x0082ee00` | `FUN_0082ee00` | **ACK/NAK sender** | §2.0 (NAK packet) |
-| `0x0082f098` | `FUN_0082f098` | Starts 2000 ms fragment timeout timer (`m_ble_packet_timer_id`) | §2.0.1 |
-| `0x0082f4fa` | `FUN_0082f4fa` | Stores parsed Channel B command for asynchronous consumption | §2.0.1 |
-| `0x0082fe52` | `FUN_0082fe52` | OTA state machine (DFU) | §5.1 |
+| `0x0082efea` | `channel_b_parse_reassembly_frame` | **Parser / fragment reassembly** | §2.0.1 |
+| `0x0082eee6` | `channel_b_dispatch_complete_frame` | **Dispatcher** after full frame received | §2.0.1 |
+| `0x0082fc0c` | `channel_b_async_command_processor` | **Async command processor** (runs from state stored by `channel_b_store_async_command`) | §2.0.1 |
+| `0x0082f114` | `crc16_modbus_update` | **CRC-16/MODBUS** (init `0xFFFF`, poly `0xA001`) | §2.0.1 (disassembly) |
+| `0x0082ece0` | `channel_b_queue_notify_frame` | **Frame builder / sender** (queues `0xBC` notifications) | §2.0.1 |
+| `0x0082ee00` | `channel_b_send_nak` | **ACK/NAK sender** | §2.0 (NAK packet) |
+| `0x0082f098` | `channel_b_start_fragment_timeout` | Starts 2000 ms fragment timeout timer (`m_ble_packet_timer_id`) | §2.0.1 |
+| `0x0082f4fa` | `channel_b_store_async_command` | Stores parsed Channel B command for asynchronous consumption | §2.0.1 |
+| `0x0082fe52` | `ota_dfu_state_machine` | OTA state machine (DFU) | §5.1 |
 
 #### 2.0.1 Channel-B internal helpers
 
@@ -313,7 +419,7 @@ section documents them in one place so a host SDK author
 who needs to understand the Channel-B packet flow can read
 all the helpers together.
 
-##### `FUN_0082efea` — parser / fragment reassembly
+##### `channel_b_parse_reassembly_frame` — parser / fragment reassembly
 
 The **per-frame state machine** for receiving Channel-B
 frames. Splits a frame into the *6-byte header* (magic + cmd +
@@ -321,66 +427,67 @@ payload-length LE u16 + CRC-16 LE u16) and the *variable-
 length payload*. Handles fragment reassembly: if the host
 sends `frame_0 | frame_1 | frame_2`, the parser buffers the
 payloads until `frame_N` arrives with the expected total
-length, then dispatches via `FUN_0082eee6` (§2.0.1).
+length, then dispatches via `channel_b_dispatch_complete_frame` (§2.0.1).
 
 The state byte at `DAT_0082f0f0 + 0xb` tracks the parser
 mode (0 = waiting for first fragment, 1 = continuing).
-The 2-second fragment timeout (`FUN_0082f098` §2.0.1) aborts
+The 2-second fragment timeout (`channel_b_start_fragment_timeout` §2.0.1) aborts
 if the host doesn't deliver all fragments in time.
 
-##### `FUN_0082eee6` — dispatcher
+##### `channel_b_dispatch_complete_frame` — dispatcher
 
-Called when `FUN_0082efea` has assembled a complete frame.
+Called when `channel_b_parse_reassembly_frame` has assembled a complete frame.
 Runs the **opcode → handler** table that maps Channel-B
 cmd bytes to handler functions (the §2.1-§2.11 handlers).
-After dispatching, calls `FUN_0082f4fa` (§2.0.1) to store
-the parsed cmd in the async queue, then `FUN_0082fc0c`
+After dispatching, calls `channel_b_store_async_command` (§2.0.1) to store
+the parsed cmd in the async queue, then `channel_b_async_command_processor`
 (§2.0.1) to consume it later.
 
-##### `FUN_0082fc0c` — async command processor
+##### `channel_b_async_command_processor` — async command processor
 
 The **worker that drains the deferred queue**. Pops the
-parsed cmd from `DAT_0082fcbc` (§2.1), runs the
+parsed cmd from `channel_b_async_state_ptr_alias` (§2.1), runs the
 per-cmd handler (§2.1-§2.11), and emits the response via
-`FUN_0082ece0` (§2.0.1). The cmd dispatch in §2.0 is a
+`channel_b_queue_notify_frame` (§2.0.1). The cmd dispatch in §2.0 is a
 **synchronous** parser/dispatcher pair; the cmd *handler*
 in §2.0 is an **async** worker — that's why we have two
 separate functions.
 
-##### `FUN_0082f4fa` — store parsed cmd
+##### `channel_b_store_async_command` — store parsed cmd
 
 The **queue-writer** for the async cmd path. Sets
-`DAT_0082f894 + 1 = cmd`, copies the payload ptr into
-`DAT_0082f894 + 4`, sets `DAT_0082f894 + 0xc = length`.
-The `FUN_0082fc0c` worker (§2.0.1) reads these back when it
+`channel_b_async_state_ptr_primary + 1 = cmd`, copies the payload ptr into
+`channel_b_async_state_ptr_primary + 4`, sets
+`channel_b_async_state_ptr_primary + 0xc = length`.
+The `channel_b_async_command_processor` worker (§2.0.1) reads these back when it
 runs the async handler.
 
-##### `FUN_0082ece0` — frame builder / sender
+##### `channel_b_queue_notify_frame` — frame builder / sender
 
-The **symmetric counterpart** of `FUN_0082efea`. Reads the
+The **symmetric counterpart** of `channel_b_parse_reassembly_frame`. Reads the
 cmd byte, the payload, and the payload length, computes
-the CRC-16/MODBUS over the payload via `FUN_0082f114`
+the CRC-16/MODBUS over the payload via `crc16_modbus_update`
 (§2.0.1), and writes the assembled 0xBC-magic frame into the
-notify ring at `DAT_0082edbc + 0xc + slot_idx * 0xb6`,
+notify ring at `channel_b_notify_ring_state + 0xc + slot_idx * 0xb6`,
 then advances the slot index (wraps at 8 = 0x180 / 0xb6).
 Calls `FUN_0082eb8a` to kick BLE notify transmission
 after the frame is queued.
 
-##### `FUN_0082ee00` — ACK/NAK sender
+##### `channel_b_send_nak` — ACK/NAK sender
 
 See §2.0 for the full NAK packet layout. The ACK/NAK sender
 is just a §2.0 NAK frame builder with `cmd = req_cmd,
 error_code = 1/2/0x10/0x14`. The §2.0 host-SDK recipe (§2.0)
 shows how to parse the returned NAK.
 
-##### `FUN_0082f098` — 2-second fragment timeout
+##### `channel_b_start_fragment_timeout` — 2-second fragment timeout
 
 Starts the BLE packet timer with a 2000 ms timeout. The
 parser's state machine (§2.0.1) is reset if the timeout
 fires before all fragments arrive. The timer ID
 `m_ble_packet_timer_id` is a global in the BLE stack.
 
-##### `FUN_0082f114` — CRC-16/MODBUS
+##### `crc16_modbus_update` — CRC-16/MODBUS
 
 See the disassembly below §2.0 for the algorithm. The CRC
 table at `DAT_0082f158` is a 512-byte lookup table of the
@@ -392,24 +499,25 @@ The `DAT_0082f154` global holds the initial CRC value
 `0xFFFF` — the standard MODBUS CRC initial value. The
 `DAT_0082f158` global holds the table base.
 
-#### 2.0.2 The Channel-B `DAT_0082f894` async state structure
+#### 2.0.2 The Channel-B async state structure
 
-The async cmd path uses a *single* state structure at
-`DAT_0082f894` (the same buffer the sleep context uses, but
-for a different purpose — the firmware reuses the buffer for
-the cmd state to save memory).
+The async cmd path uses a shared state structure reached through two data-word
+aliases. In this image `channel_b_async_state_ptr_primary` (`0x0082f894`) and
+`channel_b_async_state_ptr_alias` (`0x0082fcbc`) both contain `0x0020b9a8`.
+Ghidra names both because different functions load different literal-pool
+aliases, but they refer to the same runtime context.
 
 | Off | Field | Notes |
 |---:|---|---|
 | `+1` | `cmd` (u8) | the parsed cmd byte |
-| `+4` | `payload_ptr` (u32) | pointer to the cmd payload in some buffer |
+| `+4` | `payload_ptr` (u32) | pointer to the cmd payload / backing buffer |
 | `+0xc` | `payload_len` (u16) | length of the payload in bytes |
 
-The cmd dispatcher writes these fields when `FUN_0082eee6`
+The cmd dispatcher writes these fields when `channel_b_dispatch_complete_frame`
 (§2.0.1) completes the frame; the async worker
-`FUN_0082fc0c` (§2.0.1) reads them back. The buffer is
-shared with the sleep data context (which uses the *same*
-`DAT_0082f894` pointer but different fields).
+`channel_b_async_command_processor` (§2.0.1) reads them back. The buffer is
+shared with the sleep data context (which uses the same pointer but different
+fields).
 
 #### Why this sub-section exists
 
@@ -431,7 +539,7 @@ Channel-B request/response cycle. The pipeline is *symmetric*
 that stores a parsed cmd also serves as the input buffer
 for `FUN_0082fc0c` which consumes it.
 
-### Parser behavior (`FUN_0082efea`)
+### Parser behavior (`channel_b_parse_reassembly_frame`)
 
 - State byte at `DAT_0082f0f0 + 0xb`:
   - `0`: waiting for first fragment.
@@ -440,18 +548,18 @@ for `FUN_0082fc0c` which consumes it.
     - If `length <= received`, calls dispatcher.
   - `1`: continuation. Appends payload until `accumulated >= length`.
 
-### Dispatcher behavior (`FUN_0082eee6`)
+### Dispatcher behavior (`channel_b_dispatch_complete_frame`)
 
-1. Computes CRC over assembled payload with `FUN_0082f114`.
-2. If CRC mismatch → sends NAK (`FUN_0082ee00(cmd, 2)`).
+1. Computes CRC over assembled payload with `crc16_modbus_update`.
+2. If CRC mismatch → sends NAK (`channel_b_send_nak(cmd, 2)`).
 3. Direct routes for OTA commands:
    - `0x01`, `0x02`, `0x21`, `0x31`, `0x35`, `0x36`, `0x61` → `FUN_0082fe52(1, 0)`
    - `0x10`, `0x46` → skip (handled elsewhere / no direct dispatch)
-4. All other commands → `FUN_0082f4fa(cmd, payload, length)` for asynchronous consumption.
+4. All other commands → `channel_b_store_async_command(cmd, payload, length)` for asynchronous consumption.
 
-### Async processor (`FUN_0082fc0c`)
+### Async processor (`channel_b_async_command_processor`)
 
-Consumes the state saved by `FUN_0082f4fa` (`cmd` at offset `+1`, payload ptr at `+4`, length at `+0xc`).
+Consumes the state saved by `channel_b_store_async_command` (`cmd` at offset `+1`, payload ptr at `+4`, length at `+0xc`).
 
 The dispatch is a hybrid: low cmds `0x00..0x10` go through a switch8
 table at `0x82fc2f` (base, `0x12` entries: `0x2e, 0x5f, 0x63, 0x69, 0x6d,
@@ -461,66 +569,66 @@ is reusable.
 
 | Cmd | Handler | Notes |
 |---|---|---|
-| `0x01` | `FUN_0082f1a4` (table offset 0x5f) | OTA start ack — calls state callback `(1, 0)` |
-| `0x02` | `FUN_0082f1b6` (table offset 0x63) | OTA init — expects 9-byte payload, sub-cmd `0x01`/`0x04`; stores image size and metadata; sets OTA state to `2` |
-| `0x03` | `FUN_0082f240` (table offset 0x69) | OTA data packet — reassembles image, validates first 0x50 bytes, copies a 32-byte digest, writes to flash |
-| `0x04` | `FUN_0082f378` (table offset 0x6d) | OTA check — validates state `3` and accumulated size matches expected |
-| `0x05` | `FUN_0082f3b4` (table offset 0x71) | OTA end — finalizes, resets sensors/BLE, reboots after delays |
+| `0x01` | `ota_cmd_start_ack` (table offset 0x5f) | OTA start ack — calls state callback `(1, 0)` |
+| `0x02` | `ota_cmd_init_metadata` (table offset 0x63) | OTA init — expects 9-byte payload, sub-cmd `0x01`/`0x04`; stores image size and metadata; sets OTA state to `2` |
+| `0x03` | `ota_cmd_write_data_packet` (table offset 0x69) | OTA data packet — reassembles image, validates first 0x50 bytes, writes to flash |
+| `0x04` | `ota_cmd_check_complete` (table offset 0x6d) | OTA check — validates state `3` and accumulated size matches expected |
+| `0x05` | `ota_cmd_end_reboot` (table offset 0x71) | OTA end — finalizes, resets sensors/BLE, reboots after delays |
 | `0x06` | — | falls into the table's default `0x2e` slot — NAK with code 0 |
-| `0x07` | `FUN_0082f410` (table offset 0x75) | OTA sub-ack — calls state callback `(7, 0)` |
+| `0x07` | `ota_cmd_sub_ack` (table offset 0x75) | OTA sub-ack — calls state callback `(7, 0)` |
 | `0x08..0x10` | — | default slot — NAK with code 0 |
-| `0x11` | `FUN_0082f5a2(payload[0])` | Read sleep summary — see §2.1 |
-| `0x12` | `FUN_0082f50c()` | Read detailed sleep data — see §2.2 |
+| `0x11` | `channel_b_send_sleep_summary(payload[0])` | Read sleep summary — see §2.1 |
+| `0x12` | `channel_b_send_detailed_sleep()` | Read detailed sleep data — see §2.2 |
 | `0x13` | — | no-op (skipped) |
-| `0x21`, `0x22`, `0x23`, `0x24` | `FUN_0082ee00(cmd, 2)` | ACK with code `2` (intentionally rejected at this layer) |
-| `0x27` | `FUN_0082fada(payload[0], payload[1])` | Read sleep records — see §2.3 |
+| `0x21`, `0x22`, `0x23`, `0x24` | `channel_b_send_nak(cmd, 2)` | ACK with code `2` (intentionally rejected at this layer) |
+| `0x27` | `channel_b_send_sleep_records(payload[0], payload[1])` | Read sleep records — see §2.3 |
 | `0x29`, `0x3b` | — | no-op (skipped) |
-| `0x2a` | `FUN_00833bbc(payload[0])` | Read activity/sport summary — see §2.4 |
-| `0x2c` | `FUN_0082f8ec()` | Alarm read/write — see §2.5 |
-| `0x41` | `FUN_008311b8(0x41, payload, length)` | File list — see §2.6 |
-| `0x43`, `0x46` | `FUN_008311b8(cmd, payload)` | File init / file delete (same handler) — see §2.6 |
-| `0x47` | `FUN_008347fa(payload[0])` | no-op |
-| `0x4b` | `FUN_00830460(payload[0])` | no-op |
-| `0x5a` | `FUN_0082f6ec(payload)` | Device info/config — see §2.7 |
+| `0x2a` | `channel_b_send_activity_summary(payload[0])` | Read activity/sport summary — see §2.4 |
+| `0x2c` | `channel_b_handle_alarm_read_write()` | Alarm read/write — see §2.5 |
+| `0x41` | `channel_b_handle_file_command(0x41, payload, length)` | File list — see §2.6 |
+| `0x43`, `0x46` | `channel_b_handle_file_command(cmd, payload)` | File init / file delete family — see §2.6 |
+| `0x47` | `channel_b_handle_0x47_noop(payload[0])` | no-op |
+| `0x4b` | `channel_b_handle_0x4b_noop(payload[0])` | no-op |
+| `0x5a` | `channel_b_handle_device_info_config(payload)` | Device info/config — see §2.7 |
 
-Unrecognized commands fall through to `FUN_0082ee00(cmd, 0)` (NAK code `0`).
+Unrecognized commands fall through to `channel_b_send_nak(cmd, 0)` (NAK code `0`).
 
-#### 2.1 Sleep summary (`FUN_0082f5a2`)
+#### 2.1 Sleep summary (`channel_b_send_sleep_summary`)
 
 Input: `payload[0]` is the day offset (0 = today, 1 = yesterday, …).
 Effective day is `current_day - payload[0]`. The handler reads 100 B
-from the sleep-summary store via `FUN_008318c2(day, buf)` and emits a
+from the sleep-summary store via `sleep_read_summary_record(day, buf)` and emits a
 0x65-byte (101 B) Channel-B frame:
 
 ```
-byte 0     presence_byte (the byte pointed at by *(DAT_0082f894 + 4))
+byte 0       echoed day_offset
 byte 1..100 100-byte summary (e.g. totals, deep/light/REM minutes,
               avg HR, breath rate — exact layout recovered only after
               linking with the producer side)
 ```
 
-#### 2.2 Detailed sleep (`FUN_0082f50c`)
+#### 2.2 Detailed sleep (`channel_b_send_detailed_sleep`)
 
-Uses the day-index byte at `*(DAT_0082f894 + 4)` and an aux size at
+Uses the requested day-offset byte at `*(channel_b_async_state_ptr_primary + 4)` and an aux size at
 `DAT_0082f89c` (typically `0x130`). Two-phase build:
 
-1. If `FUN_008318b0(day) == 0` (no record): `memset(target, 0, DAT_0082f89c)` (zero-fill).
+1. If `sleep_read_detail_record(day) == 0` (no record): `memset(target, 0, DAT_0082f89c)` (zero-fill).
    Otherwise call the delayed init helper `func_0x000002a8` (probably a flash-read wrapper).
-2. If the day-index byte is `0` (record not ready), send a NAK via
-   `FUN_0082ee00(0x12, day_index_byte)` instead of a payload.
-3. Otherwise the response is 0x121 B: byte 0 = day_index_byte, bytes
+2. If the RTC/day guard fails, send a NAK via
+   `channel_b_send_nak(0x12, day_offset)` instead of a payload.
+3. Otherwise the response is 0x121 B: byte 0 = echoed day offset, bytes
    1..0x120 = a 0x120-byte slice from `auStack_52c + DAT_0082f8a0`
    (i.e. a 0x120-byte "detailed" window whose offset is the
    sleep-context base).
 
-#### 2.3 Sleep records (`FUN_0082fada`)
+#### 2.3 Sleep records (`channel_b_send_sleep_records`)
 
 Inputs: `param_1` (clamped to 6) = day offset; `param_2` = record-type
 filter. Two parallel passes always run, regardless of `param_2`:
 
-- Nap pass (`param_2 == 1`): reads records via `FUN_00831908(day, buf)`.
+- Nap pass (`param_2 == 1`): reads records via `sleep_read_nap_record(day, buf)`.
   Emits one Channel-B `0x3E` frame (header + nap records).
-- Night-sleep pass (always): reads via `FUN_008318c2(day, buf)`.
+- Night-sleep pass (always): reads via `sleep_read_summary_record(day, buf)`.
   Emits one Channel-B `0x27` frame (header + night records).
 
 Each emitted record (6-byte header + score bytes + label bytes) is
@@ -537,11 +645,11 @@ byte 6..N    per-record score bytes (count = record_count)
 The very first byte of the response is the number of records actually
 written (`cVar8` accumulator).
 
-#### 2.4 Activity / sport summary (`FUN_00833bbc`)
+#### 2.4 Activity / sport summary (`channel_b_send_activity_summary`)
 
 Input: `payload[0]` is the day offset (clamped to 2, max 3 days
 back). Iterates from `current_day` down to `current_day - offset`,
-calling `FUN_00833b42(day, buf)` (returns 0 if no data). For every
+calling `activity_read_day_summary_record(day, buf)` (returns 0 if no data). For every
 day with data, emits a 0x31-byte entry:
 
 ```
@@ -552,7 +660,8 @@ byte 1..0x30 48 bytes activity summary (steps, distance, calories,
 ```
 
 The total Channel-B frame uses cmd `0x2A` and a length up to
-`0x31 * 3 = 0x93` bytes.
+`0x31 * 3 = 0x93` bytes. `day_offset == 0` is a valid final entry for
+today; do not treat a zero byte inside the entry stream as a terminator.
 
 #### 2.5 Alarm read/write (`FUN_0082f8ec`)
 
@@ -598,45 +707,45 @@ shape, but for the **activity tracker** (`vc_SportMotion`
 library) instead of the per-hour sport detail.
 
 ```c
-void FUN_00833bbc(int n_days) {
-    if (n_days > 2) n_days = 2;            // cap at "today + yesterday"
+void channel_b_send_activity_summary(int n_days) {
+    if (n_days > 2) n_days = 2;            // cap at three entries: 2, 1, 0
     if (n_days < 0) return;               // negative -> no response
     int month = FUN_0082840e();
     int out_offset = 0;
     for (int d = n_days; d >= 0; d--) {
-        uint8_t *entry = FUN_00833b42(month - d, &buf);  // read day d
+        uint8_t *entry = activity_read_day_summary_record(month - d, &buf);
         if (entry != NULL) {
             rsp[out_offset] = (char)d;
             memcpy(rsp + out_offset + 1, entry, 0x30);
             out_offset += 0x31;
         }
     }
-    FUN_0082ebdc(0x2A, rsp, out_offset);  // send via §2.0 frame builder
+    channel_b_queue_notify_frame(0x2A, rsp, out_offset);
 }
 ```
 
 The handler:
-* Clamps `n_days` to `[0, 2]` (only "today" and "yesterday"
-  are reported; older days return nothing).
-* Calls `FUN_00833b42(month - d, &buf)` for each day — this
+* Clamps `n_days` to `[0, 2]`, so the maximum response covers
+  three offsets: `2`, `1`, and `0`.
+* Calls `activity_read_day_summary_record(month - d, &buf)` for each day — this
   helper looks up the day in the **activity tracker state
-  buffer** at `DAT_00833c44` (the activity tracker is
+  buffer** at `activity_state_ptr` (the activity tracker is
   separate from the sport-detail buffer at `DAT_0082d440`).
 * Builds a **49-byte record per day** (1 byte day-offset +
   48 bytes body = `0x31` bytes).
-* Sends via `FUN_0082ebdc(0x2A, rsp, n)` — the standard
+* Sends via `channel_b_queue_notify_frame(0x2A, rsp, n)` — the standard
   §2.0 frame builder.
 
-#### `FUN_00833b42` — per-day activity reader
+#### `activity_read_day_summary_record` — per-day activity reader
 
 ```c
-uint FUN_00833b42(uint day, u16 *out) {
-    activity_rec *r = FUN_0082966e(DAT_00833c50,
-                                    *(DAT_00833c44 + 8),
+uint activity_read_day_summary_record(uint day, u16 *out) {
+    activity_rec *r = FUN_0082966e(activity_record_table_base,
+                                    *(activity_state_ptr + 8),
                                     day, ...);
     memset(out, 0, 0x34);                  // 52 B cleared
     if (r == NULL) {
-        if (*(u16*)(DAT_00833c44 + 0xE) != day) return 0;
+        if (*(u16*)(activity_state_ptr + 0xE) != day) return 0;
         // no record, but cache matches: return zeroed
     } else {
         // copy record (with FF→0 padding for uncompressed bytes)
@@ -644,43 +753,40 @@ uint FUN_00833b42(uint day, u16 *out) {
             if (r->body[2*i + 4] == -1) out->body[2*i + 4] = 0;
             else                              out->body[2*i + 4] = r->body[2*i + 4];
         }
-        if (*(u16*)(DAT_00833c44 + 0xE) != day) return 1;  // warning
+        if (*(u16*)(activity_state_ptr + 0xE) != day) return 1;  // warning
     }
     // copy the 2 "step type" bytes from the activity state
-    out[0] = *(u16*)(DAT_00833c44 + 0x10);
-    out[1] = *(u16*)(DAT_00833c44 + 0x12);
+    out[0] = *(u16*)(activity_state_ptr + 0x10);
+    out[1] = *(u16*)(activity_state_ptr + 0x12);
     return 1;
 }
 ```
 
 Notable details:
-* The activity tracker uses a **`0x34` byte** record (52 B) —
-  different from the 12-B per-hour sport record. The extra
-  bytes are presumably the per-day step count, distance, and
-  calorie totals.
+* The activity tracker stores a **`0x34` byte** record (52 B), but
+  the Channel-B response sends only bytes `+4..+0x33`: a fixed
+  48-byte body after the day-offset byte.
 * The `0xFF → 0x00` padding on uncompressed bytes is the
   same compression-trick used by the sleep record parser
   (§2.4 / §2.5) — a byte of `0xFF` means "no data, treat as
   zero" so the host can read the body as a fixed 48-byte
   array.
-* The function falls back to the cache (`DAT_00833c44 +
+* The function falls back to the cache (`activity_state_ptr +
   0xE` = last-day-read index) if no fresh record exists, so
   the host still gets a (zeroed) response for "yesterday"
   even when the day's data hasn't been written yet.
 
 #### Why cap at 2 days
 
-The §2.5 sleep record parser returns up to 10 days; the
-§2.8 activity summary is **capped at 2 days** (today +
-yesterday). The likely reason: the activity record is
-**52 B per day** (vs the sleep record's 30 B), so 10 days
-would be 520 B — too long for a single 16-byte fragmented
-Channel-B frame. The 2-day cap keeps the total payload under
-100 B, which fits in 7 Channel-B frames.
+The §2.5 sleep record parser returns up to 7 day offsets (`0..6`); the
+§2.8 activity summary is **capped at max offset 2**, so at most three 49-byte
+entries are returned. The cap keeps the total payload under `0x93` bytes.
 
 The host SDK that consumes `0x2a` should:
-* Parse the response as `[day_offset_0][48 B body 0][day_offset_1][48 B body 1]` (variable length).
-* Stop reading at the first byte of value `0x00` (no more days).
+* Parse the response as repeated 49-byte entries:
+  `[day_offset][48 B activity body]`.
+* Use the Channel-B payload length to stop. `day_offset == 0` is a valid entry
+  for today and is often the last entry, not a terminator.
 * Treat `0xFF` bytes in the body as `0x00` (same compression-trick).
 
 #### Pair with Channel-A `0x43 readDetailSport` (§3.6)
@@ -689,14 +795,12 @@ The host SDK that consumes `0x2a` should:
 data sources:
 * `0x43` (Channel-A) — per-hour sport detail (24 slots × 12 B
   = 288 B) from the `vc_SportMotion_Int` library.
-* `0x2a` (Channel-B) — per-day activity summary (2 slots ×
-  52 B = 104 B) from the same library but a different record
-  type.
+* `0x2a` (Channel-B) — per-day activity summary (up to 3 slots ×
+  49 B = 147 B) from the same library but a different record type.
 
 A host that wants both should poll `0x43` *after* receiving an
-`0x2a` ack (the `0x2a` response is *shorter* than `0x43` —
-2 days vs 24 hours — so it's the cheaper "what days have
-data?" probe).
+`0x2a` ack (the `0x2a` response is still shorter than `0x43` and is the
+cheaper "what days have data?" probe).
 
 ### CRC-16/MODBUS (`FUN_0082f114`)
 
@@ -722,7 +826,7 @@ blt  loop
 pop  {r4,r5,r6,pc}
 ```
 
-#### 2.9 Sleep summary (`FUN_0082f5a2`)
+#### 2.9 Sleep summary (`channel_b_send_sleep_summary`)
 
 The "read a *summary* of one day's sleep" command. Like
 `0x12 detailed sleep` (§2.10 below) but returns a smaller
@@ -731,30 +835,28 @@ detail. Used by the host SDK for the "sleep score" card on
 the dashboard.
 
 ```c
-void FUN_0082f5a2(short day_offset) {
+void channel_b_send_sleep_summary(short day_offset) {
     int today = FUN_0082840e();
-    FUN_008318c2(today - day_offset, stack_buf);
-    rsp[0] = **(undefined1 **)(DAT_0082f894 + 4);   // state byte
+    sleep_read_summary_record(today - day_offset, stack_buf);
+    rsp[0] = day_offset;                             // echoed request byte
     memcpy(rsp + 1, stack_buf, 100);
-    FUN_0082ece0(0x11, rsp, 0x65);                   // 1 + 100 = 101 B
+    channel_b_queue_notify_frame(0x11, rsp, 0x65);   // 1 + 100 = 101 B
 }
 ```
 
 The handler:
 1. Reads the sleep summary for `(today - day_offset)` via
-   `FUN_008318c2` — a 100-byte summary record into a stack
+   `sleep_read_summary_record` — a 100-byte summary record into a stack
    buffer.
-2. Sets `rsp[0]` to the current sleep state byte
-   (`**(DAT_0082f894 + 4)` — the sleep-context's
-   "current-state" pointer dereference).
+2. Sets `rsp[0]` to the echoed day-offset request byte.
 3. Copies the 100-byte summary into `rsp[1..100]`.
-4. Sends via `FUN_0082ece0(0x11, rsp, 0x65)` — total
-   payload 101 bytes (1 state + 100 summary).
+4. Sends via `channel_b_queue_notify_frame(0x11, rsp, 0x65)` — total
+   payload 101 bytes (1 offset + 100 summary).
 
 #### Response layout (101 bytes)
 
 ```
-byte  0:    state byte (sleep-context state)
+byte  0:    echoed day offset
 byte  1..100: 100-byte sleep summary
 ```
 
@@ -764,10 +866,10 @@ remaining is the per-segment detail. A host that only
 wants the summary can stop reading after the first ~20
 bytes; a host that wants full detail uses `0x12` instead.
 
-#### `FUN_008318c2` — sleep summary reader
+#### `sleep_read_summary_record` — sleep summary reader
 
 ```c
-void FUN_008318c2(int day, u8 *out) {
+void sleep_read_summary_record(int day, u8 *out) {
     int today = FUN_0082840e();
     if (day == today && FUN_00844c34() != 0) {
         FUN_00844328(out);              // "live today" path
@@ -808,8 +910,8 @@ hides the offset arithmetic.
 
 #### Pair with `0x12 detailed sleep` (§2.10)
 
-`0x11` returns **100 bytes** (summary); `0x12` returns
-**~1000+ bytes** (per-segment detail). The two are *the
+`0x11` returns **101 bytes** (`day_offset` + 100-byte summary); `0x12` returns
+**289 bytes** (`day_offset` + 288-byte detail). The two are *the
 same record type* — `0x11` is the "small" variant that
 ships only the summary header, `0x12` is the "full"
 variant that ships the per-segment detail. A host that wants
@@ -827,46 +929,46 @@ so the host gets the freshest data. Without this branch, a
 mid-day poll would return zeroed summary data even when the
 watch has full sleep data in RAM.
 
-#### 2.10 Detailed sleep (`FUN_0082f50c`)
+#### 2.10 Detailed sleep (`channel_b_send_detailed_sleep`)
 
 The "full per-segment sleep curve" command. Returns a
-**289-byte record** (1 state byte + 288 B body) — the same
+**289-byte record** (1 echoed day-offset byte + 288 B body) — the same
 size as the §3.6 `0x43 readDetailSport` per-day record.
 Like `0x11` (§2.9), this is a per-day dump but with **24
 × 12 B hourly slots** instead of the 100 B summary.
 
 ```c
-void FUN_0082f50c() {
+void channel_b_send_detailed_sleep() {
     int today = FUN_0082840e();
-    sleep_ctx = DAT_0082f894;
-    FUN_008318b0(today - *(byte*)(DAT_0082f894 + 4));   // read detail
-    body_offset = DAT_0082f8a0;
+    sleep_ctx = channel_b_async_state_ptr_primary;
+    day_offset = **(u8**)(sleep_ctx + 4);
+    sleep_read_detail_record(today - day_offset);
+    body_offset = channel_b_sleep_detail_body_offset;
     body_ptr = stack_buf + body_offset;
-    if (FUN_008318b0 result == 0)
-        memset(body_ptr, 0, DAT_0082f89c);
+    if (sleep_read_detail_record result == 0)
+        memset(body_ptr, 0, channel_b_sleep_detail_clear_len);
     else
-        memcpy(body_ptr, FUN_008318b0 result, ...);
+        memcpy(body_ptr, sleep_read_detail_record result, ...);
 
     // If no day offset in request, also write today's live record
-    if (**(char**)(sleep_ctx + 4) == '\0') {
-        current_minute = FUN_0083dfba(FUN_0082841e(), 0x3c);
-        FUN_008315ba(body_ptr + current_minute * 0xc + 4);
+    if (day_offset == 0) {
+        current_hour = FUN_0083dfba(FUN_0082841e(), 0x3c);
+        sleep_write_live_detail_slot(body_ptr + current_hour * 0xc + 4);
     }
 
-    state = **(u8**)(sleep_ctx + 4);
     if (current_month == 0) {
-        FUN_0082ee00(0x12, *state);                   // error path
+        channel_b_send_nak(0x12, day_offset);         // error path
     } else {
-        stack_buf[0] = *state;
+        stack_buf[0] = day_offset;
         memcpy(stack_buf + 1, stack_528 + body_offset, 0x120);
-        FUN_0082ece0(0x12, stack_buf, 0x121);          // 1 + 288 = 289 B
+        channel_b_queue_notify_frame(0x12, stack_buf, 0x121);
     }
 }
 ```
 
 Notable details:
 
-* `FUN_008318b0(day)` — the per-day detail reader. Uses
+* `sleep_read_detail_record(day)` — the per-day detail reader. Uses
   `DAT_00831990` (same table base as `0x11`) but with
   `*(DAT_0083198c + -0x4C)` (offset `-0x4C`, *another*
   negative offset — the sleep-detail table starts 0x4C bytes
@@ -875,15 +977,15 @@ Notable details:
   suggesting the firmware keeps separate indices for the
   summary and the detail records even though they live in
   the same day-table.
-* `body_offset = DAT_0082f8a0` — the offset into the
+* `body_offset = channel_b_sleep_detail_body_offset` — the offset into the
   per-day record where the per-hour slots start. Like
   `0x43 readDetailSport` (§3.6) which uses an offset of
-  `+4` (the state byte lives at byte 0..3), the sleep
+  `+4` (the day key/header lives at byte 0..3), the sleep
   detail offsets the slots past a 4-byte header.
-* `body_ptr + current_minute * 0xc + 4` — the helper writes
-  the **current live minute** into the appropriate slot
-  before sending. `0xc = 12` is the slot size; `current_minute`
-  picks the right slot for the current minute-of-day (0..1439).
+* `body_ptr + current_hour * 0xc + 4` — the helper writes
+  the **current live hour** into the appropriate slot
+  before sending. `0xc = 12` is the slot size; `current_hour`
+  is computed as `currentMinuteOfDay / 60`.
   This means **a `0x12` poll always returns up-to-the-minute
   data** for today, while older days return the committed
   table record.
@@ -896,7 +998,7 @@ Notable details:
 #### Response layout (289 bytes)
 
 ```
-byte  0:        state byte (sleep-context state)
+byte  0:        echoed day offset
 byte  1..288:   288-byte per-hour sleep detail
                 (24 hours × 12 B per hour)
 ```
@@ -924,12 +1026,10 @@ prefix without breaking the helper.
 
 #### Why the live-minute write
 
-The `FUN_008315ba(body_ptr + minute * 0xc + 4)` call is the
-"up-to-the-minute" trick: it overwrites the appropriate slot
-in the body buffer with the live sleep data for the current
-minute. Without this, a `0x12` poll for today would return
-the last-committed minute (typically the previous day's
-midnight finalisation), which can be up to 24 hours stale.
+The `sleep_write_live_detail_slot(body_ptr + current_hour * 0xc + 4)` call is
+the live-overlay path: it overwrites the appropriate hourly slot in the body
+buffer with current sleep data. Without this, a `0x12` poll for today would
+return the last committed slot, which can be up to 24 hours stale.
 The 0xc = 12 slot size matches the §3.6 detail record layout
 — the same vendor library (`vc_SportMotion_Int`) generates
 both the sport and sleep records.
@@ -1063,11 +1163,21 @@ response semantics — keeping the response-cmd one-higher
 than the request-cmd is the firmware's convention for
 "stream this list" operations.
 
-Channel A frames are fixed 16 bytes. The main command dispatcher is `FUN_0082d2dc` **in the firmware** — this routine processes a circular queue of incoming 16-byte frames, reads the opcode at offset `2`, and dispatches to a handler. Earlier notes in `R2_ANALYSIS.md`/`PROTOCOL.md` claimed Channel-A dispatch was APK-only; that claim is incorrect for v14.
+Channel A frames are fixed 16 bytes. The main command dispatcher is
+`channel_a_dispatch_queued_frame` (`0x0082d2dc`) **in the firmware** — this
+routine processes a circular queue of incoming 16-byte frames and dispatches
+on the queued frame's byte `0` opcode. Earlier notes in
+`R2_ANALYSIS.md`/`PROTOCOL.md` claimed Channel-A dispatch was APK-only; that
+claim is incorrect for v14.
 
-### Main dispatcher (`FUN_0082d2dc`)
+### Main dispatcher (`channel_a_dispatch_queued_frame`)
 
-Processes a circular queue of incoming 16-byte frames (`DAT_0082d440 + 0x14` ring). For each frame it reads the opcode at offset `2` and dispatches to a handler.
+Processes a 10-slot circular queue under `channel_a_command_queue_state`
+(`0x0082d440`). The ring head and tail live at `state + 0x14` and
+`state + 0x16`; entries start at `state + 0x18 + index * 0x10`. The decompiler
+loads each entry through `state+0x14` plus a halfword offset, which can look
+like "+2" in decompiled pointer arithmetic, but handlers receive the copied
+16-byte Channel-A frame with opcode at byte `0` and payload at byte `1`.
 
 ### Opcode → handler map
 
@@ -1353,14 +1463,15 @@ treat the value as an opaque feature-mode byte that the
 firmware-side producer (the UV sensor / touch-screen
 driver) consumes.
 
-#### `FUN_00827624` — config-commit
+#### `sleep_refresh_after_time_or_config_change`
 
-Called on the write path after the byte is stored. Same
-function used by `0x01 setTime` and by the Channel-A
-dispatcher's restart paths (§3.4). Marks the config
-*dirty* so the next `0x81` config-chunk write flushes the
-new value to flash, and re-arms the bitmap-driven
-UI re-render.
+Called on the write path after the byte is stored. The same helper is also
+called by `0x01 setTime` when the RTC changes. Earlier notes treated this as a
+settings commit, but the Ghidra body is a thin wrapper around
+`sleep_recompute_live_history_summary`: it refreshes today's detailed-sleep
+slots, rolls up the previous six days' sleep totals, and updates the cached
+sleep-state byte from the latest night-sleep record. No direct blob0/blob1 flash
+write is visible in this helper.
 
 #### Why the request-echo response
 
@@ -2792,8 +2903,8 @@ countdown are packed into a single byte at `DAT_0082d43c + 8`
 
 | `req[1]` | Condition | Action |
 |---:|---|---|
-| `0x01` (start) | `cVar2 == 0` (idle) | `*(DAT_0082d43c + 8) = 0x3C` (60-second counter reload); `FUN_0083371e(0x2000)` (HR driver start in continuous mode); `func_0x00013694(DAT_0082d440, 1000)` (start 1 s tick timer) |
-| `0x02` (stop) | `cVar2 != 0` (running) | `*(DAT_0082d43c + 8) = 0` (counter to zero); `FUN_00833704()` (HR driver stop); `func_0x000136bc(DAT_0082d440)` (cancel 1 s tick timer) |
+| `0x01` (start) | `cVar2 == 0` (idle) | `*(DAT_0082d43c + 8) = 0x3C` (60-second counter reload); `health_post_start_measure_event(0x2000)` (HR driver start in continuous mode); `func_0x00013694(DAT_0082d440, 1000)` (start 1 s tick timer) |
+| `0x02` (stop) | `cVar2 != 0` (running) | `*(DAT_0082d43c + 8) = 0` (counter to zero); `health_post_stop_measure_event(0x2000)` (HR driver stop); `func_0x000136bc(DAT_0082d440)` (cancel 1 s tick timer) |
 | `0x03` (reset) | `cVar2 != 0` (running) | `*(DAT_0082d43c + 8) = 0x3C` (counter back to 60, but no driver re-start and no timer re-arm) |
 | other | any | no-op (handler does not branch) |
 
@@ -2824,14 +2935,14 @@ naturally falls out of its re-arm loop.
 
 #### HR driver calls
 
-`FUN_0083371e(mode = 0x2000)` (start) builds the 8-byte request
+`health_post_start_measure_event(mode = 0x2000)` (start) builds the 8-byte request
 `{cmd = 0x10003, mode = 0x2000}` and forwards it to the HR driver
 via `FUN_008273d0(&req, 0x17C)`. The `0x17C` is the HR driver
 sub-command id for "start measurement", and `0x2000` selects
 *continuous* mode (as opposed to `0x0800` used by the `0xa1`
 factory test mode for one-shot measurement).
 
-`FUN_00833704()` (stop) builds `{cmd = 0x20003, mode = 0x2000}`
+`health_post_stop_measure_event(0x2000)` (stop) builds `{cmd = 0x20003, mode = 0x2000}`
 and forwards via `FUN_008273d0(&req, 0x174)`. The `0x174` is the HR
 driver sub-command id for "stop measurement". Both sub-commands
 live in the same driver wrapper `FUN_008273d0` and are part of the
@@ -2918,7 +3029,7 @@ The four "interesting" paths:
   4. Tail-call `FUN_00829c50` to cancel any pending workers.
 
 * **`sub 0x04` — start HR mode `0x800`**:
-  Just calls `FUN_0083371e(0x800)` and stores `req[2]` in
+  Just calls `health_post_start_measure_event(0x800)` and stores `req[2]` in
   `DAT_00828108[0]` for the worker.
 
 * **`sub 0x06` — save + reset**:
@@ -2994,7 +3105,7 @@ buffer (`DAT_0082810c + 4..0xC`) is re-staged after the clear.
 entry points but on **different transports**. `0xa1` is the
 public Channel-A path used by host SDKs; `0xce` is the OEM
 vendor path used by factory-floor equipment (§8.10). They
-share *some* helpers (`FUN_0083371e`, `FUN_00833704`,
+share *some* helpers (`health_post_start_measure_event`, `health_post_stop_measure_event`,
 `FUN_0082a460`) but call different state-update paths
 (`FUN_00827dba` vs `FUN_00838bc0`/`FUN_00833400`).
 
@@ -3006,11 +3117,11 @@ interfere with each other.
 
 Unlike the other Channel-A opcodes that route to dedicated
 handler functions, `0xc6` is a *special* case handled inline in
-the main dispatcher `FUN_0082d2dc`. The handler takes a one-byte
+the main dispatcher `channel_a_dispatch_queued_frame`. The handler takes a one-byte
 sub-command at `req[1]` and either runs a full reboot sequence
 or sends a one-byte ack, depending on the sub-command.
 
-#### Sub-command dispatch (inline in `FUN_0082d2dc`)
+#### Sub-command dispatch (inline in `channel_a_dispatch_queued_frame`)
 
 ```c
 if (opcode == 0xc6) {
@@ -3254,7 +3365,7 @@ Total size: `4 + 10 * 16 = 164` bytes (`0xA4`).
 The worker (`FUN_00827124(0, DAT_0082bfd0)`) drains the
 ring asynchronously — each slot is consumed in order,
 dispatched to its corresponding handler (§3 — the same
-`FUN_0082d2dc` dispatch loop), and then freed. The
+`channel_a_dispatch_queued_frame` dispatch loop), and then freed. The
 `DAT_0082bfd0` argument is the work-item struct that holds
 the "next slot to drain" index.
 
@@ -3292,22 +3403,21 @@ dispatcher and §3 dispatcher):
 
 | Opcode | § | Handler (deferred-worker target) |
 |---|---|---|
-| `0x2b` menstruation | §3.1 | `FUN_0082ba54` |
-| `0x37` pressureSetting | §3.20 | `FUN_0082caa6` |
-| `0x38` pressure | §3.17 | `FUN_0082ca54` |
-| `0x3a` sub 0x03/0x04 sugar/lipids | §3.22 | `FUN_0082cc1e` |
-| `0x3b` uvTouch | §3.18 | `FUN_0082cbc8` |
-| `0x43 'C'` Channel-A capability | §3.6 | `FUN_0082d034` |
-| `0x48 'H'` 0xFEE7 handshake | §8.2 | `FUN_0082bf40` |
-| `0x72` pushMsgUint | §3.3 | `FUN_00829e92` |
-| `0x7a` muslim | §3.11 | `FUN_0082cb3a` |
-| `0x81` config chunk | §3.5 companion | `FUN_0082cdac` |
-| `0xa1` factory/test | §3.x | `FUN_00827f5c` + worker `FUN_00827dba` (§3.x) |
-| `0xc6` restoreKey | §3.14 | `FUN_0082c1e2` (inline in dispatcher) |
-| `0xc7 'D'` vibration | §3.2 | `FUN_00832ebc` |
-| `0xff` factory reset | §3.8 | `FUN_0082cde8` |
+| `0x2b` menstruation | §3.1 | `channel_a_handle_menstruation` |
+| `0x37` pressure history | §3.20 | `channel_a_handle_pressure_history` |
+| `0x38` pressure flag | §3.17 | `channel_a_handle_pressure_flag` |
+| `0x3a` sub 0x03/0x04 sugar/lipids | §3.22 | `channel_a_handle_sugar_lipids_flags` |
+| `0x3b` uvTouch | §3.18 | `channel_a_handle_touch_uv_config` |
+| `0x43 'C'` detail sport | §3.6 | `channel_a_handle_detail_sport_read` |
+| `0x72` pushMsgUint | §3.3 | `channel_a_handle_push_msg_unicode` |
+| `0x7a` muslim | §3.11 | `channel_a_handle_muslim_prayer` |
+| `0x81` config chunk | §3.5 companion | `channel_a_handle_config_chunk` |
+| `0xa1` factory/test | §3.x | `channel_a_handle_factory_test` |
+| `0xc6` restoreKey/reboot | §3.14 | inline case in `channel_a_dispatch_queued_frame` |
+| `0xc7` vibration | §3.2 | `channel_a_handle_vibration_pattern` |
+| `0xff` factory reset | §3.8 | `channel_a_handle_factory_reset` |
 
-That's **14 opcodes** routed through `FUN_0082be64`. The
+That's **13 opcodes** routed through `enqueue_deferred_command_frame`. The
 remaining ~30 documented 0xFEE7 opcodes are either inline
 in the dispatcher (no ring) or are state-update / ack-only
 (no response).
@@ -3327,7 +3437,7 @@ queue unboundedly.
 
 #### §3 vs §8 ring usage
 
-The §3 dispatcher (`FUN_0082d2dc`) routes `0x2b`, `0x37`,
+The §3 dispatcher (`channel_a_dispatch_queued_frame`) routes `0x2b`, `0x37`,
 `0x38`, `0x3a`, `0x3b`, `0x43`, `0x72`, `0x7a`, `0x81`,
 `0xa1`, `0xc6`, `0xc7`, `0xff` through `FUN_0082be64` —
 13 opcodes. The §8.1 0xFEE7 dispatcher adds `0x48 'H'` —
@@ -3348,7 +3458,7 @@ short-lived (a single config-byte write or an immediate
 self-marker ack) and don't need async dispatch.
 
 Like `0xc6` (see §3.14), the `0x08` opcode is *special-cased inline*
-in the main dispatcher `FUN_0082d2dc` rather than routed to a
+in the main dispatcher `channel_a_dispatch_queued_frame` rather than routed to a
 dedicated handler. It owns three distinct user-visible features
 on the H59MA: **find-device** (vibrate the watch to help the user
 locate it from the host), the **camera-shutter remote** path (a
@@ -3722,17 +3832,21 @@ Channel-A `0x72` path.
 
 | Address | Function | Role |
 |---|---|---|
-| `0x00840724` | `FUN_00840724` | OTA signature check — compares first 4 bytes of image to magic `0x8721bee2` (stored at `DAT_00840744`); logs `"wrong signature! Read %8X != Requried %8X"` |
-| `0x0082fe52` | `FUN_0082fe52` | OTA/DFU state machine driven by Channel B cmd ids |
-| `0x0082f160` | `FUN_0082f160` | Starts a one-shot timer (used during reboot/OTA) |
-| `0x0082f1a4` | `FUN_0082f1a4` | OTA start ack |
-| `0x0082f1b6` | `FUN_0082f1b6` | OTA init — parses image header, stores size/digest metadata |
-| `0x0082f240` | `FUN_0082f240` | OTA data — reassembles and writes image, validates a 32-byte digest block |
-| `0x0082f378` | `FUN_0082f378` | OTA check — validates completion and size |
-| `0x0082f3b4` | `FUN_0082f3b4` | OTA end — reboots device |
-| `0x0082f410` | `FUN_0082f410` | OTA sub-ack |
+| `0x0082fe52` | `ota_dfu_state_machine` | OTA/DFU state machine driven by Channel-B command ids |
+| `0x0082f160` | `ota_start_write_flag_timer` | Starts a one-shot timer (used during reboot/OTA) |
+| `0x0082f1a4` | `ota_cmd_start_ack` | OTA start ack |
+| `0x0082f1b6` | `ota_cmd_init_metadata` | OTA init — parses 9-byte metadata and stores expected image size/check fields |
+| `0x0082f240` | `ota_cmd_write_data_packet` | OTA data — validates sequence/header, skips the first 0x50-byte container header, writes image data to staging flash |
+| `0x0082f378` | `ota_cmd_check_complete` | OTA check — validates completion and size |
+| `0x0082f3b4` | `ota_cmd_end_reboot` | OTA end — reboots/applies device image |
+| `0x0082f410` | `ota_cmd_sub_ack` | OTA sub-ack |
+| `0x00840724` | `cfg_blob_magic_ok` | **Not OTA.** Persistent config-blob magic check for `0x8721bee2`; kept here only because older notes misidentified it as OTA validation. |
 
-The 32-byte OTA digest buffer is prepared in `FUN_0082f240` but the hashing algorithm itself is not located in the firmware body; it may live in the bootloader or be computed by the host tool.
+The OTA data path checks the first word of the OTA container header against
+`ota_container_magic` (`0x0082f47c`, bytes `e5 c3 bd 81`, little-endian
+`0x81bdc3e5`). The separate `0x8721bee2` magic belongs to the persistent
+config blob, not the OTA image. The 32-byte `image_digest @0x1c4` still is not
+validated in `body.bin`; bootloader-side validation remains unresolved.
 
 ### 5.1 OTA/DFU state machine (`FUN_0082fe52`)
 
@@ -3807,107 +3921,53 @@ the §5 helpers are the *workers*. A host that sends a
 sequence of OTA commands (init → receive N times → complete)
 sees the dispatcher route each to the right worker.
 
-### 5.2 OTA helper details (`FUN_00840724`, `FUN_0082f1a4`, `FUN_0082f1b6`)
+### 5.2 OTA helper details
 
-The three "small" §5 helpers that wrap the OTA flow's
-*signature check* and *state transitions*. None of these are
-documented in detail elsewhere; this section pulls them
-together.
+The small §5 helpers wrap OTA state transitions and flash staging. The
+persistent config validator at `0x00840724` is documented separately in §5.3
+because it was previously mistaken for an OTA signature check.
 
-#### `FUN_00840724` — OTA signature check
-
-The smallest of the three:
+#### `ota_cmd_start_ack`
 
 ```c
-bool FUN_00840724() {
-    uint32_t read_value = FUN_0083dfa4();    // read first 4 B of image
-    bool ok = (read_value == DAT_00840744);
-    if (!ok) {
-        func_0x00005a06(0x23000000,
-                         "wrong signature! Read %8X != Requried %8X",
-                         read_value);
-    }
-    return ok;
-}
-```
-
-The function reads the first 4 bytes of the OTA image
-(via `FUN_0083dfa4`, a fixed-address reader) and compares
-against `DAT_00840744` which holds the magic value
-`0x8721bee2` (the §5 header-magic). On mismatch, it logs
-the firmware's standard "wrong signature!" message via
-`func_0x00005a06` (the debug-output helper that emits a
-formatted string with the `0x23000000` log-channel id).
-**Note** the typo: "Requried" instead of "Required" — the
-firmware's debug message has a spelling error.
-
-Returns `true` if the signature matches, `false` otherwise.
-The caller (`FUN_0082f240` OTA data handler) uses this
-return to abort the OTA write if the signature is wrong.
-
-#### `FUN_0082f1a4` — OTA start ack
-
-```c
-u32 FUN_0082f1a4() {
-    (*(code **)(DAT_0082f458 + -4))(1, 0);
+u32 ota_cmd_start_ack() {
+    (*(code **)(ota_write_context_ptr - 4))(1, 0);
     return 0;
 }
 ```
 
-The simplest of the three — just calls a function pointer
-loaded from `DAT_0082f458 + -4` with args `(1, 0)` and
-returns 0. The `1` arg is the "OTA start" sub-cmd; the `0`
-arg is presumably "no payload". The function pointer table
-at `DAT_0082f458` is the same vendor table used by `0xce ' '`
-(§8.10) — the OTA start ack is implemented as a call into
-the OEM vendor code.
+The simplest OTA worker: calls the registered OTA callback with `(1, 0)` and
+returns success.
 
-#### `FUN_0082f1b6` — OTA init
+#### `ota_cmd_init_metadata`
+
+The OTA-init handler parses exactly 9 payload bytes:
 
 ```c
-u32 FUN_0082f1b6(char *req, int param_2) {
-    state = DAT_0082f458;
-    state_base = state - 0x18;
-    pcVar7 = *(code **)(state - 4);
-    if (param_2 == 9) {                          // OTA-init sub-cmd 9
-        if ((*req == '\x01') || (*req == '\x04')) {
-            // parse 9-byte init payload
-            byte cmd  = req[0];                   // 0x01 or 0x04
-            byte b1   = req[3];
-            byte b2   = req[4];
-            u16  size = *(u16*)(req + 1);         // image size LE
-            *(u32*)(state - 0xc) = 0;
-            *(u16*)(state - 0x12) = 0;
-            *(u8*) state_base = cmd;
-            *(u32*)(state - 0x10) = (b1 << 16) | (b2 << 24) | size;
-            *(u8*) (state - 0x17) = 1;            // state = 1 (init)
-            *(u16*)(state - 0x16) = *(u16*)(req + 5);  // version
-            *(u16*)(state - 0x14) = *(u16*)(req + 7);  // CRC
-            *(u8*) (state - 0x17) = 2;            // state = 2 (ready)
-            (*pcVar7)(2, 0);                       // start OTA worker
-            return 0;
-        }
-        return 2;                                // bad cmd byte
-    }
-    return 1;                                    // wrong sub-cmd
+u32 ota_cmd_init_metadata(u8 *req, int len) {
+    if (len != 9) return callback(2, 1), 1;
+    if (req[0] != 0x01 && req[0] != 0x04) return callback(2, 2), 1;
+    expected_size = u32le(req + 1);
+    crc16 = u16le(req + 5);
+    checksum16 = u16le(req + 7);
+    written_bytes = 0;
+    packet_index = 0;
+    ota_state = 2;
+    callback(2, 0);
+    return 0;
 }
 ```
 
-The OTA-init handler parses the 9-byte init payload:
-
 * `req[0]` — cmd byte (`0x01` or `0x04`)
-* `req[1..2]` — image size (u16 LE)
-* `req[3..4]` — image_id bytes (packed into the high bytes of
-  the image_id u32)
-* `req[5..6]` — version (u16)
-* `req[7..8]` — CRC (u16)
+* `req[1..4]` — image size (`u32LE`)
+* `req[5..6]` — CRC/check field (`u16LE`)
+* `req[7..8]` — additive/check field (`u16LE`)
 
 The state-machine transitions are:
-1. Clear the OTA context's `state - 0xC..-0x10` region (12 B).
-2. Set state = 1 (init) at `state - 0x17`.
-3. Store the image_id u32 at `state - 0x10`.
-4. Set state = 2 (ready) at `state - 0x17`.
-5. Call `pcVar7(2, 0)` to start the OTA worker (function
+1. Clear written-byte and packet-index counters.
+2. Store expected image size and check fields.
+3. Set OTA state to `2`.
+4. Call the registered callback with `(2, 0)` (function
    pointer from `state - 4`).
 
 The `0x01` and `0x04` cmd bytes are the only ones accepted.
@@ -3916,46 +3976,102 @@ The `0x04` cmd byte is the *force-ready* path (same as the
 cmd byte is the normal init path. Any other cmd byte
 returns error 2; any other sub-cmd returns error 1.
 
-#### Why three helpers for OTA?
+#### `ota_cmd_write_data_packet`
 
-`FUN_0082f1a4` is the "ack" path — called *after* the OTA
-init succeeds to ack the host that the watch has started
-processing the image. `FUN_0082f1b6` is the "init" path —
-called *before* the data transfer to set up the state
-context. `FUN_00840724` is the "verify" path — called *during*
-the data transfer to abort if the image signature is wrong.
+Payload is `[u16LE 1-based packet_index] + raw bytes`. The first packet carries
+the 0x50-byte container header. The writer:
 
-The three helpers form a **state-transition triple**:
-* `init` (FUN_0082f1b6) sets the context up
-* `verify` (FUN_00840724) checks each image block
-* `ack` (FUN_0082f1a4) tells the host the init succeeded
+1. Requires OTA state `2` or `3`.
+2. Requires packet index to increment by 1.
+3. Rejects data payloads larger than `0x600` bytes.
+4. On packet 1, checks word 0 of the 0x50-byte header against
+   `ota_container_magic` (`0x81bdc3e5`) and optionally compares the container
+   hardware string against current/default `H59MA_V1.0`.
+5. Writes only bytes after the 0x50-byte header to `ota_staging_flash_base`
+   (`0x0084e000` in this image), erasing 4 KiB pages as needed.
 
-The OTA host SDK calls these in sequence: `0x01 0x09 init
-payload` → `FUN_0082f1b6` sets up state, then `0x01 0x01 ack`
-→ `FUN_0082f1a4` acks the start, then `0x21 0x01 data
-payload` → `FUN_0082f240` checks signature via `FUN_00840724`
-and writes the block.
+`ota_cmd_check_complete` later requires `written_bytes == expected_size - 0x50`
+before moving state to `4`.
 
-#### Why the typo "Requried"
+### 5.3 Persistent config blob (`cfg_blob_magic_ok`, `cfg_find_item`)
 
-The OTA signature-check log message has a spelling error
-in the firmware's debug output: "Requried" instead of
-"Required". This is likely an OEM-supplied string that
-was never corrected. The OEM likely doesn't ship a debug
-build to end users — the typo only matters for the firmware
-developers reading serial logs.
+The `0x8721bee2` magic checked by `cfg_blob_magic_ok` belongs to the persistent
+config store, not OTA. Config blobs start with:
+
+```
+u32 magic = 0x8721bee2
+u16 len
+records...
+```
+
+Each record has:
+
+```
+u16 item_id
+u8  len
+u8  value[len]
+u8  mirror_or_compare[len]
+```
+
+`cfg_find_item` scans records from offset `+6`, guarded by a maximum scan size
+near `0x03fa`. `cfg_update_mac_item` updates item `0x33` with length `6` and
+logs `Ready to update MAC!`. `cfg_write_to_flash_preserve_sector` rewrites a
+changed config range by preserving the 0x400-byte prefix and 0x800-byte suffix
+around the changed data, erasing the enclosing 4 KiB sector, and writing the
+prefix/change/suffix back.
+
+#### Offset-store settings blobs
+
+The firmware also has two offset-store settings blobs outside the `0x8721bee2`
+config item store:
+
+| Blob | RAM base | Flash offset | Length | Magic | Commit helper | Role |
+|---|---:|---:|---:|---:|---|---|
+| blob0 | `0x200088fc` | `0x0000` | `0xe0` | `0x04` | `settings_blob0_commit` | BLE identity, advertised name, Channel-B `0x5a` TLV slots. |
+| blob1 | `0x200089dc` | `0x0400` | `0x2b0` | `0x07` | `settings_blob1_commit` | User settings: DND, health feature bits, sedentary, menstruation, touch/UV config. |
+
+Stable blob1 fields confirmed from Channel-A handlers:
+
+| Field | Meaning | Writers |
+|---:|---|---|
+| `+0x2d` bit `1` (`0x02`) | SpO2 enabled | `settings_set_spo2_enabled_commit_if_changed`; commits blob1 when changed. |
+| `+0x2d` bit `3` (`0x08`) | Pressure/stress enabled | `settings_set_pressure_enabled_ram`; RAM-only in this path. |
+| `+0x2d` bit `5` (`0x20`) | Blood-sugar flag | `settings_set_sugar_flag_ram`; subcmd `0x3a/3`. |
+| `+0x2d` bit `7` (`0x80`) | Lipids flag | `settings_set_lipids_flag_ram`; subcmd `0x3a/4`. |
+| `+0x2e` | Sugar/lipids init sentinel | Sugar write sets this to `0x1e` if it was zero. |
+| `+0xc8` | Touch/UV config byte | Channel-A `0x3b`, guarded by request byte `2 == 0`. |
+| `+0xee..+0xf3` | DND schedule | `[enable, runtime, startMin u16LE, endMin u16LE]`. |
+| `+0x294..+0x299` | Sedentary config | `[start_h,start_m,end_h,end_m,enable,duration]`; times are BCD on Channel A and stored as decoded bytes. |
+| `+0x29a..+0x2a6` | Menstruation config | Marker `0xca`, copied fields, and current-day-relative u16 values. |
+
+#### Channel-B `0x5a` TLV storage
+
+`channel_b_handle_device_info_config` subcmd `2` accepts
+`[0x02, count, (id, len, data[len])*]`. The writer clears each destination to a
+nominal max length, then copies the supplied length; no length clamp was visible
+in the decompiled callee, so hosts should keep lengths within the maxima below.
+
+| TLV id | Destination | Max cleared | Enable flag | Notes |
+|---:|---:|---:|---|---|
+| `1` | blob0 `+0xb6` | `0x18` | blob0 `+0xd6` bits `1:0 = 1` | Custom advertised name/prefix. |
+| `2` | blob0 `+0xce` | `0x06` | blob0 `+0xd6` bits `3:2 = 1` | BLE address override; calls `cfg_update_mac_item`. |
+| `3` | blob0 `+0x7a` | `0x14` | blob0 `+0xd5` bits `1:0 = 1` | Device-info string slot. |
+| `4` | blob0 `+0x8e` | `0x10` | blob0 `+0xd5` bits `3:2 = 1` | Device-info string slot. |
+| `5` | blob0 `+0x9e` | `0x10` | blob0 `+0xd5` bits `5:4 = 1` | Device-info string slot. |
+| `6` | blob0 `+0xae` | `0x08` | blob0 `+0xd5` bits `7:6 = 1` | Device-info string slot. |
+| `7` | blob0 `+0xd4` | `1` | none | Name-format control byte; not returned by query. |
+
+Subcmd `4` clears blob0 `+0x7a` for `100` bytes and commits blob0. That clears
+the string slots and flags but does not call `cfg_update_mac_item`, so the
+sector config item `0x33` can remain stale until a later MAC-update path runs.
 
 #### Pair with §10.2 (open question)
 
 The 32-byte OTA digest algorithm referenced in §10.2 is
-**not** in the firmware body — the only digest check is
-the **4-byte signature magic** at `DAT_00840744` (validated
-by `FUN_00840724`). The 32-byte digest is presumably computed
-either by the bootloader (which lives in a separate image
-not in `body.bin`) or by the host tool before sending the
-image. The H59MA v14 firmware only validates the 4-byte
-magic; the per-block 32-byte digest is the bootloader's
-responsibility.
+**not** in the firmware body. `body.bin` checks the 4-byte OTA container magic
+at `ota_container_magic` and writes the staged image, but does not validate the
+32-byte `image_digest @0x1c4`. Digest validation, if present, is presumably
+bootloader-side.
 
 ---
 
@@ -4260,7 +4376,7 @@ struct. The `param2` u16 is the *per-sub-cmd* parameter
 
 `0x1e` is the Channel-A opcode that calls into the same
 `hr_module.c` functions. The §3.13 doc shows `0x1e` calling
-`FUN_0083371e(0x2000)` for "start continuous" mode — that
+`health_post_start_measure_event(0x2000)` for "start continuous" mode — that
 `0x2000` is the `param2` value the §7.1 dispatcher passes
 into `FUN_00837b96` / `FUN_00837c4e`. The `0x1e` opcode is
 the *Channel-A entry point*; the §7.1 dispatcher is the
@@ -4350,7 +4466,7 @@ service, not a user-initiated command.
 
 ## 8. Vendor `0xFEE7` GATT Service — Active Protocol Role
 
-The `0xFEE7` vendor service is **not** table decoration. It is registered during BLE initialization (`FUN_0082e464` → `FUN_0082e8ec`) using an attribute table at base `0x00845604` (size `0xa8`). Three handler pointers are active in the GATT records:
+The `0xFEE7` vendor service is **not** table decoration. It is registered during BLE initialization (`ble_services_init` → `FUN_0082e8ec`) using an attribute table at base `0x00845604` (size `0xa8`). Three handler pointers are active in the GATT records:
 
 | Handler | Address | Role |
 |---|---|---|
@@ -4360,7 +4476,7 @@ The `0xFEE7` vendor service is **not** table decoration. It is registered during
 
 The write handler is the protocol entry point.
 
-### 8.1 0xFEE7 dispatcher (`FUN_0082c944`)
+### 8.1 0xFEE7 dispatcher (`fee7_dispatch_vendor_command`)
 
 The actual opcode table for the 0xFEE7 service. The function is
 called from `FUN_0082e87a` (the GATT write handler) with
@@ -4369,59 +4485,59 @@ called from `FUN_0082e87a` (the GATT write handler) with
 #### Top-level guards
 
 ```c
-void FUN_0082c944(byte *param_1, int param_2) {
+void fee7_dispatch_vendor_command(byte *param_1, int param_2) {
     if (*DAT_0082caec == 0x01) return;   // §8.1 service-suspended flag
     if (param_2 != 0x10) return;         // 16-byte frame only
     if (*param_1 != 0x43 && *param_1 != 0x48)
-        FUN_0082eebe();                  // keep-alive timer reset
+        fee7_abort_active_ota_before_vendor_cmd();
     // ... opcode dispatch ...
 }
 ```
 
 The `*DAT_0082caec == 0x01` check is the watch's *service-suspended*
 flag (set by `0xC5/0xC8/0xC9` config writes — see §8.1 below).
-The keep-alive reset skips the "read-only" opcodes `0x43 'C'` and
-`0x48 'H'` (the host handshake/keep-alive pair) so an idle host
-polling the link does not bump the timer.
+The pre-dispatch helper skips `0x43 'C'` and `0x48 'H'`; for other commands it
+aborts any active Channel-B OTA state `2`/`3` before accepting vendor traffic
+and marks the Channel-B receive side busy.
 
 #### Opcode → handler map (reverse-engineered from `FUN_0082c944`)
 
 | Opcode(s) | Handler | Notes |
 |---|---|---|
 | `0x00..0x2a` | Low-range `switch8` at `0x82c61c` (39 cases + default) | Per-entry thunk — detailed below |
-| `0x2b, 0x37, 0x38, 0x3a, 0x3b, 0x43 'C', 0x72, 0x77, 0x7a, 0x7d, 0x81, 0xa1, 0xc6, 0xc7 'D', 0xff` | Deferred-command ring | `FUN_0082be64` |
+| `0x2b, 0x37, 0x38, 0x3a, 0x3b, 0x43 'C', 0x72, 0x77, 0x7a, 0x7d, 0x81, 0xa1, 0xc6, 0xc7, 0xff` | Deferred-command ring | `enqueue_deferred_command_frame` |
 | `0x36` | Heart-rate related read/set | `FUN_0082c112` — see §8.8 |
-| `0x39` | HRV setting | `FUN_0082c9da` |
-| `0x3c` | Fixed capability block `[0x3c,0,0x40,0xa0,0x20,…]` | `FUN_0082c50e` — see §8.12 |
-| `0x3e` | Lipids read/set (bit 7 of shared config byte) | `FUN_0082c550` | see §8.15 |
-| `0x48 'H'` | Handshake — 15-byte device-info block | `FUN_0082bf40` — see §8.2 |
+| `0x39` | HRV setting/history path | `channel_a_handle_hrv_history` |
+| `0x3c` | Fixed capability block `[0x3c,0,0x40,0xa0,0x20,…]` | `fee7_send_fixed_capability_3c` — see §8.12 |
+| `0x3e` | Lipids read/set (bit 7 of shared config byte) | `fee7_handle_lipids_flag_3e` | see §8.15 |
+| `0x48 'H'` | Current sport/today totals and state bytes | `fee7_send_today_sport_totals` — see §8.2 |
 | `0x50 'P'` | **Inline** alert: `FUN_0082994c(0x14,0x10,1,0x19)` + `FUN_0082a5c8(8)` (motor + UI) | inline |
-| `0x51 'Q'` | "Find phone" / alert trigger | `FUN_0082c5b8` — see §8.11 |
-| `0x60` | Status-field write (`DAT_0082bfd4 + 0x2c`) | `FUN_0082be90` | see §8.16 |
-| `0x61 'a'` | Status response (battery / daily counters) | `FUN_0082bee6` — see §8.3 |
-| `0x69 'i'` | Multi-step mode control (start/stop/cancel) | `FUN_0082c2f4` — see §8.5 |
-| `0x6a 'j'` | Continuation of `0x69` mode control | `FUN_0082c1e2` |
+| `0x51 'Q'` | Vendor alert/test request | `fee7_handle_test_request_51` — see §8.11 |
+| `0x60` | Store pending 32-bit vendor status field (`DAT_0082bfd4 + 0x2c`) | `fee7_store_pending_u32_60` | see §8.16 |
+| `0x61 'a'` | Read pending 32-bit vendor status field | `fee7_read_pending_u32_61` — see §8.3 |
+| `0x69 'i'` | Start health measurement/session | `health_handle_start_measure` — see §8.5 |
+| `0x6a 'j'` | Stop health measurement/session | `health_handle_stop_measure` |
 | `0x7b, 0xb0, 0xc2, 0xcc, 0xf0, 0xf1` | No-op (early return) | — |
-| `0x90` | Echo `[0x90]` (self-marker) | `FUN_00827ad2` — see §8.6 |
-| `0x91` | Echo `[0x91]` | `FUN_00827aee` |
-| `0x92` | (handler) | `FUN_00827b14` |
-| `0x93` | Firmware version + build-date string | `FUN_00827c4a` | see §8.18 |
-| `0x94` | State-update mode 1 (deferred-ring drain) | `FUN_00827b2e` | see §8.19 |
-| `0x95` | State-update mode 3 (deferred-ring drain) | `FUN_00827b54` | see §8.19 |
-| `0x96` | Sends `[0x96,0,0,0x96,…]` and resets state | `FUN_00827b7c` — see §8.4 |
+| `0x90` | Echo `[0x90]` (self-marker) | `fee7_send_test_ack_90` — see §8.6 |
+| `0x91` | Echo `[0x91]` | `fee7_send_test_ack_91` |
+| `0x92` | No-op handler | `fee7_noop_92` |
+| `0x93` | Firmware version + build-date string | `fee7_send_fw_version_build_info_93` | see §8.18 |
+| `0x94` | Set vendor test state `1` and restart 1000 ms timer | `fee7_start_test_mode_94` | see §8.19 |
+| `0x95` | Set vendor test state `3` and restart 1000 ms timer | `fee7_start_test_mode_95` | see §8.19 |
+| `0x96` | Sends `[0x96,0,0,0x96,…]`, sets vendor test state `4`, restarts timer | `fee7_start_test_mode_96` — see §8.4 |
 | `0x97..0xa0` | High-range `switch8` at `0x82c6e0` (10 cases + default) | Per-entry thunk — detailed below |
-| `0xbf` | Vendor memory write (host→watch, arbitrary addr) | `FUN_0082ba94` | see §8.17 |
-| `0xc0` | Vendor memory read (watch→host, fragmented) | `FUN_0082bb0c` | see §8.17 |
-| `0xc1` | Sends a long/fragmented response: `FUN_008337fa(DAT_0082caf0)` + `FUN_0082b938(*param_1, DAT_0082caf0, 1)` | inline |
-| `0xc3` | If `param_1[2] == 1` → `FUN_0082dfde()`; then drive OTA state machine via `FUN_0082fe52(4 or 0, 0)` based on `param_1[1]` (1=push 4, 2=push 0, other=return) | inline |
+| `0xbf` | Vendor memory write (host→watch, arbitrary addr, max 8 bytes) | `fee7_vendor_memory_write` | see §8.17 |
+| `0xc0` | Vendor memory read (watch→host, max 0x200 bytes fragmented) | `fee7_vendor_memory_read` | see §8.17 |
+| `0xc1` | Starts/queries one health/sensor mask through `health_post_start_measure_event` path and sends a 1-byte fragmented response | inline |
+| `0xc3` | If `param_1[2] == 1` → BLE/service teardown event; then drive `ota_dfu_state_machine(4,0)` for `param_1[1]==1` or `ota_dfu_state_machine(0,0)` for `param_1[1]==2` | inline |
 | `0xc4` | No-op | `FUN_00830462` |
 | `0xc5` | If `param_1[1] == 1` → `DAT_0082caec[3] = 1`; else `DAT_0082caec[3] = 0` | inline |
 | `0xc8` | Same as `0xc5` but writes `DAT_0082caec[4]` | inline |
 | `0xc9` | `DAT_0082caec[5] = param_1[1]` | inline |
-| `0xcd` | Byte-reverse echo of req[3..6] (link sanity test) | `FUN_0082be12` — see §8.9 |
-| `0xce` | Factory/test sub-commands (`0x01`, `0x02`, `' '`, `'!'`, `'"'`) | `FUN_0082bcde` — see §8.10 |
+| `0xcd` | Small host-addressed memory read: response copies up to 14 bytes from address encoded in request bytes `3..6` | `fee7_vendor_memory_read_small_cd` — see §8.9 |
+| `0xce` | Factory/test sub-commands (`0x01`, `0x02`, `' '`, `'!'`, `'"'`) | `fee7_handle_factory_test_ce` — see §8.10 |
 | `0xfe` | `FUN_00844214(*(u16*)(param_1 + 1))` — vibration pattern from a duration arg | inline — see §8.13 |
-| other | Vendor NAK: `FUN_0082bcba(opcode)` | `FUN_0082bcba` |
+| other | Vendor NAK: response opcode `opcode|0x80`, marker `0xee` | `fee7_send_vendor_nak` |
 
 #### Deferred-command ring (`FUN_0082be64`)
 
@@ -4441,9 +4557,9 @@ FUN_00827124(0, DAT_0082bfd0);   // signal qc_app_task
 ```
 
 This is the same ring consumed by the Channel-A dispatcher
-`FUN_0082d2dc`. The consumer is the main app task `qc_app_task`
+`channel_a_dispatch_queued_frame`. The consumer is the main app task `qc_app_task`
 (`FUN_0082724c`), whose loop waits on a message queue and then
- calls `FUN_0082d2dc()`:
+ calls `channel_a_dispatch_queued_frame()`:
 
 ```c
 void FUN_0082724c(void) {
@@ -4452,7 +4568,7 @@ void FUN_0082724c(void) {
         do {
             msg = os_message_get(*(void **)(DAT_0082732c + 4), 0xffffffff);
         } while (msg == 0);
-        FUN_0082d2dc();   // drains the 0x00209f54 ring
+        channel_a_dispatch_queued_frame();   // drains the 0x00209f54 ring
         FUN_0083304c();
         FUN_0082fc0c();
         // ...
@@ -4575,7 +4691,9 @@ byte 1..14  payload / parameters
 byte 15     additive checksum (sum of bytes 0..14)
 ```
 
-If `opcode` is not `'C'` (`0x43`) or `'H'` (`0x48`) the firmware first resets a keep-alive timer (`FUN_0082eebe`), then dispatches on the opcode.
+If `opcode` is not `'C'` (`0x43`) or `'H'` (`0x48`) the firmware first runs
+`fee7_abort_active_ota_before_vendor_cmd`, which aborts active Channel-B OTA
+state `2`/`3` before dispatching the vendor opcode.
 
 Responses are built with `FUN_0082b0c4` (additive checksum) and queued through `FUN_0082ebdc` / `FUN_0082eb8a` into the same 16-byte notify ring used by Channel A. Many commands are simply copied into a deferred command ring (`FUN_0082be64`) and processed later.
 
@@ -4598,22 +4716,22 @@ entries decoded from the two `switch8` tables:
 | `0x19` | `FUN_0082c484` | Degree (°C/°F) switch |
 | `0x21` | `FUN_0082bfd8` | Daily target setting |
 | `0x36` | `FUN_0082c112` | Heart-rate related read/set — see §8.8 |
-| `0x3c` | `FUN_0082c50e` | Returns fixed capability block `[0x3c,0,0x40,0xa0,0x20,...]` — see §8.12 |
-| `0x3e` | `FUN_0082c550` | Lipids read/set (bit 7 of shared config byte) — see §8.15 |
-| `0x48` `'H'` | `FUN_0082bf40` | Handshake response — sends 15-byte device-info block — see §8.2 |
+| `0x3c` | `fee7_send_fixed_capability_3c` | Returns fixed capability block `[0x3c,0,0x40,0xa0,0x20,...]` — see §8.12 |
+| `0x3e` | `fee7_handle_lipids_flag_3e` | Lipids read/set (bit 7 of shared config byte) — see §8.15 |
+| `0x48` `'H'` | `fee7_send_today_sport_totals` | Current sport/today totals and state bytes — see §8.2 |
 | `0x50` `'P'` | inline | Calls `FUN_0082994c(0x14,0x10,1,0x19)` + `FUN_0082a5c8(8)` (alert/motor) |
-| `0x51` `'Q'` | `FUN_0082c5b8` | "Find phone" / alert trigger; arms pattern when `payload[1]==1` — see §8.11 |
-| `0x60` | `FUN_0082be90` | Status-field write (`DAT_0082bfd4 + 0x2c`) — see §8.16 |
-| `0x61` `'a'` | `FUN_0082bee6` | Status response (battery / daily counters) — see §8.3 |
-| `0x69` `'i'` | `FUN_0082c2f4` | Multi-step mode control (start/stop/cancel of a remote feature) — see §8.5 |
-| `0x6a` `'j'` | `FUN_0082c1e2` | Continuation of `0x69` mode control |
-| `0x90` | `FUN_00827ad2` | Echo `[0x90]` |
-| `0x91` | `FUN_00827aee` | Echo `[0x91]` |
-| `0x92` | `FUN_00827b14` | |
-| `0x93` | `FUN_00827c4a` | Firmware version + build-date string — see §8.18 |
-| `0x94` | `FUN_00827b2e` | State-update mode 1 — see §8.19 |
-| `0x95` | `FUN_00827b54` | State-update mode 3 — see §8.19 |
-| `0x96` | `FUN_00827b7c` | Sends `[0x96,0,0,0x96,...]` and resets state — see §8.4 |
+| `0x51` `'Q'` | `fee7_handle_test_request_51` | Vendor alert/test trigger; arms pattern when `payload[1]==1` — see §8.11 |
+| `0x60` | `fee7_store_pending_u32_60` | Status-field write (`DAT_0082bfd4 + 0x2c`) — see §8.16 |
+| `0x61` `'a'` | `fee7_read_pending_u32_61` | Status-field response — see §8.3 |
+| `0x69` `'i'` | `health_handle_start_measure` | Start/extend health measurement session — see §8.5 |
+| `0x6a` `'j'` | `health_handle_stop_measure` | Stop health measurement session and return final values |
+| `0x90` | `fee7_send_test_ack_90` | Echo `[0x90]` |
+| `0x91` | `fee7_send_test_ack_91` | Echo `[0x91]` |
+| `0x92` | `fee7_noop_92` | No response |
+| `0x93` | `fee7_send_fw_version_build_info_93` | Firmware version + build-date string — see §8.18 |
+| `0x94` | `fee7_start_test_mode_94` | Set vendor test state 1 and restart timer — see §8.19 |
+| `0x95` | `fee7_start_test_mode_95` | Set vendor test state 3 and restart timer — see §8.19 |
+| `0x96` | `fee7_start_test_mode_96` | Sends `[0x96,0,0,0x96,...]`, sets state 4, restarts timer — see §8.4 |
 | `0x97` | `FUN_00827ba4` | No-op |
 | `0x98` | `FUN_00827be6` | Sets state to `1`, sends `[0x98]` |
 | `0x99` | `FUN_00827bea` | No-op |
@@ -4624,16 +4742,16 @@ entries decoded from the two `switch8` tables:
 | `0x9e` | `FUN_00827cc8` | Conditional 10-byte copy from `DAT_00827e8c + 0x7a` |
 | `0x9f` | `FUN_00827b16` | No-op |
 | `0xa0` | `FUN_00827d1a` | Multi-byte status frame builder |
-| `0xbf` | `FUN_0082ba94` | Vendor memory write — see §8.17 |
-| `0xc0` | `FUN_0082bb0c` | Vendor memory read — see §8.17 |
-| `0xc1` | `FUN_008337fa` + `FUN_0082b938` | Sends a long/fragmented response |
-| `0xc3` | `FUN_0082fe52` | Drives the OTA/DFU state machine (`param[2]==1` also calls `FUN_0082dfde`) |
+| `0xbf` | `fee7_vendor_memory_write` | Vendor memory write, arbitrary address, max 8 bytes — see §8.17 |
+| `0xc0` | `fee7_vendor_memory_read` | Vendor memory read, arbitrary address, max 0x200 bytes — see §8.17 |
+| `0xc1` | inline health/sensor response | Starts/queries one health/sensor mask and sends a 1-byte fragmented response |
+| `0xc3` | inline OTA control | Drives `ota_dfu_state_machine(4,0)` or `(0,0)`; `param[2]==1` also calls teardown event helper |
 | `0xc4` | `FUN_00830462` | No-op in firmware |
 | `0xc5` | — | Sets `DAT_0082caec[3]` from `param[1]` |
 | `0xc8` | — | Sets `DAT_0082caec[4]` from `param[1]` |
 | `0xc9` | — | Sets `DAT_0082caec[5] = param[1]` |
-| `0xcd` | `FUN_0082be12` | Byte-reverse echo of req[3..6] (link sanity test) — see §8.9 |
-| `0xce` | `FUN_0082bcde` | Factory/test sub-commands (`0x01`, `0x02`, `' '`, `'!'`, `'"'`) — see §8.10 |
+| `0xcd` | `fee7_vendor_memory_read_small_cd` | Small arbitrary-address read, max 14 bytes in one frame — see §8.9 |
+| `0xce` | `fee7_handle_factory_test_ce` | Factory/test sub-commands (`0x01`, `0x02`, `' '`, `'!'`, `'"'`) — see §8.10 |
 | `0xfe` | `FUN_00844214` | Builds a vibration pattern from a duration argument — see §8.13 |
 
 Opcodes `0x2b`, `0x37`, `0x38`, `0x3a`, `0x3b`, `0x43`, `0x72`,
@@ -4649,7 +4767,7 @@ Unrecognized opcodes fall through to `FUN_0082bcba`.
 
 The `0xFEE7` service carries a parallel 16-byte command channel that overlaps some Channel-A opcodes (e.g. `0x48`, `0x50`, `0x51`, `0x69`, `0x6a`, `0x3c`, `0x3e`) and adds vendor-specific commands (`0x90`–`0x9f`, `0xce`, `0xfe`). The OpenWatch host code should treat it as a second command path rather than a passive discovery UUID.
 
-### 8.2 0x48 `'H'` handshake response (`FUN_0082bf40`)
+### 8.2 0x48 `'H'` today-sport totals (`fee7_send_today_sport_totals`)
 
 The first frame the host sees on the `0xFEE7` service. Reads
 the per-device info struct at `DAT_00831d94` and ships a
@@ -4658,7 +4776,7 @@ the per-device info struct at `DAT_00831d94` and ships a
 `+0x14`, `+0x1c`, and `+0x30`.
 
 ```c
-void FUN_0082bf40() {
+void fee7_send_today_sport_totals() {
     u32 hw_ver   = FUN_00831b12();   // = *(u32*)(DAT_00831d94 + 0x04)
     u32 fw_ver   = FUN_00831cdc();   // = *(u32*)(DAT_00831d94 + 0x14)
     u32 batt_raw = FUN_00831ce2();   // returns FUN_0083dfba(*(u32*)(DAT_00831d94 + 0x1c), 100)
@@ -4822,13 +4940,13 @@ producer side (`DAT_0082bfd4 + 0x2C`) has been populated.
 | Polling cost | full 15-byte device-info block | 5-byte u32 status |
 | Idle response | (always returns full block) | all-zeros 1-byte-cmd ack |
 | Live battery data | yes (FUN_0083dfba(_, 100) mod 100) | yes (same source as `0x48`) |
-| Keep-alive exempt | yes (§8.1) | no — bumps `FUN_0082eebe` |
+| Keep-alive exempt | yes (§8.1) | no — runs `fee7_abort_active_ota_before_vendor_cmd` |
 
 A host that wants *fast* battery updates can poll `0x61`
 instead of `0x48` and skip the 11-byte header overhead, but
 has to handle the idle-path "all zeros" response.
 
-### 8.4 0x96 reset-state (`FUN_00827b7c`)
+### 8.4 0x96 reset-state (`fee7_start_test_mode_96`)
 
 The vendor "reset to a clean state" command. Sends a
 16-byte notify frame with **`0x96` at both byte 0 and byte
@@ -4839,7 +4957,7 @@ marker*, not a hash) and resets the per-feature state at
 #### Behavior
 
 ```c
-void FUN_00827b7c() {
+void fee7_start_test_mode_96() {
     rsp[0] = 0x96;
     rsp[12] = 0x96;                          // bytes 1..11 + 13..14 = 0
     FUN_0082ebdc(&rsp);
@@ -4932,7 +5050,7 @@ reset followed by `0xC9` set is the documented host pattern
 for switching between "feature on" and "feature off"
 modes without a full BLE reboot.
 
-### 8.5 0x69 `'i'` mode control (`FUN_0082c2f4`)
+### 8.5 0x69 `'i'` health start/control (`health_handle_start_measure`)
 
 The most stateful handler in the 0xFEE7 dispatcher. Drives
 a multi-step "start / stop / cancel / refresh" sequence
@@ -4980,10 +5098,10 @@ sub)`:
 
 | Mode | Sub | Action |
 |---:|---:|---|
-| `0x06` | `0x01` | **Start**: zero `state[0xC..0xD]`, call `FUN_0083371e(1)` (HR continuous start), cancel timer at `state[0x10]`, arm 500 ms timer |
+| `0x06` | `0x01` | **Start**: zero `state[0xC..0xD]`, call `health_post_start_measure_event(1)` (HR continuous start), cancel timer at `state[0x10]`, arm 500 ms timer |
 | `0x06` | `0x02` | **Cancel**: cancel timer |
 | `0x06` | `0x03` | **Refresh**: cancel + re-arm 500 ms timer |
-| `0x06` | `0x04` | **Stop HR**: call `FUN_00833704(1)` (HR stop), zero `state[0xC..0xD]` |
+| `0x06` | `0x04` | **Stop HR**: call `health_post_stop_measure_event(1)`, zero `state[0xC..0xD]` |
 | `0x06` | other | (no action — go to send) |
 | other | any | **Generic mode start**: zero `state[0xC..0xD]` and `state[2]`, cancel + re-arm 500 ms timer, then dispatch on `state[7]` (just-stored mode) for the per-mode start action (see "Per-mode start dispatch" below) |
 
@@ -4994,13 +5112,13 @@ When the mode is not `0x06`, the handler reads back
 
 | `state[7]` | Action |
 |---:|---|
-| `0x03` | `FUN_0083371e(0x20)` (HR mode `0x20`) |
-| `0x09` | `FUN_00834862()` + `FUN_0083371e(0x400)` |
-| `0x0B` (11) | `FUN_0083371e(0x1000)` + `FUN_0082ad02()` (some calibration / step-counter init) |
-| `0x0C` (12) | `FUN_0083475a()` + `FUN_0082ad02()` + `FUN_0083454c()` + `FUN_0083371e(DAT_0082c57c)` (data-driven mode param) |
-| `0x0D` (13) | `FUN_0083371e(1)` |
-| `0x0E` (14) | `FUN_0083371e(0x20)` |
-| other | (fallback — `FUN_0083371e(1)`) |
+| `0x03` | `health_post_start_measure_event(0x20)` (HR mode `0x20`) |
+| `0x09` | `FUN_00834862()` + `health_post_start_measure_event(0x400)` |
+| `0x0B` (11) | `health_post_start_measure_event(0x1000)` + `FUN_0082ad02()` (some calibration / step-counter init) |
+| `0x0C` (12) | `FUN_0083475a()` + `FUN_0082ad02()` + `FUN_0083454c()` + `health_post_start_measure_event(DAT_0082c57c)` (data-driven mode param) |
+| `0x0D` (13) | `health_post_start_measure_event(1)` |
+| `0x0E` (14) | `health_post_start_measure_event(0x20)` |
+| other | (fallback — `health_post_start_measure_event(1)`) |
 
 For all non-fallback modes the handler then:
 1. Reads `req[2..3]` as a u16 `param`
@@ -5063,7 +5181,7 @@ the handler clamps to `0x06` and the echo reflects that).
 
 #### Pair with `0x6a 'j'`
 
-`0x6a 'j'` (handled by `FUN_0082c1e2`) is the *continuation*
+`0x6a 'j'` (handled by `health_handle_stop_measure`) is the *continuation*
 of `0x69 'i'` — when the 500 ms timer fires, it pops the
 mode's continuation state and dispatches the next step.
 The host should treat `0x69` + `0x6a` as a single
@@ -5073,7 +5191,7 @@ multi-frame transaction: `0x69` *starts* the mode,
 `0x6a` re-reads `DAT_0082c578` and pushes the next-step
 data on the notify ring.
 
-### 8.6 0x90 `'.'` self-marker echo (`FUN_00827ad2`)
+### 8.6 0x90 `'.'` self-marker echo (`fee7_send_test_ack_90`)
 
 The smallest 0xFEE7 echo handler (27 bytes). Sends a
 16-byte notify frame with `0x90` at both byte 0 AND byte
@@ -5085,7 +5203,7 @@ for the second `0x90` marker.
 #### Behavior
 
 ```c
-void FUN_00827ad2() {
+void fee7_send_test_ack_90() {
     rsp[0]  = 0x90;            // cmd
     rsp[12] = 0x90;            // byte 12 (high byte of u32 at offset 12)
     rsp[15] = 0;               // (byte 15 of u32 at offset 12 → 0x90 from
@@ -5125,12 +5243,12 @@ read bytes 0 and 15 as marker bits rather than the usual
 
 #### Pair with `0x91` (proper echo)
 
-The adjacent `0x91` handler (`FUN_00827aee`) is the
+The adjacent `0x91` handler (`fee7_send_test_ack_91`) is the
 "normal" version of the same idea — a simple echo of the
 opcode with a *real* additive checksum:
 
 ```c
-void FUN_00827aee() {
+void fee7_send_test_ack_91() {
     rsp[0]  = 0x91;
     rsp[15] = FUN_0082b0c4(rsp, 0xf);   // additive sum of bytes 0..14
     FUN_0082ebdc(rsp);
@@ -5146,7 +5264,7 @@ echo command that round-trips through the standard
 
 #### Adjacent `0x92` is a no-op
 
-For completeness, `0x92` (`FUN_00827b14`) is an empty
+For completeness, `0x92` (`fee7_noop_92`) is an empty
 function (decompiles to `return;`). The handler is wired
 into the `0xFEE7` dispatcher but does nothing — the
 opcode is reserved for a future vendor-specific feature
@@ -5154,14 +5272,13 @@ that v14 does not implement. A host sending `0x92` will
 *not* receive any response (the dispatcher routes it but
 the handler is empty).
 
-### 8.7 0x6a `'j'` mode-control continuation (`FUN_0082c1e2`)
+### 8.7 0x6a `'j'` health stop/result (`health_handle_stop_measure`)
 
 The second half of the `0x69 'i'` / `0x6a 'j'` multi-step
-transaction (§8.5). The dispatcher (§8.1) routes both
-opcodes to `FUN_0082be64` (the deferred ring), but only
-`0x69` starts a new mode; `0x6a` *advances* the mode already
-in progress by re-reading `DAT_0082c578` and dispatching
-on the mode to call the appropriate sensor-read helper.
+transaction (§8.5). The current Ghidra pass shows both opcodes are dispatched
+directly from `fee7_dispatch_vendor_command`, not through the deferred ring:
+`0x69` starts or extends a health measurement and `0x6a` stops the active mode
+and returns final values.
 
 The handler also enforces a **mode-mismatch guard**: if
 `req[1]` does not match `state[7]` (the mode stored by the
@@ -5175,14 +5292,14 @@ mode if the host lost track of the protocol state.
 if (req[1] != state[7]) return;          // mode-mismatch guard
 
 if ((cVar1 == '\r') || (cVar1 == '\x0e')) {
-    FUN_00833704(DAT_0082c580);          // stop HR with stored mode
+    health_post_stop_measure_event(DAT_0082c580); // stop with stored mask
     func_0x000136bc(state + 0x10);       // cancel 500 ms timer
     state[7] = 1;                        // reset to mode 1 (idle)
 } else if (*(u16*)(state + 0xC) < 0x3C) {
     // 0xC is the "frame count" that 0x69 advanced;
     // if it's < 60 (the typical full-data threshold),
     // pick the matching stop parameter and bail early.
-    FUN_00833704(<stop_param>);
+    health_post_stop_measure_event(<stop_param>);
     func_0x000136bc(state + 0x10);
     if (*(u16*)(state + 0xC) < 0x32) return;
 }
@@ -5208,13 +5325,13 @@ full per-mode start dispatch.
 
 | Mode | Action | Sensor read |
 |---:|---|---|
-| `0x03` | `FUN_00833704(0x20)` | `FUN_00833a50()` |
-| `0x09` | `FUN_00833704(0x400)` | `FUN_0083485c()` |
-| `0x0B` | `FUN_00833704(0x1000)` | `FUN_0082acf6()` |
-| `0x0C` | `FUN_00833704(DAT_0082c57c)` (data-driven) | `FUN_00837ade()` + 3 more reads (see below) |
-| other | `FUN_00833704(1)` | `FUN_00837ade()` |
+| `0x03` | `health_post_stop_measure_event(0x20)` | `spo2_current_value()` |
+| `0x09` | `health_post_stop_measure_event(0x400)` | `blood_sugar_current_value()` |
+| `0x0B` | `health_post_stop_measure_event(0x1000)` | `body_temperature_current_value_stub()` |
+| `0x0C` | `health_post_stop_measure_event(DAT_0082c57c)` (data-driven) | `heart_rate_current_bpm()` + HRV/pressure/temp values |
+| other | `health_post_stop_measure_event(1)` | `heart_rate_current_bpm()` |
 
-The `FUN_00833704(<param>)` calls are the same HR-driver
+The `health_post_stop_measure_event(<param>)` calls are the same HR-driver
 "stop with mode parameter" wrappers used in `0x69 'i'` and
 `0x1e realTimeHeartRate`. The `uVar4 = <sensor_read>()` is
 the **1-byte result** that ends up in `byte 2` of the
@@ -5226,13 +5343,13 @@ For mode `0x0C` the handler reads **5 sensor values** and
 packs them into the response frame:
 
 ```c
-uVar4 = FUN_00837ade();           // 1st
+uVar4 = heart_rate_current_bpm(); // 1st
 local_28 = CONCAT13(uVar4, <0>);  // byte 3 = uVar4
-uVar4 = FUN_008346e4();           // 2nd
+uVar4 = hrv_current_value();      // 2nd
 local_24 = CONCAT31(<hi3>, uVar4); // byte 0 of local_24 = uVar4
-uVar4 = FUN_00834556();           // 3rd
+uVar4 = pressure_current_value(); // 3rd
 local_24._0_2_ = CONCAT11(uVar4, <old_byte0>); // byte 0 = uVar4
-uVar4 = FUN_0082acf6();           // 4th
+uVar4 = body_temperature_current_value_stub(); // 4th
 local_20 = CONCAT31(<hi3>, uVar4); // byte 0 of local_20 = uVar4
 FUN_00834092(local_28._3_1_, &local_20 + 1, &local_20 + 2);
                                    // copy byte 3 of local_28 into bytes 1..2 of local_20
@@ -5251,7 +5368,7 @@ The handler writes the cmd and echo **last**:
 ```c
 local_28 = (uint)CONCAT11(local_28._3_1_, uVar4) << 0x10;  // pack sensor data
 LAB_0082c256:
-local_28._0_2_ = CONCAT11(req[1], 0x6a);                    // overwrite bytes 0..1
+local_28._0_2_ = CONCAT11(req[1], 0x6a);                    // little-endian: byte0 cmd, byte1 mode
 rsp[15] = FUN_0082b0c4(local_28, 0xf);                    // additive checksum
 FUN_0082ebdc(local_28);
 ```
@@ -5259,37 +5376,12 @@ FUN_0082ebdc(local_28);
 So the final 16-byte response is:
 
 ```
-byte  0: req[1]              (echo of mode)
-byte  1: 0x6a                (cmd — note: byte 0/1 reversed vs §3 convention)
+byte  0: 0x6a                (cmd)
+byte  1: req[1]              (echo of mode)
 byte  2: uVar4 (sensor read) | bytes 2..4 packed sensor trace for 0x0C
 byte  3..14: 0 | packed sensor trace for 0x0C
 byte 15: additive checksum
 ```
-
-The **byte 0 / byte 1 reversal** is deliberate: the
-handler builds bytes 0..1 *last* so the cmd is the last
-byte written, but the order in `CONCAT11(req[1], 0x6a)`
-puts `req[1]` at byte 0 and `0x6a` at byte 1. The host
-SDK that consumes `0x6a` must read the cmd from **byte 1**
-and the echo from **byte 0** — *not* the usual `byte 0 =
-cmd` convention used by §3 handlers. This same quirk
-appears in `0x69 'i'` (§8.5) and is the only place in the
-table where the response shape diverges from the §3
-"Common response path".
-
-#### Why the byte 0/1 reversal
-
-The §3 "Common response path" handlers all set `byte 0 =
-cmd` first via `local_18 = CONCAT11(0, cmd)` (low byte 0,
-high byte cmd). The `0x69 'i'` / `0x6a 'j'` pair instead
-set byte 0 = `req[1]` (echo) and byte 1 = cmd, because
-the dispatcher (§8.1) routes both opcodes through the
-**deferred ring** (`FUN_0082be64`) and the worker pops
-the stored frame with the cmd byte at position 1 (so the
-host's echo of `req[1]` is the *first* byte the worker
-sees). This is a vestige of the deferred-ring layout; the
-non-deferred `0x90` self-marker (§8.6) and `0x91` echo
-both follow the §3 convention.
 
 ### 8.8 0x36 heart-rate related read/set (`FUN_0082c112`)
 
@@ -5396,16 +5488,16 @@ maps each global to the handlers that read or write it.
 
 | Global | Owners (handlers / sections) |
 |---|---|
-| `DAT_0082d440` | `FUN_0082d2dc` Channel-A dispatcher ring (§3); `FUN_0082d034` `0x43 readDetailSport` (§3.6); `FUN_0082ce0c` `0x77 phoneSport` (§3.16); `FUN_0082cb28` `0x0e bpReadConform` (§3.19) |
-| `DAT_0082f0f0` | `FUN_0082efea` Channel-B parser (§2.0); `FUN_0082eee6` dispatcher (§2.0); `FUN_0082f098` 2-sec fragment timeout (§2.0); `FUN_0082f4fa` per-frame store (§2.0) |
-| `DAT_0082edb8` | `FUN_0082ebdc` Channel-A notify ring builder (§3); §3 "Common response path" |
-| `DAT_00830120` / `DAT_00830124` | `FUN_0082fe52` OTA state machine (§5.1); `FUN_0082f240` OTA data writer (§5.1); `FUN_00840724` OTA signature check (§5.2) |
+| `channel_a_command_queue_state` | `channel_a_dispatch_queued_frame` Channel-A dispatcher ring (§3); `channel_a_handle_detail_sport_read` `0x43 readDetailSport` (§3.6); `channel_a_handle_phone_sport` `0x77 phoneSport` (§3.16); `channel_a_handle_bp_read_confirm` `0x0e bpReadConform` (§3.19) |
+| `channel_b_rx_reassembly_state` | `channel_b_parse_reassembly_frame` parser (§2.0); `channel_b_dispatch_complete_frame` dispatcher (§2.0); `channel_b_start_fragment_timeout` / `channel_b_fragment_timeout_cb` fragment timeout (§2.0); `channel_b_store_async_command` per-frame store (§2.0) |
+| `channel_a_notify_ring_state` | `channel_a_queue_notify_frame` Channel-A notify ring builder (§3); §3 "Common response path" |
+| `DAT_00830120` / `DAT_00830124` | `ota_dfu_state_machine` OTA state machine (§5.1); `ota_cmd_write_data_packet` OTA data writer (§5.2) |
 | `DAT_0082b0b8` | `FUN_0082ba54` `0x2b menstruation` (§3.1); `FUN_0082bb4e` `0x01 setTime` (§3.4); `FUN_0082edc4` BCD decoder (§3.4) |
 | `DAT_00827e8c` | `FUN_0082bb4e` `0x01 setTime` (§3.4); `FUN_00827b6c` vibration-mode setter (§3.2); `FUN_00827ba6` vibration-player (§3.2); `FUN_0082c7b8` `0x08` findDevice vibration (§3.15) |
 | `DAT_0082cfe8` | `FUN_0082cdac` `0x81 config-chunk write` (§3.5); `FUN_0082ccb6` `0x18 displayClock` (§3.5) |
-| `DAT_0082fcbc` | `FUN_0082fc0c` Channel-B async processor (§2.0); §2.1-§2.7 Channel-B handlers read/write here |
-| `DAT_0082f458` | `FUN_0082fe52` OTA state machine (§5.1); `FUN_0082f1b6` OTA init (§5.2); §5.1 deferred-ring downstream |
-| `DAT_0082f894` | `FUN_0082f5a2` `0x11 sleep summary` (§2.9); `FUN_0082f50c` `0x12 detailed sleep` (§2.10) |
+| `channel_b_async_state_ptr_alias` | `channel_b_async_command_processor` (§2.0); §2.1-§2.7 Channel-B handlers read/write here |
+| `ota_write_context_ptr` | `ota_dfu_state_machine` state machine (§5.1); `ota_cmd_init_metadata` init (§5.2); §5.1 deferred-ring downstream |
+| `channel_b_async_state_ptr_primary` | `channel_b_send_sleep_summary` `0x11 sleep summary` (§2.9); `channel_b_send_detailed_sleep` `0x12 detailed sleep` (§2.10) |
 | `DAT_0082f8a4` | `FUN_0082f6ec` `0x5a device info` (§2.7) |
 
 #### The two "shared with all of §8" globals
@@ -5458,7 +5550,7 @@ sees these globals referenced (e.g. `DAT_0082d440` in §3.6,
 handlers. This section is the *single place* in the doc
 that ties the 11 globals to the 30+ handlers that use them.
 
-### 8.9 0xcd byte-reverse echo / link-sanity test (`FUN_0082be12`)
+### 8.9 0xcd small arbitrary-address read (`fee7_vendor_memory_read_small_cd`)
 
 A vendor-service **byte-order sanity check**. When the host
 sends `0xcd 0x01 LEN B3 B4 B5 B6`, the watch responds with
@@ -5471,7 +5563,7 @@ the response.
 #### Behavior
 
 ```c
-void FUN_0082be12(int param_1) {
+void fee7_vendor_memory_read_small_cd(int param_1) {
     rsp[0] = 0xcd;
     if (req[1] == 1) {
         uint8_t len = min(req[2], 0x0E);    // clamp to 14
@@ -5564,7 +5656,7 @@ same as `rev` + `lsl #0` would give, but `rev16` is a
 16-bit Thumb instruction and uses one fewer cycle than
 the 32-bit `rev`.
 
-### 8.10 0xce factory/test sub-commands (`FUN_0082bcde`)
+### 8.10 0xce factory/test sub-commands (`fee7_handle_factory_test_ce`)
 
 The vendor-test entry point. Dispatches on five
 *non-sequential* sub-cmd bytes — `0x01`, `0x02`, `' '`
@@ -5721,7 +5813,7 @@ test tables (`DAT_0082bfc0`/`bfc4`/`bfc8`). They are
 `0xce` is reachable only when the OEM has populated the
 vendor tables.
 
-### 8.11 0x51 `'Q'` find-phone / long alert (`FUN_0082c5b8`)
+### 8.11 0x51 `'Q'` vendor alert/test request (`fee7_handle_test_request_51`)
 
 The "find phone" / longer alert trigger. Mirrors `0x50 'P'`
 (§8.1) with different vendor-alert parameters — together
@@ -5730,7 +5822,7 @@ they are the two fire-alert commands on the 0xFEE7 service.
 #### Behavior
 
 ```c
-void FUN_0082c5b8(int param_1) {
+void fee7_handle_test_request_51(int param_1) {
     rsp[0] = 0x51;
     if (req[1] == 0x01) {
         FUN_0082994c(100, 0x10, 2, 8);   // vendor alert: mode 100, count 2, repeat 8
@@ -5806,7 +5898,7 @@ can write `0` to `DAT_0082caec[3]` via `0xC5 0x00` and the
 sub-cmd-byte guard will still pass but the vendor alert
 helper will be a no-op via the dispatcher gate).
 
-### 8.12 0x3c capability block (`FUN_0082c50e`)
+### 8.12 0x3c capability block (`fee7_send_fixed_capability_3c`)
 
 The "what features does this watch support" answer. Sends
 a **fully static 16-byte response** that contains four
@@ -5816,7 +5908,7 @@ ignores the request entirely — `0x3c` is fire-and-forget.
 #### Behavior
 
 ```c
-void FUN_0082c50e() {
+void fee7_send_fixed_capability_3c() {
     rsp[0]  = 0x3c;        // cmd
     rsp[1]  = 0x00;
     rsp[2]  = 0x40;        // feature ID 1
@@ -5882,7 +5974,7 @@ suggests:
 
 #### `param_1` ignored
 
-The handler signature is `void FUN_0082c50e()` (no params),
+The handler signature is `void fee7_send_fixed_capability_3c()` (no params),
 even though the dispatcher passes `param_1` (the request
 frame). The decompiler optimises the unused param out
 entirely. A host that sends a *non-empty* request still
@@ -5905,9 +5997,9 @@ host that wants both can:
 #### Relation to the §3 "0x3c capability block"
 
 `0x3c` is also a *Channel-A* opcode (the §3 dispatcher
-at `FUN_0082d2dc` does not route `0x3c`; the byte 0x3c
+at `channel_a_dispatch_queued_frame` does not route `0x3c`; the byte 0x3c
 falls into the `0x39 < uVar2 < 0x43` chain and reaches
-`FUN_0082c50e`). So `0x3c` is in fact a *shared* opcode
+`fee7_send_fixed_capability_3c`). So `0x3c` is in fact a *shared* opcode
 between Channel-A and 0xFEE7 — the dispatcher for both
 tables lands on the same handler. The host SDK can call it
 from either transport.
@@ -6063,7 +6155,7 @@ void FUN_008337fa(undefined1 *out_ptr, ..., undefined4 param_4) {
     if (!(*flag & 1)) {                     // not already pending
         *flag = 0;  *(state + 0x20) = 0;  *(state + 0x24) = 0;
         if (*DAT_0083389c != 1 && !FUN_00828af4()) {  // ring idle, HR not running
-            FUN_0083371e(2);                       // start HR measurement mode 2
+            health_post_start_measure_event(2);                       // start HR measurement mode 2
             FUN_00829c24(DAT_00833a1c, DAT_00833a18,
                          DAT_00833a14, 1, param_4); // queue work item
             *flag |= 1;
@@ -6086,7 +6178,7 @@ The helper is a **debounced HR read initiator**:
    * If the deferred ring is idle *and* the HR step counter
      is not busy (`FUN_00828af4()` — same gate used by
      `0x08 findDevice` and `0x77 phoneSport`), start the HR
-     measurement (`FUN_0083371e(2)` — mode 2 = one-shot
+     measurement (`health_post_start_measure_event(2)` — mode 2 = one-shot
      single-record read) and queue a worker item via
      `FUN_00829c24`.
    * Otherwise mark a "needs-retry" flag at `+0xF` and
@@ -6171,7 +6263,7 @@ on completion. The differences:
 | | `0x15` (Channel-A) | `0xc1` (0xFEE7) |
 |---|---|---|
 | Trigger | dispatcher calls `FUN_0082cf48` directly | dispatcher calls `FUN_008337fa` + `FUN_0082b938` |
-| Read mode | `FUN_008279c4(idx)` — live-tested as UTC day-start seconds | `FUN_0083371e(2)` — one-shot |
+| Read mode | `FUN_008279c4(idx)` — live-tested as UTC day-start seconds | `health_post_start_measure_event(2)` — one-shot |
 | Ack | none — payload frames only | 1-byte ack frame sent immediately |
 | State machine | per-call fresh state | debounced via `flag` + secondary out-pointer |
 
@@ -6200,10 +6292,11 @@ The host SDK should:
 
 ## 10. Open Questions / Next Steps
 
-All three originally-open questions have been resolved:
+Two of the three originally-open questions have been resolved, and the OTA
+digest question is narrowed:
 
 1. ~~Recover the exact meaning of opcode `0x2b` mixture container fields.~~ **Resolved** — see §3.1. The 16-byte `mixture_state_t` is now fully decoded; remaining unknowns are semantic (BCD field interpretation, period-data byte meanings).
-2. ~~Identify the 32-byte `image_digest` algorithm used for OTA and the container header digest at `0x1c4`.~~ **Resolved** — see §5.2. The 32-byte digest is the **bootloader's responsibility**, not in `body.bin`. The H59MA v14 firmware only validates the **4-byte signature magic** at `DAT_00840744` (= `0x8721bee2`) via `FUN_00840724`. The per-block 32-byte digest lives in the bootloader image (a separate image not in `body.bin`).
+2. **Identify the 32-byte `image_digest` algorithm used for OTA and the container header digest at `0x1c4`.** Still open for the bootloader image. `body.bin` validates only the first OTA container word (`ota_container_magic` = little-endian `0x81bdc3e5`) and writes `expected_size - 0x50` bytes to the OTA staging area. The separate `0x8721bee2` magic belongs to the config blob (§5.3), not OTA.
 3. ~~Determine whether the `0xFEE7` vendor service has any active protocol role in the firmware.~~ **Resolved** — see §8; it implements a second 16-byte command channel.
 
 ### 10.0 What's in this doc (final tally)
@@ -6229,7 +6322,7 @@ This document covers the H59MA v14 firmware in **~7,250 lines** with **17+ synth
   readHeartRate, restoreKey, factory test mode.
 * **§4 ANCS** (3 sub-sections) — ancs_add_client,
   ancs_parse_notification_source_data, ancs_client_cb.
-* **§5 OTA/DFU** (2 sub-sections including §5.1 state
+* **§5 OTA/DFU** (3 sub-sections including §5.1 state
   machine and §5.2 helper details) — the OTA dispatcher,
   signature check, start/init/data/end helpers.
 * **§6 Power Management** (2 sub-sections) — button/DLPS init,
@@ -6264,10 +6357,10 @@ section number* for a given operation.
 
 | Cmd (hex) | Sub-byte | § | Operation |
 |---|---|---|---|
-| `0x11` | day_offset | §2.9 | sleep summary (100 B) |
-| `0x12` | day_offset | §2.10 | sleep detail (289 B) |
+| `0x11` | day_offset | §2.9 | sleep summary (101 B: echoed offset + 100 B) |
+| `0x12` | day_offset | §2.10 | sleep detail (289 B: echoed offset + 288 B) |
 | `0x27` | — | §2.4 | sleep records (night) |
-| `0x2a` | day_offset | §2.8 | activity summary (2 × 52 B) |
+| `0x2a` | day_offset | §2.8 | activity summary (up to 3 × 49 B) |
 | `0x2c` | sub 0x01 / 0x02 | §2.5 | alarm read / write |
 | `0x3e` | — | §2.4 | lunch sleep records (same as `0x27`) |
 | `0x41` | file_index | §2.11 | file list (up to 10 files, `0x42` response opcode) |
@@ -6337,14 +6430,17 @@ section number* for a given operation.
 | `ancs_parse_notification_source_data` (`FUN_00839fee`) | §4.2 | parse incoming notification source bytes |
 | `ancs_client_cb` (`FUN_0083a116`) | §4.3 | handle `connect`/`notification`/`data`/`disconnect` events |
 
-#### OTA / DFU (§5) — 4 helpers
+#### OTA / DFU (§5) — helpers
 
 | Function | § | Operation |
 |---|---|---|
-| `FUN_00840724` | §5.2 | OTA signature check (4 B magic `0x8721bee2`) |
-| `FUN_0082fe52` | §5.1 | OTA state machine (sub 0/1/2/3/4 lifecycle) |
-| `FUN_0082f1a4` | §5.2 | OTA start ack |
-| `FUN_0082f1b6` | §5.2 | OTA init (parses 9 B header) |
+| `ota_dfu_state_machine` | §5.1 | OTA state machine (sub 0/1/2/3/4 lifecycle) |
+| `ota_cmd_start_ack` | §5.2 | OTA start ack |
+| `ota_cmd_init_metadata` | §5.2 | OTA init (parses 9 B metadata) |
+| `ota_cmd_write_data_packet` | §5.2 | OTA data writer and container magic check |
+| `ota_cmd_check_complete` | §5.2 | validates `written == size - 0x50` |
+| `ota_cmd_end_reboot` | §5.2 | final reboot/apply path |
+| `cfg_blob_magic_ok` | §5.3 | config blob magic check (`0x8721bee2`), not OTA |
 
 #### Power management (§6) — 2 helpers
 
@@ -6357,8 +6453,8 @@ section number* for a given operation.
 
 | Function | § | Operation |
 |---|---|---|
-| `FUN_00833770` | §7.1 | HR module dispatcher (4-stage lifecycle) |
-| `FUN_00833334` | §7.2 | accelerometer / LIS3DH SPI dispatcher (single sub-cmd) |
+| `health_module_event_dispatch` | §7.1 | HR module dispatcher (start/stop event bus) |
+| `lis3dh_accel_dispatch` | §7.2 | accelerometer / LIS3DH SPI dispatcher (single sub-cmd) |
 
 #### Boot (§1) — 2 functions
 
@@ -6423,7 +6519,7 @@ post-§8.8 synthesis, §8.22 = final wire-format synthesis),
 so reading them in §0's recommended order gives the right
 narrative arc.
 
-### 8.15 0x3e lipids read/set (`FUN_0082c550`)
+### 8.15 0x3e lipids read/set (`fee7_handle_lipids_flag_3e`)
 
 The 0xFEE7 vendor-side **duplicate** of the `0x3a sub 0x04`
 lipids bit-toggle. The existing docstring for `0x3e`
@@ -6617,7 +6713,7 @@ this frame is a `0x60` ack". The host SDK that consumes
 than trusting the additive checksum (which will be `0xC0`,
 not `0x60`).
 
-### 8.17 0xbf / 0xc0 vendor memory R/W (`FUN_0082ba94`, `FUN_0082bb0c`)
+### 8.17 0xbf / 0xc0 vendor memory R/W (`fee7_vendor_memory_write`, `fee7_vendor_memory_read`)
 
 The **arbitrary-memory read/write pair** for OEM vendor
 tools. `0xbf` lets the host write `up_to_8_bytes` to any
@@ -6632,7 +6728,7 @@ the deferred-ring state at `DAT_0082bfcc`, the OTA state at
 #### `0xbf` — vendor memory write
 
 ```c
-void FUN_0082ba94(undefined1 *param_1) {
+void fee7_vendor_memory_write(undefined1 *param_1) {
     uint8_t len = param_1[5];
     if (len > 8) len = 8;
     if (len != 0) {
@@ -6659,7 +6755,7 @@ constants, and the deferred-ring worker state.
 #### `0xc0` — vendor memory read
 
 ```c
-void FUN_0082bb0c(undefined1 *param_1) {
+void fee7_vendor_memory_read(undefined1 *param_1) {
     uint16_t len = (uint32_t)(param_1[5])        |
                    ((uint32_t)(param_1[6]) <<  8) |
                    ((uint32_t)(param_1[7]) << 16) |
@@ -6727,8 +6823,8 @@ with a paired BLE link can:
 
 A production firmware *should* gate these behind a "vendor
 mode" flag that requires an OEM-signed unlock, but the
-H59MA v14 firmware does not — `FUN_0082ba94` and
-`FUN_0082bb0c` are unconditionally called from the 0xFEE7
+H59MA v14 firmware does not — `fee7_vendor_memory_write` and
+`fee7_vendor_memory_read` are unconditionally called from the 0xFEE7
 dispatcher (§8.1).
 
 #### Why these opcodes exist
@@ -6765,7 +6861,7 @@ bounds check, *no* MPU-region check, *no* "is this address
 in a vendor-readable region?" gate. The watchdog is the
 host SDK's own policy — the firmware trusts the caller.
 
-### 8.18 0x93 firmware version + build-date string (`FUN_00827c4a`)
+### 8.18 0x93 firmware version + build-date string (`fee7_send_fw_version_build_info_93`)
 
 The vendor-string variant of `0x48 'H'` handshake (§8.2).
 While `0x48 'H'` returns the device-info block as a
@@ -6778,7 +6874,7 @@ interpretation.
 #### Behavior
 
 ```c
-void FUN_00827c4a() {
+void fee7_send_fw_version_build_info_93() {
     // header frame [0x93, 0, ..., 0, 0x93]
     rsp[0]  = 0x93;
     rsp[12] = 0x93;            // self-marker pattern (like 0x90/0x96/0x60)
@@ -6915,7 +7011,7 @@ transformation. This means a host SDK that prints
 `rsp[1..14]` directly to a UI label gets a readable version
 string with no parsing required.
 
-### 8.19 0x94 / 0x95 state-update commands (`FUN_00827b2e`, `FUN_00827b54`)
+### 8.19 0x94 / 0x95 state-update commands (`fee7_start_test_mode_94`, `fee7_start_test_mode_95`)
 
 The **two missing members** of the 0x90-0x9f vendor
 state-update trio. Together with `0x96` (§8.4), they form
@@ -6927,10 +7023,10 @@ a 3-state machine controlled by `DAT_00827e88[0]`:
 | `3` | `0x95` | state-update mode 3 — drain deferred ring, **clear `DAT_00827e88[1]`** |
 | `4` | `0x96` (§8.4) | full reset state — drain, clear `DAT_00827e88[1]`, set mode to `4` |
 
-#### `FUN_00827b2e` (0x94)
+#### `fee7_start_test_mode_94` (0x94)
 
 ```c
-void FUN_00827b2e() {
+void fee7_start_test_mode_94() {
     rsp[0]  = 0x94;
     rsp[12] = 0x94;                  // self-marker pattern
     FUN_0082ebdc(rsp);
@@ -6939,10 +7035,10 @@ void FUN_00827b2e() {
 }
 ```
 
-#### `FUN_00827b54` (0x95)
+#### `fee7_start_test_mode_95` (0x95)
 
 ```c
-void FUN_00827b54() {
+void fee7_start_test_mode_95() {
     rsp[0]  = 0x95;
     rsp[12] = 0x95;
     FUN_0082ebdc(rsp);
@@ -7106,7 +7202,7 @@ request and treat it as "not implemented" rather than as
 
 The §3 Channel-A table lists `0x97..0x9f` as "(handler)" with
 no detail — that handler is exactly the **default-slot
-vendor-NAK** from §8.1. The §3 dispatcher (`FUN_0082d2dc`)
+vendor-NAK** from §8.1. The §3 dispatcher (`channel_a_dispatch_queued_frame`)
 does *not* have the `0x97..0x9F` range routed (the §3 table
 falls into `FUN_0082ce0c` / `FUN_0082cede` / etc. for opcodes
 in that range), so the 0xFEE7 §8.1 dispatcher is the
@@ -7220,7 +7316,7 @@ content and the checksum catches transmission errors.
 #### §3 Channel-A equivalents?
 
 Channel-A opcodes do *not* use the self-marker pattern. The
-§3 dispatcher (`FUN_0082d2dc`) always emits the standard
+§3 dispatcher (`channel_a_dispatch_queued_frame`) always emits the standard
 additive checksum. The self-marker pattern is a **0xFEE7-
 only** convention, used by 6 of the ~50 documented 0xFEE7
 opcodes (the rest use the standard checksum).
@@ -7268,25 +7364,23 @@ opcode). It's the maximum single-frame payload BLE supports.
 
 | Section | Opcode byte | Sub-byte byte |
 |---|---|---|
-| Channel-A (§3) | byte 2 | byte 1 |
+| Channel-A (§3) | byte 0 | byte 1 |
 | Channel-B (§2) | byte 0 | byte 1 |
 | 0xFEE7 vendor (§8) | byte 0 | byte 1 |
 | ANCS (§4) | byte 0 (notification source) or byte 1 (data source / control point) | byte 1 (cmd id) |
 | OTA (§5) | byte 1 (within 4-byte CRC + cmd header) | byte 0 (OTA start/stop/etc.) |
 
-The §3 dispatcher (`FUN_0082d2dc`) is the **odd one out** —
-its command byte is at offset 2, not 0. The §3 frame
-*prefix* (bytes 0..1) is reserved for the queue / fragment
-metadata that the dispatcher reads first; the actual command
-opcode is at byte 2. All other sections use byte 0 as the
-opcode (matching the §2.0 frame builder).
+The §3 dispatcher (`channel_a_dispatch_queued_frame`) consumes a queued copy of
+the same 16-byte Channel-A frame used on the wire: command byte at offset 0,
+sub-byte at offset 1, checksum at offset 15. The ring head/tail metadata lives
+outside the entry, not in bytes 0..1 of the frame.
 
 #### Response treatment
 
 | Section | Response opcode | Checksum treatment |
 |---|---|---|
 | Channel-A | echoes request cmd | additive checksum (FUN_0082b0c4) |
-| Channel-B | usually `req_cmd + 1` (e.g. 0x41 → 0x42, 0x6 → 0x6 + 1) | additive checksum |
+| Channel-B | command-specific (`0x41` list → `0x42`; most reads echo request cmd; NAK carries original cmd) | CRC-16/MODBUS over the Channel-B payload |
 | 0xFEE7 vendor | echoes request cmd | additive checksum OR self-marker (§8.21) |
 | ANCS | n/a (notification source is read-only) | n/a |
 | OTA | echoes request cmd | CRC + length header (§5) |
