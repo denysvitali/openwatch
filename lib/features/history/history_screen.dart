@@ -300,8 +300,9 @@ class _DayDetailPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isToday = day.day == DateOnly.today();
-    final isEmpty = _isEmpty(day);
+    final displayDay = _displayDayForNow(day, DateTime.now());
+    final isToday = displayDay.day == DateOnly.today();
+    final isEmpty = _isEmpty(displayDay);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
@@ -315,14 +316,14 @@ class _DayDetailPage extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      _formatDayHeader(day.day),
+                      _formatDayHeader(displayDay.day),
                       style: theme.textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                    if (day.lastUpdated != null)
+                    if (displayDay.lastUpdated != null)
                       Text(
-                        'Updated ${DateFormat.jm().format(day.lastUpdated!)}',
+                        'Updated ${DateFormat.jm().format(displayDay.lastUpdated!)}',
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant,
                         ),
@@ -357,50 +358,54 @@ class _DayDetailPage extends StatelessWidget {
               children: [
                 _MetricPill(
                   icon: CupertinoIcons.heart_fill,
-                  label: day.hr.isEmpty ? '-' : '${_avgBpm(day.hr)} bpm',
+                  label: displayDay.hr.isEmpty
+                      ? '-'
+                      : '${_avgBpm(displayDay.hr)} bpm',
                   tint: const Color(0xFFFF3B30),
                 ),
                 _MetricPill(
                   icon: CupertinoIcons.moon_fill,
-                  label: _sleepSummary(day),
+                  label: _sleepSummary(displayDay),
                   tint: const Color(0xFF5856D6),
                 ),
                 _MetricPill(
                   icon: CupertinoIcons.arrow_up_right,
-                  label: day.steps == null
+                  label: displayDay.steps == null
                       ? '-'
-                      : NumberFormat.compact().format(day.steps),
+                      : NumberFormat.compact().format(displayDay.steps),
                   tint: theme.colorScheme.primary,
                 ),
                 _MetricPill(
                   icon: CupertinoIcons.bolt_fill,
-                  label: day.stress.isEmpty
+                  label: displayDay.stress.isEmpty
                       ? '-'
-                      : '${_avgValue(day.stress)} stress',
+                      : '${_avgValue(displayDay.stress)} stress',
                   tint: const Color(0xFFFF9500),
                 ),
                 _MetricPill(
                   icon: CupertinoIcons.chart_bar_fill,
-                  label: day.hrv.isEmpty ? '-' : '${_avgValue(day.hrv)} ms',
+                  label: displayDay.hrv.isEmpty
+                      ? '-'
+                      : '${_avgValue(displayDay.hrv)} ms',
                   tint: const Color(0xFF34C759),
                 ),
                 _MetricPill(
                   icon: CupertinoIcons.waveform_path_ecg,
-                  label: day.bloodPressure.isEmpty
+                  label: displayDay.bloodPressure.isEmpty
                       ? '-'
-                      : _formatBp(day.bloodPressure.last),
+                      : _formatBp(displayDay.bloodPressure.last),
                   tint: const Color(0xFFFF3B30),
                 ),
               ],
             ),
-            if (day.hr.isNotEmpty) ...[
+            if (displayDay.hr.isNotEmpty) ...[
               const SizedBox(height: 20),
               _ChartHeader(
                 title: 'Heart rate',
-                detail: '${_avgBpm(day.hr)} bpm avg',
+                detail: '${_avgBpm(displayDay.hr)} bpm avg',
               ),
               const SizedBox(height: 10),
-              SizedBox(height: 184, child: HrLineChart(samples: day.hr)),
+              SizedBox(height: 184, child: HrLineChart(samples: displayDay.hr)),
             ] else ...[
               const SizedBox(height: 20),
               SizedBox(
@@ -415,39 +420,42 @@ class _DayDetailPage extends StatelessWidget {
                 ),
               ),
             ],
-            if (day.sleep.isNotEmpty) ...[
+            if (displayDay.sleep.isNotEmpty) ...[
               const SizedBox(height: 20),
               _ChartHeader(
                 title: 'Sleep',
-                detail: 'Total ${_sleepSummary(day)}',
+                detail: 'Total ${_sleepSummary(displayDay)}',
               ),
               const SizedBox(height: 8),
               _SleepSessionRows(
-                sessions: SleepSessionSummary.fromSegments(day.sleep),
+                sessions: SleepSessionSummary.fromSegments(displayDay.sleep),
               ),
               const SizedBox(height: 8),
               Text(
-                _sleepLongSummary(day),
+                _sleepLongSummary(displayDay),
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
               ),
               const SizedBox(height: 10),
-              SleepTimeline(segments: day.sleep, height: 110),
+              SleepTimeline(segments: displayDay.sleep, height: 110),
             ],
-            if (day.stress.isNotEmpty ||
-                day.hrv.isNotEmpty ||
-                day.bloodPressure.isNotEmpty) ...[
+            if (displayDay.stress.isNotEmpty ||
+                displayDay.hrv.isNotEmpty ||
+                displayDay.bloodPressure.isNotEmpty) ...[
               const SizedBox(height: 20),
               _ChartHeader(title: 'Other metrics', detail: 'Synced values'),
               const SizedBox(height: 10),
-              if (day.stress.isNotEmpty) ...[
-                _ChartHeader(title: 'Stress', detail: _scalarRange(day.stress)),
+              if (displayDay.stress.isNotEmpty) ...[
+                _ChartHeader(
+                  title: 'Stress',
+                  detail: _scalarRange(displayDay.stress),
+                ),
                 const SizedBox(height: 8),
                 SizedBox(
                   height: 132,
                   child: ScalarMetricChart(
-                    samples: day.stress,
+                    samples: displayDay.stress,
                     color: const Color(0xFFFF9500),
                     minValue: 0,
                     maxValue: 100,
@@ -455,19 +463,22 @@ class _DayDetailPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 14),
               ],
-              if (day.hrv.isNotEmpty) ...[
-                _ChartHeader(title: 'HRV', detail: _scalarRange(day.hrv)),
+              if (displayDay.hrv.isNotEmpty) ...[
+                _ChartHeader(
+                  title: 'HRV',
+                  detail: _scalarRange(displayDay.hrv),
+                ),
                 const SizedBox(height: 8),
                 SizedBox(
                   height: 132,
                   child: ScalarMetricChart(
-                    samples: day.hrv,
+                    samples: displayDay.hrv,
                     color: const Color(0xFF34C759),
                   ),
                 ),
                 const SizedBox(height: 14),
               ],
-              _MetricValueList(day: day),
+              _MetricValueList(day: displayDay),
             ],
           ],
         ],
@@ -483,6 +494,53 @@ bool _isEmpty(DailyHistory day) =>
     day.hrv.isEmpty &&
     day.bloodPressure.isEmpty &&
     day.steps == null;
+
+DailyHistory _displayDayForNow(DailyHistory day, DateTime now) {
+  return day.copyWith(
+    hr: _clipAndDedupeHr(day.hr, now),
+    stress: _clipScalar(day.stress, now),
+    hrv: _clipScalar(day.hrv, now),
+    bloodPressure: _clipBp(day.bloodPressure, now),
+  );
+}
+
+List<HrSample> _clipAndDedupeHr(List<HrSample> samples, DateTime now) {
+  final bySlot = <int, HrSample>{};
+  for (final sample in samples) {
+    final snapped = _snapToHrSlot(sample.timestamp);
+    if (snapped.isAfter(now)) continue;
+    final key = snapped.millisecondsSinceEpoch;
+    final existing = bySlot[key];
+    if (existing == null || sample.timestamp.isAfter(existing.timestamp)) {
+      bySlot[key] = HrSample(snapped, sample.bpm);
+    }
+  }
+  return bySlot.values.toList()
+    ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+}
+
+List<HealthMetricSample> _clipScalar(
+  List<HealthMetricSample> samples,
+  DateTime now,
+) {
+  return [
+    for (final sample in samples)
+      if (!sample.timestamp.isAfter(now)) sample,
+  ];
+}
+
+List<BloodPressureSample> _clipBp(
+  List<BloodPressureSample> samples,
+  DateTime now,
+) {
+  return [
+    for (final sample in samples)
+      if (!sample.timestamp.isAfter(now)) sample,
+  ];
+}
+
+DateTime _snapToHrSlot(DateTime t) =>
+    DateTime(t.year, t.month, t.day, t.hour, (t.minute ~/ 5) * 5);
 
 String _formatDayTab(DateOnly d) {
   final today = DateOnly.today();

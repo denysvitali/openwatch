@@ -24,12 +24,14 @@ class HrLineChart extends StatefulWidget {
     this.minBpm = 40,
     this.maxBpm = 200,
     this.showAxes = true,
+    this.now,
   });
 
   final List<HrSample> samples;
   final int minBpm;
   final int maxBpm;
   final bool showAxes;
+  final DateTime? now;
 
   @override
   State<HrLineChart> createState() => _HrLineChartState();
@@ -49,7 +51,7 @@ class _HrLineChartState extends State<HrLineChart> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.samples != widget.samples) {
       _viewStart = 0;
-      _viewEnd = 1;
+      _viewEnd = _maxViewEnd(widget.samples, widget.now ?? DateTime.now());
       _selected = null;
     }
   }
@@ -57,17 +59,15 @@ class _HrLineChartState extends State<HrLineChart> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final selected = _selected;
-    // The watch stores a fixed 288-slot HR record per day, so on a freshly-
-    // started day the chart would otherwise paint a wall of "future" samples
-    // anchored at e.g. 23:55 while the actual local time is 00:58. Clip to
-    // `now` so only past samples are drawn — anything beyond now is slot
-    // padding the watch hasn't actually measured yet.
-    final now = DateTime.now();
-    final visible = <HrSample>[
-      for (final s in widget.samples)
-        if (!s.timestamp.isAfter(now)) s,
-    ];
+    // Build one chart data set and use it for paint, hit-testing, badges, and
+    // scroll limits. Otherwise future fixed-slot watch records can be hidden
+    // visually while still being selectable.
+    final now = widget.now ?? DateTime.now();
+    final visible = _visibleSamples(widget.samples, now);
+    final maxViewEnd = _maxViewEnd(widget.samples, now);
+    final viewStart = _viewStart.clamp(0.0, maxViewEnd);
+    final viewEnd = _viewEnd.clamp(viewStart, maxViewEnd);
+    final selected = _selectedVisibleIn(_selected, visible);
     return LayoutBuilder(
       builder: (context, constraints) {
         final size = Size(
@@ -99,8 +99,8 @@ class _HrLineChartState extends State<HrLineChart> {
                       minBpm: widget.minBpm.toDouble(),
                       maxBpm: widget.maxBpm.toDouble(),
                       showAxes: widget.showAxes,
-                      viewStart: _viewStart,
-                      viewEnd: _viewEnd,
+                      viewStart: viewStart,
+                      viewEnd: viewEnd,
                       selected: selected,
                     ),
                     size: Size.infinite,
@@ -139,8 +139,17 @@ class _HrLineChartState extends State<HrLineChart> {
           ((details.localFocalPoint.dx - chartRect.left) / chartRect.width)
               .clamp(0.0, 1.0);
       final anchor = _scaleStartStart + startSpan * focal;
-      final nextSpan = (startSpan / details.scale).clamp(_minSpan, 1.0);
-      _setRange(anchor - nextSpan * focal, anchor + nextSpan * (1 - focal));
+      final maxViewEnd = _maxViewEnd(
+        widget.samples,
+        widget.now ?? DateTime.now(),
+      );
+      final minSpan = _minSpanFor(maxViewEnd);
+      final nextSpan = (startSpan / details.scale).clamp(minSpan, maxViewEnd);
+      _setRange(
+        anchor - nextSpan * focal,
+        anchor + nextSpan * (1 - focal),
+        maxViewEnd: maxViewEnd,
+      );
       return;
     }
     if (details.pointerCount <= 1) {
@@ -155,18 +164,23 @@ class _HrLineChartState extends State<HrLineChart> {
   }
 
   void _selectNearest(Offset position, Size size) {
-    if (widget.samples.isEmpty) return;
+    final now = widget.now ?? DateTime.now();
+    final samples = _visibleSamples(widget.samples, now);
+    if (samples.isEmpty) return;
     final chartRect = _HrPainter.chartRectFor(size, widget.showAxes);
     if (!chartRect.contains(position)) return;
+    final maxViewEnd = _maxViewEnd(widget.samples, now);
+    final viewStart = _viewStart.clamp(0.0, maxViewEnd);
+    final viewEnd = _viewEnd.clamp(viewStart, maxViewEnd);
     final target =
-        _viewStart +
+        viewStart +
         ((position.dx - chartRect.left) / chartRect.width) *
-            (_viewEnd - _viewStart);
+            (viewEnd - viewStart);
     HrSample? best;
     var bestDistance = double.infinity;
-    for (final sample in widget.samples) {
-      final fraction = _HrPainter.dayFraction(sample.timestamp, widget.samples);
-      if (fraction < _viewStart || fraction > _viewEnd) continue;
+    for (final sample in samples) {
+      final fraction = _HrPainter.dayFraction(sample.timestamp, samples);
+      if (fraction < viewStart || fraction > viewEnd) continue;
       final distance = (fraction - target).abs();
       if (distance < bestDistance) {
         best = sample;
@@ -189,24 +203,43 @@ class _HrLineChartState extends State<HrLineChart> {
 
   void _zoom(double factor) {
     final center = (_viewStart + _viewEnd) / 2;
-    final nextSpan = ((_viewEnd - _viewStart) * factor).clamp(_minSpan, 1.0);
-    _setRange(center - nextSpan / 2, center + nextSpan / 2);
+    final maxViewEnd = _maxViewEnd(
+      widget.samples,
+      widget.now ?? DateTime.now(),
+    );
+    final minSpan = _minSpanFor(maxViewEnd);
+    final nextSpan = ((_viewEnd - _viewStart) * factor).clamp(
+      minSpan,
+      maxViewEnd,
+    );
+    _setRange(
+      center - nextSpan / 2,
+      center + nextSpan / 2,
+      maxViewEnd: maxViewEnd,
+    );
   }
 
   void _resetView() {
+    final maxViewEnd = _maxViewEnd(
+      widget.samples,
+      widget.now ?? DateTime.now(),
+    );
     setState(() {
       _viewStart = 0;
-      _viewEnd = 1;
+      _viewEnd = maxViewEnd;
       _selected = null;
     });
   }
 
-  void _setRange(double start, double end) {
+  void _setRange(double start, double end, {double? maxViewEnd}) {
+    final maxEnd =
+        maxViewEnd ?? _maxViewEnd(widget.samples, widget.now ?? DateTime.now());
+    final minSpan = _minSpanFor(maxEnd);
     final span = end - start;
-    if (span >= 1) {
+    if (span >= maxEnd) {
       setState(() {
         _viewStart = 0;
-        _viewEnd = 1;
+        _viewEnd = maxEnd;
       });
       return;
     }
@@ -216,17 +249,67 @@ class _HrLineChartState extends State<HrLineChart> {
       nextEnd -= nextStart;
       nextStart = 0;
     }
-    if (nextEnd > 1) {
-      nextStart -= nextEnd - 1;
-      nextEnd = 1;
+    if (nextEnd > maxEnd) {
+      nextStart -= nextEnd - maxEnd;
+      nextEnd = maxEnd;
     }
-    nextStart = nextStart.clamp(0.0, 1.0 - _minSpan);
-    nextEnd = nextEnd.clamp(nextStart + _minSpan, 1.0);
+    nextStart = nextStart.clamp(0.0, math.max(0.0, maxEnd - minSpan));
+    nextEnd = nextEnd.clamp(nextStart + minSpan, maxEnd);
     setState(() {
       _viewStart = nextStart;
       _viewEnd = nextEnd;
     });
   }
+
+  static double _minSpanFor(double maxViewEnd) {
+    return math.min(_minSpan, math.max(1 / (24 * 12), maxViewEnd));
+  }
+
+  static double _maxViewEnd(List<HrSample> samples, DateTime now) {
+    if (samples.isEmpty) return 1;
+    final first = samples.first.timestamp;
+    final dayStart = DateTime(first.year, first.month, first.day);
+    final todayStart = DateTime(now.year, now.month, now.day);
+    if (dayStart != todayStart) return 1;
+    final dayEnd = dayStart.add(const Duration(days: 1));
+    final dayMs =
+        dayEnd.millisecondsSinceEpoch - dayStart.millisecondsSinceEpoch;
+    final elapsedMs =
+        now.millisecondsSinceEpoch - dayStart.millisecondsSinceEpoch;
+    return (elapsedMs / dayMs).clamp(1 / (24 * 12), 1.0);
+  }
+
+  static List<HrSample> _visibleSamples(List<HrSample> samples, DateTime now) {
+    final bySlot = <int, HrSample>{};
+    for (final sample in samples) {
+      final snapped = _snapToSlot(sample.timestamp);
+      if (snapped.isAfter(now)) continue;
+      final key = snapped.millisecondsSinceEpoch;
+      final existing = bySlot[key];
+      if (existing == null || sample.timestamp.isAfter(existing.timestamp)) {
+        bySlot[key] = HrSample(snapped, sample.bpm);
+      }
+    }
+    return bySlot.values.toList()
+      ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+  }
+
+  static HrSample? _selectedVisibleIn(
+    HrSample? selected,
+    List<HrSample> visible,
+  ) {
+    if (selected == null) return null;
+    final snapped = _snapToSlot(selected.timestamp);
+    for (final sample in visible) {
+      if (sample.timestamp == snapped && sample.bpm == selected.bpm) {
+        return sample;
+      }
+    }
+    return null;
+  }
+
+  static DateTime _snapToSlot(DateTime t) =>
+      DateTime(t.year, t.month, t.day, t.hour, (t.minute ~/ 5) * 5);
 }
 
 /// Tiny heart-rate sparkline for a day-summary card.
@@ -234,17 +317,27 @@ class _HrLineChartState extends State<HrLineChart> {
 /// No axes, no labels — just a thin filled line. Designed to fit a
 /// ~64 px-tall card row.
 class MiniHrSpark extends StatelessWidget {
-  const MiniHrSpark({super.key, required this.samples, this.height = 48});
+  const MiniHrSpark({
+    super.key,
+    required this.samples,
+    this.height = 48,
+    this.now,
+  });
   final List<HrSample> samples;
   final double height;
+  final DateTime? now;
 
   @override
   Widget build(BuildContext context) {
+    final visible = _HrLineChartState._visibleSamples(
+      samples,
+      now ?? DateTime.now(),
+    );
     return SizedBox(
       height: height,
       child: CustomPaint(
         painter: _HrPainter(
-          samples: samples,
+          samples: visible,
           color: Theme.of(context).colorScheme.primary,
           axisColor: Colors.transparent,
           textColor: Colors.transparent,

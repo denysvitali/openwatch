@@ -10,19 +10,26 @@ class ScalarMetricChart extends StatelessWidget {
     required this.color,
     this.minValue,
     this.maxValue,
+    this.now,
   });
 
   final List<HealthMetricSample> samples;
   final Color color;
   final int? minValue;
   final int? maxValue;
+  final DateTime? now;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final cutoff = now ?? DateTime.now();
+    final visible = [
+      for (final sample in samples)
+        if (!sample.timestamp.isAfter(cutoff)) sample,
+    ];
     return CustomPaint(
       painter: _ScalarMetricPainter(
-        samples: samples,
+        samples: visible,
         color: color,
         axisColor: theme.colorScheme.outlineVariant,
         textColor: theme.colorScheme.onSurfaceVariant,
