@@ -796,8 +796,11 @@ class ChannelADispatcher {
     _muslim.add(MuslimConfig(sub: pl[0], stubbed: stubbed));
   }
 
-  /// `menstruation` (0x2b): mixture container; firmware uses additive
-  /// checksum over the body before sending.
+  /// `menstruation` (0x2b): 16-byte notify frame. Layout (incl. byte-0
+  /// sentinel quirk + read/write asymmetry) is documented on
+  /// [MenstruationMixture]; see also `GHIDRA_DECOMPILATION.md` §3.1.
+  /// The dispatcher forwards the 15-byte body unchanged — callers that
+  /// want the parsed fields should use [MenstruationMixture.tryParse].
   void _decodeMenstruation(Uint8List pl) {
     if (pl.length < 2) return;
     _menstruation.add(MenstruationMixture(sub: pl[0], payload: pl.sublist(1)));
@@ -1379,10 +1382,121 @@ class MuslimConfig {
   final bool stubbed;
 }
 
+/// `MenstruationDataRsp` (0x2b): 16-byte Channel-A notify frame carrying the
+/// user's menstrual-cycle configuration plus a phase hint used by the
+/// firmware UI.
+///
+/// The wire shape (verified against H59MA v14 — see
+/// `GHIDRA_DECOMPILATION.md` §3.1 / §3.1.1, `FUN_0082b078` lazy-init +
+/// `FUN_0082af28` read-memcpy + `FUN_0082aee4` write) is:
+///
+/// | byte | meaning                                                                       |
+/// |------|-------------------------------------------------------------------------------|
+/// | 0    | presence sentinel: `0xCA` ⇒ record present; `0x00` ⇒ lazy-init zero state      |
+/// | 1    | `BCD(startDate.year)`                                                         |
+/// | 2    | `BCD(cycleLenDays)`                                                           |
+/// | 3    | `BCD(startDate.day)` — zero here triggers the cycle-phase detector returning 3 |
+/// | 4..5 | `currentDay - record[4]` u16 LE on **write**; low byte only on **read**       |
+/// | 6..7 | `currentMonth - record[6]` u16 LE on **write**; low byte only on **read**      |
+/// | 8..12| 5-byte opaque `periodData` blob (semantics not RE-resolvable)                 |
+/// | 13..15| always-zero padding                                                           |
+///
+/// **Byte-0 sentinel quirk** (`FUN_0082af28`): on read the firmware overwrites
+/// `rsp[0]` with `start_date_bcd[0]` *before* the copy-out, so the returned
+/// frame's byte 0 is the BCD year nibble — **not** the `0xCA` sentinel. Hosts
+/// that want the presence sentinel must re-stamp `rsp[0] = 0x2B` (the
+/// request opcode) themselves before they can use the lazy-init-zero
+/// detection below. [tryParse] expects a 15-byte body that has already had
+/// the cmd byte stripped (i.e. the same shape that
+/// [ChannelADispatcher._decodeMenstruation] feeds into `payload`).
 class MenstruationMixture {
   const MenstruationMixture({required this.sub, required this.payload});
+
+  /// Sub-byte that echoed back the request's `req[1]` selector (read vs
+  /// write — `OpA.mixRead` / `OpA.mixWrite`).
   final int sub;
+
+  /// Raw 15-byte body, layout as described in the class doc.
   final Uint8List payload;
+
+  /// Presence sentinel at `payload[0]`. The firmware's lazy-init handler
+  /// writes `0x00` when no record exists and `0xCA` once a write has
+  /// committed a record (see `FUN_0082b078` in
+  /// `GHIDRA_DECOMPILATION.md` §3.1.1).
+  ///
+  /// Note: on a real read (`FUN_0082af28`) the firmware overwrites this
+  /// byte with `start_date_bcd[0]` before sending — so a fresh read frame
+  /// will *not* show `0xCA`. Callers that want to discriminate "present"
+  /// vs "lazy-init empty" should re-stamp byte 0 with `0x2B` (the
+  /// request opcode) before calling [tryParse], or compare against
+  /// [presenceSentinel] / 0 directly.
+  static const int presenceSentinel = 0xCA;
+
+  /// Parsed view of a 15-byte [payload] body.
+  ///
+  /// Returns `null` when the body length is not exactly 15 bytes or the
+  /// presence sentinel at `payload[0]` is zero (lazy-init empty state).
+  ///
+  /// **Important**: pass the *post-strip* body — i.e. the bytes that
+  /// remain after [Codec.rxPayload] has removed the cmd byte (or after
+  /// [ChannelADispatcher] has produced a [MenstruationMixture] for you).
+  /// The full 16-byte Channel-A frame includes the cmd byte at index 0,
+  /// which would push every field offset by one.
+  static MenstruationParsed? tryParse(Uint8List payload) {
+    if (payload.length != 15) return null;
+    if (payload[0] == 0x00) return null;
+    return MenstruationParsed._(payload);
+  }
+
+  /// Convenience: try to parse [payload] (or, when called as a default
+  /// constructor, the receiver's own `payload`) into a [MenstruationParsed]
+  /// view. Returns `null` for the wrong-length / lazy-init-zero cases.
+  MenstruationParsed? get parsed => tryParse(payload);
+}
+
+/// Parsed view of a [MenstruationMixture] body. Fields map 1:1 to the byte
+/// offsets documented on [MenstruationMixture]. All accessors are total —
+/// the [MenstruationMixture.tryParse] factory guarantees the underlying
+/// payload is exactly 15 bytes long.
+class MenstruationParsed {
+  const MenstruationParsed._(this._payload);
+
+  final Uint8List _payload;
+
+  /// Raw view of the 15-byte body, kept around for the [periodData] blob
+  /// (which has no RE-resolvable field-by-field semantics).
+  Uint8List get raw => _payload;
+
+  /// Year of the last cycle start date, decoded from BCD at `payload[1]`.
+  /// Range 0..99 — callers combine this with the watch's two-digit year
+  /// convention (e.g. `2000 + year` for any modern H59MA firmware).
+  int get startYear => Codec.fromBcd(_payload[1]);
+
+  /// Cycle length in days, decoded from BCD at `payload[2]`. Range 0..99.
+  int get cycleLenDays => Codec.fromBcd(_payload[2]);
+
+  /// Day-of-month of the last cycle start date, decoded from BCD at
+  /// `payload[3]`. When this is zero the firmware's cycle-phase detector
+  /// (`FUN_0082aee4`) returns `3 = Unset` — use that signal in a UI
+  /// instead of guessing from `startDate`.
+  int get startDay => Codec.fromBcd(_payload[3]);
+
+  /// `currentDay - record[4]` offset written by `FUN_0082aee4` as a u16 LE
+  /// pair (`payload[4] = low`, `payload[5] = high`). On read-back only
+  /// the low byte is returned by the firmware's copy-out — callers that
+  /// want the full u16 should treat it as the *write* value and clamp to
+  /// 0..255 if the high byte is zero.
+  int get currentDayDelta => _payload[4] | (_payload[5] << 8);
+
+  /// `currentMonth - record[6]` offset written by `FUN_0082aee4` as a u16
+  /// LE pair. Same low-byte-only-on-read caveat as [currentDayDelta].
+  int get currentMonthDelta => _payload[6] | (_payload[7] << 8);
+
+  /// 5-byte opaque `periodData` blob (`payload[8..12]`). The RE notes do
+  /// not resolve per-byte semantics; expose the raw bytes so callers
+  /// can decide how to surface them (or log+ignore) without us
+  /// over-promising on the layout.
+  Uint8List get periodData => Uint8List.sublistView(_payload, 8, 13);
 }
 
 /// Sub-commands of opcode `0xa1` factory / test mode dispatched by

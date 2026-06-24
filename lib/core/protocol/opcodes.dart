@@ -54,10 +54,25 @@ class OpA {
   static const int bpSetting = 0x0c;
   static const int bpReadConform = 0x0e;
   static const int bpData = 0x0d;
+
+  /// `HRVReq` (0x39): uses the shared FUN_0082c988 13-byte-chunk
+  /// fragmenter per GHIDRA section 3.21. The 49-byte record equals
+  /// 4 chunks (1 header + 3 body chunks).
   static const int hrv = 0x39;
   static const int hrvSetting = 0x38;
+
+  /// `PressureReq` (0x37): uses the shared FUN_0082c988 13-byte-chunk
+  /// fragmenter per GHIDRA section 3.20. The 49-byte record equals
+  /// 4 chunks (1 header + 3 body chunks).
   static const int pressure = 0x37;
   static const int pressureSetting = 0x36;
+
+  /// `UltraVioletReq` (0x7d): NOT in section 10.2 fragmenter table —
+  /// needs live capture. Shares the FUN_0082c988 13-byte-chunk
+  /// fragmenter layout (49-byte record = 4 chunks) with 0x37/0x39,
+  /// but the section 10.2 inventory does not list 0x7d under the
+  /// fragmenter callers — verify before relying on the
+  /// header+3-body-chunk shape.
   static const int ultraViolet = 0x7d;
   static const int uvSetting = 0x3e;
   static const int sugarLipidsSetting = 0x3a;
@@ -66,6 +81,11 @@ class OpA {
   // Activity / sport / sleep / alarm / target
   static const int readBandSport = 0x13;
   static const int readDetailSport = 0x43;
+
+  /// NOT IMPLEMENTED in H59MA v14 firmware — section 10.2 Channel-A
+  /// inventory has no 0x07 row. Stale legacy spec retired (subsumed by
+  /// 0x48 todaySport / 0x43 readDetailSport / Ch-B 0x2a activity
+  /// summary). See PROTOCOL.md section 4.4.
   static const int readTotalSport = 0x07;
   static const int phoneSport = 0x77;
   static const int phoneGps = 0x74;
@@ -147,6 +167,22 @@ class OpB {
   static const int activitySummary =
       0x2a; // v14 activity/sport summary — see GHIDRA §2.8
   static const int sleepLunchNew = 0x3e; // new sleep (lunch/nap) — Ch B
+
+  /// H59MA v14 device-info / config TLV handler (Channel-B `0x5a`).
+  ///
+  /// Sub-cmds (`payload[0]`):
+  ///   `0x01` — query enabled TLV slots; response is
+  ///            `[0x01, 0x01, count, ...tlvs]`.
+  ///   `0x02` — write TLVs; commit-only, no visible response payload.
+  ///   `0x03` — read static info TLVs (`H59MAX_`, `H59MA_V1.0`, ...).
+  ///   `0x04` — clear blob0 device-info / config slots.
+  ///
+  /// Writable TLV ids 1..7: `1` custom name prefix (max 0x18 B),
+  /// `2` BLE addr override (max 6 B), `3..6` device-info string
+  /// slots (max 0x14 / 0x10 / 0x10 / 0x08 B), `7` name-format
+  /// control byte (1 B). See `PROTOCOL.md` §4.8 and
+  /// `GHIDRA_DECOMPILATION.md` §2.7 (`FUN_0082f6ec`).
+  static const int deviceInfoConfig = 0x5a;
 
   // OTA response types (byte[1] of RX status frame)
   static const int rspOk = 0;

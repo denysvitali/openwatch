@@ -1068,6 +1068,92 @@ void main() {
         expect(r.auxHi, 0x9a);
       },
     );
+
+    test(
+      'menstruation 0x2b routes body to onMenstruation; tryParse parses 15B body',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final got = d.onMenstruation.first;
+        // Build a 13B body that fits the Codec helper's 14B limit
+        // (sub echo + 13 body bytes → `pl.length` == 14, of which
+        // `pl.sublist(1)` is 13B). The dispatcher's `payload` should
+        // be exactly those 13B after the sub echo is stripped.
+        final body = Uint8List.fromList(const [
+          0xCA, // presence sentinel (body[0])
+          0x26, // startYear BCD 26 (body[1])
+          0x28, // cycleLenDays BCD 28 (body[2])
+          0x16, // startDay BCD 16 (body[3])
+          0x02, 0x01, // currentDayDelta u16 LE = 0x0102 (body[4..5])
+          0x04, 0x03, // currentMonthDelta u16 LE = 0x0304 (body[6..7])
+          0xAA, 0xBB, 0xCC, 0xDD, 0xEE, // periodData 5B (body[8..12])
+        ]);
+        // sub echo at pl[0] — OpA.mixRead (0x01).
+        t.inA.add(Codec.buildChannelA(OpA.menstruation, [0x01, ...body]));
+        final m = await got.timeout(const Duration(seconds: 1));
+        expect(m.sub, 0x01);
+        expect(m.payload, body);
+
+        // Exercise the static parser with the canonical 15B body
+        // shape (sentinel at byte 0, year at byte 1, etc.) — that's
+        // the layout documented on the MenstruationMixture class.
+        // The BCD bytes round-trip via Codec.fromBcd: 0x26 → 26,
+        // 0x28 → 28, 0x16 → 16.
+        final body15 = Uint8List.fromList(const [
+          0xCA, // presence sentinel
+          0x26, // startYear BCD 26
+          0x28, // cycleLenDays BCD 28
+          0x16, // startDay BCD 16
+          0x02, 0x01, // currentDayDelta u16 LE = 0x0102
+          0x04, 0x03, // currentMonthDelta u16 LE = 0x0304
+          0xAA, 0xBB, 0xCC, 0xDD, 0xEE, // periodData 5B
+          0x00, 0x00, // padding
+        ]);
+        final parsed = MenstruationMixture.tryParse(body15);
+        expect(parsed, isNotNull);
+        expect(parsed!.startYear, 26);
+        expect(parsed.cycleLenDays, 28);
+        expect(parsed.startDay, 16);
+        expect(parsed.currentDayDelta, 0x0102);
+        expect(parsed.currentMonthDelta, 0x0304);
+        expect(parsed.periodData, [0xAA, 0xBB, 0xCC, 0xDD, 0xEE]);
+        expect(parsed.raw.length, 15);
+      },
+    );
+
+    test('menstruation 0x2b tryParse returns null on length mismatch', () {
+      expect(MenstruationMixture.tryParse(Uint8List(0)), isNull);
+      expect(MenstruationMixture.tryParse(Uint8List(14)), isNull);
+      expect(MenstruationMixture.tryParse(Uint8List(16)), isNull);
+      // 15-byte record but sentinel zero → lazy-init empty record.
+      final empty = Uint8List(15);
+      expect(MenstruationMixture.tryParse(empty), isNull);
+    });
+
+    test(
+      'menstruation 0x2b startDay=0 triggers Unset phase (parsed field)',
+      () {
+        // Per GHIDRA §3.1.1: when wire-record byte[3] is zero the
+        // firmware's cycle-phase detector returns 3 = Unset. Verify the
+        // parsed view exposes startDay == 0 (not a date).
+        final wireRecord = Uint8List.fromList(const [
+          0xCA, // presence sentinel
+          0x26, // startYear BCD
+          0x1C, // cycleLenDays BCD
+          0x00, // startDay BCD 0 → Unset
+          0x00, 0x00, // currentDayDelta
+          0x00, 0x00, // currentMonthDelta
+          0x00, 0x00, 0x00, 0x00, 0x00, // periodData
+          0x00, 0x00, // padding
+        ]);
+        final parsed = MenstruationMixture.tryParse(wireRecord);
+        expect(parsed, isNotNull);
+        expect(parsed!.startDay, 0);
+        expect(parsed.currentDayDelta, 0);
+        expect(parsed.currentMonthDelta, 0);
+      },
+    );
   });
 
   group('Commands', () {

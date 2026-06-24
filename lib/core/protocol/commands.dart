@@ -122,6 +122,10 @@ class Commands {
   static Uint8List advanceBpRecord({int sub = 0x00}) =>
       Codec.buildChannelA(OpA.bpReadConform, [sub & 0xFF]);
 
+  /// NOT IMPLEMENTED in H59MA v14 firmware. Do not call this from
+  /// production code — kept for spec compatibility only. See
+  /// PROTOCOL.md section 4.4.
+  ///
   /// `ReadTotalSportDataReq` (0x07): `[dayOffset]` (0 = today).
   static Uint8List readTotalSport({int dayOffset = 0}) =>
       Codec.buildChannelA(OpA.readTotalSport, [dayOffset & 0xFF]);
@@ -713,6 +717,44 @@ class Commands {
     }
     return Codec.buildChannelB(OpB.customWatchFace, body);
   }
+
+  // ---------------------------------------------------------------------------
+  // Channel-B device-info / config TLVs (0x5a — H59MA v14 only).
+  // ---------------------------------------------------------------------------
+
+  /// `DeviceInfoConfig` sub-cmd `0x01`: query enabled TLV slots.
+  ///
+  /// Response payload begins with `[0x01, 0x01, count, ...tlvs]` where each
+  /// TLV is `[id, len, data...]`. See `PROTOCOL.md` §4.8 and
+  /// `GHIDRA_DECOMPILATION.md` §2.7.
+  static Uint8List deviceInfoQuery() =>
+      Codec.buildChannelB(OpB.deviceInfoConfig, [0x01]);
+
+  /// `DeviceInfoConfig` sub-cmd `0x02`: write one or more TLV slots and
+  /// commit the settings blob0.
+  ///
+  /// Each entry is encoded as `[id, len, data...]`; the on-wire body is
+  /// `[0x02, count, ...encoded]`. The handler is commit-only — there is no
+  /// visible response payload, so callers must not wait for a reply.
+  ///
+  /// Maximum lengths per id (per `GHIDRA_DECOMPILATION.md` §2.7):
+  /// `1` 0x18 (name prefix), `2` 6 (BLE addr), `3` 0x14, `4` 0x10,
+  /// `5` 0x10, `6` 0x08, `7` 1 (name-format control byte). The writer
+  /// does not visibly clamp — callers must enforce.
+  static Uint8List deviceInfoWrite(List<({int id, List<int> data})> entries) {
+    final body = <int>[0x02, entries.length & 0xFF];
+    for (final e in entries) {
+      body.add(e.id & 0xFF);
+      body.add(e.data.length & 0xFF);
+      body.addAll(e.data);
+    }
+    return Codec.buildChannelB(OpB.deviceInfoConfig, body);
+  }
+
+  /// `DeviceInfoConfig` sub-cmd `0x04`: clear blob0 device-info / config
+  /// slots and commit settings blob0. See `PROTOCOL.md` §4.8.
+  static Uint8List deviceInfoClear() =>
+      Codec.buildChannelB(OpB.deviceInfoConfig, [0x04]);
 
   /// `SugarLipidsSetting` read (`0x3a`): asks the watch to read one of the
   /// two 1-bit flags packed into the shared config byte at
