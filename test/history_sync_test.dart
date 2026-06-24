@@ -380,6 +380,197 @@ void main() {
     );
 
     test(
+      'syncAll skips persisted past days that were confirmed empty for stress',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final sync = _testSync(t, d);
+        final today = DateOnly.today();
+        final yesterday = today.addDays(-1);
+        await sync.bindStore(
+          _FakeHistoryStore(
+            seed: {
+              yesterday: DailyHistory(
+                day: yesterday,
+                // Empty stress, but the metric was synced earlier (watch
+                // returned an empty 0x37 record). It must be skipped now.
+                syncedMetrics: const {'stress'},
+              ),
+            },
+          ),
+        );
+
+        await sync.syncAll(daysBack: 2);
+
+        final stressReads = t.sent
+            .where((f) => f.isNotEmpty && f[0] == OpA.pressure)
+            .toList();
+        expect(
+          stressReads,
+          hasLength(1),
+          reason: 'confirmed-empty stress day should be skipped',
+        );
+        expect(stressReads.first[1], 0x00); // today only
+        sync.dispose();
+        d.dispose();
+      },
+    );
+
+    test(
+      'syncAll skips persisted past days that were confirmed empty for HRV',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final sync = _testSync(t, d);
+        final today = DateOnly.today();
+        final yesterday = today.addDays(-1);
+        await sync.bindStore(
+          _FakeHistoryStore(
+            seed: {
+              yesterday: DailyHistory(
+                day: yesterday,
+                syncedMetrics: const {'hrv'},
+              ),
+            },
+          ),
+        );
+
+        await sync.syncAll(daysBack: 2);
+
+        final hrvReads = t.sent
+            .where((f) => f.isNotEmpty && f[0] == OpA.hrv)
+            .toList();
+        expect(
+          hrvReads,
+          hasLength(1),
+          reason: 'confirmed-empty HRV day should be skipped',
+        );
+        expect(hrvReads.first[1], 0x00); // today only
+        sync.dispose();
+        d.dispose();
+      },
+    );
+
+    test(
+      'syncAll skips persisted past days that were confirmed empty for sleep',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        final bParser = ChannelBParser(t);
+        d.bind();
+        final sync = _testSync(t, d, bParser: bParser);
+        final today = DateOnly.today();
+        final yesterday = today.addDays(-1);
+        await sync.bindStore(
+          _FakeHistoryStore(
+            seed: {
+              yesterday: DailyHistory(
+                day: yesterday,
+                syncedMetrics: const {'sleep'},
+              ),
+            },
+          ),
+        );
+
+        await sync.syncAll(daysBack: 2);
+
+        final nightReads = t.sentB
+            .where(
+              (f) => f.isNotEmpty && Codec.rxChannelBCmd(f) == OpB.sleepNew,
+            )
+            .toList();
+        final lunchReads = t.sentB
+            .where(
+              (f) =>
+                  f.isNotEmpty && Codec.rxChannelBCmd(f) == OpB.sleepLunchNew,
+            )
+            .toList();
+        expect(
+          nightReads,
+          hasLength(1),
+          reason: 'confirmed-empty sleep day should be skipped',
+        );
+        expect(
+          lunchReads,
+          hasLength(1),
+          reason: 'confirmed-empty lunch day should be skipped',
+        );
+        sync.dispose();
+        d.dispose();
+      },
+    );
+
+    test(
+      'syncAll force=true re-fetches persisted past days for every metric',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        final bParser = ChannelBParser(t);
+        d.bind();
+        final sync = _testSync(t, d, bParser: bParser);
+        final today = DateOnly.today();
+        final yesterday = today.addDays(-1);
+        await sync.bindStore(
+          _FakeHistoryStore(
+            seed: {
+              yesterday: DailyHistory(
+                day: yesterday,
+                hr: [
+                  HrSample(
+                    yesterday.midnight.add(const Duration(hours: 8)),
+                    62,
+                  ),
+                ],
+                stress: [HealthMetricSample(DateTime(2026, 6, 23, 10, 30), 42)],
+                hrv: [HealthMetricSample(DateTime(2026, 6, 23, 10, 30), 55)],
+                sleep: [
+                  SleepSegment(
+                    DateTime(2026, 6, 23, 23, 30),
+                    const Duration(minutes: 30),
+                    SleepStage.deep,
+                  ),
+                ],
+              ),
+            },
+          ),
+        );
+
+        await sync.syncAll(daysBack: 2, force: true);
+
+        // Force must bypass every per-metric skip rule.
+        final hrReads = t.sent
+            .where((f) => f.isNotEmpty && f[0] == OpA.readHeartRate)
+            .toList();
+        final stressReads = t.sent
+            .where((f) => f.isNotEmpty && f[0] == OpA.pressure)
+            .toList();
+        final hrvReads = t.sent
+            .where((f) => f.isNotEmpty && f[0] == OpA.hrv)
+            .toList();
+        final nightReads = t.sentB
+            .where(
+              (f) => f.isNotEmpty && Codec.rxChannelBCmd(f) == OpB.sleepNew,
+            )
+            .toList();
+        final lunchReads = t.sentB
+            .where(
+              (f) =>
+                  f.isNotEmpty && Codec.rxChannelBCmd(f) == OpB.sleepLunchNew,
+            )
+            .toList();
+        expect(hrReads, hasLength(2));
+        expect(stressReads, hasLength(2));
+        expect(hrvReads, hasLength(2));
+        expect(nightReads, hasLength(2));
+        expect(lunchReads, hasLength(2));
+        sync.dispose();
+        d.dispose();
+      },
+    );
+
+    test(
       'unsolicited 0x46 push from the watch does NOT throw or break sync',
       () async {
         final t = _StubTransport();

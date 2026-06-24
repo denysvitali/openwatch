@@ -102,6 +102,13 @@ class DateOnly implements Comparable<DateOnly> {
 /// All four lists are independently nullable — a freshly-paired device may
 /// only ever push HR for a few days before sleep lands; the store must
 /// surface what it has without fabricating missing data.
+///
+/// [syncedMetrics] tracks which metrics have been explicitly fetched from
+/// the watch for this day, including fetches that returned no samples. This
+/// lets [HistorySync] skip confirmed-empty days on subsequent syncs instead
+/// of re-polling them forever. Old on-disk rows that lack this field are
+/// treated as if no metric has been synced yet, so the next sync will
+/// re-ask once and then mark them.
 @immutable
 class DailyHistory {
   const DailyHistory({
@@ -115,6 +122,7 @@ class DailyHistory {
     this.energyKcal,
     this.distanceMeters,
     this.lastUpdated,
+    this.syncedMetrics = const {},
   });
 
   final DateOnly day;
@@ -138,6 +146,12 @@ class DailyHistory {
   /// were never touched (not currently reachable but reserved).
   final DateTime? lastUpdated;
 
+  /// Metrics that have been fetched for this day, including fetches that
+  /// returned an empty sample list. Used by [HistorySync] to avoid
+  /// re-polling confirmed-empty days. The set contains lowercase metric
+  /// names: `'hr'`, `'stress'`, `'hrv'`, `'sleep'`, `'bp'`.
+  final Set<String> syncedMetrics;
+
   DailyHistory copyWith({
     List<HrSample>? hr,
     List<SleepSegment>? sleep,
@@ -151,6 +165,7 @@ class DailyHistory {
     int? distanceMeters,
     bool clearDistanceMeters = false,
     DateTime? lastUpdated,
+    Set<String>? syncedMetrics,
   }) => DailyHistory(
     day: day,
     hr: hr ?? this.hr,
@@ -164,6 +179,7 @@ class DailyHistory {
         ? null
         : distanceMeters ?? this.distanceMeters,
     lastUpdated: lastUpdated ?? this.lastUpdated,
+    syncedMetrics: syncedMetrics ?? this.syncedMetrics,
   );
 
   Map<String, dynamic> toJson() => {
@@ -200,6 +216,7 @@ class DailyHistory {
     'kcal': energyKcal,
     'dist': distanceMeters,
     'updated': lastUpdated?.toUtc().millisecondsSinceEpoch,
+    'synced': syncedMetrics.toList()..sort(),
   };
 
   static DailyHistory fromJson(Map<String, dynamic> j) {
@@ -290,6 +307,9 @@ class DailyHistory {
               (updatedRaw as num).toInt(),
               isUtc: true,
             ).toLocal(),
+      syncedMetrics: {
+        for (final m in ((j['synced'] as List?) ?? const []).cast<String>()) m,
+      },
     );
   }
 }
@@ -675,6 +695,7 @@ class HistoryStore {
         final stamped = current.copyWith(
           hr: merged,
           lastUpdated: DateTime.now(),
+          syncedMetrics: {...current.syncedMetrics, 'hr'},
         );
         final raw = jsonEncode(stamped.toJson());
         await _fileFor(day).writeAsString(raw, flush: true);
@@ -714,6 +735,7 @@ class HistoryStore {
         final stamped = current.copyWith(
           sleep: merged,
           lastUpdated: DateTime.now(),
+          syncedMetrics: {...current.syncedMetrics, 'sleep'},
         );
         final raw = jsonEncode(stamped.toJson());
         await _fileFor(day).writeAsString(raw, flush: true);
@@ -808,6 +830,7 @@ class HistoryStore {
         final stamped = current.copyWith(
           bloodPressure: merged,
           lastUpdated: DateTime.now(),
+          syncedMetrics: {...current.syncedMetrics, 'bp'},
         );
         final raw = jsonEncode(stamped.toJson());
         await _fileFor(day).writeAsString(raw, flush: true);
@@ -846,7 +869,10 @@ class HistoryStore {
         final merged = byTs.values.toList()
           ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
         final stamped = copy(
-          current.copyWith(lastUpdated: DateTime.now()),
+          current.copyWith(
+            lastUpdated: DateTime.now(),
+            syncedMetrics: {...current.syncedMetrics, metricName},
+          ),
           merged,
         );
         final raw = jsonEncode(stamped.toJson());

@@ -433,6 +433,10 @@ class HistorySync extends ChangeNotifier {
   ///     re-fetched because it can carry samples from sessions that
   ///     started in a previous calendar day (overnight sleep, late
   ///     HR, etc.) and may have grown since the previous sync;
+  ///   * pass [force] `true` to ignore the per-metric skip rule and
+  ///     re-fetch every day in range (useful when the user wants to
+  ///     re-pull data after a suspected corruption or after manually
+  ///     clearing a day).
   ///   * each day's HR + sleep samples are persisted as they land;
   ///   * the sync watermark is bumped only on a clean pass.
   ///
@@ -440,7 +444,7 @@ class HistorySync extends ChangeNotifier {
   /// the lists, refetches every requested day). [daysBack] caps how
   /// far into the past we look at the distribution bitmask — the
   /// bitmask is a 32-day window so values above 32 are clamped.
-  Future<void> syncAll({int daysBack = 7}) async {
+  Future<void> syncAll({int daysBack = 7, bool force = false}) async {
     if (_syncing) return;
     _syncing = true;
     lastSyncError = null;
@@ -474,10 +478,13 @@ class HistorySync extends ChangeNotifier {
     try {
       AppLog.instance.info(
         'history',
-        'Sync start (last $effectiveDaysBack days, store=${_store != null})',
+        'Sync start (last $effectiveDaysBack days, store=${_store != null}, force=$force)',
       );
-      Future<void> runBody() =>
-          _syncAllBody(effectiveDaysBack, onFetched: (i) => fetched = i);
+      Future<void> runBody() => _syncAllBody(
+        effectiveDaysBack,
+        force: force,
+        onFetched: (i) => fetched = i,
+      );
       if (syncSpan == null) {
         await runBody();
       } else {
@@ -509,6 +516,7 @@ class HistorySync extends ChangeNotifier {
   /// method signature.
   Future<void> _syncAllBody(
     int effectiveDaysBack, {
+    required bool force,
     required void Function(int) onFetched,
   }) async {
     try {
@@ -556,6 +564,7 @@ class HistorySync extends ChangeNotifier {
         todayD,
         metric: 'hr',
         hasData: (h) => h.hr.isNotEmpty,
+        force: force,
       );
       _progressTotal = hrToFetch.length;
       _progressCurrent = 0;
@@ -618,12 +627,14 @@ class HistorySync extends ChangeNotifier {
           todayD,
           metric: 'stress',
           hasData: (h) => h.stress.isNotEmpty,
+          force: force,
         );
         final hrvToFetch = _daysToFetch(
           wantsDays,
           todayD,
           metric: 'hrv',
           hasData: (h) => h.hrv.isNotEmpty,
+          force: force,
         );
         // Union of days we need to hit on the wire — we always
         // send both 0x37 and 0x39 in the same per-day pass so a
@@ -688,6 +699,7 @@ class HistorySync extends ChangeNotifier {
           todayD,
           metric: 'sleep',
           hasData: (h) => h.sleep.isNotEmpty,
+          force: force,
         );
         for (final d in sleepToFetch) {
           final day = todayD.addDays(-d);
@@ -730,22 +742,30 @@ class HistorySync extends ChangeNotifier {
   /// today) that we still need to fetch for [metric]. Today is
   /// always included — its response can carry samples that
   /// straddle midnight or that have filled in since the previous
-  /// sync. Past days are skipped when [hasData] reports the
+  /// sync. Past days are skipped when either [hasData] reports the
   /// in-memory cache already has at least one sample of that
-  /// metric for them. Without a store backing the cache, every
-  /// requested day is returned (legacy in-memory behaviour).
+  /// metric for them, or [DailyHistory.syncedMetrics] already
+  /// contains [metric] (meaning we fetched it earlier and the watch
+  /// returned an empty record). When [force] is `true`, every
+  /// requested day is returned so the caller can do a full re-sync.
+  /// Without a store backing the cache, every requested day is also
+  /// returned (legacy in-memory behaviour).
   List<int> _daysToFetch(
     Iterable<int> wantsDays,
     DateOnly todayD, {
     required String metric,
     required bool Function(DailyHistory) hasData,
+    required bool force,
   }) {
     final out = <int>[];
     for (final d in wantsDays) {
       final day = todayD.addDays(-d);
       final isToday = day == todayD;
       final existing = _days[day];
-      if (!isToday && existing != null && hasData(existing)) {
+      if (!force &&
+          !isToday &&
+          existing != null &&
+          (hasData(existing) || existing.syncedMetrics.contains(metric))) {
         AppLog.instance.debug(
           'history',
           'skip ${day.iso} for $metric (already in store)',
@@ -760,11 +780,17 @@ class HistorySync extends ChangeNotifier {
   void _clearSleepDays(Iterable<DateOnly> days, {bool persist = true}) {
     var changed = false;
     for (final day in days) {
-      final previous = _days[day];
-      if (previous == null || previous.sleep.isEmpty) continue;
+      final existing = _days[day];
+      final previous = existing ?? DailyHistory(day: day);
+      final alreadySynced = previous.syncedMetrics.contains('sleep');
+      // If the day is already in memory with empty sleep and marked
+      // synced, there is nothing to do. Otherwise we need to record
+      // the empty response so the next sync skips this day.
+      if (existing != null && previous.sleep.isEmpty && alreadySynced) continue;
       final updated = previous.copyWith(
         sleep: const [],
         lastUpdated: DateTime.now(),
+        syncedMetrics: {...previous.syncedMetrics, 'sleep'},
       );
       _days[day] = updated;
       changed = true;
@@ -1073,9 +1099,13 @@ class HistorySync extends ChangeNotifier {
   void _commitCurrentDayHr(DateOnly? day) {
     if (day == null) return;
     final previous = _days[day] ?? DailyHistory(day: day);
-    if (previous.hr.isNotEmpty) return; // already persisted
-    _days[day] = previous;
-    unawaited(_store?.writeDay(previous, lastUpdated: DateTime.now()));
+    if (previous.hr.isNotEmpty) return; // already persisted with data
+    final updated = previous.copyWith(
+      lastUpdated: DateTime.now(),
+      syncedMetrics: {...previous.syncedMetrics, 'hr'},
+    );
+    _days[day] = updated;
+    unawaited(_store?.writeDay(updated));
   }
 
   void _onStressRecord(PressureRecord record) {
@@ -1083,7 +1113,19 @@ class HistorySync extends ChangeNotifier {
       _clock(),
     ).addDays(-record.slotId.clamp(0, 31).toInt());
     final samples = _decodeFixedSlotMetric(record.header, record.body, day);
-    if (samples.isEmpty) return;
+    if (samples.isEmpty) {
+      // The watch returned a stress record for this day but it decoded
+      // to zero samples (all slots empty/0xff). Mark stress as synced
+      // so we don't re-poll this day forever.
+      final previous = _days[day] ?? DailyHistory(day: day);
+      final updated = previous.copyWith(
+        lastUpdated: DateTime.now(),
+        syncedMetrics: {...previous.syncedMetrics, 'stress'},
+      );
+      _days[day] = updated;
+      unawaited(_store?.writeDay(updated));
+      return;
+    }
     final previous = _days[day] ?? DailyHistory(day: day);
     final merged = _mergeScalar(previous.stress, samples);
     final updated = previous.copyWith(
@@ -1100,7 +1142,19 @@ class HistorySync extends ChangeNotifier {
       _clock(),
     ).addDays(-record.slotId.clamp(0, 31).toInt());
     final samples = _decodeFixedSlotMetric(record.header, record.body, day);
-    if (samples.isEmpty) return;
+    if (samples.isEmpty) {
+      // The watch returned an HRV record for this day but it decoded
+      // to zero samples. Mark HRV as synced so we don't re-poll this
+      // day forever.
+      final previous = _days[day] ?? DailyHistory(day: day);
+      final updated = previous.copyWith(
+        lastUpdated: DateTime.now(),
+        syncedMetrics: {...previous.syncedMetrics, 'hrv'},
+      );
+      _days[day] = updated;
+      unawaited(_store?.writeDay(updated));
+      return;
+    }
     final previous = _days[day] ?? DailyHistory(day: day);
     final merged = _mergeScalar(previous.hrv, samples);
     final updated = previous.copyWith(hrv: merged, lastUpdated: DateTime.now());

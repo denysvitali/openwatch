@@ -50,6 +50,13 @@ class HistoryScreen extends ConsumerWidget {
             tooltip: 'Sync now',
             onPressed: (ready && !sync.syncing) ? () => sync.syncAll() : null,
           ),
+          IconButton(
+            icon: const Icon(CupertinoIcons.arrow_counterclockwise),
+            tooltip: 'Full sync',
+            onPressed: (ready && !sync.syncing)
+                ? () => sync.syncAll(force: true)
+                : null,
+          ),
         ],
       ),
       body: RefreshIndicator(

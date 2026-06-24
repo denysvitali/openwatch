@@ -20,10 +20,9 @@ mise install                              # install the pinned Flutter SDK (one-
 flutter pub get
 flutter analyze
 dart format --output=none --set-exit-if-changed .
-flutter test                              # full suite
-flutter test test/channel_a_test.dart     # single file
-flutter test --plain-name 'setTime ACK'   # single test by name
 ```
+
+**Do not run `flutter test` locally.** Tests are meant to run in CI only; the local Flutter toolchain in this environment is not trusted to produce reliable test results. Use `flutter analyze` and `dart format` for local validation, then push and monitor the GitHub Actions run. The CI workflow runs the full test suite.
 
 Codegen (freezed / json_serializable):
 
