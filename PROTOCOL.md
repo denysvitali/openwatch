@@ -377,9 +377,9 @@ the generic bitmap below.
 | UltraVioletReq | `0x7d` | index | →watch | `[index]` | multi-pkt (same scheme). stride 13B. | Read UV-index history for a day index. |
 | UVSettingReq | `0x3e` | 01/02 | →watch | w:`[02,en(0/1)]` | read: `[1]`enable | UV auto-measure on/off. |
 | SugarLipidsSettingReq | `0x3a` | type+act | →watch | r:`[type,01]`; w:`[type,02,en(0/1),valLo,valHi]` | `[1]`act, if read `[0]`type,`[2]`en,`[3..4]`value LE,`[5]`supportUnit | Blood sugar/lipids reference config. (per-request waiter) |
-| MenstruationReq | `0x2b` | 01/02 | →watch | w(11B):`[02,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10]` | **MenstruationDataRsp**: stub — logs hex only, returns true (SDK does NOT decode body) | Menstrual-cycle config. |
-| HealthEcgRsp (notify) | **TODO** | — | watch→ | n/a (session under `0x69` type=7) | len≥3: `[0]`status,`[1]`ecgInterval,`[2]`ppgInterval | ECG status during ECG session. Listener opcode not statically resolvable. |
-| PpgDataRspCmd (notify) | **TODO** | — | watch→ | n/a (ECG/PPG session) | `[0]`rate; ppgValue=`bytesToInt([1..4])` i32 LE | Raw PPG + HR stream. Listener opcode unresolved. |
+| MenstruationReq | `0x2b` | 01/02 | →watch | w(11B):`[02,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10]` | **MenstruationDataRsp** 16B (per GHIDRA §3.1/§3.1.1, `FUN_0082b078` lazy-init + `FUN_0082af28` read-memcpy): `[0]`sentinel (`0xCA`=present; lazy-init zeroes; quirk — `rsp[0]` is overwritten with `start_date_bcd[0]` on read, so host must re-stamp `rsp[0]=0x2B`), `[1]`startDate-yr BCD, `[2]`cycleLenDays BCD, `[3]`startDate-day BCD, `[4..5]`=`currentDay − record[4]` (u16 LE on write, low byte only returned), `[6..7]`=`currentMonth − record[6]` (u16 LE on write, low byte only returned), `[8..12]`=5B opaque `periodData` (semantics not RE-resolvable), `[13..15]`=padding (always zero on write/read-back). Decode via `MixtureState.tryParse`. | Menstrual-cycle config. |
+| HealthEcgRsp (notify) | **needs live capture** | — | watch→ | n/a (session under `0x69` type=7) | Statically unresolvable in H59MA v14 — §10.2 unified inventory (GHIDRA §10.2 lines 6322–6396) enumerates every FEE7 opcode statically resolved and none match the `[status,ecgInterval,ppgInterval]` shape. §8.5 per-mode start dispatch (lines 5228–5236) has no mode-0x07 (ECG) entry — falls into HR-mode-1 fallback (`health_post_start_measure_event(1)`). Do not infer a payload layout from §8.5 fallback semantics. | ECG status during ECG session. Listener opcode not statically resolvable. |
+| PpgDataRspCmd (notify) | **needs live capture** | — | watch→ | n/a (ECG/PPG session) | Statically unresolvable in H59MA v14 — the only PPG-related handler is §3.10 `0x2c` SpO2 (an enable-bit + auto-measure cadence), NOT a real-time stream from a `0x69` type=7 session. Do not infer a payload layout. | Raw PPG + HR stream. Listener opcode unresolved. |
 
 **StartHeartRate type enum:** HEARTRATE=1, BLOODPRESSURE=2, BLOODOXYGEN=3, FATIGUE=4, HEALTHCHECK=5,
 REALTIMEHEARTRATE=6, ECG=7, PRESSURE=8, BLOOD_SUGAR=9, HRV=0xa, BODY_TEMPERATURE=0xb.
@@ -391,7 +391,7 @@ REALTIMEHEARTRATE=6, ECG=7, PRESSURE=8, BLOOD_SUGAR=9, HRV=0xa, BODY_TEMPERATURE
 |---|---|---|---|---|---|---|
 | ReadBandSportReq | `0x13` | — | →watch | `[1..4]`ts u32 LE | **ReadSportRsp** multi-pkt: hdr `b0=00,b1=size`(*13); records 13B; 7×4B **BE** fields [startTime,duration,sportType,stepCount,distance,calories,hrCount] + hrCount HR bytes; `0xFF`=end | Read one stored exercise session. |
 | ReadDetailSportDataReq | `0x43` | `0x0F`@[1] | →watch | `[dayOffset,0F,startSeg,endSeg(≤0x5f),01]` | paged BleStepDetails: `0xFF`=clear, `0xF0`=init(`b2==1`⇒calorie*10); data `[0]`yr-2000,`[1]`mo,`[2]`d,`[3]`segIdx, cal/steps/dist=`bytes2Int` of swapped pairs; `b4`=page,`b5`=total; done when `b4==b5-1` | Per-slot step detail for a day. |
-| ReadTotalSportDataReq | `0x07` | — | →watch | `[dayOffset]` | **TotalSportDataRsp** paged: `b0`=page idx, first page `b1`=daysAgo BCD, no-data if `b2==b3==b4==0`; 3B BE groups → BleStepTotal (steps/calorie/distance) across pages | Aggregated daily step total. |
+| ReadTotalSportDataReq | `0x07` | — | →watch | `[dayOffset]` | **NOT IMPLEMENTED in H59MA v14.** The §10.2 Channel-A inventory (GHIDRA §10.2 lines 6345–6373) enumerates 22 handlers (`0x01, 0x06, 0x08, 0x0e, 0x15, 0x18, 0x1e, 0x25, 0x26, 0x2b, 0x2c, 0x37, 0x38, 0x39, 0x3a, 0x3b, 0x43, 0x72, 0x77, 0x7a, 0xa1, 0xc6, 0xc7, 0xff`); `0x07` is absent. The only `0x07` handler in the firmware is the Channel-B OTA `ota_cmd_sub_ack` table slot. The closest live data the firmware exposes is `0x48` todaySport (15B interleaved totals), `0x43` readDetailSport (292B per-day dump), and Channel-B `0x2a` activity summary (49B per-day record). The OpenWatch host code defines `OpA.readTotalSport = 0x07` (`lib/core/protocol/opcodes.dart:69`) but the request is never called; no decoder exists. Treat the `TotalSportDataRsp` entry as a legacy/SDK-era spec that v14 retired (subsumed by `0x48`/`0x2a`). | Stale/legacy. |
 | PhoneSportReq | `0x77` | — | →watch | `[status, sportType]` | **AppSportRsp**: `b0`=gpsStatus; if==6 `ts=bytesToInt(b[2..6])` u32 LE | Tell watch the phone's app-side sport status. |
 | PhoneGpsReq | `0x74` | — | →watch | gps:`[status,00]`; phoneData:`[05,00]+dist u32 LE+cal u32 LE` | **AppGpsRsp**: same shape as AppSport | GPS/outdoor-sport coordination. |
 | ReadSleepDetailsReq | `0x44` | `0x0F`@[1] | →watch | `[dayOffset,0F,startSeg,endSeg(≤0x5f)]` | paged BleSleepDetails: `0xFF`=clear, `0xF0`=init; data `[0]`yr-2000,`[1]`mo,`[2]`d,`[3]`idx, `sleepQualities[8]=b[5+i]`; `b4`/`b5` page/total | Legacy per-slot sleep detail. |
@@ -828,12 +828,27 @@ Feedback, Customer-support chat.
 
 ### 8.5 Gaps / TODO
 
-- **ECG/PPG notify listener opcodes** (`HealthEcgRsp`, `PpgDataRspCmd`) — not statically resolvable;
-  observe live traffic during a `0x69` type=7 session.
+- **ECG/PPG notify listener opcodes** (`HealthEcgRsp`, `PpgDataRspCmd`) — not statically
+  resolvable in H59MA v14 (§10.2 unified inventory enumerates every resolved FEE7
+  opcode; no match for the documented `[status,ecgInterval,ppgInterval]` /
+  `[rate;ppgValue i32 LE]` shapes). §8.5 per-mode start dispatch has no mode-0x07
+  (ECG) entry — it falls into the generic HR-mode-1 fallback. The §8.14 0xc1
+  one-shot health-result handler returns ONE byte from `DAT_0082caf0`, incompatible
+  with the documented shapes. SpO2 = PPG is on §3.10 `0x2c` (enable-bit +
+  auto-measure), NOT routed through `0x69` type=7. Resolution path: live BLE
+  capture during a `0x69` type=7 session on real hardware; cross-version Ghidra
+  pass against `H59MA_1.00.13_251230.bin` to check whether v13 carried an ECG
+  opcode that v14 dropped; sweep the `0x97..0x9F` reserved range (§8.20) for a
+  vendor-private notify opcode.
 - **`@RequiresSignature` method set** — confirm which cloud endpoints sign at runtime.
-- **TotalSportDataRsp exact field-to-offset split** across pages — verify against live data.
-- **MenstruationDataRsp body** — SDK does not decode it; reverse from live frames if needed.
-- **`bind` (`0x10` CMD_BIND_SUCCESS)** request layout — not captured in this dataset; capture on pair.
+- **`bind` (`0x10` CMD_BIND_SUCCESS)** request layout — **not on H59MA Channel-A.**
+  The §10.2 inventory (22 Channel-A handlers) does not list `0x10`; on Channel-B
+  it falls into the `0x08..0x10` default slot (`NAK code 0`). The actual device-side
+  bind state transition is on `0xFEE7` `0x04` (`fee7_handle_bind_ancs_04`,
+  GHIDRA §8.5 lines 4735/4824). The Oudmon SDK's `0x10` is a phone-side/app-layer
+  convention that lives in the proprietary APK, not in the firmware — payload
+  reconstruction requires APK-side RE (`jadx`/`Bytecode Viewer`), not the H59MA
+  bin. Live capture is also acceptable.
 
 > **Resolved (post-FW-RE):**
 > - DFU init payload layout (`[0x01, size32LE, crc16LE, checksum16LE]`) — verified
@@ -856,6 +871,38 @@ Feedback, Customer-support chat.
 > - Watch-side opcode → bucket dispatch table located and documented (see §9).
 > - Channel-B frame parser / CRC-16/MODBUS functions located in the H59MA
 >   firmware and cross-checked against `Codec.crc16` (see §9).
+> - **TotalSportDataRsp (`0x07`)** — not implemented in H59MA v14; §10.2
+>   inventory has no `0x07` row. Stale legacy/SDK-era spec retired (subsumed by
+>   `0x48`/`0x2a`). See §4.4.
+> - **MenstruationDataRsp (`0x2b`) body** — full field layout recovered via
+>   `FUN_0082b078` (lazy-init) + `FUN_0082af28` (read-memcpy) +
+>   `FUN_0082aee4` (write) per GHIDRA §3.1/§3.1.1; documented in §4.3 with
+>   the byte-0 sentinel quirk (read-back overwrites `rsp[0]` with
+>   `start_date_bcd[0]`, so host must re-stamp `rsp[0]=0x2B`). The 5B
+>   `periodData` at `[8..12]` remains semantically opaque — needs live capture
+>   with at least 3 known cycle dates to decode.
+> - **Channel-A `0x3c` capability** — H59MA routes the opcode through the
+>   `0x39 < uVar2 < 0x43` chain to the FEE7 `fee7_send_fixed_capability_3c`
+>   handler (GHIDRA §8.12 lines 6055–6057); the §3 Channel-A table has no
+>   `0x3c` row. The response is a static 16B block
+>   `[0x3c, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0xA0, 0x00, 0x00, 0x00, 0x20,
+>   0x00, 0x00, 0x00, cksum]` with feature IDs at full-frame bytes 2/7/11
+>   (payload-relative bytes 1/6/10 after `Codec.rxPayload` strip). The
+>   existing `_isH59maCapabilityBlock` heuristic in `capabilities.dart:210-224`
+>   handles both v13 (`pl[3]=0x80`) and v14 (`pl[6]∈{0x80,0xa0}`) layouts.
+> - **Channel-B `0x5a` device-info/config** — full subcmd coverage
+>   (`0x01..0x04` + default), 7-slot writable TLV table, 6-slot read TLV
+>   table, blob0 offsets, and the cfg_update_mac_item quirk
+>   documented in §4.8.
+> - **Channel-A `0x37`/`0x39` health-history field layouts** — both use the
+>   shared `FUN_0082c988` 13-byte-chunk fragmenter (GHIDRA §3.20/§3.21 +
+>   §10.2 fragmenter table). The 49-byte record body (1B slot-id echo + 48B
+>   null-padded producer output from `FUN_008344fe`/`FUN_0083468e`) is split
+>   into 4 chunks of 13B; no end-of-message sentinel — host must reassemble
+>   by quiet-period or per-record marker. `0x7d` UV history is NOT in the
+>   §3.x handler set (only deferred-ring dispatcher references); fragmenter
+>   table at GHIDRA §10.2 lists `0x37/0x39/0x7a` only. Live capture needed
+>   to confirm `0x7d`'s fragmenter / feature-id byte.
 
 ---
 
