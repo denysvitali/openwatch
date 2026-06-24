@@ -837,32 +837,33 @@ class HistorySync extends ChangeNotifier {
   int? _hrExpectedChunks;
 
   void _flushHrChunks(DateOnly? day) {
-    // Spans the assembly + merge step for one day's HR series; tagged
-    // with the target day so flame graphs show which day is slow.
-    final span = OpenTelemetryService().startChildSpan(
-      'sync.history.flush_hr',
-      attributes: {'sync.day.iso': day?.iso ?? '', 'sync.hr_samples': 0},
-    );
+      // Spans the assembly + merge step for one day's HR series; tagged
+      // with the target day so flame graphs show which day is slow.
+      final span = OpenTelemetryService().startChildSpan(
+        'sync.history.flush_hr',
+        attributes: {'sync.day.iso': day?.iso ?? '', 'sync.hr_samples': 0},
+      );
     try {
       // Stitch the 13-byte chunks into a flat record, then walk 5-min
-      // BPM slots. 288 slots * 1 byte (BPM) = 288 bytes; per
-      // GHIDRA §3.12 the first 4 bytes of the assembled record are
-      // the firmware's echo of the request index (LE u32 — NOT a
-      // host-readable day timestamp), and the rest is the 5-min
-      // sample series. 0xFF = no sample.
+      // BPM slots. 288 slots * 1 byte (BPM) = 288 bytes. Per
+      // GHIDRA §3.12 each *chunk* begins with a 4-byte echoed
+      // value, followed by 9 sample bytes (total 13 bytes). 0xFF is
+      // no sample.
       //
-      // We DO NOT use the echoed u32 as a date — its unit (seconds
-      // vs ms) and timezone are not documented and vary across
+      // We DO NOT use the echoed 4-byte prefix as a date — its unit
+      // (seconds vs ms) and timezone are not documented and vary across
       // firmware builds, so trusting it as UTC has historically
-      // produced "samples in the future" near midnight. Anchor
-      // every sample on the day we asked for (HS-8) and bound the
-      // slot index so off-the-end bytes cannot spill past 23:55.
-      final buf = BytesBuilder();
+      // produced "samples in the future" near midnight. Anchor every
+      // sample on the day we asked for (HS-8) and bound the slot
+      // index so off-the-end bytes cannot spill past 23:55.
+      final sampleBytes = <int>[];
       for (final c in _hrChunks) {
-        buf.add(c);
+        final sampleStart = c.length >= 4 ? 4 : c.length;
+        for (var i = sampleStart; i < c.length && i < 13; i++) {
+          sampleBytes.add(c[i]);
+        }
       }
-      final rec = buf.toBytes();
-      if (rec.length < 5) {
+      if (sampleBytes.length < 2) {
         _hrChunks.clear();
         _hrExpectedChunks = null;
         return;
@@ -890,11 +891,11 @@ class HistorySync extends ChangeNotifier {
       // day) we fall back to a zero offset and keep the dayStart anchor.
       var watchOffsetMinutes = 0;
       var lastValidIdx = -1;
-      for (var j = rec.length - 1; j >= 4; j--) {
-        if (j - 4 >= 288) continue;
-        final bpm = rec[j];
+      for (var j = sampleBytes.length - 1; j >= 0; j--) {
+        if (j >= 288) continue;
+        final bpm = sampleBytes[j];
         if (bpm >= 30 && bpm <= 240) {
-          lastValidIdx = j - 4;
+          lastValidIdx = j;
           break;
         }
       }
@@ -929,15 +930,15 @@ class HistorySync extends ChangeNotifier {
       // 288 × 5-min slots = 24h; bound the slot index so any trailing
       // padding bytes from the firmware cannot create samples past
       // 23:55 on the target day.
-      for (var i = 4; i < rec.length && (i - 4) < 288; i++) {
-        final bpm = rec[i];
+      for (var i = 0; i < sampleBytes.length && i < 288; i++) {
+        final bpm = sampleBytes[i];
         if (bpm == 0xff || bpm == 0x00) continue;
         if (bpm < 30 || bpm > 240) continue;
         // Watch stores samples at its own minute-of-day. Subtract the
         // inferred drift so the timestamp lands on wall-clock at the
         // moment the watch actually recorded the BPM (rather than on
         // the watch's clock reading, which may have drifted ahead).
-        final slotTimestamp = dayStart.add(_hrSlotDuration * (i - 4));
+        final slotTimestamp = dayStart.add(_hrSlotDuration * i);
         final timestamp = slotTimestamp.subtract(
           Duration(minutes: watchOffsetMinutes),
         );

@@ -264,9 +264,71 @@ void main() {
       }
       // Let the sync finish.
       await syncFuture;
-      sync.dispose();
-      d.dispose();
-    });
+        sync.dispose();
+        d.dispose();
+      });
+
+    test(
+      'readHeartRate 0x15 skips chunk-local 4-byte headers when '
+      'building the 5-minute HR timeline',
+      () async {
+        final now = DateTime(2026, 6, 24, 12);
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final sync = _testSync(t, d, clock: () => now);
+        final syncFuture = sync.syncAll(daysBack: 1);
+        await Future<void>.delayed(const Duration(milliseconds: 150));
+
+        // H59MAX style header: chunkCount=2 data chunks (pl[1] includes header).
+        t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x00, 0x03, 0x05]));
+
+        final dayStartBytes = [0x00, 0xF6, 0x34, 0x6A];
+        final chunk1 = Uint8List.fromList([
+          0x01,
+          ...dayStartBytes,
+          61, 62, 63, 64, 65, 66, 67, 68, 69,
+        ]);
+        final chunk2Header = [0x41, 0x42, 0x43, 0x44];
+        final chunk2 = Uint8List.fromList([
+          0x02,
+          ...chunk2Header,
+          70, 71, 72, 73, 74, 75, 76, 77, 78,
+        ]);
+        t.inA.add(Codec.buildChannelA(OpA.readHeartRate, chunk1));
+        await Future<void>.delayed(const Duration(milliseconds: 80));
+
+        // This second packet must be merged with the pending series,
+        // not interpreted as independent BPM bytes at the next 4 slots.
+        t.inA.add(Codec.buildChannelA(OpA.readHeartRate, chunk2));
+        await Future<void>.delayed(const Duration(milliseconds: 120));
+
+        final today = DateOnly.today();
+        final dayHistory = sync.dayOf(today);
+        expect(dayHistory, isNotNull);
+        final bySlot = <int, HrSample>{
+          for (final h in dayHistory!.hr)
+            (h.timestamp.difference(today.midnight).inMinutes ~/ 5): h,
+        };
+
+        expect(bySlot.length, 18);
+        expect(bySlot[0]?.bpm, 61);
+        expect(bySlot[1]?.bpm, 62);
+        expect(bySlot[8]?.bpm, 69);
+        expect(bySlot[9]?.bpm, 70);
+        expect(bySlot[10]?.bpm, 71);
+        expect(bySlot[17]?.bpm, 78);
+        expect(bySlot[9]?.timestamp, equals(today.midnight.add(const Duration(minutes: 45))));
+
+        // If per-chunk headers were not stripped, slot 9 would contain 0x41
+        // (65), and sample 70 would land on slot 13.
+        expect(bySlot[13]?.bpm, isNot(70));
+
+        await syncFuture;
+        sync.dispose();
+        d.dispose();
+      },
+    );
 
     test(
       'readHeartRate 0x15 seq-0 firmware header waits for all chunks',
