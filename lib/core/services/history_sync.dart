@@ -427,7 +427,12 @@ class HistorySync extends ChangeNotifier {
   ///   * in-memory cache is hydrated from disk on first call;
   ///   * the watch's distribution bitmask is queried for which days
   ///     have data;
-  ///   * only days we don't already have persisted are re-fetched;
+  ///   * **delta sync per metric** — each metric (HR, stress, HRV,
+  ///     sleep, activity) is only re-fetched for days the store has
+  ///     not already ingested that metric for. Today is always
+  ///     re-fetched because it can carry samples from sessions that
+  ///     started in a previous calendar day (overnight sleep, late
+  ///     HR, etc.) and may have grown since the previous sync;
   ///   * each day's HR + sleep samples are persisted as they land;
   ///   * the sync watermark is bumped only on a clean pass.
   ///
@@ -541,27 +546,23 @@ class HistorySync extends ChangeNotifier {
       final wantsDays = <int>{for (var d = 0; d < effectiveDaysBack; d++) d};
 
       // Pre-compute the days we'll actually fetch so the UI can
-      // render an accurate progress fraction.
-      final toFetch = <int>[];
-      for (final d in wantsDays) {
-        final day = todayD.addDays(-d);
-        final existing = _days[day];
-        final isToday = day == todayD;
-        if (existing != null && !isToday && existing.hr.isNotEmpty) {
-          AppLog.instance.debug(
-            'history',
-            'skip ${day.iso} (already has HR in store)',
-          );
-          continue;
-        }
-        toFetch.add(d);
-      }
-      _progressTotal = toFetch.length;
+      // render an accurate progress fraction. The per-metric helper
+      // is the single source of truth for the "skip if already
+      // ingested" rule — stress/HRV/sleep reuse it with the
+      // appropriate predicate. Today is always re-fetched (overnight
+      // sessions, trailing HR samples, etc.).
+      final hrToFetch = _daysToFetch(
+        wantsDays,
+        todayD,
+        metric: 'hr',
+        hasData: (h) => h.hr.isNotEmpty,
+      );
+      _progressTotal = hrToFetch.length;
       _progressCurrent = 0;
       notifyListeners();
 
       var fetched = 0;
-      for (final d in toFetch) {
+      for (final d in hrToFetch) {
         // Per-day child span — one full HR poll per day. Parent
         // (sync.history) is auto-inherited via currentSpan.
         final daySpan = OpenTelemetryService().startChildSpan(
@@ -605,13 +606,41 @@ class HistorySync extends ChangeNotifier {
 
       if (_dispatcher != null) {
         _ensureMetricRecordListeners();
-        for (final d in wantsDays.toList()..sort()) {
-          await transport.sendA(Commands.readStressHistory(dayOffset: d));
-          await _drainRx(drainDuration);
-          await Future<void>.delayed(postCommandDelay);
-          await transport.sendA(Commands.readHrvHistory(dayOffset: d));
-          await _drainRx(drainDuration);
-          await Future<void>.delayed(postCommandDelay);
+        // Delta sync for stress + HRV: same skip rule as HR. The
+        // watch only emits fixed-slot records for completed past
+        // days, and the merge is idempotent on timestamp, so
+        // re-polling a day we already have is wasted bytes only —
+        // never a missing write. Today is always re-fetched so
+        // half-hour slots that have filled in since the previous
+        // sync are picked up.
+        final stressToFetch = _daysToFetch(
+          wantsDays,
+          todayD,
+          metric: 'stress',
+          hasData: (h) => h.stress.isNotEmpty,
+        );
+        final hrvToFetch = _daysToFetch(
+          wantsDays,
+          todayD,
+          metric: 'hrv',
+          hasData: (h) => h.hrv.isNotEmpty,
+        );
+        // Union of days we need to hit on the wire — we always
+        // send both 0x37 and 0x39 in the same per-day pass so a
+        // single sync skip applies to both.
+        final metricDays = <int>{...stressToFetch, ...hrvToFetch}.toList()
+          ..sort();
+        for (final d in metricDays) {
+          if (stressToFetch.contains(d)) {
+            await transport.sendA(Commands.readStressHistory(dayOffset: d));
+            await _drainRx(drainDuration);
+            await Future<void>.delayed(postCommandDelay);
+          }
+          if (hrvToFetch.contains(d)) {
+            await transport.sendA(Commands.readHrvHistory(dayOffset: d));
+            await _drainRx(drainDuration);
+            await Future<void>.delayed(postCommandDelay);
+          }
         }
       }
 
@@ -642,14 +671,25 @@ class HistorySync extends ChangeNotifier {
 
       // Sleep for the most recent N days — the new protocol emits
       // a single day offset per request, so we fire-and-await for
-      // each. Re-fetching is safe because the merge logic deduplicates
-      // by start timestamp, so we always poll every requested day to
-      // catch new sleep sessions that may have arrived after a prior
-      // sync (HS-3). Sleep buckets are cleared only when a replacement
-      // response is actually decoded; a missed or malformed reply must
-      // not erase the user's previously-stored night.
+      // each. Delta sync: a past day we have already ingested sleep
+      // for is skipped; today is always re-fetched because the
+      // watch's "night" response for the wake-up day also carries
+      // sessions that *began* in the previous calendar day (the
+      // HS-3 rationale for re-polling past days no longer holds —
+      // the watch's own per-day responses are immutable, so a
+      // second pull can only return the same segments the merge
+      // would have already deduplicated). Sleep buckets are cleared
+      // only when a replacement response is actually decoded; a
+      // missed or malformed reply must not erase the user's
+      // previously-stored night.
       if (_bParser != null) {
-        for (final d in wantsDays) {
+        final sleepToFetch = _daysToFetch(
+          wantsDays,
+          todayD,
+          metric: 'sleep',
+          hasData: (h) => h.sleep.isNotEmpty,
+        );
+        for (final d in sleepToFetch) {
           final day = todayD.addDays(-d);
           _currentSyncDay = day;
           await transport.sendB(Commands.readSleepNewProtocol(dayOffset: d));
@@ -684,6 +724,37 @@ class HistorySync extends ChangeNotifier {
       _syncing = false;
       notifyListeners();
     }
+  }
+
+  /// Returns the subset of [wantsDays] (a set of day-offsets, 0 =
+  /// today) that we still need to fetch for [metric]. Today is
+  /// always included — its response can carry samples that
+  /// straddle midnight or that have filled in since the previous
+  /// sync. Past days are skipped when [hasData] reports the
+  /// in-memory cache already has at least one sample of that
+  /// metric for them. Without a store backing the cache, every
+  /// requested day is returned (legacy in-memory behaviour).
+  List<int> _daysToFetch(
+    Iterable<int> wantsDays,
+    DateOnly todayD, {
+    required String metric,
+    required bool Function(DailyHistory) hasData,
+  }) {
+    final out = <int>[];
+    for (final d in wantsDays) {
+      final day = todayD.addDays(-d);
+      final isToday = day == todayD;
+      final existing = _days[day];
+      if (!isToday && existing != null && hasData(existing)) {
+        AppLog.instance.debug(
+          'history',
+          'skip ${day.iso} for $metric (already in store)',
+        );
+        continue;
+      }
+      out.add(d);
+    }
+    return out;
   }
 
   void _clearSleepDays(Iterable<DateOnly> days, {bool persist = true}) {

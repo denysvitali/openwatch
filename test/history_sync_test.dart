@@ -193,6 +193,193 @@ void main() {
     });
 
     test(
+      'syncAll skips persisted past days that already have stress',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final sync = _testSync(t, d);
+        final today = DateOnly.today();
+        final yesterday = today.addDays(-1);
+        await sync.bindStore(
+          _FakeHistoryStore(
+            seed: {
+              yesterday: DailyHistory(
+                day: yesterday,
+                // A past day already has stress samples — the stress
+                // poll for that dayOffset must NOT go on the wire.
+                // Today is always re-fetched.
+                stress: [HealthMetricSample(DateTime(2026, 6, 23, 10, 30), 42)],
+              ),
+            },
+          ),
+        );
+
+        await sync.syncAll(daysBack: 2);
+
+        // 0x37 (pressure) frames for dayOffset=1 must be absent.
+        // 0x37 for dayOffset=0 (today) is still present.
+        final stressReads = t.sent
+            .where((f) => f.isNotEmpty && f[0] == OpA.pressure)
+            .toList();
+        expect(
+          stressReads,
+          hasLength(1),
+          reason: 'only today should be re-polled for stress',
+        );
+        expect(stressReads.first[1], 0x00); // dayOffset=0
+        sync.dispose();
+        d.dispose();
+      },
+    );
+
+    test('syncAll skips persisted past days that already have HRV', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final sync = _testSync(t, d);
+      final today = DateOnly.today();
+      final yesterday = today.addDays(-1);
+      await sync.bindStore(
+        _FakeHistoryStore(
+          seed: {
+            yesterday: DailyHistory(
+              day: yesterday,
+              hrv: [HealthMetricSample(DateTime(2026, 6, 23, 10, 30), 55)],
+            ),
+          },
+        ),
+      );
+
+      await sync.syncAll(daysBack: 2);
+
+      // 0x39 (hrv) frames for dayOffset=1 must be absent.
+      final hrvReads = t.sent
+          .where((f) => f.isNotEmpty && f[0] == OpA.hrv)
+          .toList();
+      expect(
+        hrvReads,
+        hasLength(1),
+        reason: 'only today should be re-polled for HRV',
+      );
+      expect(hrvReads.first[1], 0x00); // dayOffset=0
+      sync.dispose();
+      d.dispose();
+    });
+
+    test('syncAll skips persisted past days that already have sleep', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      final bParser = ChannelBParser(t);
+      d.bind();
+      final sync = _testSync(t, d, bParser: bParser);
+      final today = DateOnly.today();
+      final yesterday = today.addDays(-1);
+      await sync.bindStore(
+        _FakeHistoryStore(
+          seed: {
+            yesterday: DailyHistory(
+              day: yesterday,
+              // Past day already has a sleep segment — the
+              // 0x27 + 0x3e polls for that dayOffset must NOT
+              // go on the wire. Today is always re-fetched.
+              sleep: [
+                SleepSegment(
+                  DateTime(2026, 6, 23, 23, 30),
+                  const Duration(minutes: 30),
+                  SleepStage.deep,
+                ),
+              ],
+            ),
+          },
+        ),
+      );
+
+      await sync.syncAll(daysBack: 2);
+
+      // Each day requested over Channel B (0x27 night + 0x3e
+      // lunch) produces one 0xBC-framed frame per opcode. With
+      // yesterday skipped, the only frames should be for
+      // dayOffset=0 (today).
+      final nightReads = t.sentB
+          .where((f) => f.isNotEmpty && Codec.rxChannelBCmd(f) == OpB.sleepNew)
+          .toList();
+      final lunchReads = t.sentB
+          .where(
+            (f) => f.isNotEmpty && Codec.rxChannelBCmd(f) == OpB.sleepLunchNew,
+          )
+          .toList();
+      expect(
+        nightReads,
+        hasLength(1),
+        reason: 'only today should be re-polled for night sleep',
+      );
+      expect(
+        lunchReads,
+        hasLength(1),
+        reason: 'only today should be re-polled for lunch sleep',
+      );
+      sync.dispose();
+      d.dispose();
+    });
+
+    test(
+      'syncAll still re-fetches past days when the stored slice is empty',
+      () async {
+        // Regression: the skip rule must trigger on "data present",
+        // not "file present". A day that exists in the store with
+        // zero stress / sleep samples is a partial sync and must be
+        // re-polled to fill the gap.
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final bParser = ChannelBParser(t);
+        final sync = _testSync(t, d, bParser: bParser);
+        final today = DateOnly.today();
+        final yesterday = today.addDays(-1);
+        await sync.bindStore(
+          _FakeHistoryStore(
+            seed: {
+              yesterday: DailyHistory(
+                day: yesterday,
+                hr: [
+                  HrSample(
+                    yesterday.midnight.add(const Duration(hours: 8)),
+                    62,
+                  ),
+                ],
+                // stress + sleep intentionally empty.
+              ),
+            },
+          ),
+        );
+
+        await sync.syncAll(daysBack: 2);
+
+        // HR for yesterday IS skipped (has data).
+        // Stress + HRV for yesterday are NOT skipped (empty).
+        final stressReads = t.sent
+            .where((f) => f.isNotEmpty && f[0] == OpA.pressure)
+            .toList();
+        final hrvReads = t.sent
+            .where((f) => f.isNotEmpty && f[0] == OpA.hrv)
+            .toList();
+        final nightReads = t.sentB
+            .where(
+              (f) => f.isNotEmpty && Codec.rxChannelBCmd(f) == OpB.sleepNew,
+            )
+            .toList();
+        // Two days requested × 1 command each, so we expect
+        // 2 stress / 2 hrv / 2 night sleep reads on the wire.
+        expect(stressReads, hasLength(2));
+        expect(hrvReads, hasLength(2));
+        expect(nightReads, hasLength(2));
+        sync.dispose();
+        d.dispose();
+      },
+    );
+
+    test(
       'unsolicited 0x46 push from the watch does NOT throw or break sync',
       () async {
         final t = _StubTransport();
