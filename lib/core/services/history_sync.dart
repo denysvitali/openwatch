@@ -837,12 +837,12 @@ class HistorySync extends ChangeNotifier {
   int? _hrExpectedChunks;
 
   void _flushHrChunks(DateOnly? day) {
-      // Spans the assembly + merge step for one day's HR series; tagged
-      // with the target day so flame graphs show which day is slow.
-      final span = OpenTelemetryService().startChildSpan(
-        'sync.history.flush_hr',
-        attributes: {'sync.day.iso': day?.iso ?? '', 'sync.hr_samples': 0},
-      );
+    // Spans the assembly + merge step for one day's HR series; tagged
+    // with the target day so flame graphs show which day is slow.
+    final span = OpenTelemetryService().startChildSpan(
+      'sync.history.flush_hr',
+      attributes: {'sync.day.iso': day?.iso ?? '', 'sync.hr_samples': 0},
+    );
     try {
       // Stitch the 13-byte chunks into a flat record, then walk 5-min
       // BPM slots. 288 slots * 1 byte (BPM) = 288 bytes. Per
