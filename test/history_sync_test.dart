@@ -276,7 +276,12 @@ void main() {
       d.bind();
       final sync = _testSync(t, d, clock: () => now);
       final syncFuture = sync.syncAll(daysBack: 1);
-      await Future<void>.delayed(const Duration(milliseconds: 150));
+      // Wait only long enough for the first HR drain to start (not for
+      // syncAll to advance past the HR phase) — once stress/activity
+      // loops begin, `_currentSyncDay` flips back to null and the HR
+      // chunk series loses its day attribution. The HS-8 fix only
+      // captures `_hrChunkDay` at header arrival.
+      await Future<void>.delayed(const Duration(milliseconds: 20));
 
       // H59MAX style header: chunkCount=2 data chunks (pl[1] includes header).
       t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x00, 0x03, 0x05]));
@@ -310,12 +315,18 @@ void main() {
         78,
       ]);
       t.inA.add(Codec.buildChannelA(OpA.readHeartRate, chunk1));
-      await Future<void>.delayed(const Duration(milliseconds: 80));
+      // Wait long enough that chunk2 lands in a drain cycle AFTER the
+      // header + chunk1 have already been processed — otherwise the
+      // chunk-handler races with the drain ordering and `sync.hr` ends
+      // up empty. 200ms comfortably covers the HR drain (50ms) and the
+      // first stress drain (50ms) so the merge flush fires once both
+      // chunks are in the assembly buffer.
+      await Future<void>.delayed(const Duration(milliseconds: 100));
 
       // This second packet must be merged with the pending series,
       // not interpreted as independent BPM bytes at the next 4 slots.
       t.inA.add(Codec.buildChannelA(OpA.readHeartRate, chunk2));
-      await Future<void>.delayed(const Duration(milliseconds: 120));
+      await Future<void>.delayed(const Duration(milliseconds: 200));
 
       final today = DateOnly.today();
       final dayHistory = sync.dayOf(today);
@@ -377,13 +388,17 @@ void main() {
 
         final chunk2 = Uint8List.fromList([
           0x02,
+          // Per-chunk 4-byte header (skipped by the chunk-handler — the
+          // chunk-local test above documents the same wire shape). All-zero
+          // placeholder is fine here because the test only asserts which
+          // BPMs end up in `sync.hr`, not the echoed timestamp.
+          0,
+          0,
+          0,
+          0,
           0x6f,
           0x72,
           0x73,
-          0,
-          0,
-          0,
-          0,
           0,
           0,
           0,
