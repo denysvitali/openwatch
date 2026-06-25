@@ -711,7 +711,7 @@ void main() {
         t.inA.add(Codec.buildChannelA(OpA.readHeartRate, chunk2));
         await Future<void>.delayed(const Duration(milliseconds: 200));
 
-        final today = DateOnly.today();
+        final today = DateOnly.fromDateTime(now);
         final dayHistory = sync.dayOf(today);
         expect(dayHistory, isNotNull);
         final bySlot = <int, HrSample>{
