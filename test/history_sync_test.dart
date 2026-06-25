@@ -646,94 +646,101 @@ void main() {
       d.dispose();
     });
 
-    test('readHeartRate 0x15 skips chunk-local 4-byte headers when '
-        'building the 5-minute HR timeline', () async {
-      final now = DateTime(2026, 6, 24, 12);
-      final t = _StubTransport();
-      final d = ChannelADispatcher(t);
-      d.bind();
-      final sync = _testSync(t, d, clock: () => now);
-      final syncFuture = sync.syncAll(daysBack: 1);
-      // Wait only long enough for the first HR drain to start (not for
-      // syncAll to advance past the HR phase) — once stress/activity
-      // loops begin, `_currentSyncDay` flips back to null and the HR
-      // chunk series loses its day attribution. The HS-8 fix only
-      // captures `_hrChunkDay` at header arrival.
-      await Future<void>.delayed(const Duration(milliseconds: 20));
+    test(
+      'readHeartRate 0x15 only strips the single 4-byte record header',
+      () async {
+        final now = DateTime(2026, 6, 24, 12);
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final sync = _testSync(t, d, clock: () => now);
+        final syncFuture = sync.syncAll(daysBack: 1);
+        // Wait only long enough for the first HR drain to start (not for
+        // syncAll to advance past the HR phase) — once stress/activity
+        // loops begin, `_currentSyncDay` flips back to null and the HR
+        // chunk series loses its day attribution. The HS-8 fix only
+        // captures `_hrChunkDay` at header arrival.
+        await Future<void>.delayed(const Duration(milliseconds: 20));
 
-      // H59MAX style header: chunkCount=2 data chunks (pl[1] includes header).
-      t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x00, 0x03, 0x05]));
+        // H59MAX style header: chunkCount=2 data chunks (pl[1] includes header).
+        t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x00, 0x03, 0x05]));
 
-      final dayStartBytes = [0x00, 0xF6, 0x34, 0x6A];
-      final chunk1 = Uint8List.fromList([
-        0x01,
-        ...dayStartBytes,
-        61,
-        62,
-        63,
-        64,
-        65,
-        66,
-        67,
-        68,
-        69,
-      ]);
-      final chunk2Header = [0x41, 0x42, 0x43, 0x44];
-      final chunk2 = Uint8List.fromList([
-        0x02,
-        ...chunk2Header,
-        70,
-        71,
-        72,
-        73,
-        74,
-        75,
-        76,
-        77,
-        78,
-      ]);
-      t.inA.add(Codec.buildChannelA(OpA.readHeartRate, chunk1));
-      // Wait long enough that chunk2 lands in a drain cycle AFTER the
-      // header + chunk1 have already been processed — otherwise the
-      // chunk-handler races with the drain ordering and `sync.hr` ends
-      // up empty. 200ms comfortably covers the HR drain (50ms) and the
-      // first stress drain (50ms) so the merge flush fires once both
-      // chunks are in the assembly buffer.
-      await Future<void>.delayed(const Duration(milliseconds: 100));
+        final dayStartBytes = [0x00, 0xF6, 0x34, 0x6A];
+        final chunk1 = Uint8List.fromList([
+          0x01,
+          ...dayStartBytes,
+          61,
+          62,
+          63,
+          64,
+          65,
+          66,
+          67,
+          68,
+          69,
+        ]);
+        // On H59MA v13 firmware only chunk 1 carries the 4-byte timestamp
+        // echo; chunks 2+ are 13 pure BPM bytes.
+        final chunk2 = Uint8List.fromList([
+          0x02,
+          70,
+          71,
+          72,
+          73,
+          74,
+          75,
+          76,
+          77,
+          78,
+          79,
+          80,
+          81,
+          82,
+        ]);
+        t.inA.add(Codec.buildChannelA(OpA.readHeartRate, chunk1));
+        // Wait long enough that chunk2 lands in a drain cycle AFTER the
+        // header + chunk1 have already been processed — otherwise the
+        // chunk-handler races with the drain ordering and `sync.hr` ends
+        // up empty. 200ms comfortably covers the HR drain (50ms) and the
+        // first stress drain (50ms) so the merge flush fires once both
+        // chunks are in the assembly buffer.
+        await Future<void>.delayed(const Duration(milliseconds: 100));
 
-      // This second packet must be merged with the pending series,
-      // not interpreted as independent BPM bytes at the next 4 slots.
-      t.inA.add(Codec.buildChannelA(OpA.readHeartRate, chunk2));
-      await Future<void>.delayed(const Duration(milliseconds: 200));
+        // This second packet must be merged with the pending series,
+        // not interpreted as independent BPM bytes at the next 4 slots.
+        t.inA.add(Codec.buildChannelA(OpA.readHeartRate, chunk2));
+        await Future<void>.delayed(const Duration(milliseconds: 200));
 
-      final today = DateOnly.today();
-      final dayHistory = sync.dayOf(today);
-      expect(dayHistory, isNotNull);
-      final bySlot = <int, HrSample>{
-        for (final h in dayHistory!.hr)
-          (h.timestamp.difference(today.midnight).inMinutes ~/ 5): h,
-      };
+        final today = DateOnly.today();
+        final dayHistory = sync.dayOf(today);
+        expect(dayHistory, isNotNull);
+        final bySlot = <int, HrSample>{
+          for (final h in dayHistory!.hr)
+            (h.timestamp.difference(today.midnight).inMinutes ~/ 5): h,
+        };
 
-      expect(bySlot.length, 18);
-      expect(bySlot[0]?.bpm, 61);
-      expect(bySlot[1]?.bpm, 62);
-      expect(bySlot[8]?.bpm, 69);
-      expect(bySlot[9]?.bpm, 70);
-      expect(bySlot[10]?.bpm, 71);
-      expect(bySlot[17]?.bpm, 78);
-      expect(
-        bySlot[9]?.timestamp,
-        equals(today.midnight.add(const Duration(minutes: 45))),
-      );
+        expect(bySlot.length, 22);
+        expect(bySlot[0]?.bpm, 61);
+        expect(bySlot[1]?.bpm, 62);
+        expect(bySlot[8]?.bpm, 69);
+        expect(bySlot[9]?.bpm, 70);
+        expect(bySlot[10]?.bpm, 71);
+        expect(bySlot[21]?.bpm, 82);
+        expect(
+          bySlot[9]?.timestamp,
+          equals(today.midnight.add(const Duration(minutes: 45))),
+        );
 
-      // If per-chunk headers were not stripped, slot 9 would contain 0x41
-      // (65), and sample 70 would land on slot 13.
-      expect(bySlot[13]?.bpm, isNot(70));
+        // With the v13 wire shape, chunk 2's first byte is sample 70, so
+        // it lands at slot 9; a per-chunk-header interpretation would have
+        // placed it at slot 13.
+        expect(bySlot[13]?.bpm, isNot(70));
 
-      await syncFuture;
-      sync.dispose();
-      d.dispose();
-    });
+        await syncFuture;
+        sync.dispose();
+        d.dispose();
+      },
+    );
 
     test(
       'readHeartRate 0x15 seq-0 firmware header waits for all chunks',
@@ -766,17 +773,14 @@ void main() {
 
         final chunk2 = Uint8List.fromList([
           0x02,
-          // Per-chunk 4-byte header (skipped by the chunk-handler — the
-          // chunk-local test above documents the same wire shape). All-zero
-          // placeholder is fine here because the test only asserts which
-          // BPMs end up in `sync.hr`, not the echoed timestamp.
-          0,
-          0,
-          0,
-          0,
+          // Chunks 2+ are 13 pure BPM bytes on v13 firmware.
           0x6f,
           0x72,
           0x73,
+          0,
+          0,
+          0,
+          0,
           0,
           0,
           0,

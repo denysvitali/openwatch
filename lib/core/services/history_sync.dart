@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 
@@ -942,9 +943,11 @@ class HistorySync extends ChangeNotifier {
     try {
       // Stitch the 13-byte chunks into a flat record, then walk 5-min
       // BPM slots. 288 slots * 1 byte (BPM) = 288 bytes. Per
-      // GHIDRA §3.12 each *chunk* begins with a 4-byte echoed
-      // value, followed by 9 sample bytes (total 13 bytes). 0xFF is
-      // no sample.
+      // GHIDRA §3.12 and verified on H59MA_1.00.13_251230, only chunk 1
+      // begins with the 4-byte echoed request timestamp; chunks 2+ carry
+      // 13 pure BPM bytes. We therefore concatenate every chunk first,
+      // then drop the single 4-byte header at the start of the assembled
+      // record. 0xFF is no sample.
       //
       // We DO NOT use the echoed 4-byte prefix as a date — its unit
       // (seconds vs ms) and timezone are not documented and vary across
@@ -952,13 +955,14 @@ class HistorySync extends ChangeNotifier {
       // produced "samples in the future" near midnight. Anchor every
       // sample on the day we asked for (HS-8) and bound the slot
       // index so off-the-end bytes cannot spill past 23:55.
-      final sampleBytes = <int>[];
+      final builder = BytesBuilder();
       for (final c in _hrChunks) {
-        final sampleStart = c.length >= 4 ? 4 : c.length;
-        for (var i = sampleStart; i < c.length && i < 13; i++) {
-          sampleBytes.add(c[i]);
-        }
+        builder.add(c.sublist(0, c.length < 13 ? c.length : 13));
       }
+      final assembled = builder.toBytes();
+      final sampleBytes = assembled.length >= 4
+          ? Uint8List.fromList(assembled.sublist(4))
+          : assembled;
       if (sampleBytes.length < 2) {
         _hrChunks.clear();
         _hrExpectedChunks = null;
