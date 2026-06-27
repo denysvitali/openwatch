@@ -401,6 +401,9 @@ class HistorySync extends ChangeNotifier {
     final store = _store;
     if (store == null) return;
     final persisted = await store.persistedDays();
+    // The latest store snapshot wins; drop any in-memory days that no
+    // longer exist on disk (e.g. after clearAll) so they don't leak forever.
+    _days.clear();
     for (final d in persisted) {
       _days[d] = await store.readDay(d);
     }
@@ -924,13 +927,17 @@ class HistorySync extends ChangeNotifier {
           // arrive after _currentSyncDay has moved on (HS-8).
           _hrChunkDay = day;
         } else if (tag == 0xff) {
+          // Capture the target day before clearing the series state: a late
+          // 0xFF response may arrive after _currentSyncDay has been cleared,
+          // but _hrChunkDay was set when the header arrived (HS-8).
+          final commitDay = day ?? _hrChunkDay;
           _hrChunks.clear();
           _hrExpectedChunks = null;
           _hrChunkDay = null;
           _hrChunk1Received = false;
           // Persist the (possibly empty) record so the UI shows the
           // day even when the watch has no HR data for it.
-          _commitCurrentDayHr(day);
+          _commitCurrentDayHr(commitDay);
         } else if (tag >= 1 && tag <= 23) {
           if (pl.length >= 1 + 13) {
             // Store by sequence number so out-of-order chunks and BLE

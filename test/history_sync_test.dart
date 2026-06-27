@@ -351,6 +351,85 @@ void main() {
       d.dispose();
     });
 
+    test('loadFromStore drops days removed from disk', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final store = _FakeHistoryStore(
+        seed: {DateOnly(2026, 6, 20): DailyHistory(day: DateOnly(2026, 6, 20))},
+      );
+      final sync = _testSync(t, d);
+      await sync.bindStore(store);
+      expect(sync.dayOf(DateOnly(2026, 6, 20)), isNotNull);
+
+      await store.clearAll();
+      await sync.loadFromStore();
+
+      expect(sync.dayOf(DateOnly(2026, 6, 20)), isNull);
+      sync.dispose();
+      d.dispose();
+    });
+
+    test(
+      'days getter returns persisted days sorted oldest to newest',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final sync = _testSync(t, d, clock: () => DateTime(2026, 6, 23));
+        await sync.bindStore(
+          _FakeHistoryStore(
+            seed: {
+              DateOnly(2026, 6, 20): DailyHistory(day: DateOnly(2026, 6, 20)),
+              DateOnly(2026, 6, 18): DailyHistory(day: DateOnly(2026, 6, 18)),
+              DateOnly(2026, 6, 19): DailyHistory(day: DateOnly(2026, 6, 19)),
+            },
+          ),
+        );
+
+        expect(sync.days.map((d) => d.day), [
+          DateOnly(2026, 6, 18),
+          DateOnly(2026, 6, 19),
+          DateOnly(2026, 6, 20),
+        ]);
+
+        sync.dispose();
+        d.dispose();
+      },
+    );
+
+    test(
+      'hrvRecords and pressureRecords getters cache their streams',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final sync = _testSync(t, d);
+
+        expect(identical(sync.hrvRecords, sync.hrvRecords), isTrue);
+        expect(identical(sync.pressureRecords, sync.pressureRecords), isTrue);
+
+        sync.dispose();
+        d.dispose();
+      },
+    );
+
+    test('lastSyncedAt is set after successful sync', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final store = _FakeHistoryStore();
+      final sync = _testSync(t, d);
+      await sync.bindStore(store);
+
+      expect(sync.lastSyncedAt, isNull);
+      await sync.syncAll(daysBack: 1);
+      expect(sync.lastSyncedAt, isNotNull);
+
+      sync.dispose();
+      d.dispose();
+    });
+
     test(
       'syncAll still re-fetches past days when the stored slice is empty',
       () async {
@@ -1523,7 +1602,7 @@ void main() {
     // ------------------------------------------------------------------
 
     test(
-      'syncAll skips sleep commands when ChannelBParser is null (HS-5)',
+      'syncAll skips sleep and activity commands when ChannelBParser is null (HS-5)',
       () async {
         final t = _StubTransport();
         final d = ChannelADispatcher(t);
@@ -1533,7 +1612,7 @@ void main() {
         await Future<void>.delayed(const Duration(milliseconds: 20));
         await future;
 
-        // No sleep or lunch commands should be sent on Channel B.
+        // No sleep or activity commands should be sent on Channel B.
         expect(
           t.sentB.where(
             (f) => f.isNotEmpty && Codec.rxChannelBCmd(f) == OpB.sleepNew,
@@ -1547,6 +1626,14 @@ void main() {
           ),
           isEmpty,
           reason: '0x3e sleepLunchNew must not be sent when bParser is null',
+        );
+        expect(
+          t.sentB.where(
+            (f) =>
+                f.isNotEmpty && Codec.rxChannelBCmd(f) == OpB.activitySummary,
+          ),
+          isEmpty,
+          reason: '0x2a activitySummary must not be sent when bParser is null',
         );
 
         // HR sync should still proceed normally.
