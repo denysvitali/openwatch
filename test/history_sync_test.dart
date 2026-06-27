@@ -399,15 +399,45 @@ void main() {
     );
 
     test(
-      'hrvRecords and pressureRecords getters cache their streams',
+      'hrvRecords and pressureRecords getters return broadcast streams',
       () async {
         final t = _StubTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final sync = _testSync(t, d);
 
-        expect(identical(sync.hrvRecords, sync.hrvRecords), isTrue);
-        expect(identical(sync.pressureRecords, sync.pressureRecords), isTrue);
+        final hrv1 = <HrvRecord>[];
+        final hrv2 = <HrvRecord>[];
+        sync.hrvRecords.listen(hrv1.add);
+        sync.hrvRecords.listen(hrv2.add);
+
+        // Minimal HRV record: header + four 14-byte chunks.
+        t.inA.add(Codec.buildChannelA(OpA.hrv, [0x00, 0x05, 0x1e]));
+        for (var i = 0; i < 4; i++) {
+          t.inA.add(
+            Codec.buildChannelA(OpA.hrv, List<int>.filled(14, 0x40 + i)),
+          );
+        }
+
+        final pressure1 = <PressureRecord>[];
+        final pressure2 = <PressureRecord>[];
+        sync.pressureRecords.listen(pressure1.add);
+        sync.pressureRecords.listen(pressure2.add);
+
+        // Minimal stress record: header + four 14-byte chunks.
+        t.inA.add(Codec.buildChannelA(OpA.pressure, [0x00, 0x05, 0x1e]));
+        for (var i = 0; i < 4; i++) {
+          t.inA.add(
+            Codec.buildChannelA(OpA.pressure, List<int>.filled(14, 0x50 + i)),
+          );
+        }
+
+        await Future<void>.delayed(const Duration(milliseconds: 400));
+
+        expect(hrv1, hasLength(1));
+        expect(hrv2, hasLength(1));
+        expect(pressure1, hasLength(1));
+        expect(pressure2, hasLength(1));
 
         sync.dispose();
         d.dispose();
