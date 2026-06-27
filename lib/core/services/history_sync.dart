@@ -1288,11 +1288,6 @@ class HistorySync extends ChangeNotifier {
     final day = DateOnly(year, month, dayOfMonth);
     _sportDetailPageState[day] = (page: page, total: total);
 
-    // PROTOCOL.md §4.4: b4=page, b5=total; done when b4==b5-1.
-    // Do not accumulate until the final page arrives — partial
-    // paged responses would write incomplete data to the store.
-    if (page != total - 1) return;
-
     // Live H59MA_V1.0 captures show the detail record body as:
     //   pl[3]    = slot << 2
     //   pl[4]    = record index (page)
@@ -1309,9 +1304,14 @@ class HistorySync extends ChangeNotifier {
     // from the generic Oudmon SDK spec.
     final steps = pl[8] | (pl[9] << 8);
     final distance = pl[10] | (pl[11] << 8);
-    if (steps == 0 && distance == 0) return;
 
-    final previous = _sportDetailTotals[day] ?? const DailyTotals();
+    // Accumulate each page's contribution as it arrives, but start a
+    // fresh sum on page 0 so a restarted/retried paged sequence does
+    // not inherit stale totals. Only persist to the store once the
+    // final page (page == total - 1) has been seen.
+    var previous = _sportDetailTotals[day] ?? const DailyTotals();
+    if (page == 0) previous = const DailyTotals();
+
     final existingDay = _days[day];
     final totals = DailyTotals(
       steps: (previous.steps ?? 0) + steps,
@@ -1321,7 +1321,11 @@ class HistorySync extends ChangeNotifier {
       distanceMeters: (previous.distanceMeters ?? 0) + distance,
     );
     _sportDetailTotals[day] = totals;
-    _upsertTotals(day, totals);
+
+    // PROTOCOL.md §4.4: b4=page, b5=total; done when b4==b5-1.
+    if (page == total - 1) {
+      _upsertTotals(day, totals);
+    }
   }
 
   void _upsertTotals(DateOnly day, DailyTotals totals) {
