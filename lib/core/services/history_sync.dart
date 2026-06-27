@@ -736,6 +736,11 @@ class HistorySync extends ChangeNotifier {
         'Sync complete: hr=${_hr.length} sleep=${_sleep.length} '
             'fetched=$fetched days=${_watchDaysWithData.length}',
       );
+
+      // Final drain to catch any late-arriving frames that were queued
+      // after the last per-command drain (e.g. multi-page sport detail
+      // responses that straddle the settle window).
+      await _drainRx(drainDuration);
     } catch (e) {
       lastSyncError = e.toString();
       AppLog.instance.error('history', 'Sync failed: $e');
