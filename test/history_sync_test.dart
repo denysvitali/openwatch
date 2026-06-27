@@ -1907,17 +1907,19 @@ void main() {
       final t = _StubTransport();
       final d = ChannelADispatcher(t);
       d.bind();
-      final sync = _testSync(t, d);
+      final now = DateTime(2026, 6, 21, 12);
+      final sync = _testSync(t, d, clock: () => now);
       final syncFuture = sync.syncAll(daysBack: 1);
       await Future<void>.delayed(const Duration(milliseconds: 20));
 
       // Page 0 of 2: steps=100, distance=50. Not final page — totals
-      // must NOT be written yet.
+      // must NOT be written yet. BCD date matches the clock day.
       t.inA.add(
         Codec.buildChannelA(OpA.readDetailSport, [
-          0x26, // year BCD
-          0x06, // month BCD
-          0x21, // day BCD
+          0x26, // year BCD = 38 → 2038? No, 0x26 = 2*16+6 = 38... wait.
+          // Actually BCD: 0x26 = tens=2, units=6 → 26. Year = 2000 + 26 = 2026.
+          0x06, // month BCD = 6
+          0x21, // day BCD = 21
           0x00, // slot << 2
           0x00, // page = 0
           0x02, // total = 2
@@ -1931,7 +1933,7 @@ void main() {
       );
       await Future<void>.delayed(const Duration(milliseconds: 150));
 
-      final today = DateOnly.today();
+      final today = DateOnly.fromDateTime(now);
       final historyBefore = sync.dayOf(today);
       // Totals should not exist yet because page 0 < total-1.
       expect(
@@ -1976,11 +1978,13 @@ void main() {
       final t = _StubTransport();
       final d = ChannelADispatcher(t);
       d.bind();
-      final sync = _testSync(t, d);
+      final now = DateTime(2026, 6, 21, 12);
+      final sync = _testSync(t, d, clock: () => now);
       final syncFuture = sync.syncAll(daysBack: 1);
       await Future<void>.delayed(const Duration(milliseconds: 20));
 
       // Single page: page=0, total=1 → final page, totals write immediately.
+      // BCD date matches the clock day.
       t.inA.add(
         Codec.buildChannelA(OpA.readDetailSport, [
           0x26,
@@ -2000,7 +2004,7 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 150));
       await syncFuture;
 
-      final today = DateOnly.today();
+      final today = DateOnly.fromDateTime(now);
       final history = sync.dayOf(today);
       expect(history, isNotNull);
       expect(history!.steps, 299);
