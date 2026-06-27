@@ -164,32 +164,46 @@ void main() {
       expect(f[1], 0x00);
     });
 
-    test('readDetailSport encodes v14 day/hour/unit request', () {
+    test(
+      'readDetailSport encodes v14 segment request with 0x0F sub-opcode',
+      () {
+        final f = Commands.readDetailSport(
+          dayOffset: 2,
+          startHour: 3,
+          endHour: 9,
+        );
+        expect(f[0], OpA.readDetailSport);
+        // byte 1 = dayOffset, byte 2 = 0x0F sub-opcode,
+        // byte 3 = startSeg (3*6=18=0x12), byte 4 = endSeg (9*6=54=0x36),
+        // byte 5 = fixed 0x01
+        expect(f.sublist(1, 6), [0x02, 0x0F, 0x12, 0x36, 0x01]);
+      },
+    );
+
+    test('readDetailSport clamps segment indices to 0..0x5F', () {
       final f = Commands.readDetailSport(
-        dayOffset: 2,
-        startHour: 3,
-        endHour: 9,
-        oneSecondUnits: true,
+        dayOffset: 0,
+        startHour: 25, // would be 150, clamped to 0x5F
+        endHour: -1, // would be -6, clamped to startSeg
       );
-      expect(f[0], OpA.readDetailSport);
-      expect(f.sublist(1, 6), [0x02, 0x00, 0x03, 0x09, 0x01]);
+      expect(f.sublist(1, 6), [0x00, 0x0F, 0x5F, 0x5F, 0x01]);
     });
 
     test(
-      'readSleepNewProtocol uses Channel-B 0x27 with day offset + record type 0x00',
+      'readSleepNewProtocol clamps dayOffset to 0..6 per PROTOCOL.md §4.4',
       () {
-        final f = Commands.readSleepNewProtocol(dayOffset: 3);
+        final f = Commands.readSleepNewProtocol(dayOffset: 10);
         expect(Codec.rxChannelBCmd(f), OpB.sleepNew);
-        expect(Codec.rxChannelBPayload(f), [0x03, 0x00]);
+        expect(Codec.rxChannelBPayload(f), [0x06, 0x00]);
       },
     );
 
     test(
-      'readSleepLunchProtocol uses Channel-B 0x3e with day offset + record type 0x01',
+      'readSleepLunchProtocol clamps dayOffset to 0..6 per PROTOCOL.md §4.4',
       () {
-        final f = Commands.readSleepLunchProtocol(dayOffset: 2);
+        final f = Commands.readSleepLunchProtocol(dayOffset: 99);
         expect(Codec.rxChannelBCmd(f), OpB.sleepLunchNew);
-        expect(Codec.rxChannelBPayload(f), [0x02, 0x01]);
+        expect(Codec.rxChannelBPayload(f), [0x06, 0x01]);
       },
     );
 

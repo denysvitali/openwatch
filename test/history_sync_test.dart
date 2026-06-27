@@ -281,8 +281,8 @@ void main() {
             yesterday: DailyHistory(
               day: yesterday,
               // Past day already has a sleep segment — the
-              // 0x27 + 0x3e polls for that dayOffset must NOT
-              // go on the wire. Today is always re-fetched.
+              // 0x27 poll for that dayOffset must NOT go on the wire.
+              // Today is always re-fetched.
               sleep: [
                 SleepSegment(
                   DateTime(2026, 6, 23, 23, 30),
@@ -297,27 +297,26 @@ void main() {
 
       await sync.syncAll(daysBack: 2);
 
-      // Each day requested over Channel B (0x27 night + 0x3e
-      // lunch) produces one 0xBC-framed frame per opcode. With
-      // yesterday skipped, the only frames should be for
+      // With yesterday skipped, the only 0x27 frame should be for
       // dayOffset=0 (today).
       final nightReads = t.sentB
           .where((f) => f.isNotEmpty && Codec.rxChannelBCmd(f) == OpB.sleepNew)
-          .toList();
-      final lunchReads = t.sentB
-          .where(
-            (f) => f.isNotEmpty && Codec.rxChannelBCmd(f) == OpB.sleepLunchNew,
-          )
           .toList();
       expect(
         nightReads,
         hasLength(1),
         reason: 'only today should be re-polled for night sleep',
       );
+      // 0x3e must never be sent (redundant per GHIDRA §2.3).
+      final lunchReads = t.sentB
+          .where(
+            (f) => f.isNotEmpty && Codec.rxChannelBCmd(f) == OpB.sleepLunchNew,
+          )
+          .toList();
       expect(
         lunchReads,
-        hasLength(1),
-        reason: 'only today should be re-polled for lunch sleep',
+        isEmpty,
+        reason: '0x3e sleepLunchNew must not be sent (redundant)',
       );
       sync.dispose();
       d.dispose();
@@ -481,6 +480,7 @@ void main() {
               (f) => f.isNotEmpty && Codec.rxChannelBCmd(f) == OpB.sleepNew,
             )
             .toList();
+        // 0x3e must never be sent (redundant per GHIDRA §2.3).
         final lunchReads = t.sentB
             .where(
               (f) =>
@@ -494,8 +494,8 @@ void main() {
         );
         expect(
           lunchReads,
-          hasLength(1),
-          reason: 'confirmed-empty lunch day should be skipped',
+          isEmpty,
+          reason: '0x3e sleepLunchNew must not be sent (redundant)',
         );
         sync.dispose();
         d.dispose();
@@ -554,6 +554,7 @@ void main() {
               (f) => f.isNotEmpty && Codec.rxChannelBCmd(f) == OpB.sleepNew,
             )
             .toList();
+        // 0x3e must never be sent (redundant per GHIDRA §2.3).
         final lunchReads = t.sentB
             .where(
               (f) =>
@@ -564,7 +565,7 @@ void main() {
         expect(stressReads, hasLength(2));
         expect(hrvReads, hasLength(2));
         expect(nightReads, hasLength(2));
-        expect(lunchReads, hasLength(2));
+        expect(lunchReads, isEmpty);
         sync.dispose();
         d.dispose();
       },
@@ -857,13 +858,14 @@ void main() {
     );
 
     test(
-      'readHeartRate 0x15 keeps trailing bucket whose offset-shift lands in the past',
+      'readHeartRate 0x15 keeps a completed trailing slot and drops the next one',
       () async {
-        // A trailing slot whose raw timestamp would land slightly in the
-        // future gets pulled into the past by the inferred watch offset
-        // (lastValidIdx × 5 min ≈ watch-now). Sync must accept it
-        // instead of dropping it on the floor.
-        final now = DateTime(2026, 6, 23, 17, 34, 13);
+        // Protocol-faithful decode: each byte is a 5-min slot anchored at
+        // the requested day's midnight. A slot whose anchor is already in
+        // the past is kept; one still in the future is dropped (the watch
+        // cannot have measured a sample it hasn't reached yet). No offset
+        // is inferred and no timestamp is shifted.
+        final now = DateTime(2026, 6, 23, 17, 36);
         final t = _StubTransport();
         final d = ChannelADispatcher(t);
         d.bind();
@@ -878,8 +880,9 @@ void main() {
         for (var i = 0; i < 4; i++) {
           record[i] = 0;
         }
-        record[4 + (17 * 12 + 6)] = 80; // 17:30, completed slot.
-        record[4 + (17 * 12 + 7)] = 120; // 17:35, the trailing bucket.
+        record[4 + (17 * 12 + 6)] = 80; // slot 210 → 17:30, completed.
+        record[4 + (17 * 12 + 7)] = 120; // slot 211 → 17:35, completed.
+        record[4 + (17 * 12 + 8)] = 99; // slot 212 → 17:40, future → dropped.
 
         for (var chunk = 0; chunk < 23; chunk++) {
           final start = chunk * 13;
@@ -894,12 +897,16 @@ void main() {
         await Future<void>.delayed(const Duration(milliseconds: 150));
         await syncFuture;
 
-        // The inferred offset pulls slot 211 (17:35 watch) into the past,
-        // so both samples land before "now" and are accepted.
         expect(sync.hr.map((s) => s.bpm), contains(80));
         expect(sync.hr.map((s) => s.bpm), contains(120));
+        expect(sync.hr.map((s) => s.bpm), isNot(contains(99)));
         expect(sync.hr.any((s) => s.timestamp.isAfter(now)), isFalse);
         expect(sync.lastSyncError, isNull);
+        // Anchored exactly at slot time — no drift shift.
+        expect(
+          sync.hr.lastWhere((s) => s.bpm == 120).timestamp,
+          equals(DateTime(2026, 6, 23, 17, 35)),
+        );
 
         sync.dispose();
         d.dispose();
@@ -1395,14 +1402,12 @@ void main() {
         final history = sync.dayOf(today);
         expect(history, isNotNull);
         expect(history!.stress.map((s) => s.value), [21, 44, 68]);
-        // The new soft-clip+shift path infers watchOffsetMinutes from the
-        // record (lastValidIdx × 30 min ≈ watch-now) and shifts slot
-        // timestamps accordingly. With lastValidIdx=47 (23:30) and
-        // phone-now=23:59 the inferred offset is -29 min, so the
-        // 06:00 raw slot lands at 06:29 wall-clock.
+        // Protocol-faithful decode: each byte is a 30-min slot anchored at
+        // the requested day's midnight. samples[12]=44 is slot 12 → 06:00
+        // exactly. No clock-offset is inferred and no timestamp is shifted.
         expect(
           history.stress[1].timestamp,
-          today.midnight.add(const Duration(minutes: 6 * 60 + 29)),
+          today.midnight.add(const Duration(minutes: 6 * 60)),
         );
 
         sync.dispose();
@@ -1453,7 +1458,7 @@ void main() {
     );
 
     test(
-      'syncAll sends sleep commands when ChannelBParser is provided (HS-5)',
+      'syncAll sends only 0x27 sleep (not redundant 0x3e) when ChannelBParser is provided',
       () async {
         final t = _StubTransport();
         final d = ChannelADispatcher(t);
@@ -1464,7 +1469,7 @@ void main() {
         await Future<void>.delayed(const Duration(milliseconds: 20));
         await future;
 
-        // Sleep commands should be sent on Channel B.
+        // 0x27 sleepNew must be sent.
         expect(
           t.sentB.where(
             (f) => f.isNotEmpty && Codec.rxChannelBCmd(f) == OpB.sleepNew,
@@ -1472,12 +1477,15 @@ void main() {
           isNotEmpty,
           reason: '0x27 sleepNew must be sent when bParser is provided',
         );
+        // 0x3e sleepLunchNew must NOT be sent — the firmware always
+        // emits both 0x27 and 0x3e responses from a single 0x27 request
+        // per GHIDRA_DECOMPILATION.md §2.3.
         expect(
           t.sentB.where(
             (f) => f.isNotEmpty && Codec.rxChannelBCmd(f) == OpB.sleepLunchNew,
           ),
-          isNotEmpty,
-          reason: '0x3e sleepLunchNew must be sent when bParser is provided',
+          isEmpty,
+          reason: '0x3e sleepLunchNew is redundant; 0x27 alone triggers both',
         );
 
         sync.dispose();
@@ -1885,6 +1893,118 @@ void main() {
         isNull,
         reason: 'absurd distance must clamp to null',
       );
+
+      sync.dispose();
+      d.dispose();
+    });
+
+    // ------------------------------------------------------------------
+    // 0x43 sport detail paging validation.
+    // ------------------------------------------------------------------
+
+    test('0x43 sport detail defers totals until final page arrives '
+        '(regression for partial paged response)', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final sync = _testSync(t, d);
+      final syncFuture = sync.syncAll(daysBack: 1);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      // Page 0 of 2: steps=100, distance=50. Not final page — totals
+      // must NOT be written yet.
+      t.inA.add(
+        Codec.buildChannelA(OpA.readDetailSport, [
+          0x26, // year BCD
+          0x06, // month BCD
+          0x21, // day BCD
+          0x00, // slot << 2
+          0x00, // page = 0
+          0x02, // total = 2
+          0x00,
+          0x0A, // duration = 10
+          0x64,
+          0x00, // steps = 100
+          0x32,
+          0x00, // distance = 50
+        ]),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+
+      final today = DateOnly.today();
+      final historyBefore = sync.dayOf(today);
+      // Totals should not exist yet because page 0 < total-1.
+      expect(
+        historyBefore == null || historyBefore.steps == null,
+        isTrue,
+        reason: 'partial page must not write totals',
+      );
+
+      // Page 1 of 2 (final): steps=200, distance=80.
+      t.inA.add(
+        Codec.buildChannelA(OpA.readDetailSport, [
+          0x26,
+          0x06,
+          0x21,
+          0x04, // slot << 2 (next slot)
+          0x01, // page = 1 (final)
+          0x02, // total = 2
+          0x00,
+          0x14, // duration = 20
+          0xC8,
+          0x00, // steps = 200
+          0x50,
+          0x00, // distance = 80
+        ]),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      await syncFuture;
+
+      final historyAfter = sync.dayOf(today);
+      expect(historyAfter, isNotNull);
+      // After final page, accumulated totals = 100 + 200 = 300 steps,
+      // 50 + 80 = 130 distance.
+      expect(historyAfter!.steps, 300);
+      expect(historyAfter.distanceMeters, 130);
+
+      sync.dispose();
+      d.dispose();
+    });
+
+    test('0x43 sport detail single-page response (page==total-1) writes '
+        'totals immediately', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final sync = _testSync(t, d);
+      final syncFuture = sync.syncAll(daysBack: 1);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      // Single page: page=0, total=1 → final page, totals write immediately.
+      t.inA.add(
+        Codec.buildChannelA(OpA.readDetailSport, [
+          0x26,
+          0x06,
+          0x21,
+          0x00,
+          0x00, // page = 0
+          0x01, // total = 1
+          0x00,
+          0x0A,
+          0x2B,
+          0x01, // steps = 299
+          0x5E,
+          0x01, // distance = 350
+        ]),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      await syncFuture;
+
+      final today = DateOnly.today();
+      final history = sync.dayOf(today);
+      expect(history, isNotNull);
+      expect(history!.steps, 299);
+      expect(history.distanceMeters, 350);
 
       sync.dispose();
       d.dispose();

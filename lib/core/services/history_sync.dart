@@ -455,6 +455,7 @@ class HistorySync extends ChangeNotifier {
     _activity.clear();
     _availableDays.clear();
     _sportDetailTotals.clear();
+    _sportDetailPageState.clear();
     _watchDaysWithData.clear();
     _fetchedDays.clear();
     _hrChunks.clear();
@@ -694,6 +695,15 @@ class HistorySync extends ChangeNotifier {
       // only when a replacement response is actually decoded; a
       // missed or malformed reply must not erase the user's
       // previously-stored night.
+      //
+      // NOTE: per GHIDRA_DECOMPILATION.md §2.3, the firmware handler
+      // `channel_b_send_sleep_records` (0x0082fada) **always** emits
+      // both `0x3E` (nap) and `0x27` (night) responses in a single
+      // call regardless of `recordType`. The `param_2` only affects
+      // which pass reads from storage first. Therefore, sending only
+      // `0x27` suffices to get both night and lunch/nap data; a
+      // separate `0x3e` send would be redundant and cause duplicate
+      // responses (absorbed by ChannelBParser dedup, but wasted).
       if (_bParser != null) {
         final sleepToFetch = _daysToFetch(
           wantsDays,
@@ -706,7 +716,6 @@ class HistorySync extends ChangeNotifier {
           final day = todayD.addDays(-d);
           _currentSyncDay = day;
           await transport.sendB(Commands.readSleepNewProtocol(dayOffset: d));
-          await transport.sendB(Commands.readSleepLunchProtocol(dayOffset: d));
           await _drainRx(drainDuration);
           await Future<void>.delayed(postCommandDelay);
           _currentSyncDay = null;
@@ -938,138 +947,47 @@ class HistorySync extends ChangeNotifier {
     // with the target day so flame graphs show which day is slow.
     final span = OpenTelemetryService().startChildSpan(
       'sync.history.flush_hr',
-      attributes: {'sync.day.iso': day?.iso ?? '', 'sync.hr_samples': 0},
+      attributes: {'sync.day.iso': day?.iso ?? ''},
     );
     try {
-      // Stitch the 13-byte chunks into a flat record, then walk 5-min
-      // BPM slots. 288 slots * 1 byte (BPM) = 288 bytes. Per
-      // GHIDRA §3.12 and verified on H59MA_1.00.13_251230, only chunk 1
-      // begins with the 4-byte echoed request timestamp; chunks 2+ carry
-      // 13 pure BPM bytes. We therefore concatenate every chunk first,
-      // then drop the single 4-byte header at the start of the assembled
-      // record. 0xFF is no sample.
-      //
-      // We DO NOT use the echoed 4-byte prefix as a date — its unit
-      // (seconds vs ms) and timezone are not documented and vary across
-      // firmware builds, so trusting it as UTC has historically
-      // produced "samples in the future" near midnight. Anchor every
-      // sample on the day we asked for (HS-8) and bound the slot
-      // index so off-the-end bytes cannot spill past 23:55.
-      final builder = BytesBuilder();
-      for (final c in _hrChunks) {
-        builder.add(c.sublist(0, c.length < 13 ? c.length : 13));
-      }
-      final assembled = builder.toBytes();
-      final sampleBytes = assembled.length >= 4
-          ? Uint8List.fromList(assembled.sublist(4))
-          : assembled;
-      if (sampleBytes.length < 2) {
-        _hrChunks.clear();
-        _hrExpectedChunks = null;
-        return;
-      }
-      // No header → drop the record. (The HS-8 fix already captures
-      // the day at header-arrival time, so reaching here with no
-      // day means the header was lost; trusting the echoed u32 as
-      // a fallback has caused cross-day pollution in the wild.)
+      // No header → drop the record. The header handler captures the
+      // day at arrival time (HS-8); reaching here with no day means the
+      // header was lost, and trusting the echoed u32 as a fallback has
+      // caused cross-day pollution in the wild.
       final resolvedDay = day;
       if (resolvedDay == null) {
         _hrChunks.clear();
         _hrExpectedChunks = null;
         return;
       }
-      final dayStart = resolvedDay.midnight;
-      final now = _clock();
-
-      // Best-effort watch-vs-phone clock offset, derived from the
-      // record itself: find the highest slot index with a plausible
-      // BPM and assume it was sampled "just now" in the watch's clock.
-      // The watch never echoes its RTC over BLE (the `0x01` setTime ACK
-      // is a fixed capability shape per §3.4, not a time echo), so this
-      // is the only signal we have. When the gap is unreasonable
-      // (watch not worn → no recent sample, or the data is from a stale
-      // day) we fall back to a zero offset and keep the dayStart anchor.
-      var watchOffsetMinutes = 0;
-      var lastValidIdx = -1;
-      for (var j = sampleBytes.length - 1; j >= 0; j--) {
-        if (j >= 288) continue;
-        final bpm = sampleBytes[j];
-        if (bpm >= 30 && bpm <= 240) {
-          lastValidIdx = j;
-          break;
-        }
+      // Per GHIDRA §3.12 + verified on H59MA_1.00.13_251230, only chunk 1
+      // carries the 4-byte echoed request timestamp; chunks 2+ are 13
+      // pure BPM bytes. Concatenate every chunk, then drop the single
+      // 4-byte record header. Each remaining byte is one 5-min slot
+      // anchored at the requested day's midnight (PROTOCOL.md §4.3).
+      final builder = BytesBuilder();
+      for (final c in _hrChunks) {
+        builder.add(c.sublist(0, c.length < 13 ? c.length : 13));
       }
-      if (lastValidIdx >= 0) {
-        final phoneMinOfDay = now.hour * 60 + now.minute;
-        final watchMinOfDay = lastValidIdx * 5;
-        var delta = watchMinOfDay - phoneMinOfDay;
-        // Normalise into [-12h, +12h] so a "23:55 watch, 00:05 phone"
-        // pair maps to -10 min rather than +1430 min.
-        if (delta > 12 * 60) delta -= 24 * 60;
-        if (delta < -12 * 60) delta += 24 * 60;
-        // Cap at 4 h — anything bigger means the watch probably wasn't
-        // being worn when the record was captured, and shifting by a
-        // half-day would silently mis-attribute every sample.
-        if (delta.abs() <= 4 * 60) {
-          watchOffsetMinutes = delta;
-        }
-      }
-      if (watchOffsetMinutes != 0) {
-        span?.setAttribute('sync.watch_offset_minutes', watchOffsetMinutes);
-        AppLog.instance.debug(
-          'history',
-          'watch clock offset inferred: '
-              '${watchOffsetMinutes >= 0 ? '+' : ''}$watchOffsetMinutes min '
-              '(last valid HR slot $lastValidIdx, '
-              'phone-now ${_formatClock(now)})',
-        );
-      }
-
-      final samples = <HrSample>[];
-      var droppedFuture = 0;
-      // 288 × 5-min slots = 24h; bound the slot index so any trailing
-      // padding bytes from the firmware cannot create samples past
-      // 23:55 on the target day.
-      for (var i = 0; i < sampleBytes.length && i < 288; i++) {
-        final bpm = sampleBytes[i];
-        if (bpm == 0xff || bpm == 0x00) continue;
-        if (bpm < 30 || bpm > 240) continue;
-        // Watch stores samples at its own minute-of-day. Subtract the
-        // inferred drift so the timestamp lands on wall-clock at the
-        // moment the watch actually recorded the BPM (rather than on
-        // the watch's clock reading, which may have drifted ahead).
-        final slotTimestamp = dayStart.add(_hrSlotDuration * i);
-        final timestamp = slotTimestamp.subtract(
-          Duration(minutes: watchOffsetMinutes),
-        );
-        if (timestamp.isAfter(now)) {
-          // Watch still has not caught up to phone clock at this slot.
-          // Silently drop — the watch will resync these on the next
-          // pass once its RTC catches up. We deliberately do NOT throw
-          // here: the watch's RTC legitimately drifts faster than the
-          // host's on cheap crystals, and aborting the entire sync
-          // because a handful of trailing samples cannot yet be
-          // attributed is the wrong call (HS-9).
-          droppedFuture++;
-          continue;
-        }
-        samples.add(HrSample(timestamp, bpm));
-      }
+      final assembled = builder.toBytes();
       _hrChunks.clear();
       _hrExpectedChunks = null;
-      if (droppedFuture > 0) {
-        span?.setAttribute('sync.hr_dropped_future', droppedFuture);
-        AppLog.instance.debug(
-          'history',
-          'dropped $droppedFuture HR slot(s) still in the watch\'s '
-              'future (offset=${watchOffsetMinutes}m, '
-              'lastValid=$lastValidIdx)',
-        );
-      }
+      final sampleBytes = assembled.length >= 4
+          ? Uint8List.fromList(assembled.sublist(4))
+          : assembled;
+      if (sampleBytes.length < 2) return;
+
+      final slots = _decodeFixedSlots(
+        sampleBytes,
+        day: resolvedDay,
+        slotDuration: _hrSlotDuration,
+        maxSlots: 288,
+        keep: (v) => v != 0x00 && v != 0xff && v >= 30 && v <= 240,
+      );
+      final samples = [for (final s in slots) HrSample(s.timestamp, s.value)];
       final previous = _days[resolvedDay] ?? DailyHistory(day: resolvedDay);
       final mergedByTs = <int, HrSample>{
-        for (final h in previous.hr)
-          if (!h.timestamp.isAfter(now)) h.timestamp.millisecondsSinceEpoch: h,
+        for (final h in previous.hr) h.timestamp.millisecondsSinceEpoch: h,
         for (final h in samples) h.timestamp.millisecondsSinceEpoch: h,
       };
       final mergedHr = mergedByTs.values.toList()
@@ -1090,10 +1008,43 @@ class HistorySync extends ChangeNotifier {
       span?.end(ok: false);
       rethrow;
     } finally {
-      // The wrapper short-circuits when the span is already ended, so
-      // this also covers the early-return-on-rec.length<5 path.
       span?.end();
     }
+  }
+
+  /// Decode a fixed-slot byte series (HR / stress / HRV) anchored at
+  /// [day].midnight per PROTOCOL.md §4.3/§3.20/§3.21.
+  ///
+  /// Slot `i` occupies `day.midnight + slotDuration*i`, for up to
+  /// [maxSlots] slots. Bytes for which [keep] returns false (sentinels
+  /// like `0x00`/`0xff` or implausible values) are skipped, as is any
+  /// slot whose anchor is still in the future — the watch cannot have
+  /// measured a sample for a time it has not reached yet, so dropping
+  /// it is a completeness ceiling, not a reinterpretation of the data.
+  ///
+  /// The watch never echoes its RTC (the `0x01` setTime ACK is a fixed
+  /// capability shape per §3.4), so we do NOT infer a clock offset or
+  /// shift timestamps — each sample is stored at exactly the wall-clock
+  /// its slot index denotes. Display-side "now" clipping already lives
+  /// in the chart widgets and the debug export.
+  List<({DateTime timestamp, int value})> _decodeFixedSlots(
+    Uint8List bytes, {
+    required DateOnly day,
+    required Duration slotDuration,
+    required int maxSlots,
+    required bool Function(int) keep,
+  }) {
+    final now = _clock();
+    final dayStart = day.midnight;
+    final out = <({DateTime timestamp, int value})>[];
+    for (var i = 0; i < bytes.length && i < maxSlots; i++) {
+      final v = bytes[i] & 0xff;
+      if (!keep(v)) continue;
+      final ts = dayStart.add(slotDuration * i);
+      if (ts.isAfter(now)) continue;
+      out.add((timestamp: ts, value: v));
+    }
+    return out;
   }
 
   /// Persist the currently-attributed day as an empty HR record. Called
@@ -1172,68 +1123,21 @@ class HistorySync extends ChangeNotifier {
     Uint8List body,
     DateOnly day,
   ) {
-    // H59MA v14 fragments 49 bytes: a slot-id echo followed by 48
-    // half-hour samples. Existing reassembly preserves the first four bytes
-    // as `header`, so rejoin and skip the echo byte here.
+    // GHIDRA §3.20/§3.21: the reassembled record is 49 bytes — a 1-byte
+    // slot-id echo followed by 48 half-hour samples. Drop the echo and
+    // anchor each remaining byte at day.midnight + i*30min.
     final raw = Uint8List.fromList([...header, ...body]);
     if (raw.length < 2) return const [];
-    final samples = <HealthMetricSample>[];
-    final now = _clock();
-
-    // Best-effort watch-vs-phone clock offset, derived from the record
-    // itself: find the highest slot index with a plausible sample and
-    // assume it was captured "just now" in the watch's clock. Same
-    // heuristic as _flushHrChunks — the 0x01 setTime ACK is a fixed
-    // capability shape (§3.4) so the watch never echoes its RTC, and
-    // this is the only signal we have. Cap at 4 h so a half-day drift
-    // does not silently mis-attribute every sample.
-    var watchOffsetMinutes = 0;
-    var lastValidIdx = -1;
-    final rawSampleBytes = raw.skip(1).take(48).toList();
-    for (var j = rawSampleBytes.length - 1; j >= 0; j--) {
-      final v = rawSampleBytes[j] & 0xff;
-      if (v != 0 && v != 0xff) {
-        lastValidIdx = j;
-        break;
-      }
-    }
-    if (lastValidIdx >= 0) {
-      final phoneMinOfDay = now.hour * 60 + now.minute;
-      final watchMinOfDay = lastValidIdx * 30;
-      var delta = watchMinOfDay - phoneMinOfDay;
-      if (delta > 12 * 60) delta -= 24 * 60;
-      if (delta < -12 * 60) delta += 24 * 60;
-      if (delta.abs() <= 4 * 60) {
-        watchOffsetMinutes = delta;
-      }
-    }
-
-    for (var i = 0; i < rawSampleBytes.length; i++) {
-      final value = rawSampleBytes[i] & 0xff;
-      if (value == 0 || value == 0xff) continue;
-      // Watch stores samples at its own minute-of-day. Subtract the
-      // inferred drift so the timestamp lands on wall-clock at the
-      // moment the watch actually recorded the sample.
-      final slotTimestamp = day.midnight.add(Duration(minutes: i * 30));
-      final timestamp = slotTimestamp.subtract(
-        Duration(minutes: watchOffsetMinutes),
-      );
-      if (timestamp.isAfter(now)) {
-        // Silently drop — the watch will resync these on the next pass
-        // once its RTC catches up. We deliberately do NOT return empty
-        // here: throwing the entire day's fixed-slot data because a
-        // handful of trailing samples can't be attributed is the wrong
-        // call (matches HS-9 for the HR path).
-        continue;
-      }
-      samples.add(HealthMetricSample(timestamp, value));
-    }
-    return samples;
+    final sampleBytes = Uint8List.fromList(raw.skip(1).take(48).toList());
+    final slots = _decodeFixedSlots(
+      sampleBytes,
+      day: day,
+      slotDuration: const Duration(minutes: 30),
+      maxSlots: 48,
+      keep: (v) => v != 0 && v != 0xff,
+    );
+    return [for (final s in slots) HealthMetricSample(s.timestamp, s.value)];
   }
-
-  static String _formatClock(DateTime time) =>
-      '${time.hour.toString().padLeft(2, '0')}:'
-      '${time.minute.toString().padLeft(2, '0')}';
 
   List<HealthMetricSample> _mergeScalar(
     List<HealthMetricSample> existing,
@@ -1355,6 +1259,12 @@ class HistorySync extends ChangeNotifier {
     );
   }
 
+  /// Tracks the last seen page/total per day for `0x43` sport-detail
+  /// paged responses. Key = [DateOnly] day; value = (page, total).
+  /// Totals are only finalized when the last page (`page == total - 1`)
+  /// arrives, per PROTOCOL.md §4.4.
+  final Map<DateOnly, ({int page, int total})> _sportDetailPageState = {};
+
   void _decodeSportDetailTotals(Uint8List pl) {
     if (pl.length < 12) return;
     if (pl[0] == 0xf0 || pl[0] == 0xff) return; // header / empty day
@@ -1366,18 +1276,36 @@ class HistorySync extends ChangeNotifier {
       return;
     }
 
+    final page = pl[4];
+    final total = pl[5];
+    if (total == 0) return; // malformed / zero-total guard
+
+    final day = DateOnly(year, month, dayOfMonth);
+    _sportDetailPageState[day] = (page: page, total: total);
+
+    // PROTOCOL.md §4.4: b4=page, b5=total; done when b4==b5-1.
+    // Do not accumulate until the final page arrives — partial
+    // paged responses would write incomplete data to the store.
+    if (page != total - 1) return;
+
     // Live H59MA_V1.0 captures show the detail record body as:
     //   pl[3]    = slot << 2
-    //   pl[4]    = record index
-    //   pl[5]    = header record count
+    //   pl[4]    = record index (page)
+    //   pl[5]    = header record count (total)
     //   pl[6..7] = duration seconds, LE
     //   pl[8..9] = per-slot steps, LE
     //   pl[10..11] = per-slot distance meters, LE
+    //
+    // NOTE: PROTOCOL.md §3.4 says `BLEDataFormatUtils.bytes2Int` is
+    // big-endian, and §4.4 says `0x43` cal/steps/dist uses
+    // "bytes2Int of swapped pairs". However, live H59MA v13/v14
+    // captures show plain LE for steps/dist here, matching the
+    // current decode. This is a documented H59MA-specific deviation
+    // from the generic Oudmon SDK spec.
     final steps = pl[8] | (pl[9] << 8);
     final distance = pl[10] | (pl[11] << 8);
     if (steps == 0 && distance == 0) return;
 
-    final day = DateOnly(year, month, dayOfMonth);
     final previous = _sportDetailTotals[day] ?? const DailyTotals();
     final existingDay = _days[day];
     final totals = DailyTotals(

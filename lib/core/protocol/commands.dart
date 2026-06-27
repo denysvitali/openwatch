@@ -130,28 +130,30 @@ class Commands {
   static Uint8List readTotalSport({int dayOffset = 0}) =>
       Codec.buildChannelA(OpA.readTotalSport, [dayOffset & 0xFF]);
 
-  /// `ReadDetailSport` (`0x43`): per-hour activity detail for one day.
+  /// `ReadDetailSport` (`0x43`): per-segment activity detail for one day.
   ///
-  /// H59MA v14 request layout (GHIDRA §3.6):
+  /// H59MA v14 request layout (PROTOCOL.md §4.4 / GHIDRA §3.6):
   ///   byte 1 = day offset (`0` today, `1` yesterday, ...)
-  ///   byte 2 = reserved
-  ///   byte 3 = start hour (`0..23`)
-  ///   byte 4 = end hour (`0..23`)
-  ///   byte 5 = unit flag (`1` = seconds, `0` = 10-second units)
+  ///   byte 2 = sub-opcode `0x0F` (`ReadDetailSportDataReq`)
+  ///   byte 3 = start segment (`0..0x5F`, 10-minute segments)
+  ///   byte 4 = end segment (`0..0x5F`, ≤ start segment)
+  ///   byte 5 = fixed `0x01`
+  ///
+  /// [startHour] and [endHour] are converted to segment indices
+  /// (`hour * 6`) before being placed on the wire.
   static Uint8List readDetailSport({
     int dayOffset = 0,
     int startHour = 0,
     int endHour = 23,
-    bool oneSecondUnits = true,
   }) {
-    final start = _clamp(startHour, 0, 23);
-    final end = _clamp(endHour, start, 23);
+    final startSeg = _clamp(startHour * 6, 0, 0x5F);
+    final endSeg = _clamp(endHour * 6, startSeg, 0x5F);
     return Codec.buildChannelA(OpA.readDetailSport, [
       dayOffset & 0xFF,
-      0x00,
-      start,
-      end,
-      oneSecondUnits ? 1 : 0,
+      0x0F,
+      startSeg,
+      endSeg,
+      0x01,
     ]);
   }
 
@@ -210,16 +212,17 @@ class Commands {
   ///
   /// The firmware handler `FUN_0082fada` (GHIDRA §2.3) expects a 2-byte
   /// payload: `[dayOffset, recordType]` where `recordType = 0x00` selects the
-  /// night sleep pass.
+  /// night sleep pass. `dayOffset` is clamped to `0..6` per the spec.
   static Uint8List readSleepNewProtocol({int dayOffset = 0}) =>
-      Codec.buildChannelB(OpB.sleepNew, [dayOffset & 0xFF, 0x00]);
+      Codec.buildChannelB(OpB.sleepNew, [_clamp(dayOffset, 0, 6), 0x00]);
 
   /// New sleep protocol lunch/nap variant (Channel-B `0x3e`) for a given
   /// day offset. The firmware handler `FUN_0082fada` (GHIDRA §2.3) expects
   /// a 2-byte payload: `[dayOffset, recordType]` where `recordType = 0x01`
-  /// selects the lunch/nap pass (`param_2 == 1`).
+  /// selects the lunch/nap pass (`param_2 == 1`). `dayOffset` is clamped
+  /// to `0..6` per the spec.
   static Uint8List readSleepLunchProtocol({int dayOffset = 0}) =>
-      Codec.buildChannelB(OpB.sleepLunchNew, [dayOffset & 0xFF, 0x01]);
+      Codec.buildChannelB(OpB.sleepLunchNew, [_clamp(dayOffset, 0, 6), 0x01]);
 
   /// Activity / sport summary (Channel-B `0x2a`) for today through
   /// [dayOffset]. The firmware clamps the offset to `2` and returns
