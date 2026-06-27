@@ -910,6 +910,7 @@ class HistorySync extends ChangeNotifier {
         if (tag == 0x18 || (tag == 0x00 && pl.length >= 3 && pl[1] > 0)) {
           _hrChunks.clear();
           _hrExpectedChunks = tag == 0x00 ? pl[1] - 1 : null;
+          _hrChunk1Received = false;
           // Capture the day the header arrived for; subsequent chunks
           // for this series will flush under that day even if they
           // arrive after _currentSyncDay has moved on (HS-8).
@@ -918,12 +919,14 @@ class HistorySync extends ChangeNotifier {
           _hrChunks.clear();
           _hrExpectedChunks = null;
           _hrChunkDay = null;
+          _hrChunk1Received = false;
           // Persist the (possibly empty) record so the UI shows the
           // day even when the watch has no HR data for it.
           _commitCurrentDayHr(day);
         } else if (tag >= 1 && tag <= 23) {
           if (pl.length >= 1 + 13) {
             _hrChunks.add(Uint8List.fromList(pl.sublist(1, 1 + 13)));
+            if (tag == 1) _hrChunk1Received = true;
             final expected = _hrExpectedChunks;
             if ((expected != null && _hrChunks.length >= expected) ||
                 (expected == null && _hrChunks.length >= tag)) {
@@ -949,6 +952,7 @@ class HistorySync extends ChangeNotifier {
 
   final List<Uint8List> _hrChunks = [];
   int? _hrExpectedChunks;
+  bool _hrChunk1Received = false;
 
   void _flushHrChunks(DateOnly? day) {
     // Spans the assembly + merge step for one day's HR series; tagged
@@ -966,6 +970,7 @@ class HistorySync extends ChangeNotifier {
       if (resolvedDay == null) {
         _hrChunks.clear();
         _hrExpectedChunks = null;
+        _hrChunk1Received = false;
         return;
       }
       // Per GHIDRA §3.12 + verified on H59MA_1.00.13_251230, only chunk 1
@@ -980,9 +985,10 @@ class HistorySync extends ChangeNotifier {
       final assembled = builder.toBytes();
       _hrChunks.clear();
       _hrExpectedChunks = null;
-      final sampleBytes = assembled.length >= 4
+      final sampleBytes = assembled.length >= 4 && _hrChunk1Received
           ? Uint8List.fromList(assembled.sublist(4))
           : assembled;
+      _hrChunk1Received = false;
       if (sampleBytes.length < 2) return;
 
       final slots = _decodeFixedSlots(
