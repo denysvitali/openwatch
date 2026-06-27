@@ -97,8 +97,9 @@ void main() {
         final t = _StubTransport();
         final d = ChannelADispatcher(t);
         d.bind();
+        final bp = ChannelBParser(t);
         final now = DateTime(2026, 6, 23, 23, 59);
-        final sync = _testSync(t, d, clock: () => now);
+        final sync = _testSync(t, d, bParser: bp, clock: () => now);
         final future = sync.syncAll(daysBack: 2);
         await Future<void>.delayed(const Duration(milliseconds: 20));
         await future;
@@ -1113,41 +1114,44 @@ void main() {
     );
 
     test('late Channel-A HR frame is attributed to correct day even when '
-        'sync loop has moved on to sleep/activity (HS-8)', () async {
+        'sync loop has moved on (HS-8)', () async {
       final t = _StubTransport();
       final d = ChannelADispatcher(t);
       d.bind();
-      final sync = _testSync(t, d);
+      final bp = ChannelBParser(t);
+      final sync = _testSync(t, d, bParser: bp);
       final syncFuture = sync.syncAll(daysBack: 2);
 
       // Wait until today's HR poll is active (_currentSyncDay == today).
       // drainDuration is 50 ms, so the first-day window is short.
       await Future<void>.delayed(const Duration(milliseconds: 25));
 
-      // Today: send a header + chunk 1 that will NOT flush yet (seq=2).
+      // Today: send a H59MAX header declaring 2 chunks total, then chunk 1.
+      // The header captures today's day; the chunk does not flush yet because
+      // only one chunk has arrived.
       // Day-start timestamp = 2026-06-19 00:00 UTC = 0x6A34F600 (LE).
       final dayStartBytes = [0x00, 0xF6, 0x34, 0x6A];
-      t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x18, 0x80, 0x05]));
+      t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x00, 0x03, 0x05]));
       t.inA.add(
         Codec.buildChannelA(OpA.readHeartRate, [
-          0x02, // seq=2 (need 2 chunks to flush)
+          0x01, // seq=1 (captures series day; does not flush alone)
           ...dayStartBytes,
           0x60, 0x64, 0x66, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ]),
       );
 
-      // Let today's drain finish and give yesterday's poll time to start
-      // so that _currentSyncDay has moved on.
+      // Let today's drain finish and give the next poll/sleep/activity phase
+      // time to start so that _currentSyncDay has moved on.
       await Future<void>.delayed(const Duration(milliseconds: 85));
 
       // Now inject the SECOND chunk for TODAY, but AFTER the sync loop
-      // has moved _currentSyncDay to yesterday. In the old code this
-      // would be mis-attributed to yesterday because _flushHrChunks read
+      // has moved past today's HR window. In the old code this
+      // would be mis-attributed to the current day because _flushHrChunks read
       // _currentSyncDay at flush time. With HS-8 fix, the series day is
-      // captured when the 0x18 header arrives.
+      // captured when the header arrives.
       t.inA.add(
         Codec.buildChannelA(OpA.readHeartRate, [
-          0x02, // seq=2 (now count >= seq, so flush)
+          0x02, // seq=2 (length >= expected, so flush)
           ...dayStartBytes,
           0x6A, 0x6E, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ]),
@@ -1182,6 +1186,7 @@ void main() {
 
       sync.dispose();
       d.dispose();
+      bp.dispose();
     });
 
     test('0xFF empty-day frame is attributed to correct day when captured '
