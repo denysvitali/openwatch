@@ -117,6 +117,34 @@ void main() {
       },
     );
 
+    test('syncAll ignores concurrent calls while already syncing', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      // Use a long drain so the first syncAll stays in-flight long enough
+      // for us to fire a second one while _syncing is true.
+      final sync = HistorySync(
+        t,
+        (_) {},
+        dispatcher: d,
+        drainDuration: const Duration(milliseconds: 500),
+        postCommandDelay: Duration.zero,
+        fragmentQuietWindow: const Duration(milliseconds: 50),
+      );
+
+      final first = sync.syncAll(daysBack: 1);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      final sentBefore = t.sent.length;
+
+      // Second call must return immediately and not send any frames.
+      await sync.syncAll(daysBack: 1);
+
+      expect(t.sent.length, sentBefore);
+      await first;
+      sync.dispose();
+      d.dispose();
+    });
+
     test('syncAll re-fetches persisted past days with empty HR', () async {
       final t = _StubTransport();
       final d = ChannelADispatcher(t);
@@ -742,6 +770,76 @@ void main() {
         d.dispose();
       },
     );
+
+    test('readHeartRate 0x15 assembles out-of-order chunks and suppresses '
+        'duplicates', () async {
+      final now = DateTime(2026, 6, 24, 12);
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final sync = _testSync(t, d, clock: () => now);
+      final syncFuture = sync.syncAll(daysBack: 1);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      // H59MAX style header: 2 data chunks expected.
+      t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x00, 0x03, 0x05]));
+
+      final dayStartBytes = [0x00, 0xF6, 0x34, 0x6A];
+      final chunk1 = Uint8List.fromList([
+        0x01,
+        ...dayStartBytes,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+      ]);
+      final chunk2 = Uint8List.fromList([
+        0x02,
+        70,
+        71,
+        72,
+        73,
+        74,
+        75,
+        76,
+        77,
+        78,
+        79,
+        80,
+        81,
+        82,
+      ]);
+
+      // Inject chunk 2 first, then a duplicate chunk 2, then chunk 1.
+      t.inA.add(Codec.buildChannelA(OpA.readHeartRate, chunk2));
+      t.inA.add(Codec.buildChannelA(OpA.readHeartRate, chunk2));
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      t.inA.add(Codec.buildChannelA(OpA.readHeartRate, chunk1));
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+
+      final today = DateOnly.fromDateTime(now);
+      final dayHistory = sync.dayOf(today);
+      expect(dayHistory, isNotNull);
+      final bySlot = <int, HrSample>{
+        for (final h in dayHistory!.hr)
+          (h.timestamp.difference(today.midnight).inMinutes ~/ 5): h,
+      };
+
+      // 22 unique slots; duplicates must not inflate the count.
+      expect(bySlot.length, 22);
+      expect(bySlot[0]?.bpm, 61);
+      expect(bySlot[9]?.bpm, 70);
+      expect(bySlot[21]?.bpm, 82);
+
+      await syncFuture;
+      sync.dispose();
+      d.dispose();
+    });
 
     test(
       'readHeartRate 0x15 seq-0 firmware header waits for all chunks',
@@ -1575,8 +1673,8 @@ void main() {
       },
     );
 
-    test('activity summary 0x2a terminator with non-zero padding stops at '
-        'first dayOffset==0 (HS-7)', () async {
+    test('activity summary 0x2a parses dayOffset=0 as a valid today entry '
+        'after yesterday (HS-7)', () async {
       final t = _StubTransport();
       final d = ChannelADispatcher(t);
       final bParser = ChannelBParser(t);
@@ -1585,11 +1683,9 @@ void main() {
       final future = sync.syncAll(daysBack: 1);
       await Future<void>.delayed(const Duration(milliseconds: 20));
 
-      // Build a Channel-B 0x2a payload with two entries:
-      //   entry 1: dayOffset = 1 (yesterday), body has data
-      //   entry 2: dayOffset = 0 (terminator), body has non-zero padding
-      //            (firmware sometimes pads sentinel entries with garbage)
-      //   entry 3: dayOffset = 2 (garbage beyond terminator) — must NOT be read
+      // Firmware emits entries in descending day-offset order.
+      // A dayOffset=0 entry in the middle is today's data, not a
+      // terminator — parsing must continue to the payload end.
       final body1 = List<int>.filled(48, 0x00);
       body1[0] = 0x00;
       body1[1] = 0x00;
@@ -1601,27 +1697,25 @@ void main() {
       body1[10] = 0x00;
       body1[11] = 0x50; // distance = 80
 
-      final body2 = List<int>.filled(48, 0x00);
-      body2[0] = 0xAA; // non-zero padding in sentinel body
-      body2[1] = 0xBB;
-      body2[2] = 0xCC;
-
-      final body3 = List<int>.filled(48, 0x00);
-      body3[0] = 0x00;
-      body3[1] = 0x00;
-      body3[2] = 0xFF; // would be steps = 255 if parsed
+      final body0 = List<int>.filled(48, 0x00);
+      body0[0] = 0x00;
+      body0[1] = 0x00;
+      body0[2] = 0xC8; // steps = 200
+      body0[6] = 0x00;
+      body0[7] = 0x00;
+      body0[8] = 0x64; // calories = 100
+      body0[9] = 0x00;
+      body0[10] = 0x00;
+      body0[11] = 0xA0; // distance = 160
 
       final payload = Uint8List.fromList([
         0x01, ...body1, // yesterday with data
-        0x00, ...body2, // terminator with non-zero padding
-        0x02, ...body3, // garbage beyond terminator
+        0x00, ...body0, // today with data
       ]);
       t.inB.add(Codec.buildChannelB(OpB.activitySummary, payload));
 
       await future;
 
-      // Only yesterday should be recorded; the dayOffset=0 terminator
-      // must stop parsing even though its body is non-zero.
       final yesterday = DateOnly.today().addDays(-1);
       final yestHistory = sync.dayOf(yesterday);
       expect(yestHistory, isNotNull);
@@ -1629,74 +1723,55 @@ void main() {
       expect(yestHistory.energyKcal, 50);
       expect(yestHistory.distanceMeters, 80);
 
-      // The day before yesterday (dayOffset=2) must NOT appear.
-      final twoDaysAgo = DateOnly.today().addDays(-2);
-      final twoDaysAgoHistory = sync.dayOf(twoDaysAgo);
-      expect(
-        twoDaysAgoHistory == null || twoDaysAgoHistory.steps == null,
-        isTrue,
-        reason: 'dayOffset=2 beyond terminator must not be ingested',
-      );
+      final today = DateOnly.today();
+      final todayHistory = sync.dayOf(today);
+      expect(todayHistory, isNotNull);
+      expect(todayHistory!.steps, 200);
+      expect(todayHistory.energyKcal, 100);
+      expect(todayHistory.distanceMeters, 160);
 
       sync.dispose();
       d.dispose();
     });
 
-    test(
-      'activity summary 0x2a all-zero body terminator still stops parsing (HS-7)',
-      () async {
-        final t = _StubTransport();
-        final d = ChannelADispatcher(t);
-        final bParser = ChannelBParser(t);
-        d.bind();
-        final sync = _testSync(t, d, bParser: bParser);
-        final future = sync.syncAll(daysBack: 1);
-        await Future<void>.delayed(const Duration(milliseconds: 20));
+    test('activity summary 0x2a parses all three day offsets in firmware order '
+        '[2, 1, 0] (HS-7)', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      final bParser = ChannelBParser(t);
+      d.bind();
+      final sync = _testSync(t, d, bParser: bParser);
+      final future = sync.syncAll(daysBack: 2);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
 
-        // Build a Channel-B 0x2a payload with two entries:
-        //   entry 1: dayOffset = 1 (yesterday), body has data
-        //   entry 2: dayOffset = 0 (terminator), body all zeros
-        //   entry 3: dayOffset = 2 (garbage beyond terminator) — must NOT be read
-        final body1 = List<int>.filled(48, 0x00);
-        body1[0] = 0x00;
-        body1[1] = 0x00;
-        body1[2] = 0x64; // steps = 100
+      Uint8List body(int steps) {
+        final b = List<int>.filled(48, 0x00);
+        b[0] = 0x00;
+        b[1] = 0x00;
+        b[2] = steps;
+        return Uint8List.fromList(b);
+      }
 
-        final body2 = List<int>.filled(48, 0x00); // all-zero terminator
+      final payload = Uint8List.fromList([
+        0x02, ...body(0x10), // 2 days ago: 16 steps
+        0x01, ...body(0x20), // yesterday: 32 steps
+        0x00, ...body(0x30), // today: 48 steps
+      ]);
+      t.inB.add(Codec.buildChannelB(OpB.activitySummary, payload));
 
-        final body3 = List<int>.filled(48, 0x00);
-        body3[0] = 0x00;
-        body3[1] = 0x00;
-        body3[2] = 0xFF; // would be steps = 255 if parsed
+      await future;
 
-        final payload = Uint8List.fromList([
-          0x01, ...body1, // yesterday with data
-          0x00, ...body2, // all-zero terminator
-          0x02, ...body3, // garbage beyond terminator
-        ]);
-        t.inB.add(Codec.buildChannelB(OpB.activitySummary, payload));
+      final today = DateOnly.today();
+      final yesterday = today.addDays(-1);
+      final twoDaysAgo = today.addDays(-2);
 
-        await future;
+      expect(sync.dayOf(today)?.steps, 0x30);
+      expect(sync.dayOf(yesterday)?.steps, 0x20);
+      expect(sync.dayOf(twoDaysAgo)?.steps, 0x10);
 
-        // Only yesterday should be recorded.
-        final yesterday = DateOnly.today().addDays(-1);
-        final yestHistory = sync.dayOf(yesterday);
-        expect(yestHistory, isNotNull);
-        expect(yestHistory!.steps, 100);
-
-        // The day before yesterday (dayOffset=2) must NOT appear.
-        final twoDaysAgo = DateOnly.today().addDays(-2);
-        final twoDaysAgoHistory = sync.dayOf(twoDaysAgo);
-        expect(
-          twoDaysAgoHistory == null || twoDaysAgoHistory.steps == null,
-          isTrue,
-          reason: 'dayOffset=2 beyond terminator must not be ingested',
-        );
-
-        sync.dispose();
-        d.dispose();
-      },
-    );
+      sync.dispose();
+      d.dispose();
+    });
 
     test(
       'activity summary 0x2a first entry dayOffset=0 is not a terminator (HS-7)',

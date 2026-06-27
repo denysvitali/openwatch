@@ -451,23 +451,6 @@ class HistorySync extends ChangeNotifier {
   /// bitmask is a 32-day window so values above 32 are clamped.
   Future<void> syncAll({int daysBack = 7, bool force = false}) async {
     if (_syncing) return;
-    _syncing = true;
-    lastSyncError = null;
-    _rxQueue.clear();
-    _hr.clear();
-    _sleep.clear();
-    _activity.clear();
-    _availableDays.clear();
-    _sportDetailTotals.clear();
-    _sportDetailPageState.clear();
-    _watchDaysWithData.clear();
-    _fetchedDays.clear();
-    _hrChunks.clear();
-    _hrExpectedChunks = null;
-    _hrChunkDay = null;
-    _progressCurrent = 0;
-    _progressTotal = 0;
-    notifyListeners();
 
     final effectiveDaysBack = daysBack.clamp(1, 32).toInt();
     // Top-level span covering the full sync pass — distribution bitmask,
@@ -481,6 +464,30 @@ class HistorySync extends ChangeNotifier {
     Object? caughtError;
     StackTrace? caughtTrace;
     try {
+      // Move all state-mutating setup inside the try so any throw
+      // (including from [notifyListeners]) is caught and [_syncing] is
+      // always reset in the outer finally. Without this, a disposed
+      // listener throwing during the initial notify would leave
+      // [_syncing] true forever and block every future sync.
+      _syncing = true;
+      lastSyncError = null;
+      _rxQueue.clear();
+      _hr.clear();
+      _sleep.clear();
+      _activity.clear();
+      _availableDays.clear();
+      _sportDetailTotals.clear();
+      _sportDetailPageState.clear();
+      _watchDaysWithData.clear();
+      _fetchedDays.clear();
+      _hrChunks.clear();
+      _hrExpectedChunks = null;
+      _hrChunkDay = null;
+      _hrChunk1Received = false;
+      _progressCurrent = 0;
+      _progressTotal = 0;
+      notifyListeners();
+
       AppLog.instance.info(
         'history',
         'Sync start (last $effectiveDaysBack days, store=${_store != null}, force=$force)',
@@ -505,6 +512,7 @@ class HistorySync extends ChangeNotifier {
       caughtError = e;
       caughtTrace = st;
     } finally {
+      _syncing = false;
       syncSpan?.setAttribute('sync.days_fetched', fetched);
       syncSpan?.setAttribute('sync.days_total', _fetchedDays.length);
       if (caughtError != null) {
@@ -660,54 +668,54 @@ class HistorySync extends ChangeNotifier {
         }
       }
 
-      // Activity summary is the cheap v14 sport-motion probe (Channel-B
-      // `0x2a`, GHIDRA §2.8). It returns entries only for day offsets
-      // 0..2, so older history still relies on HR/sleep until a live
-      // capture confirms another totals source.
-      final activityOffsets = wantsDays.where((d) => d <= 2).toList()..sort();
-      if (activityOffsets.isNotEmpty) {
-        final maxOffset = activityOffsets.fold<int>(
-          0,
-          (max, d) => d > max ? d : max,
-        );
-        await transport.sendB(
-          Commands.readActivitySummary(dayOffset: maxOffset),
-        );
-        await Future<void>.delayed(drainDuration);
-
-        // Pair the summary with the per-hour detail command. The detail
-        // frames are surfaced through ChannelADispatcher.onSportDetail* for
-        // diagnostics and future richer charts; DailyHistory stores only
-        // day totals today.
-        for (final d in activityOffsets) {
-          await transport.sendA(Commands.readDetailSport(dayOffset: d));
-          await _drainRx(drainDuration);
-        }
-      }
-
-      // Sleep for the most recent N days — the new protocol emits
-      // a single day offset per request, so we fire-and-await for
-      // each. Delta sync: a past day we have already ingested sleep
-      // for is skipped; today is always re-fetched because the
-      // watch's "night" response for the wake-up day also carries
-      // sessions that *began* in the previous calendar day (the
-      // HS-3 rationale for re-polling past days no longer holds —
-      // the watch's own per-day responses are immutable, so a
-      // second pull can only return the same segments the merge
-      // would have already deduplicated). Sleep buckets are cleared
-      // only when a replacement response is actually decoded; a
-      // missed or malformed reply must not erase the user's
-      // previously-stored night.
-      //
-      // NOTE: per GHIDRA_DECOMPILATION.md §2.3, the firmware handler
-      // `channel_b_send_sleep_records` (0x0082fada) **always** emits
-      // both `0x3E` (nap) and `0x27` (night) responses in a single
-      // call regardless of `recordType`. The `param_2` only affects
-      // which pass reads from storage first. Therefore, sending only
-      // `0x27` suffices to get both night and lunch/nap data; a
-      // separate `0x3e` send would be redundant and cause duplicate
-      // responses (absorbed by ChannelBParser dedup, but wasted).
       if (_bParser != null) {
+        // Activity summary is the cheap v14 sport-motion probe (Channel-B
+        // `0x2a`, GHIDRA §2.8). It returns entries only for day offsets
+        // 0..2, so older history still relies on HR/sleep until a live
+        // capture confirms another totals source.
+        final activityOffsets = wantsDays.where((d) => d <= 2).toList()..sort();
+        if (activityOffsets.isNotEmpty) {
+          final maxOffset = activityOffsets.fold<int>(
+            0,
+            (max, d) => d > max ? d : max,
+          );
+          await transport.sendB(
+            Commands.readActivitySummary(dayOffset: maxOffset),
+          );
+          await Future<void>.delayed(drainDuration);
+
+          // Pair the summary with the per-hour detail command. The detail
+          // frames are surfaced through ChannelADispatcher.onSportDetail* for
+          // diagnostics and future richer charts; DailyHistory stores only
+          // day totals today.
+          for (final d in activityOffsets) {
+            await transport.sendA(Commands.readDetailSport(dayOffset: d));
+            await _drainRx(drainDuration);
+          }
+        }
+
+        // Sleep for the most recent N days — the new protocol emits
+        // a single day offset per request, so we fire-and-await for
+        // each. Delta sync: a past day we have already ingested sleep
+        // for is skipped; today is always re-fetched because the
+        // watch's "night" response for the wake-up day also carries
+        // sessions that *began* in the previous calendar day (the
+        // HS-3 rationale for re-polling past days no longer holds —
+        // the watch's own per-day responses are immutable, so a
+        // second pull can only return the same segments the merge
+        // would have already deduplicated). Sleep buckets are cleared
+        // only when a replacement response is actually decoded; a
+        // missed or malformed reply must not erase the user's
+        // previously-stored night.
+        //
+        // NOTE: per GHIDRA_DECOMPILATION.md §2.3, the firmware handler
+        // `channel_b_send_sleep_records` (0x0082fada) **always** emits
+        // both `0x3E` (nap) and `0x27` (night) responses in a single
+        // call regardless of `recordType`. The `param_2` only affects
+        // which pass reads from storage first. Therefore, sending only
+        // `0x27` suffices to get both night and lunch/nap data; a
+        // separate `0x3e` send would be redundant and cause duplicate
+        // responses (absorbed by ChannelBParser dedup, but wasted).
         final sleepToFetch = _daysToFetch(
           wantsDays,
           todayD,
@@ -727,7 +735,7 @@ class HistorySync extends ChangeNotifier {
         AppLog.instance.warn(
           'history',
           'Skipping sleep/activity sync: ChannelBParser is null. '
-              'Sleep data will not be ingested.',
+              'Sleep/activity data will not be ingested.',
         );
       }
 
@@ -925,7 +933,10 @@ class HistorySync extends ChangeNotifier {
           _commitCurrentDayHr(day);
         } else if (tag >= 1 && tag <= 23) {
           if (pl.length >= 1 + 13) {
-            _hrChunks.add(Uint8List.fromList(pl.sublist(1, 1 + 13)));
+            // Store by sequence number so out-of-order chunks and BLE
+            // retries assemble correctly. A duplicate seq overwrites the
+            // previous copy instead of inflating the buffer.
+            _hrChunks[tag] = Uint8List.fromList(pl.sublist(1, 1 + 13));
             if (tag == 1) _hrChunk1Received = true;
             final expected = _hrExpectedChunks;
             if ((expected != null && _hrChunks.length >= expected) ||
@@ -950,7 +961,7 @@ class HistorySync extends ChangeNotifier {
     }
   }
 
-  final List<Uint8List> _hrChunks = [];
+  final Map<int, Uint8List> _hrChunks = {};
   int? _hrExpectedChunks;
   bool _hrChunk1Received = false;
 
@@ -971,6 +982,7 @@ class HistorySync extends ChangeNotifier {
         _hrChunks.clear();
         _hrExpectedChunks = null;
         _hrChunk1Received = false;
+        _hrChunkDay = null;
         return;
       }
       // Per GHIDRA §3.12 + verified on H59MA_1.00.13_251230, only chunk 1
@@ -979,7 +991,9 @@ class HistorySync extends ChangeNotifier {
       // 4-byte record header. Each remaining byte is one 5-min slot
       // anchored at the requested day's midnight (PROTOCOL.md §4.3).
       final builder = BytesBuilder();
-      for (final c in _hrChunks) {
+      final keys = _hrChunks.keys.toList()..sort();
+      for (final k in keys) {
+        final c = _hrChunks[k]!;
         builder.add(c.sublist(0, c.length < 13 ? c.length : 13));
       }
       final assembled = builder.toBytes();
@@ -1211,9 +1225,6 @@ class HistorySync extends ChangeNotifier {
         for (var i = offset + 1; i < offset + 49; i++)
           payload[i] == 0xff ? 0x00 : payload[i],
       ]);
-      if (offset > 0 && dayOffset == 0) {
-        break;
-      }
       if (dayOffset <= 31) {
         final day = today.addDays(-dayOffset);
         final totals = _activityTotalsFromBody(body);
