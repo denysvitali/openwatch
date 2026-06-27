@@ -420,6 +420,10 @@ class HistorySync extends ChangeNotifier {
   /// calling it with a new store re-reads the disk.
   Future<void> bindStore(HistoryStore store) async {
     if (identical(_store, store)) return;
+    if (_syncing) {
+      AppLog.instance.warn('history', 'bindStore deferred: sync in progress');
+      return;
+    }
     _store = store;
     await loadFromStore();
   }
@@ -461,7 +465,6 @@ class HistorySync extends ChangeNotifier {
     _hrChunks.clear();
     _hrExpectedChunks = null;
     _hrChunkDay = null;
-    _days.clear();
     _progressCurrent = 0;
     _progressTotal = 0;
     notifyListeners();
