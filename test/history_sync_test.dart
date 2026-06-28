@@ -47,6 +47,20 @@ Uint8List _channelAErrorFrame(int op, List<int> payload) {
   return f;
 }
 
+void _emitSequencedChannelARecord(
+  _StubTransport transport,
+  int opcode,
+  List<int> record,
+) {
+  var seq = 1;
+  for (var offset = 0; offset < record.length; offset += 13) {
+    final end = offset + 13 < record.length ? offset + 13 : record.length;
+    transport.inA.add(
+      Codec.buildChannelA(opcode, [seq++, ...record.sublist(offset, end)]),
+    );
+  }
+}
+
 HistorySync _testSync(
   _StubTransport t,
   ChannelADispatcher d, {
@@ -411,26 +425,24 @@ void main() {
         sync.hrvRecords.listen(hrv1.add);
         sync.hrvRecords.listen(hrv2.add);
 
-        // Minimal HRV record: header + four 14-byte chunks.
+        // Minimal HRV record: header + four sequenced 13-byte chunks.
         t.inA.add(Codec.buildChannelA(OpA.hrv, [0x00, 0x05, 0x1e]));
-        for (var i = 0; i < 4; i++) {
-          t.inA.add(
-            Codec.buildChannelA(OpA.hrv, List<int>.filled(14, 0x40 + i)),
-          );
-        }
+        _emitSequencedChannelARecord(t, OpA.hrv, [
+          0x00,
+          ...List<int>.filled(48, 0x40),
+        ]);
 
         final pressure1 = <PressureRecord>[];
         final pressure2 = <PressureRecord>[];
         sync.pressureRecords.listen(pressure1.add);
         sync.pressureRecords.listen(pressure2.add);
 
-        // Minimal stress record: header + four 14-byte chunks.
+        // Minimal stress record: header + four sequenced 13-byte chunks.
         t.inA.add(Codec.buildChannelA(OpA.pressure, [0x00, 0x05, 0x1e]));
-        for (var i = 0; i < 4; i++) {
-          t.inA.add(
-            Codec.buildChannelA(OpA.pressure, List<int>.filled(14, 0x50 + i)),
-          );
-        }
+        _emitSequencedChannelARecord(t, OpA.pressure, [
+          0x00,
+          ...List<int>.filled(48, 0x50),
+        ]);
 
         await Future<void>.delayed(const Duration(milliseconds: 400));
 
@@ -1359,13 +1371,8 @@ void main() {
         d.bind();
         final sync = _testSync(t, d);
 
-        final producerHeader = [0xAA, 0xBB, 0xCC, 0xDD];
-        final body = List<int>.generate(45, (i) => 0x10 + i);
-        final all = [...producerHeader, ...body];
-        // Pad the 49-byte payload up to 56 = 4 frames × 14 bytes so
-        // the test assertions don't depend on trailing-zero behaviour.
-        final padded = [...all, ...List<int>.filled(56 - all.length, 0xEE)];
-        const chunkSize = 14;
+        final samples = List<int>.generate(48, (i) => 0x10 + i);
+        final record = [0x00, ...samples];
 
         // Start listening first so no chunk is lost, then await the
         // single assembled record instead of polling a fixed delay.
@@ -1376,17 +1383,13 @@ void main() {
           emits(
             isA<PressureRecord>()
                 .having((r) => r.slotId, 'slotId', 0x00)
-                .having((r) => r.header, 'header', producerHeader)
-                .having((r) => r.body, 'body', [
-                  ...body,
-                  0xEE,
-                  0xEE,
-                  0xEE,
-                  0xEE,
-                  0xEE,
-                  0xEE,
-                  0xEE,
-                ]),
+                .having((r) => r.header, 'header', [
+                  0x00,
+                  samples[0],
+                  samples[1],
+                  samples[2],
+                ])
+                .having((r) => r.body, 'body', samples.sublist(3)),
           ),
         );
 
@@ -1398,14 +1401,7 @@ void main() {
             0x1e, // discriminator
           ]),
         );
-        for (var i = 0; i < 4; i++) {
-          t.inA.add(
-            Codec.buildChannelA(
-              OpA.pressure,
-              padded.sublist(i * chunkSize, (i + 1) * chunkSize),
-            ),
-          );
-        }
+        _emitSequencedChannelARecord(t, OpA.pressure, record);
 
         await expectation;
         sync.dispose();
@@ -1420,41 +1416,27 @@ void main() {
       d.bind();
       final sync = _testSync(t, d);
 
-      final producerHeader = [0x11, 0x22, 0x33, 0x44];
-      final body = List<int>.generate(45, (i) => 0x40 + i);
-      final all = [...producerHeader, ...body];
-      final padded = [...all, ...List<int>.filled(56 - all.length, 0xEE)];
-      const chunkSize = 14;
+      final samples = List<int>.generate(48, (i) => 0x40 + i);
+      final record = [0x00, ...samples];
 
       final expectation = expectLater(
         sync.hrvRecords,
         emits(
           isA<HrvRecord>()
               .having((r) => r.slotId, 'slotId', 0x00)
-              .having((r) => r.header, 'header', producerHeader)
-              .having((r) => r.body, 'body', [
-                ...body,
-                0xEE,
-                0xEE,
-                0xEE,
-                0xEE,
-                0xEE,
-                0xEE,
-                0xEE,
-              ]),
+              .having((r) => r.header, 'header', [
+                0x00,
+                samples[0],
+                samples[1],
+                samples[2],
+              ])
+              .having((r) => r.body, 'body', samples.sublist(3)),
         ),
       );
 
       // Header: pl[2] == 0x1E discriminator, pl[0] = slotId = 0
       t.inA.add(Codec.buildChannelA(OpA.hrv, [0x00, 0x05, 0x1e]));
-      for (var i = 0; i < 4; i++) {
-        t.inA.add(
-          Codec.buildChannelA(
-            OpA.hrv,
-            padded.sublist(i * chunkSize, (i + 1) * chunkSize),
-          ),
-        );
-      }
+      _emitSequencedChannelARecord(t, OpA.hrv, record);
 
       await expectation;
       sync.dispose();
@@ -1473,107 +1455,16 @@ void main() {
 
       // Record #1
       t.inA.add(Codec.buildChannelA(OpA.pressure, [0x00, 0x05, 0x1e]));
-      // 49-byte payload split across 4 frames of 14 subData bytes
-      // (we send 56 total bytes — the test only asserts on the
-      // header slot + first 45 body bytes, so over-padding with
-      // a sentinel is harmless).
-      const rec1 = [
-        0xA1, 0xA2, 0xA3, 0xA4, // producer header
-        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A,
-        0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25,
-        0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F,
-        0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39,
-        0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F, 0x40, 0x41, 0x42,
-        // pad 7 sentinel bytes so 4 × 14 = 56 fits exactly.
-        0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE,
-      ];
-      const chunkSize = 14;
-      for (var i = 0; i < 4; i++) {
-        t.inA.add(
-          Codec.buildChannelA(
-            OpA.pressure,
-            rec1.sublist(i * chunkSize, (i + 1) * chunkSize),
-          ),
-        );
-      }
+      final rec1 = [0x00, ...List<int>.generate(48, (i) => 0x10 + i)];
+      _emitSequencedChannelARecord(t, OpA.pressure, rec1);
       // Wait past the quiet window so #1 fires.
       await Future<void>.delayed(const Duration(milliseconds: 250));
       expect(records, hasLength(1));
 
       // Record #2 — different slotId so we can verify it carried.
       t.inA.add(Codec.buildChannelA(OpA.pressure, [0x01, 0x05, 0x1e]));
-      const rec2 = [
-        0xB1,
-        0xB2,
-        0xB3,
-        0xB4,
-        0x50,
-        0x51,
-        0x52,
-        0x53,
-        0x54,
-        0x55,
-        0x56,
-        0x57,
-        0x58,
-        0x59,
-        0x5A,
-        0x5B,
-        0x5C,
-        0x5D,
-        0x5E,
-        0x5F,
-        0x60,
-        0x61,
-        0x62,
-        0x63,
-        0x64,
-        0x65,
-        0x66,
-        0x67,
-        0x68,
-        0x69,
-        0x6A,
-        0x6B,
-        0x6C,
-        0x6D,
-        0x6E,
-        0x6F,
-        0x70,
-        0x71,
-        0x72,
-        0x73,
-        0x74,
-        0x75,
-        0x76,
-        0x77,
-        0x78,
-        0x79,
-        0x7A,
-        0x7B,
-        0x7C,
-        0x7D,
-        0x7E,
-        0x7F,
-        0x80,
-        0x81,
-        0x82,
-        0xEE,
-        0xEE,
-        0xEE,
-        0xEE,
-        0xEE,
-        0xEE,
-        0xEE,
-      ];
-      for (var i = 0; i < 4; i++) {
-        t.inA.add(
-          Codec.buildChannelA(
-            OpA.pressure,
-            rec2.sublist(i * chunkSize, (i + 1) * chunkSize),
-          ),
-        );
-      }
+      final rec2 = [0x01, ...List<int>.generate(48, (i) => 0x50 + i)];
+      _emitSequencedChannelARecord(t, OpA.pressure, rec2);
       await Future<void>.delayed(const Duration(milliseconds: 250));
       expect(records, hasLength(2));
       expect(records[0].slotId, 0x00);
@@ -1596,19 +1487,16 @@ void main() {
         samples[0] = 21;
         samples[12] = 44;
         samples[47] = 68;
-        final raw = [0x00, ...samples, ...List<int>.filled(7, 0)];
-        const chunkSize = 14;
+        final record = [0x00, ...samples];
 
+        final assembled = expectLater(
+          sync.pressureRecords,
+          emits(isA<PressureRecord>()),
+        );
         t.inA.add(Codec.buildChannelA(OpA.pressure, [0x00, 0x05, 0x1e]));
-        for (var i = 0; i < 4; i++) {
-          t.inA.add(
-            Codec.buildChannelA(
-              OpA.pressure,
-              raw.sublist(i * chunkSize, (i + 1) * chunkSize),
-            ),
-          );
-        }
-        await Future<void>.delayed(const Duration(milliseconds: 80));
+        _emitSequencedChannelARecord(t, OpA.pressure, record);
+        await assembled;
+        await Future<void>.delayed(Duration.zero);
 
         final today = DateOnly.fromDateTime(now);
         final history = sync.dayOf(today);

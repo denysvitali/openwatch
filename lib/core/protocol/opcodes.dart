@@ -56,14 +56,14 @@ class OpA {
   static const int bpData = 0x0d;
 
   /// `HRVReq` (0x39): uses the shared FUN_0082c988 13-byte-chunk
-  /// fragmenter per GHIDRA section 3.21. The 49-byte record equals
-  /// 4 chunks (1 header + 3 body chunks).
+  /// fragmenter per GHIDRA section 3.21. The 49-byte record is sent
+  /// after the header as 4 sequenced payload frames.
   static const int hrv = 0x39;
   static const int hrvSetting = 0x38;
 
   /// `PressureReq` (0x37): uses the shared FUN_0082c988 13-byte-chunk
-  /// fragmenter per GHIDRA section 3.20. The 49-byte record equals
-  /// 4 chunks (1 header + 3 body chunks).
+  /// fragmenter per GHIDRA section 3.20. The 49-byte record is sent
+  /// after the header as 4 sequenced payload frames.
   static const int pressure = 0x37;
   static const int pressureSetting = 0x36;
 

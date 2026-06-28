@@ -53,12 +53,11 @@ class BloodPressureSample {
 /// An assembled `0x37` stress-history record (GHIDRA §3.20).
 ///
 /// The firmware fragments each `FUN_008344fe` read into a single
-/// header frame + four 13-byte payload chunks via `FUN_0082c988`.
-/// [FragmentReassembler] collects the chunks and we surface the
-/// raw 4-byte producer header + up-to-48-byte body. The exact
-/// 4-byte header shape is not documented in the RE — structured
-/// decode is a follow-up; for now callers should treat [header]
-/// as opaque.
+/// header frame + four sequenced payload frames via `FUN_0082c988`.
+/// [FragmentReassembler] collects the 49-byte record payload:
+/// one slot-id echo followed by 48 half-hour samples. [header]
+/// preserves the first four bytes of that payload for existing
+/// consumers; [body] carries the remaining 45 sample bytes.
 @immutable
 class PressureRecord {
   const PressureRecord({
@@ -71,11 +70,11 @@ class PressureRecord {
   /// yesterday = 1, ...). See GHIDRA §3.20.
   final int slotId;
 
-  /// First 4 bytes of the assembled payload — the producer header
-  /// (`FUN_008344fe` writes `*r` into `out[0..3]`).
+  /// First 4 bytes of the assembled payload: slot-id echo plus the first
+  /// three sample bytes.
   final Uint8List header;
 
-  /// Remaining bytes (up to 48) — the null-terminated body.
+  /// Remaining 45 sample bytes from the fixed 49-byte record.
   final Uint8List body;
 }
 
@@ -96,10 +95,11 @@ class HrvRecord {
   /// yesterday = 1, ...). See GHIDRA §3.21.
   final int slotId;
 
-  /// First 4 bytes of the assembled payload — the producer header.
+  /// First 4 bytes of the assembled payload: slot-id echo plus the first
+  /// three sample bytes.
   final Uint8List header;
 
-  /// Remaining bytes (up to 48) — the null-terminated body.
+  /// Remaining 45 sample bytes from the fixed 49-byte record.
   final Uint8List body;
 }
 
@@ -247,6 +247,8 @@ class HistorySync extends ChangeNotifier {
   StreamSubscription<PressureRecord>? _pressureRecordsSub;
   StreamSubscription<HrvRecord>? _hrvRecordsSub;
   static const _hrSlotDuration = Duration(minutes: 5);
+  static const _fixedMetricRecordLength = 49;
+  static const _fixedMetricRecordPrefixLength = 4;
 
   /// Broadcast stream of assembled
   /// `0x37` stress history records. Wires [FragmentReassembler]
@@ -274,19 +276,7 @@ class HistorySync extends ChangeNotifier {
         >(
           headers: dispatcher.onPressureSettingHeader,
           chunks: dispatcher.onPressureSettingChunk,
-          build: (header, payload) => PressureRecord(
-            slotId: header.slotId,
-            header: Uint8List.sublistView(
-              payload,
-              0,
-              payload.length < 4 ? payload.length : 4,
-            ),
-            body: Uint8List.sublistView(
-              payload,
-              payload.length < 4 ? payload.length : 4,
-              payload.length,
-            ),
-          ),
+          build: _buildPressureRecord,
           quietWindow: fragmentQuietWindow,
         );
     _pressureReassembler = reassembler;
@@ -307,19 +297,7 @@ class HistorySync extends ChangeNotifier {
         FragmentReassembler<HrvSettingHeader, HrvSettingChunk, HrvRecord>(
           headers: dispatcher.onHrvHeader,
           chunks: dispatcher.onHrvChunk,
-          build: (header, payload) => HrvRecord(
-            slotId: header.slotId,
-            header: Uint8List.sublistView(
-              payload,
-              0,
-              payload.length < 4 ? payload.length : 4,
-            ),
-            body: Uint8List.sublistView(
-              payload,
-              payload.length < 4 ? payload.length : 4,
-              payload.length,
-            ),
-          ),
+          build: _buildHrvRecord,
           quietWindow: fragmentQuietWindow,
         );
     _hrvReassembler = reassembler;
@@ -330,6 +308,38 @@ class HistorySync extends ChangeNotifier {
     if (_dispatcher == null) return;
     _pressureRecordsSub ??= pressureRecords.listen(_onStressRecord);
     _hrvRecordsSub ??= hrvRecords.listen(_onHrvRecord);
+  }
+
+  static Uint8List _fixedMetricRecordPayload(Uint8List payload) {
+    if (payload.length <= _fixedMetricRecordLength) return payload;
+    return Uint8List.sublistView(payload, 0, _fixedMetricRecordLength);
+  }
+
+  static PressureRecord _buildPressureRecord(
+    PressureSettingHeader header,
+    Uint8List payload,
+  ) {
+    final fixed = _fixedMetricRecordPayload(payload);
+    final split = fixed.length < _fixedMetricRecordPrefixLength
+        ? fixed.length
+        : _fixedMetricRecordPrefixLength;
+    return PressureRecord(
+      slotId: header.slotId,
+      header: Uint8List.sublistView(fixed, 0, split),
+      body: Uint8List.sublistView(fixed, split, fixed.length),
+    );
+  }
+
+  static HrvRecord _buildHrvRecord(HrvSettingHeader header, Uint8List payload) {
+    final fixed = _fixedMetricRecordPayload(payload);
+    final split = fixed.length < _fixedMetricRecordPrefixLength
+        ? fixed.length
+        : _fixedMetricRecordPrefixLength;
+    return HrvRecord(
+      slotId: header.slotId,
+      header: Uint8List.sublistView(fixed, 0, split),
+      body: Uint8List.sublistView(fixed, split, fixed.length),
+    );
   }
 
   List<HrSample> get hr => List.unmodifiable(_hr);

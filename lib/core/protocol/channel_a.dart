@@ -111,10 +111,10 @@ class ChannelADispatcher {
   /// Per `GHIDRA_DECOMPILATION.md` §3.20 the read response is a
   /// two-phase fragmenter pattern: a single 16-byte header frame
   /// (the literal dword `0x1E050037` little-endian → `pl[3] == 0x1E`)
-  /// followed by up to four 13-byte-chunk payload frames via the
-  /// shared `FUN_0082c988`. The `slot_id` (today vs yesterday) is
-  /// echoed at `payload[0]`. See the RE for the 49-byte record
-  /// layout (4-byte header + 45-byte body).
+  /// followed by four sequenced payload frames via the shared
+  /// `FUN_0082c988`. The `slot_id` (today vs yesterday) is echoed
+  /// at `payload[0]`. See the RE for the 49-byte record layout
+  /// (`slotId + 48 half-hour samples`).
   Stream<PressureSettingHeader> get onPressureSettingHeader =>
       _pressureSettingHeader.stream;
 
@@ -134,8 +134,8 @@ class ChannelADispatcher {
   /// Per `GHIDRA_DECOMPILATION.md` §3.21 the read response is a
   /// two-phase fragmenter pattern: a single 16-byte header frame
   /// (the literal dword `0x1E050039` little-endian → `pl[2] == 0x1E`)
-  /// followed by up to four 13-byte-chunk payload frames via the
-  /// shared `FUN_0082c988`. **Note**: the 0x1E feature id is the
+  /// followed by four sequenced payload frames via the shared
+  /// `FUN_0082c988`. **Note**: the 0x1E feature id is the
   /// same as `0x37 pressure` — disambiguate by cmd byte
   /// (`OpA.hrv` 0x39 vs `OpA.pressure` 0x37).
   Stream<HrvSettingHeader> get onHrvHeader => _hrvHeader.stream;
@@ -143,8 +143,8 @@ class ChannelADispatcher {
   /// HRV config (`0x39`) — payload chunk after the header.
   ///
   /// See [onHrvHeader] for the full two-phase flow. Each chunk
-  /// carries up to 13 payload bytes of the 49-byte HRV record
-  /// (4-byte header + 45-byte body per `FUN_0083468e`).
+  /// carries up to 13 bytes of the 49-byte HRV record
+  /// (`slotId + 48 half-hour samples`).
   Stream<HrvSettingChunk> get onHrvChunk => _hrvChunk.stream;
 
   /// Sugar/lipids setting (`0x3a`).
@@ -539,12 +539,13 @@ class ChannelADispatcher {
   ///
   /// Per `GHIDRA_DECOMPILATION.md` §3.20 the response is identical
   /// in shape to the `0x7a muslim` handler — a single 16-byte
-  /// header frame followed by up to four 13-byte-chunk payload
-  /// frames via `FUN_0082c988`. The header discriminator is
+  /// header frame followed by four sequenced `FUN_0082c988`
+  /// payload frames. Each payload frame carries `seq + up to 13`
+  /// record bytes. The header discriminator is
   /// `pl[3] == 0x1E` (the feature-bitmap-shape dword `0x1E050037`
   /// little-endian → bytes `0x37, 0x00, 0x05, 0x1E`).
   ///
-  /// The actual 49-byte record (4-byte header + 45-byte body)
+  /// The actual 49-byte record (`slotId + 48 half-hour samples`)
   /// is *not* decoded here — consumers reassemble from the chunks
   /// and apply the producer-side layout from `FUN_008344fe`.
   void _decodePressureSetting(Uint8List pl) {
@@ -564,9 +565,10 @@ class ChannelADispatcher {
   ///
   /// Per `GHIDRA_DECOMPILATION.md` §3.21 the response is
   /// structurally identical to `0x37 stress history` — a single
-  /// 16-byte header frame followed by up to four 13-byte-chunk
-  /// payload frames via `FUN_0082c988`. The header discriminator
-  /// is `pl[2] == 0x1E` (the `0x1E050039` little-endian dword);
+  /// 16-byte header frame followed by four sequenced `FUN_0082c988`
+  /// payload frames. Each payload frame carries `seq + up to 13`
+  /// record bytes. The header discriminator is `pl[2] == 0x1E`
+  /// (the `0x1E050039` little-endian dword);
   /// the *same* 0x1E feature id as `0x37 stress history`, so
   /// the cmd byte is the only reliable route discriminator.
   void _decodeHrv(Uint8List pl) {
@@ -1060,10 +1062,10 @@ class PressureSettingHeader {
 
 /// Payload chunk of a `0x37` stress-history read (frames 2..N
 /// of the two-phase response). Each chunk carries up to 13
-/// payload bytes of the 49-byte pressure record (4-byte header
-/// + 45-byte body per `FUN_008344fe`). There is no end-of-message
-/// marker — consumers reassemble by waiting for a quiet period
-/// after the header.
+/// bytes of the 49-byte pressure record (`slotId + 48 samples`)
+/// after the wire sequence byte is stripped. There is no
+/// end-of-message marker — consumers reassemble by waiting for a
+/// quiet period after the header.
 class PressureSettingChunk {
   const PressureSettingChunk({required this.payload});
   final Uint8List payload;
@@ -1108,11 +1110,10 @@ class HrvSettingHeader {
 }
 
 /// Payload chunk of a `0x39` HRV history read (frames 2..N of
-/// the two-phase response). Each chunk carries up to 13 payload
-/// bytes of the 49-byte HRV record (4-byte header + 45-byte
-/// body per `FUN_0083468e`). There is no end-of-message
-/// marker — consumers reassemble by waiting for a quiet period
-/// after the header.
+/// the two-phase response). Each chunk carries up to 13 bytes of
+/// the 49-byte HRV record (`slotId + 48 samples`) after the wire
+/// sequence byte is stripped. There is no end-of-message marker —
+/// consumers reassemble by waiting for a quiet period after the header.
 class HrvSettingChunk {
   const HrvSettingChunk({required this.payload});
   final Uint8List payload;
