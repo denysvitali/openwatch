@@ -15,8 +15,10 @@ import 'app_log.dart';
 ///
 /// * [serviceName] — `openwatch` (matches happy_flutter's `happy-flutter`)
 /// * [endpoint] — `https://otel.k2.k8s.best`
-/// * Tracing is enabled by default; metrics + logs + auto-log-events stay
-///   off (matches happy_flutter).
+/// * Tracing, metrics, and logs are all enabled by default and shipped
+///   over OTLP/HTTP to the shared collector; auto-log-events stay off
+///   (matches happy_flutter). All three signals reuse the same endpoint
+///   so the collector derives a single service identity.
 ///
 /// A single-threaded "current span" pointer is maintained here because
 /// the OTel package does not ship a `currentContext` helper. Long-running
@@ -32,8 +34,8 @@ class OpenTelemetryService {
   static const String serviceName = 'openwatch';
   static const String endpoint = 'https://otel.k2.k8s.best';
   static const bool tracingEnabledByDefault = true;
-  static const bool metricsEnabled = false;
-  static const bool logsEnabled = false;
+  static const bool metricsEnabled = true;
+  static const bool logsEnabled = true;
   static const bool autoLogEventsEnabled = false;
 
   final NavigatorObserver _routeObserver;
@@ -181,6 +183,28 @@ class OpenTelemetryService {
         spanProcessor: BatchSpanProcessor(
           OtlpHttpSpanExporter(OtlpHttpExporterConfig(endpoint: endpoint)),
         ),
+        // Route metrics + logs over the same OTLP/HTTPS endpoint as
+        // spans. Without an explicit exporter the FlutterOTel default
+        // would pick gRPC for native platforms, which would (a) fork
+        // traffic across two transports and (b) bypass the user-trusted
+        // CA bundle we load in main.dart for the HTTPS collector.
+        // 60s matches the spec-friendly cadence for low-cardinality
+        // UI / sync metrics; the BatchSpanProcessor flushes every 1s but
+        // metric readers aggregate on their own clock.
+        metricReader: metricsEnabled
+            ? PeriodicExportingMetricReader(
+                OtlpHttpMetricExporter(
+                  OtlpHttpMetricExporterConfig(endpoint: endpoint),
+                ),
+                interval: const Duration(seconds: 60),
+                timeout: const Duration(seconds: 30),
+              )
+            : null,
+        logRecordExporter: logsEnabled
+            ? OtlpHttpLogRecordExporter(
+                OtlpHttpLogRecordExporterConfig(endpoint: endpoint),
+              )
+            : null,
         enableMetrics: metricsEnabled,
         enableLogs: logsEnabled,
         enableAutoLogEvents: autoLogEventsEnabled,
