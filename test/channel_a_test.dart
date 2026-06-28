@@ -1172,7 +1172,7 @@ void main() {
       expect(seconds, expected);
     });
 
-    test('readHeartRateHistory ignores time-of-day on the supplied day', () {
+    test('readHeartRateHistory uses the supplied instant epoch unchanged', () {
       final localDayWithTime = DateTime(2026, 6, 20, 23, 45);
       final frame = Commands.readHeartRateHistory(day: localDayWithTime);
       // The supplied instant's epoch is what gets sent; callers should
@@ -1184,20 +1184,16 @@ void main() {
       );
     });
 
-    test(
-      'readHeartRateHistory is timezone-stable across LOCAL midnight inputs',
-      () {
-        // The contract: day.midnight is the LOCAL epoch. DateTime(year,
-        // month, day) is always local, so the encoded index is independent
-        // of the host's current timezone — what matters is that callers
-        // pass a local-midnight instant, not that we coerce one here.
-        final localMidnight = DateTime(2026, 6, 20);
-        final seconds = Codec.readU32le(
-          Commands.readHeartRateHistory(day: localMidnight),
-          1,
-        );
-        expect(seconds, localMidnight.millisecondsSinceEpoch ~/ 1000);
-      },
-    );
+    test('readHeartRateHistory uses local-midnight inputs unchanged', () {
+      // The contract: day.midnight is the LOCAL epoch. DateTime(year,
+      // month, day) is always local; callers pass that instant rather
+      // than asking the command builder to reconstruct a UTC midnight.
+      final localMidnight = DateTime(2026, 6, 20);
+      final seconds = Codec.readU32le(
+        Commands.readHeartRateHistory(day: localMidnight),
+        1,
+      );
+      expect(seconds, localMidnight.millisecondsSinceEpoch ~/ 1000);
+    });
   });
 }

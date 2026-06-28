@@ -1133,19 +1133,14 @@ void main() {
       },
     );
 
-    test('syncAll sends UTC day-start seconds for 0x15 HR history', () async {
+    test('syncAll sends local day-start seconds for 0x15 HR history', () async {
       final t = _StubTransport();
       final d = ChannelADispatcher(t);
       d.bind();
-      final sync = _testSync(t, d);
-      final today = DateTime.now();
-      final expectedSeconds =
-          DateTime.utc(
-            today.year,
-            today.month,
-            today.day,
-          ).millisecondsSinceEpoch ~/
-          1000;
+      final now = DateTime(2026, 6, 23, 12, 34);
+      final sync = _testSync(t, d, clock: () => now);
+      final today = DateOnly.fromDateTime(now);
+      final expectedSeconds = today.midnight.millisecondsSinceEpoch ~/ 1000;
       final future = sync.syncAll();
       // syncAll no longer sends 0x46 — it blind-polls day 0 directly.
       await Future<void>.delayed(const Duration(milliseconds: 20));
@@ -1159,8 +1154,8 @@ void main() {
         Codec.readU32le(sent, 1),
         expectedSeconds,
         reason:
-            '0x15 subData must be UTC day-start seconds; H59MAX replies '
-            '0xff to packed BCD date bytes such as 26 06 21 00',
+            '0x15 subData must be local-midnight epoch seconds; H59MAX '
+            'replies 0xff to packed BCD date bytes such as 26 06 21 00',
       );
       await Future<void>.delayed(const Duration(milliseconds: 1200));
       await future;

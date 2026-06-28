@@ -567,10 +567,12 @@ class HistorySync extends ChangeNotifier {
             'bounded blind-poll of last $effectiveDaysBack day(s)',
       );
 
-      // The watch expects a UTC day-start timestamp for 0x15 HR history.
+      // The watch expects epoch seconds for 0x15 HR history. Because
+      // setTime() writes the host's local BCD clock into the watch, per-day
+      // HR lookups use local-midnight epoch seconds, not a UTC day rebuild.
       // Live H59MAX firmware replies 0xff to packed BCD dates such as
-      // `26 06 21 00`; `Commands.readHeartRateHistory` converts the
-      // DateOnly-style day to epoch seconds.
+      // `26 06 21 00`; `Commands.readHeartRateHistory` performs the epoch
+      // packing from the DateOnly-style local day.
       final today = _clock();
       final todayD = DateOnly.fromDateTime(today);
       // Always blind-poll the last `effectiveDaysBack` days; the
