@@ -65,48 +65,92 @@ class _StubTransport implements BleTransport {
 Uint8List _fakeFirmware(int sizeBytes) =>
     Uint8List.fromList(List<int>.generate(sizeBytes, (i) => i & 0xFF));
 
-/// Subscribes once to the flash [stream] and returns:
-///   * a future that completes with the first [DfuProgress] emitted
-///     (or completes with the stream's terminal error if one fires
-///     before any event),
-///   * a future that completes with the full event list (or terminal
-///     error) once the stream closes.
+/// Subscribes once to the flash [stream] and returns a handle that
+/// the test can use to await specific progress events without
+/// subscribing to the stream multiple times.
 ///
 /// `async*` generators in Dart are single-subscription — every test
 /// below needs to drive the stream via a *single* listener and read
 /// progress off the collected events, not via repeated `.first` /
 /// `.drain` calls (which would race the second listener on the same
 /// underlying stream).
-({Future<DfuProgress> first, Future<List<DfuProgress>> done}) _watch(
-  Stream<DfuProgress> stream,
-) {
-  final firstCompleter = Completer<DfuProgress>();
-  final doneCompleter = Completer<List<DfuProgress>>();
+///
+/// Usage:
+/// ```dart
+/// final watch = _watch(flasher.flash(fw));
+/// await watch.waitForCount(1); // "Entering OTA"
+/// await watch.waitForCount(2); // "Starting session"
+/// ```
+///
+/// Or for tests that want to assert the terminal outcome:
+/// ```dart
+/// final result = await watch.done.timeout(const Duration(seconds: 12));
+/// ```
+class _FlashWatch {
+  _FlashWatch._(this.done, this.waitForCount);
+
+  /// Resolves with the collected event list once the stream closes,
+  /// or with the terminal error if the stream errors out.
+  final Future<List<DfuProgress>> done;
+
+  /// Returns a future that completes when the [n]th progress event
+  /// has been emitted by the stream (1-indexed). If the stream
+  /// errors before [n] events arrive, the returned future completes
+  /// with that error. If [n] is already <= the number of events
+  /// received so far, the future resolves immediately with the
+  /// cached event.
+  final Future<DfuProgress> Function(int n) waitForCount;
+
+  /// Future that completes with the first [DfuProgress] event.
+  Future<DfuProgress> get first => waitForCount(1);
+}
+
+_FlashWatch _watch(Stream<DfuProgress> stream) {
   final events = <DfuProgress>[];
+  final waiters = <int, Completer<DfuProgress>>{};
+  final doneCompleter = Completer<List<DfuProgress>>();
   StreamSubscription<DfuProgress>? sub;
   sub = stream.listen(
     (e) {
       events.add(e);
-      if (!firstCompleter.isCompleted) firstCompleter.complete(e);
+      final w = waiters.remove(events.length);
+      if (w != null && !w.isCompleted) w.complete(e);
     },
     onError: (Object e, StackTrace st) {
-      if (!firstCompleter.isCompleted) firstCompleter.completeError(e, st);
-      if (!doneCompleter.isCompleted) {
-        doneCompleter.completeError(e, st);
+      for (final w in waiters.values) {
+        if (!w.isCompleted) w.completeError(e, st);
       }
+      waiters.clear();
+      if (!doneCompleter.isCompleted) doneCompleter.completeError(e, st);
     },
     onDone: () {
-      if (!firstCompleter.isCompleted) {
-        firstCompleter.completeError(
-          StateError('stream closed with no events'),
-        );
+      for (final w in waiters.values) {
+        if (!w.isCompleted) {
+          w.completeError(StateError('stream closed before event arrived'));
+        }
       }
+      waiters.clear();
       if (!doneCompleter.isCompleted) doneCompleter.complete(events);
       sub?.cancel();
     },
     cancelOnError: true,
   );
-  return (first: firstCompleter.future, done: doneCompleter.future);
+
+  Future<DfuProgress> waitForCount(int n) {
+    if (n <= 0) {
+      throw ArgumentError.value(n, 'n', 'must be 1-indexed');
+    }
+    if (n <= events.length) {
+      return Future<DfuProgress>.value(events[n - 1]);
+    }
+    final existing = waiters[n];
+    if (existing != null) return existing.future;
+    final c = Completer<DfuProgress>();
+    waiters[n] = c;
+    return c.future;
+  }
+
+  return _FlashWatch._(doneCompleter.future, waitForCount);
 }
 
 /// Waits until the stub has observed a new Channel-B write and the
@@ -147,7 +191,9 @@ void main() {
       final flasher = DfuFlasher(t);
       final ok = _fakeFirmware(0xBB8000);
       final watch = _watch(flasher.flash(ok));
-      final first = await watch.first.timeout(const Duration(seconds: 1));
+      final first = await watch
+          .waitForCount(1)
+          .timeout(const Duration(seconds: 1));
       expect(first.phase, 'Entering OTA mode');
       t.injectRsp(OpB.rspOk);
       // The flash will block forever after this; we just verify that
@@ -167,17 +213,19 @@ void main() {
       final fw = _fakeFirmware(2048); // 2 pockets
 
       final watch = _watch(flasher.flash(fw));
-      await watch.first.timeout(const Duration(seconds: 1)); // "Entering OTA"
+      await watch
+          .waitForCount(1)
+          .timeout(const Duration(seconds: 1)); // "Entering OTA"
       // Inject otaStart ACK so we move to "Sending metadata".
       await Future<void>.delayed(const Duration(milliseconds: 600));
-      await watch.first.timeout(
-        const Duration(seconds: 1),
-      ); // "Starting session"
+      await watch
+          .waitForCount(2)
+          .timeout(const Duration(seconds: 1)); // "Starting session"
       await _waitForSendB(t); // otaStart has been sent
       t.injectRsp(OpB.rspOk); // ack otaStart
-      await watch.first.timeout(
-        const Duration(seconds: 1),
-      ); // "Sending metadata"
+      await watch
+          .waitForCount(3)
+          .timeout(const Duration(seconds: 1)); // "Sending metadata"
       await _waitForSendB(t); // otaInit has been sent
       // No RSP for otaInit → must timeout.
       await expectLater(
@@ -191,11 +239,11 @@ void main() {
       final flasher = DfuFlasher(t);
       final fw = _fakeFirmware(1024); // 1 pocket
       final watch = _watch(flasher.flash(fw));
-      await watch.first.timeout(const Duration(seconds: 1));
+      await watch.waitForCount(1).timeout(const Duration(seconds: 1));
       await Future<void>.delayed(const Duration(milliseconds: 600));
-      await watch.first.timeout(
-        const Duration(seconds: 1),
-      ); // "Starting session"
+      await watch
+          .waitForCount(2)
+          .timeout(const Duration(seconds: 1)); // "Starting session"
       await _waitForSendB(t);
       t.injectRsp(OpB.rspOk); // ack otaStart
       // No ack for otaInit → must timeout.
@@ -210,16 +258,16 @@ void main() {
       final flasher = DfuFlasher(t);
       final fw = _fakeFirmware(2048); // 2 pockets
       final watch = _watch(flasher.flash(fw));
-      await watch.first.timeout(const Duration(seconds: 1));
+      await watch.waitForCount(1).timeout(const Duration(seconds: 1));
       await Future<void>.delayed(const Duration(milliseconds: 600));
-      await watch.first.timeout(
-        const Duration(seconds: 1),
-      ); // "Starting session"
+      await watch
+          .waitForCount(2)
+          .timeout(const Duration(seconds: 1)); // "Starting session"
       await _waitForSendB(t);
       t.injectRsp(OpB.rspOk); // ack otaStart
-      await watch.first.timeout(
-        const Duration(seconds: 1),
-      ); // "Sending metadata"
+      await watch
+          .waitForCount(3)
+          .timeout(const Duration(seconds: 1)); // "Sending metadata"
       await _waitForSendB(t);
       t.injectRsp(OpB.rspOk); // ack otaInit
       // ACK both pockets (the flasher awaits an RSP per pocket).
@@ -239,11 +287,11 @@ void main() {
       final flasher = DfuFlasher(t);
       final fw = _fakeFirmware(1024);
       final watch = _watch(flasher.flash(fw));
-      await watch.first.timeout(const Duration(seconds: 1));
+      await watch.waitForCount(1).timeout(const Duration(seconds: 1));
       await Future<void>.delayed(const Duration(milliseconds: 600));
-      await watch.first.timeout(
-        const Duration(seconds: 1),
-      ); // "Starting session"
+      await watch
+          .waitForCount(2)
+          .timeout(const Duration(seconds: 1)); // "Starting session"
       await _waitForSendB(t); // otaStart sent
       t.injectRsp(OpB.rspLowBattery);
       await expectLater(
@@ -263,16 +311,18 @@ void main() {
       final flasher = DfuFlasher(t);
       final fw = _fakeFirmware(3072); // 3 pockets
       final watch = _watch(flasher.flash(fw));
-      await watch.first.timeout(const Duration(seconds: 1)); // "Entering OTA"
+      await watch
+          .waitForCount(1)
+          .timeout(const Duration(seconds: 1)); // "Entering OTA"
       await Future<void>.delayed(const Duration(milliseconds: 600));
-      await watch.first.timeout(
-        const Duration(seconds: 1),
-      ); // "Starting session"
+      await watch
+          .waitForCount(2)
+          .timeout(const Duration(seconds: 1)); // "Starting session"
       await _waitForSendB(t);
       t.injectRsp(OpB.rspOk); // ack otaStart
-      await watch.first.timeout(
-        const Duration(seconds: 1),
-      ); // "Sending metadata"
+      await watch
+          .waitForCount(3)
+          .timeout(const Duration(seconds: 1)); // "Sending metadata"
       await _waitForSendB(t);
       t.injectRsp(OpB.rspOk); // ack otaInit
       // ACK pocket 1
@@ -296,12 +346,12 @@ void main() {
       final flasher = DfuFlasher(t);
       final fw = _fakeFirmware(2048); // 2 pockets
       final watch = _watch(flasher.flash(fw));
-      await watch.first.timeout(const Duration(seconds: 1));
+      await watch.waitForCount(1).timeout(const Duration(seconds: 1));
       await Future<void>.delayed(const Duration(milliseconds: 600));
-      await watch.first.timeout(const Duration(seconds: 1));
+      await watch.waitForCount(2).timeout(const Duration(seconds: 1));
       await _waitForSendB(t);
       t.injectRsp(OpB.rspOk);
-      await watch.first.timeout(const Duration(seconds: 1));
+      await watch.waitForCount(3).timeout(const Duration(seconds: 1));
       await _waitForSendB(t);
       t.injectRsp(OpB.rspOk);
       t.injectRsp(OpB.rspOk);
@@ -327,11 +377,11 @@ void main() {
       final flasher = DfuFlasher(t);
       final fw = _fakeFirmware(1024);
       final watch = _watch(flasher.flash(fw));
-      await watch.first.timeout(const Duration(seconds: 1));
+      await watch.waitForCount(1).timeout(const Duration(seconds: 1));
       await Future<void>.delayed(const Duration(milliseconds: 600));
-      await watch.first.timeout(
-        const Duration(seconds: 1),
-      ); // "Starting session"
+      await watch
+          .waitForCount(2)
+          .timeout(const Duration(seconds: 1)); // "Starting session"
       await _waitForSendB(t);
       t.injectRsp(OpB.rspCmdStatus, status: 7);
       await expectLater(
@@ -351,16 +401,16 @@ void main() {
       final flasher = DfuFlasher(t);
       final fw = _fakeFirmware(3072); // 3 pockets
       final watch = _watch(flasher.flash(fw));
-      await watch.first.timeout(const Duration(seconds: 1));
+      await watch.waitForCount(1).timeout(const Duration(seconds: 1));
       await Future<void>.delayed(const Duration(milliseconds: 600));
-      await watch.first.timeout(
-        const Duration(seconds: 1),
-      ); // "Starting session"
+      await watch
+          .waitForCount(2)
+          .timeout(const Duration(seconds: 1)); // "Starting session"
       await _waitForSendB(t);
       t.injectRsp(OpB.rspOk);
-      await watch.first.timeout(
-        const Duration(seconds: 1),
-      ); // "Sending metadata"
+      await watch
+          .waitForCount(3)
+          .timeout(const Duration(seconds: 1)); // "Sending metadata"
       await _waitForSendB(t);
       t.injectRsp(OpB.rspOk); // ack otaInit
       t.injectRsp(OpB.rspOk); // pocket 1 ok
@@ -418,11 +468,13 @@ void main() {
       final flasher = DfuFlasher(t);
       final fw = _fakeFirmware(1024);
       final watch = _watch(flasher.flash(fw));
-      await watch.first.timeout(const Duration(seconds: 1)); // "Entering OTA"
+      await watch
+          .waitForCount(1)
+          .timeout(const Duration(seconds: 1)); // "Entering OTA"
       await Future<void>.delayed(const Duration(milliseconds: 600));
-      await watch.first.timeout(
-        const Duration(seconds: 1),
-      ); // "Starting session"
+      await watch
+          .waitForCount(2)
+          .timeout(const Duration(seconds: 1)); // "Starting session"
       await _waitForSendB(t); // otaStart is the first Channel-B write
       // otaStart's sendB throws.
       await expectLater(
@@ -436,16 +488,16 @@ void main() {
       final flasher = DfuFlasher(t);
       final fw = _fakeFirmware(2048); // 2 pockets
       final watch = _watch(flasher.flash(fw));
-      await watch.first.timeout(const Duration(seconds: 1));
+      await watch.waitForCount(1).timeout(const Duration(seconds: 1));
       await Future<void>.delayed(const Duration(milliseconds: 600));
-      await watch.first.timeout(
-        const Duration(seconds: 1),
-      ); // "Starting session"
+      await watch
+          .waitForCount(2)
+          .timeout(const Duration(seconds: 1)); // "Starting session"
       await _waitForSendB(t);
       t.injectRsp(OpB.rspOk);
-      await watch.first.timeout(
-        const Duration(seconds: 1),
-      ); // "Sending metadata"
+      await watch
+          .waitForCount(3)
+          .timeout(const Duration(seconds: 1)); // "Sending metadata"
       await _waitForSendB(t);
       t.injectRsp(OpB.rspOk); // ack otaInit
       t.injectRsp(OpB.rspOk); // ack pocket 1
