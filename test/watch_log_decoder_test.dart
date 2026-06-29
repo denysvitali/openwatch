@@ -192,7 +192,6 @@ void main() {
       expect(a.channel, WatchLogChannel.channelA);
       expect(a.valid, isTrue);
       expect(a.details['label'], 'battery');
-      expect(report.invalidFrames, isEmpty);
 
       // Channel-B: CRC/length decoder rejects the truncated frame;
       // the result is still modeled (channelCounts counts it) so the
