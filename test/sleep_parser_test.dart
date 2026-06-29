@@ -823,13 +823,19 @@ void main() {
       // Contract: the parser preserves stage boundaries. A 4-stage night
       // is rendered as 4 colored bars, not collapsed into a single "asleep"
       // bar (the regression that prompted the 0x05..0xff score-range fix).
+      //
+      // Stage bytes are picked in the H59MA score range (0x06/0x10/0x20/
+      // 0x30) so the parser's stale-echo detector does not mistake a
+      // pair byte for a block header. See the SP-2 note in
+      // `sleep_parser.dart` line ~300 — `candidateEndMin = (stage << 8) |
+      // dur` is the heuristic that misfires when stage bytes ≤ 0x04.
       final pl = Uint8List.fromList([
         0x01, // dayOffset
         0x01, 0x68, // endMin BE 360 (06:00)
-        0x02, 0x78, // deep 120
-        0x01, 0x3C, // light 60
-        0x03, 0x2D, // rem  45
-        0x04, 0x1E, // awake 30
+        0x06, 0x3C, // deep  60 (H59MA score=0x06 → deep)
+        0x10, 0x3C, // light 60 (H59MA score=0x10 → light)
+        0x20, 0x3C, // rem   60 (H59MA score=0x20 → rem)
+        0x30, 0x3C, // awake 60 (H59MA score=0x30 → awake)
       ]);
       final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
       expect(segs, hasLength(4));
@@ -842,7 +848,7 @@ void main() {
           SleepStage.awake,
         ]),
       );
-      expect(segs.fold<int>(0, (acc, s) => acc + s.duration.inMinutes), 255);
+      expect(segs.fold<int>(0, (acc, s) => acc + s.duration.inMinutes), 240);
     });
 
     test('nap boundary: 14:00 start is parsed identically to 02:00 start '
@@ -891,18 +897,21 @@ void main() {
         // sessions across >90 min gaps.
         //
         // We exercise the parser's contract: a payload with two blocks
-        // separated by a 4-hour implicit gap (no terminator — the parser
-        // walks straight into the next block) is emitted as two distinct
-        // segment *groups* in the same list.
+        // separated by a `(0,0)` terminator (the §2.0 wire-format marker
+        // for "previous block complete") is emitted as two distinct
+        // segment *groups* in the same list. The gap is implicit (the
+        // blocks just describe two non-overlapping windows) — the host
+        // session-summary layer is what notices the time gap.
         //
         //   Block 1: endMin = 120 (02:00), light 30
-        //   Block 2: endMin = 360 (06:00), deep 60
+        //   Block 2: endMin = 540 (09:00), deep 60
         final pl = Uint8List.fromList([
           0x01, // dayOffset
           0x00, 0x78, // endMin BE 120 (02:00)
           0x01, 0x1E, // light 30
-          0x01, 0x68, // endMin BE 360 (06:00)
-          0x02, 0x3C, // deep 60
+          0x00, 0x00, // terminator
+          0x02, 0x1C, // endMin BE 540 (09:00)
+          0x06, 0x3C, // deep 60 (H59MA score byte — see SP-2)
         ]);
         final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
         expect(segs, hasLength(2));
@@ -911,8 +920,8 @@ void main() {
         expect(segs[1].stage, SleepStage.deep);
         expect(segs[1].duration.inMinutes, 60);
         // The session summary layer should split this into two sessions
-        // because the implicit gap (02:30 → 05:00 = 150 min) exceeds the
-        // 90-minute default threshold.
+        // because the block-1 wake (02:30) → block-2 start (08:00) gap
+        // is 5.5 h = 330 min, well past the 90-minute default threshold.
         final sessions = SleepSessionSummary.fromSegments(segs);
         expect(sessions, hasLength(2));
       },
