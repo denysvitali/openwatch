@@ -805,17 +805,32 @@ class HistorySync extends ChangeNotifier {
         // `0x27` suffices to get both night and lunch/nap data; a
         // separate `0x3e` send would be redundant and cause duplicate
         // responses (absorbed by ChannelBParser dedup, but wasted).
+        // Sleep sync: a single 0x27 read against today returns the
+        // consolidated H59MA night/lunch record-list covering every
+        // day in the request window. Per-dayOffset sends would be
+        // redundant — ChannelBParser dedup would absorb the duplicate
+        // emits, but the second-drain window per offset still wastes
+        // 600 ms each. The parser rebuckets each segment by its own
+        // start date so every covered day gets landed under the
+        // correct calendar entry in `_days`.
         final sleepToFetch = _daysToFetch(
           wantsDays,
           todayD,
           metric: 'sleep',
           hasData: (h) => h.sleep.isNotEmpty,
+          skipOnConfirmedEmpty: false,
           force: force,
         );
-        for (final d in sleepToFetch) {
-          final day = todayD.addDays(-d);
-          _currentSyncDay = day;
-          await transport.sendB(Commands.readSleepNewProtocol(dayOffset: d));
+        if (sleepToFetch.isNotEmpty) {
+          AppLog.instance.debug(
+            'history',
+            'sleep: single-shot 0x27 for days ${sleepToFetch.toList()}',
+          );
+          // Attribute the inbound 0x27 push to today so payload[0] == 0
+          // resolves correctly on firmware that omits the dayOffset
+          // prefix (PROTOCOL.md §4.4 footnote).
+          _currentSyncDay = todayD;
+          await transport.sendB(Commands.readSleepNewProtocol(dayOffset: 0));
           await _drainRx(drainDuration);
           await Future<void>.delayed(postCommandDelay);
           _currentSyncDay = null;
@@ -859,28 +874,43 @@ class HistorySync extends ChangeNotifier {
   /// straddle midnight or that have filled in since the previous
   /// sync. Past days are skipped when either [hasData] reports the
   /// in-memory cache already has at least one sample of that
-  /// metric for them, or [DailyHistory.syncedMetrics] already
-  /// contains [metric] (meaning we fetched it earlier and the watch
-  /// returned an empty record). When [force] is `true`, every
-  /// requested day is returned so the caller can do a full re-sync.
-  /// Without a store backing the cache, every requested day is also
-  /// returned (legacy in-memory behaviour).
+  /// metric for them, OR (only when [skipOnConfirmedEmpty] is
+  /// `true`) when [DailyHistory.syncedMetrics] already contains
+  /// [metric] (meaning we fetched it earlier and the watch
+  /// returned an empty record).
+  ///
+  /// Sleep passes `skipOnConfirmedEmpty: false` because an H59MA
+  /// "empty" batch can mean either "no records on the watch" or
+  /// "this response didn't cover that day", and re-polling is
+  /// cheap thanks to [ChannelBParser] LRU dedup. Marking past
+  /// days as permanently empty after a single fragmenting packet
+  /// cost us Thursday/Friday data on user devices.
+  /// When [force] is `true`, every requested day is returned so
+  /// the caller can do a full re-sync. Without a store backing the
+  /// cache, every requested day is also returned (legacy in-memory
+  /// behaviour).
   List<int> _daysToFetch(
     Iterable<int> wantsDays,
     DateOnly todayD, {
     required String metric,
     required bool Function(DailyHistory) hasData,
     required bool force,
+    bool skipOnConfirmedEmpty = true,
   }) {
     final out = <int>[];
     for (final d in wantsDays) {
       final day = todayD.addDays(-d);
       final isToday = day == todayD;
       final existing = _days[day];
-      if (!force &&
+      final skipHasData =
+          !force && !isToday && existing != null && hasData(existing);
+      final skipConfirmed =
+          !force &&
           !isToday &&
           existing != null &&
-          (hasData(existing) || existing.syncedMetrics.contains(metric))) {
+          skipOnConfirmedEmpty &&
+          existing.syncedMetrics.contains(metric);
+      if (skipHasData || skipConfirmed) {
         AppLog.instance.debug(
           'history',
           'skip ${day.iso} for $metric (already in store)',
@@ -892,7 +922,26 @@ class HistorySync extends ChangeNotifier {
     return out;
   }
 
-  void _clearSleepDays(Iterable<DateOnly> days, {bool persist = true}) {
+  /// Marks the given [days] as having an empty sleep list in
+  /// memory and (optionally) on disk.
+  ///
+  /// [confirmedEmpty] controls whether `syncedMetrics` grows by
+  /// `'sleep'`. Only the literal `payload.isEmpty` firmware-side
+  /// answer (`added.isEmpty && payload.isEmpty`) meets the bar for
+  /// stamping — partial payloads whose records didn't cover every
+  /// calendar day in [replaceDays] are NOT a "firmware said
+  /// nothing" signal, so they must not lock the day into a
+  /// permanent-empty bucket. Without this guard, a single
+  /// fragment-loss event during the H59MA record-list fetch could
+  /// erase Thursday/Friday's sleep from the store forever.
+  /// [persist] controls whether the cleared row is flushed to disk.
+  /// Both flags default to the legacy shape; individual callsites
+  /// opt out explicitly via named args.
+  void _clearSleepDays(
+    Iterable<DateOnly> days, {
+    bool persist = true,
+    bool confirmedEmpty = true,
+  }) {
     var changed = false;
     for (final day in days) {
       final existing = _days[day];
@@ -902,10 +951,13 @@ class HistorySync extends ChangeNotifier {
       // synced, there is nothing to do. Otherwise we need to record
       // the empty response so the next sync skips this day.
       if (existing != null && previous.sleep.isEmpty && alreadySynced) continue;
+      final nextSynced = confirmedEmpty
+          ? {...previous.syncedMetrics, 'sleep'}
+          : previous.syncedMetrics;
       final updated = previous.copyWith(
         sleep: const [],
         lastUpdated: DateTime.now(),
-        syncedMetrics: {...previous.syncedMetrics, 'sleep'},
+        syncedMetrics: nextSynced,
       );
       _days[day] = updated;
       changed = true;
@@ -1561,7 +1613,13 @@ class HistorySync extends ChangeNotifier {
       }
       if (added.isEmpty) {
         if (payload.isEmpty) {
-          _clearSleepDays(replaceDays);
+          // A zero-byte payload from the firmware is the only
+          // strong "confirmed empty for every replaceDay" signal
+          // we trust — the record-list variant (`isH59maRecordList`)
+          // routinely yields non-empty bytes with zero parsed
+          // segments (e.g. an offset prefix the parser hasn't seen
+          // yet), which is ambiguous.
+          _clearSleepDays(replaceDays, persist: true, confirmedEmpty: true);
         }
         return 0;
       }
@@ -1578,7 +1636,16 @@ class HistorySync extends ChangeNotifier {
         addedByDay.putIfAbsent(d, () => []).add(s);
       }
       final daysWithNewSleep = addedByDay.keys.toSet();
-      _clearSleepDays(replaceDays.difference(daysWithNewSleep));
+      // For days the H59MA batch touched but didn't carry data
+      // for, we still reset the in-memory list to [] (so a stale
+      // earlier parse doesn't shadow today's view), but we do NOT
+      // persist that or stamp syncedMetrics. Re-polling on the next
+      // sync will re-cover them at negligible cost.
+      _clearSleepDays(
+        replaceDays.difference(daysWithNewSleep),
+        persist: false,
+        confirmedEmpty: false,
+      );
       _clearSleepDays(daysWithNewSleep, persist: false);
       for (final entry in addedByDay.entries) {
         final day = entry.key;
