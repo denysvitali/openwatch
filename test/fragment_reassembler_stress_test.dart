@@ -138,11 +138,7 @@ void main() {
         onTimeout: () => ChannelBCommand(-1, Uint8List(0)),
       );
       final c = await got;
-      expect(
-        c.cmd,
-        -1,
-        reason: 'interleaved poisoning → CRC fail → no emit',
-      );
+      expect(c.cmd, -1, reason: 'interleaved poisoning → CRC fail → no emit');
       expect(
         t.sentA,
         isEmpty,

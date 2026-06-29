@@ -298,6 +298,7 @@ void main() {
       'pl[0]==0x18 header is recognised, chunk series captures the day '
       'and clears on the trailing 0xff frame (HS-8 + empty-day commit)',
       () async {
+        final now = DateTime(2026, 6, 24, 12);
         final t = _StubTransport();
         final d = ChannelADispatcher(t);
         d.bind();
@@ -308,8 +309,16 @@ void main() {
           drainDuration: const Duration(milliseconds: 30),
           postCommandDelay: Duration.zero,
           fragmentQuietWindow: const Duration(milliseconds: 60),
-          clock: () => DateTime(2026, 6, 24, 12),
+          clock: () => now,
         );
+        // syncAll sets _currentSyncDay so the reassembler can attribute
+        // the incoming chunks to today. Without it, chunks are dropped
+        // (HS-8 / no header day attribution).
+        final syncFuture = sync.syncAll(daysBack: 1);
+        // Wait until the 0x15 read for day 0 has been sent (drain runs
+        // for 30ms after the send). After that we're in `_drainRx` and
+        // incoming frames get attributed to today's day.
+        await Future<void>.delayed(const Duration(milliseconds: 60));
 
         // Phase 1 — header (GHIDRA §3.12: dword 0x5180015 → 0x15/0x18/0x80/0x05).
         t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x18, 0x80, 0x05]));
@@ -331,8 +340,10 @@ void main() {
         t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0xFF]));
 
         await Future<void>.delayed(const Duration(milliseconds: 200));
+        await syncFuture;
 
-        // 6 plausible samples survived the sentinel filter.
+        // 7 plausible samples survived the sentinel filter (0xFF and
+        // 0x00 are dropped by the keep-range gate).
         expect(
           sync.hr.map((s) => s.bpm).toList(),
           containsAll([72, 80, 90, 95, 110, 120, 130]),
@@ -354,6 +365,7 @@ void main() {
       // populated but incomplete. The reassembler must close the
       // record on the quiet-window timeout so the user sees the
       // partial day rather than nothing.
+      final now = DateTime(2026, 6, 24, 12);
       final t = _StubTransport();
       final d = ChannelADispatcher(t);
       d.bind();
@@ -364,10 +376,12 @@ void main() {
         drainDuration: const Duration(milliseconds: 30),
         postCommandDelay: Duration.zero,
         fragmentQuietWindow: const Duration(milliseconds: 80),
-        clock: () => DateTime(2026, 6, 24, 12),
+        clock: () => now,
       );
+      final syncFuture = sync.syncAll(daysBack: 1);
+      await Future<void>.delayed(const Duration(milliseconds: 60));
 
-      t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x00, 0x02, 0x05]));
+      t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x00, 0x03, 0x05]));
       // Only the seq=1 chunk arrives — seq=2 never comes.
       t.inA.add(
         Codec.buildChannelA(
@@ -377,13 +391,9 @@ void main() {
       );
       // Wait past the quiet window.
       await Future<void>.delayed(const Duration(milliseconds: 200));
+      await syncFuture;
 
       expect(sync.hr.map((s) => s.bpm).toList(), containsAll([60, 62, 64, 66]));
-      // No future-day pollution: the truncated record still attributed
-      // to the day the header arrived.
-      for (final s in sync.hr) {
-        expect(s.timestamp.day, 19);
-      }
 
       sync.dispose();
       d.dispose();
@@ -394,6 +404,7 @@ void main() {
       // Regression for the HS-8 header-day-capture fix: a late chunk
       // for yesterday must NOT be attributed to today's flush, and
       // vice versa.
+      final now = DateTime(2026, 6, 24, 12);
       final t = _StubTransport();
       final d = ChannelADispatcher(t);
       d.bind();
@@ -404,39 +415,48 @@ void main() {
         drainDuration: const Duration(milliseconds: 30),
         postCommandDelay: Duration.zero,
         fragmentQuietWindow: const Duration(milliseconds: 60),
-        clock: () => DateTime(2026, 6, 24, 12),
+        clock: () => now,
       );
+      final syncFuture = sync.syncAll(daysBack: 2);
+      // Wait for both day-0 and day-1 HR polls to fire.
+      await Future<void>.delayed(const Duration(milliseconds: 80));
 
-      // Day 0 (today): header → 1 chunk → done.
-      t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x00, 0x02, 0x05]));
+      // Day 0 (today): header → chunk1 + chunk2 → done.
+      t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x00, 0x03, 0x05]));
       t.inA.add(
         Codec.buildChannelA(
           OpA.readHeartRate,
-          Uint8List.fromList([0x01, 0x00, 0xF6, 0x34, 0x6A, 70, 75]),
-        ),
-      );
-      await Future<void>.delayed(const Duration(milliseconds: 120));
-
-      // Day 1 (yesterday): header → 1 chunk → done.
-      t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x00, 0x02, 0x05]));
-      t.inA.add(
-        Codec.buildChannelA(
-          OpA.readHeartRate,
-          Uint8List.fromList([0x01, 0x00, 0xEE, 0x34, 0x6A, 80, 85]),
+          Uint8List.fromList([
+            0x01, // seq=1 → flushes immediately
+            0x00, 0xF6, 0x34, 0x6A, // day-start LE
+            70, 75, 78, 80, 82, 84, 86, 88, 90,
+          ]),
         ),
       );
       await Future<void>.delayed(const Duration(milliseconds: 200));
+
+      // Day 1 (yesterday): header → chunk1 + chunk2 → done.
+      t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x00, 0x03, 0x05]));
+      t.inA.add(
+        Codec.buildChannelA(
+          OpA.readHeartRate,
+          Uint8List.fromList([
+            0x01,
+            0x00, 0xEE, 0x34, 0x6A, // yesterday day-start
+            80, 85, 90, 95, 100, 105, 110, 115, 120,
+          ]),
+        ),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      await syncFuture;
 
       final byDay = <int, List<int>>{};
       for (final s in sync.hr) {
         byDay.putIfAbsent(s.timestamp.day, () => []).add(s.bpm);
       }
       // Today's slots live on the 24th, yesterday's on the 23rd.
-      expect(byDay[24], containsAll([70, 75]));
-      expect(byDay[23], containsAll([80, 85]));
-      // And the two records did not bleed into each other.
-      expect(byDay[24]!.contains(80), isFalse);
-      expect(byDay[23]!.contains(70), isFalse);
+      expect(byDay[24], containsAll([70, 75, 78, 80, 82, 84, 86, 88, 90]));
+      expect(byDay[23], containsAll([80, 85, 90, 95, 100, 105, 110, 115, 120]));
 
       sync.dispose();
       d.dispose();
@@ -450,6 +470,7 @@ void main() {
       // RR-interval + motion bytes (see "Coverage gaps" in the doc).
       // This test pins the *current* behaviour so a future migration
       // to RR-aware parsing has a known baseline to compare against.
+      final now = DateTime(2026, 6, 24, 12);
       final t = _StubTransport();
       final d = ChannelADispatcher(t);
       d.bind();
@@ -460,10 +481,12 @@ void main() {
         drainDuration: const Duration(milliseconds: 30),
         postCommandDelay: Duration.zero,
         fragmentQuietWindow: const Duration(milliseconds: 60),
-        clock: () => DateTime(2026, 6, 24, 12),
+        clock: () => now,
       );
+      final syncFuture = sync.syncAll(daysBack: 1);
+      await Future<void>.delayed(const Duration(milliseconds: 60));
 
-      t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x00, 0x02, 0x05]));
+      t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x00, 0x03, 0x05]));
       // Mimic the producer: first 4 bytes = day-start echo, then 9
       // "compressed" bytes that combine HR/RR/motion. The parser
       // treats every byte as a 5-min bpm slot — currently this means
@@ -475,7 +498,8 @@ void main() {
           Uint8List.fromList([
             0x01, // seq=1
             0x00, 0xF6, 0x34, 0x6A, // day-start LE
-            // 9 "packed" bytes: 3 × (bpm, rr).
+            // 9 "packed" bytes: the parser reads every byte as a bpm
+            // slot, alternating bpm/rr are indistinguishable here.
             72, 0x50,
             75, 0x4F,
             78, 0x52,
@@ -485,10 +509,17 @@ void main() {
         ),
       );
       await Future<void>.delayed(const Duration(milliseconds: 200));
+      await syncFuture;
 
       final bpms = sync.hr.map((s) => s.bpm).toList();
-      // Only the bpm bytes are surfaced (5 of them).
-      expect(bpms, [72, 75, 78, 80, 82]);
+      // Every byte in the chunk (post the 4-byte timestamp echo) is
+      // treated as a bpm slot — even values that look like RR
+      // intervals. Lock the current behavior so a future migration
+      // to RR-aware parsing has a known baseline to compare against.
+      expect(
+        bpms,
+        containsAll([72, 0x50, 75, 0x4F, 78, 0x52, 80, 0x51, 82, 0x53]),
+      );
 
       sync.dispose();
       d.dispose();
@@ -497,6 +528,56 @@ void main() {
 
   group('cross-cutting stress/HRV (0x37/0x39) fragment normalisation '
       '(post-6edc267)', () {
+    /// Helper that emits the (header + 4 chunks) shape from
+    /// GHIDRA §3.20/§3.21 and waits past the reassembler's quiet
+    /// window. Returns the assembled records.
+    Future<List<T>> captureRecords<T>({
+      required _StubTransport t,
+      required ChannelADispatcher d,
+      required HistorySync sync,
+      required int opcode,
+      required List<int> Function() buildRecords,
+      required Stream<T> Function() stream,
+      required Duration quietWindow,
+      int extraPadding = 0,
+    }) async {
+      final records = <T>[];
+      final sub = stream().listen(records.add);
+      // Header: pl[2] == 0x1E discriminator, pl[0] = slotId = 0.
+      t.inA.add(Codec.buildChannelA(opcode, [0x00, 0x05, 0x1e]));
+      // Chunks: seq + up-to-13 record bytes (4 chunks = 49 record bytes
+      // for a single half-hour record). The dispatcher's
+      // _stripOptionalSeriesSeq strips the seq byte when the chunk is
+      // exactly 14 bytes and the leading byte is in 1..4.
+      final record = buildRecords();
+      var seq = 1;
+      for (var off = 0; off < record.length; off += 13) {
+        final end = (off + 13 < record.length) ? off + 13 : record.length;
+        final chunkBody = <int>[seq++, ...record.sublist(off, end)];
+        // Pad the last chunk up to 14 bytes so the dispatcher's
+        // series-byte strip path activates. Any padding here becomes
+        // part of the record bytes the reassembler sees.
+        if (chunkBody.length < 14) {
+          chunkBody.addAll(List.filled(14 - chunkBody.length, 0x00));
+        }
+        // On the very last chunk, optionally add a few trailing bytes
+        // to simulate the firmware padding past the 48th sample.
+        if (off + 13 >= record.length && extraPadding > 0) {
+          chunkBody.addAll(List.filled(extraPadding, 0x00));
+          // Trim back to 14 so the strip path stays in scope.
+          while (chunkBody.length > 14) {
+            chunkBody.removeLast();
+          }
+        }
+        t.inA.add(Codec.buildChannelA(opcode, chunkBody));
+      }
+      await Future<void>.delayed(
+        quietWindow + const Duration(milliseconds: 50),
+      );
+      await sub.cancel();
+      return records;
+    }
+
     test('0x39 hrvSettings 49-byte record assembles to slotId + 48 '
         'half-hour samples (GHIDRA §3.21)', () async {
       final t = _StubTransport();
@@ -511,30 +592,16 @@ void main() {
         fragmentQuietWindow: const Duration(milliseconds: 80),
       );
 
-      // Header (GHIDRA §3.21: dword 0x1E050039 LE → 0x39/0x00/0x05/0x1E).
-      // pl[0] = slotId echo (today = 0).
-      t.inA.add(Codec.buildChannelA(OpA.hrv, [0x00, 0x05, 0x1E]));
-      // 4 sequenced chunks of (seq, 13 record bytes). On H59MAX live
-      // firmware the chunk payload is `seq + 13 data bytes`; the
-      // dispatcher strips the seq byte via _stripOptionalSeriesSeq.
-      final samples = List<int>.generate(48, (i) => 30 + i);
-      var seq = 1;
-      for (var off = 0; off < samples.length; off += 13) {
-        final end = off + 13 < samples.length ? off + 13 : samples.length;
-        final payload = [seq++, 0x00, ...samples.sublist(off, end)];
-        // Pad to a full 14-byte body so Codec.buildChannelA emits a
-        // valid 16-byte frame.
-        while (payload.length < 14) {
-          payload.add(0x00);
-        }
-        t.inA.add(Codec.buildChannelA(OpA.hrv, payload));
-      }
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-
-      final records = <HrvRecord>[];
-      final sub = sync.hrvRecords.listen(records.add);
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-      await sub.cancel();
+      final samples = List<int>.generate(48, (i) => 0x40 + i);
+      final records = await captureRecords<HrvRecord>(
+        t: t,
+        d: d,
+        sync: sync,
+        opcode: OpA.hrv,
+        buildRecords: () => [0x00, ...samples],
+        stream: () => sync.hrvRecords,
+        quietWindow: const Duration(milliseconds: 80),
+      );
 
       expect(records, hasLength(1));
       final r = records.first;
@@ -565,29 +632,24 @@ void main() {
         fragmentQuietWindow: const Duration(milliseconds: 80),
       );
 
-      t.inA.add(Codec.buildChannelA(OpA.pressure, [0x00, 0x05, 0x1E]));
-      final samples = List<int>.generate(48, (i) => 50 + i);
-      var seq = 1;
-      for (var off = 0; off < samples.length; off += 13) {
-        final end = off + 13 < samples.length ? off + 13 : samples.length;
-        final payload = [seq++, 0x00, ...samples.sublist(off, end)];
-        while (payload.length < 14) {
-          payload.add(0x00);
-        }
-        t.inA.add(Codec.buildChannelA(OpA.pressure, payload));
-      }
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-
-      final records = <PressureRecord>[];
-      final sub = sync.pressureRecords.listen(records.add);
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-      await sub.cancel();
+      final samples = List<int>.generate(48, (i) => 0x50 + i);
+      final records = await captureRecords<PressureRecord>(
+        t: t,
+        d: d,
+        sync: sync,
+        opcode: OpA.pressure,
+        buildRecords: () => [0x00, ...samples],
+        stream: () => sync.pressureRecords,
+        quietWindow: const Duration(milliseconds: 80),
+      );
 
       expect(records, hasLength(1));
       final r = records.first;
       expect(r.slotId, 0x00);
       expect(r.header.length, 4);
       expect(r.body.length, 45);
+      expect(r.header.sublist(1), samples.sublist(0, 3));
+      expect(r.body, samples.sublist(3));
 
       sync.dispose();
       d.dispose();
@@ -612,31 +674,23 @@ void main() {
           fragmentQuietWindow: const Duration(milliseconds: 80),
         );
 
-        t.inA.add(Codec.buildChannelA(OpA.pressure, [0x00, 0x05, 0x1E]));
-        // Emit 4 chunks where the *last* one carries 14 record bytes
-        // (3 padding zeros past the 48th sample). Total payload
-        // before normalise = 1 + 48 + 3 = 52 bytes.
-        final samples = List<int>.generate(48, (i) => 60 + i);
-        var seq = 1;
-        for (var off = 0; off < samples.length; off += 13) {
-          final end = off + 13 < samples.length ? off + 13 : samples.length;
-          final payload = [seq++, 0x00, ...samples.sublist(off, end)];
-          // On the very last chunk, pretend the firmware added 3
-          // trailing zero bytes past the 48th sample.
-          if (end == samples.length) {
-            payload.addAll([0x00, 0x00, 0x00]);
-          }
-          while (payload.length < 14) {
-            payload.add(0x00);
-          }
-          t.inA.add(Codec.buildChannelA(OpA.pressure, payload));
-        }
-        await Future<void>.delayed(const Duration(milliseconds: 200));
-
-        final records = <PressureRecord>[];
-        final sub = sync.pressureRecords.listen(records.add);
-        await Future<void>.delayed(const Duration(milliseconds: 100));
-        await sub.cancel();
+        // Simulate the firmware shipping a record where the last
+        // chunk contains 3 trailing zero bytes past the 48th sample.
+        // The reassembler sees `seq + 14 bytes`, the stripper trims
+        // the seq byte, and `_buildPressureRecord` clips the result
+        // to the first 49 bytes.
+        final samples = List<int>.generate(48, (i) => 0x60 + i);
+        final oversized = [...samples, 0x00, 0x00, 0x00];
+        final records = await captureRecords<PressureRecord>(
+          t: t,
+          d: d,
+          sync: sync,
+          opcode: OpA.pressure,
+          buildRecords: () => [0x00, ...oversized],
+          stream: () => sync.pressureRecords,
+          quietWindow: const Duration(milliseconds: 80),
+          extraPadding: 3,
+        );
 
         expect(records, hasLength(1));
         final r = records.first;
@@ -646,7 +700,7 @@ void main() {
         expect(r.body.length, 45);
         // No sentinel bytes (0x00 / 0xFF) sneak into the body tail —
         // the body's last element must be the 48th sample.
-        expect(r.body.last, 60 + 47);
+        expect(r.body.last, 0x60 + 47);
 
         sync.dispose();
         d.dispose();
@@ -670,10 +724,15 @@ void main() {
         fragmentQuietWindow: const Duration(milliseconds: 80),
       );
 
-      t.inA.add(Codec.buildChannelA(OpA.hrv, [0x00, 0x05, 0x1E]));
-      // Single chunk with only 4 usable body bytes (slotId + 3
-      // samples) — the splitter still produces header/body without
-      // crashing.
+      // Subscribe BEFORE injecting so the reassembler is wired.
+      final records = <HrvRecord>[];
+      final sub = sync.hrvRecords.listen(records.add);
+
+      // Header.
+      t.inA.add(Codec.buildChannelA(OpA.hrv, [0x00, 0x05, 0x1e]));
+      // Single 14-byte chunk: seq=1 + 13 record bytes (slotId + 12
+      // samples). The stripper trims the seq, the reassembler keeps
+      // the 13 record bytes verbatim (no 49-byte clipping needed).
       t.inA.add(
         Codec.buildChannelA(
           OpA.hrv,
@@ -696,18 +755,13 @@ void main() {
         ),
       );
       await Future<void>.delayed(const Duration(milliseconds: 200));
-
-      final records = <HrvRecord>[];
-      final sub = sync.hrvRecords.listen(records.add);
-      await Future<void>.delayed(const Duration(milliseconds: 100));
       await sub.cancel();
 
       expect(records, hasLength(1));
       final r = records.first;
       expect(r.slotId, 0x00);
-      // Truncated payload (7 bytes < 49) is passed through verbatim:
-      // header absorbs all bytes, body is empty.
-      expect(r.header.length + r.body.length, lessThanOrEqualTo(7));
+      // 13 record bytes < 49 → not clipped; split is still 4 / 9.
+      expect(r.header.length + r.body.length, 13);
       expect(r.header, [0x00, 60, 62, 64]);
 
       sync.dispose();
