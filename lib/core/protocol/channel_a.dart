@@ -773,6 +773,11 @@ class ChannelADispatcher {
   void _decodePushMsg(Uint8List pl) {
     if (pl.isEmpty) return;
 
+    // Capture before push() — the reassembler flips _isFirstFrame to
+    // false during the first frame, so the check below would otherwise
+    // always read false after a successful push().
+    final wasFirstFrame = _pushReassembler.isFirstFrame;
+
     // Raw chunk (always) — emits with a monotonic seq so subscribers can
     // reassemble in arrival order without trusting wall-clock timing.
     final seq = _pushMsgSeq++;
@@ -783,7 +788,7 @@ class ChannelADispatcher {
     // frame of a sequence so a chunked message doesn't fan out into N
     // truncated `PushMsgUint`s — the reassembled stream is the
     // authoritative source for chunked messages.
-    if (_pushReassembler.isFirstFrame) {
+    if (wasFirstFrame) {
       final type = pl[0];
       // Legacy wire shape (PROTOCOL.md §4.6, mirrored in §3.3 host→watch
       // direction): `[type, lenLo, lenHi, content…]`. The first 3 bytes
@@ -1443,14 +1448,23 @@ class PushMsgReassembler {
 
     // §3.3 frame layout: [type, flushLo, flushHi, payload…]. Bytes 1..n
     // are the chunk's UTF-8 payload; the flush-marker pair is at [1..2].
+    //
+    // Legacy single-frame pushes predate §3.3 and arrive as a 2-byte
+    // payload `[type, ...content]` — the dispatcher cannot distinguish
+    // them from a §3.3 frame mid-stream, but it CAN tell that a frame
+    // this short has no room for both a flush-marker pair *and* a
+    // payload, so we treat it as a complete single-frame message and
+    // emit immediately. This keeps the legacy wire shape working
+    // without paying the 250 ms quiet-window latency.
+    final isLegacyShort = pl.length < 3;
     final start = pl.length >= 3 ? 3 : 1;
-    final flush = pl.length >= 3 && pl[1] == pl[2];
+    final flush = !isLegacyShort && pl[1] == pl[2];
     for (var i = start; i < pl.length; i++) {
       if (_buf.length >= _maxBufferBytes) break; // hard cap matches firmware.
       _buf.add(pl[i]);
     }
 
-    if (flush) {
+    if (isLegacyShort || flush) {
       _emit(out);
       return true;
     }
