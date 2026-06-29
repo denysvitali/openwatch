@@ -490,7 +490,7 @@ class HistorySync extends ChangeNotifier {
       _activity.clear();
       _availableDays.clear();
       _sportDetailTotals.clear();
-      _sportDetailPageState.clear();
+      _sportDetailRecordCount.clear();
       _watchDaysWithData.clear();
       _fetchedDays.clear();
       _hrChunks.clear();
@@ -1303,15 +1303,39 @@ class HistorySync extends ChangeNotifier {
     );
   }
 
-  /// Tracks the last seen page/total per day for `0x43` sport-detail
-  /// paged responses. Key = [DateOnly] day; value = (page, total).
-  /// Totals are only finalized when the last page (`page == total - 1`)
-  /// arrives, per PROTOCOL.md §4.4.
-  final Map<DateOnly, ({int page, int total})> _sportDetailPageState = {};
+  /// Tracks the per-day "expected record count" advertised by the most
+  /// recent sport-detail record frame (`0x43`, pl[5] is the header
+  /// record-count echo per GHIDRA §3.6 / live H59MA_V1.0 captures).
+  /// Totals are only finalized when the *last* record frame arrives
+  /// (`recordIdx == recordCount - 1` for that day).
+  final Map<DateOnly, int> _sportDetailRecordCount = {};
 
   void _decodeSportDetailTotals(Uint8List pl) {
+    // H59MA_V1.0 captures (and the channel_a_test fixture at
+    // `test/channel_a_test.dart` for the dispatcher) lay out the
+    // 0x43 record frame as:
+    //   pl[0..2]  = year/month/day BCD
+    //   pl[3]     = (slot_idx << 2) — slot lives in the high 6 bits
+    //   pl[4]     = record_idx (low 8 bits)
+    //   pl[5]     = header record-count echo
+    //   pl[6..7]  = duration u16 LE
+    //   pl[8..9]  = auxLo (e.g. steps on H59MA)
+    //   pl[10..11] = auxHi (e.g. distance on H59MA)
+    //   pl[12..13] = reserved (0)
+    //
+    // The "done" condition is recordIdx == recordCount - 1, exactly
+    // what `pl[4] == pl[5] - 1` is. The previous revision used
+    // confusingly-named locals (page/total) and a stale comment that
+    // mis-attributed the field semantics.
     if (pl.length < 12) return;
-    if (pl[0] == 0xf0 || pl[0] == 0xff) return; // header / empty day
+
+    // Phase-1 header frame (0xF0 = records found, 0xFF = no records)
+    // has no per-record data. We could use it to capture the count
+    // up-front, but the record frames already echo the count in pl[5],
+    // so the finalization below works whether or not the header was
+    // seen. Drop the header on the floor.
+    final endFlag = pl[0];
+    if (endFlag == 0xf0 || endFlag == 0xff) return;
 
     final year = 2000 + Codec.fromBcd(pl[0]);
     final month = Codec.fromBcd(pl[1]);
@@ -1320,36 +1344,22 @@ class HistorySync extends ChangeNotifier {
       return;
     }
 
-    final page = pl[4];
-    final total = pl[5];
-    if (total == 0) return; // malformed / zero-total guard
-
     final day = DateOnly(year, month, dayOfMonth);
-    _sportDetailPageState[day] = (page: page, total: total);
+    final recordIdx = pl[4];
+    final recordCount = pl[5];
+    if (recordCount == 0) return; // malformed / zero-count guard
 
-    // Live H59MA_V1.0 captures show the detail record body as:
-    //   pl[3]    = slot << 2
-    //   pl[4]    = record index (page)
-    //   pl[5]    = header record count (total)
-    //   pl[6..7] = duration seconds, LE
-    //   pl[8..9] = per-slot steps, LE
-    //   pl[10..11] = per-slot distance meters, LE
-    //
-    // NOTE: PROTOCOL.md §3.4 says `BLEDataFormatUtils.bytes2Int` is
-    // big-endian, and §4.4 says `0x43` cal/steps/dist uses
-    // "bytes2Int of swapped pairs". However, live H59MA v13/v14
-    // captures show plain LE for steps/dist here, matching the
-    // current decode. This is a documented H59MA-specific deviation
-    // from the generic Oudmon SDK spec.
     final steps = pl[8] | (pl[9] << 8);
     final distance = pl[10] | (pl[11] << 8);
 
-    // Accumulate each page's contribution as it arrives, but start a
-    // fresh sum on page 0 so a restarted/retried paged sequence does
-    // not inherit stale totals. Only persist to the store once the
-    // final page (page == total - 1) has been seen.
+    _sportDetailRecordCount[day] = recordCount;
+
+    // Accumulate each record frame's contribution as it arrives, but
+    // start a fresh sum on recordIdx 0 so a restarted/retried sequence
+    // does not inherit stale totals. Only persist to the store once
+    // the final record (recordIdx == recordCount - 1) has been seen.
     var previous = _sportDetailTotals[day] ?? const DailyTotals();
-    if (page == 0) previous = const DailyTotals();
+    if (recordIdx == 0) previous = const DailyTotals();
 
     final existingDay = _days[day];
     final totals = DailyTotals(
@@ -1361,9 +1371,9 @@ class HistorySync extends ChangeNotifier {
     );
     _sportDetailTotals[day] = totals;
 
-    // PROTOCOL.md §4.4: b4=page, b5=total; done when b4==b5-1.
-    if (page == total - 1) {
+    if (recordIdx == recordCount - 1) {
       _upsertTotals(day, totals);
+      _sportDetailRecordCount.remove(day);
     }
   }
 
