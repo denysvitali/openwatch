@@ -324,12 +324,21 @@ void main() {
       _ack(t, OpB.rspOk); // ack pocket 2 → "Flashing" #2
       await watch
           .waitForCount(5)
-          .timeout(const Duration(seconds: 1)); // "Flashing" #2
-      // No ack for otaCheck → must timeout.
-      await expectLater(
-        watch.done.timeout(const Duration(seconds: 12)),
-        throwsA(isA<TimeoutException>()),
-      );
+          .timeout(const Duration(seconds: 1)); // "Flashing" #2"
+      // No ack for otaCheck → must timeout. Use direct try/catch —
+      // expectLater + async* generators + cancelOnError sometimes
+      // leaks a stray TimeoutException to the test zone after the
+      // test body has already matched, producing a "failed after
+      // test completion" report. Direct await avoids that.
+      final doneFuture = watch.done.timeout(const Duration(seconds: 12));
+      Object? caught;
+      try {
+        await doneFuture;
+        fail('expected TimeoutException, got stream completion');
+      } on Object catch (e) {
+        caught = e;
+      }
+      expect(caught, isA<TimeoutException>());
     });
   });
 
@@ -345,15 +354,25 @@ void main() {
           .waitForCount(2)
           .timeout(const Duration(seconds: 1)); // "Starting session"
       await _waitForSendB(t); // otaStart sent
+      // Subscribe BEFORE injecting the error so the `.then` chain is
+      // attached when `doneCompleter.completeError` fires. Otherwise
+      // the DfuException briefly sits in the Completer with no
+      // handler and the test zone reports it as unhandled.
+      final doneFuture = watch.done.timeout(const Duration(seconds: 12));
       await _ackDrain(t, OpB.rspLowBattery);
-      await expectLater(
-        watch.done.timeout(const Duration(seconds: 12)),
-        throwsA(
-          isA<DfuException>().having(
-            (e) => e.message,
-            'message',
-            contains('battery too low'),
-          ),
+      Object? caught;
+      try {
+        await doneFuture;
+        fail('expected DfuException, got stream completion');
+      } on Object catch (e) {
+        caught = e;
+      }
+      expect(
+        caught,
+        isA<DfuException>().having(
+          (e) => e.message,
+          'message',
+          contains('battery too low'),
         ),
       );
     });
@@ -382,16 +401,23 @@ void main() {
           .waitForCount(4)
           .timeout(const Duration(seconds: 1)); // "Flashing" #1
       await _waitForSendB(t);
-      // Battery dies before pocket 2.
+      // Battery dies before pocket 2. Subscribe BEFORE injecting the
+      // error so the `.then` chain is attached when the error fires.
+      final doneFuture = watch.done.timeout(const Duration(seconds: 12));
       await _ackDrain(t, OpB.rspLowBattery);
-      await expectLater(
-        watch.done.timeout(const Duration(seconds: 12)),
-        throwsA(
-          isA<DfuException>().having(
-            (e) => e.message,
-            'message',
-            contains('battery too low'),
-          ),
+      Object? caught;
+      try {
+        await doneFuture;
+        fail('expected DfuException, got stream completion');
+      } on Object catch (e) {
+        caught = e;
+      }
+      expect(
+        caught,
+        isA<DfuException>().having(
+          (e) => e.message,
+          'message',
+          contains('battery too low'),
         ),
       );
     });
@@ -429,15 +455,23 @@ void main() {
           .waitForCount(6)
           .timeout(const Duration(seconds: 1)); // "Verifying"
       await _waitForSendB(t);
+      // Subscribe BEFORE injecting the error so the `.then` chain
+      // is attached when the error fires.
+      final doneFuture = watch.done.timeout(const Duration(seconds: 12));
       await _ackDrain(t, OpB.rspLowBattery);
-      await expectLater(
-        watch.done.timeout(const Duration(seconds: 12)),
-        throwsA(
-          isA<DfuException>().having(
-            (e) => e.message,
-            'message',
-            contains('battery too low'),
-          ),
+      Object? caught;
+      try {
+        await doneFuture;
+        fail('expected DfuException, got stream completion');
+      } on Object catch (e) {
+        caught = e;
+      }
+      expect(
+        caught,
+        isA<DfuException>().having(
+          (e) => e.message,
+          'message',
+          contains('battery too low'),
         ),
       );
     });
@@ -455,15 +489,23 @@ void main() {
           .waitForCount(2)
           .timeout(const Duration(seconds: 1)); // "Starting session"
       await _waitForSendB(t);
+      // Subscribe BEFORE injecting the error so the `.then` chain
+      // is attached when the error fires.
+      final doneFuture = watch.done.timeout(const Duration(seconds: 12));
       await _ackDrain(t, OpB.rspCmdStatus, status: 7);
-      await expectLater(
-        watch.done.timeout(const Duration(seconds: 12)),
-        throwsA(
-          isA<DfuException>().having(
-            (e) => e.message,
-            'message',
-            contains('Device error'),
-          ),
+      Object? caught;
+      try {
+        await doneFuture;
+        fail('expected DfuException, got stream completion');
+      } on Object catch (e) {
+        caught = e;
+      }
+      expect(
+        caught,
+        isA<DfuException>().having(
+          (e) => e.message,
+          'message',
+          contains('Device error'),
         ),
       );
     });
@@ -489,16 +531,23 @@ void main() {
       // Pocket 2 NAK with non-zero status. After Flashing #1 fires,
       // the flasher is sitting on `_awaitRsp()` for pocket 2 — its
       // _rspWaiter is registered, so the injected error is routed
-      // straight to that Completer.
+      // straight to that Completer. Subscribe BEFORE injecting so
+      // the `.then` chain is attached when the error fires.
+      final doneFuture = watch.done.timeout(const Duration(seconds: 12));
       await _ackDrain(t, OpB.rspCmdStatus, status: 2);
-      await expectLater(
-        watch.done.timeout(const Duration(seconds: 12)),
-        throwsA(
-          isA<DfuException>().having(
-            (e) => e.message,
-            'message',
-            contains('Device error'),
-          ),
+      Object? caught;
+      try {
+        await doneFuture;
+        fail('expected DfuException, got stream completion');
+      } on Object catch (e) {
+        caught = e;
+      }
+      expect(
+        caught,
+        isA<DfuException>().having(
+          (e) => e.message,
+          'message',
+          contains('Device error'),
         ),
       );
     });
