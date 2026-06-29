@@ -19,6 +19,12 @@ void main() {
       expect(otel.configuredEnableAutoLogEvents, isFalse);
     });
 
+    test('logs and metrics use batched export cadences', () {
+      expect(otel.configuredMetricExportInterval, const Duration(seconds: 60));
+      expect(otel.configuredLogBatchScheduleDelay, const Duration(seconds: 5));
+      expect(otel.configuredLogBatchMaxExportBatchSize, 512);
+    });
+
     test('service name matches the happy_flutter convention', () {
       expect(OpenTelemetryService.serviceName, 'openwatch');
     });

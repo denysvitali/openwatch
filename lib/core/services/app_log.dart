@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 
 enum LogLevel { debug, info, tx, rx, warn, error }
 
+typedef AppLogSink = void Function(LogEntry entry);
+
 class LogEntry {
   LogEntry(this.time, this.level, this.tag, this.message);
   final DateTime time;
@@ -31,14 +33,32 @@ class AppLog extends ChangeNotifier {
 
   static const int _max = 2000;
   final List<LogEntry> _entries = [];
+  final Set<AppLogSink> _sinks = {};
 
   List<LogEntry> get entries => List.unmodifiable(_entries);
+
+  void addSink(AppLogSink sink) {
+    _sinks.add(sink);
+  }
+
+  void removeSink(AppLogSink sink) {
+    _sinks.remove(sink);
+  }
 
   void log(String tag, String message, {LogLevel level = LogLevel.info}) {
     final entry = LogEntry(DateTime.now(), level, tag, message);
     _entries.add(entry);
     if (_entries.length > _max) _entries.removeAt(0);
     if (kDebugMode) debugPrint(entry.toString());
+    for (final sink in List<AppLogSink>.of(_sinks)) {
+      try {
+        sink(entry);
+      } catch (e, stack) {
+        if (kDebugMode) {
+          debugPrint('AppLog sink failed: $e\n$stack');
+        }
+      }
+    }
     notifyListeners();
   }
 

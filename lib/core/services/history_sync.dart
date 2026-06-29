@@ -555,6 +555,7 @@ class HistorySync extends ChangeNotifier {
       'sync.history',
       attributes: {'sync.days_back': effectiveDaysBack},
     );
+    final syncStarted = DateTime.now();
     var fetched = 0;
     Object? caughtError;
     StackTrace? caughtTrace;
@@ -619,13 +620,20 @@ class HistorySync extends ChangeNotifier {
       // body; only the delta vs the post-hydration baseline is the
       // on-wire contribution (HS-9). Clamp to >= 0 for safety in case
       // a concurrent mutation shrinks the list between the two reads.
-      syncSpan?.setAttribute(
-        'sync.hr_new',
-        (_hr.length - _hrBaseline).clamp(0, _hr.length),
-      );
-      syncSpan?.setAttribute(
-        'sync.sleep_new',
-        (_sleep.length - _sleepBaseline).clamp(0, _sleep.length),
+      final hrNew = (_hr.length - _hrBaseline).clamp(0, _hr.length).toInt();
+      final sleepNew = (_sleep.length - _sleepBaseline)
+          .clamp(0, _sleep.length)
+          .toInt();
+      syncSpan?.setAttribute('sync.hr_new', hrNew);
+      syncSpan?.setAttribute('sync.sleep_new', sleepNew);
+      OpenTelemetryService().recordHistorySync(
+        daysBack: effectiveDaysBack,
+        daysFetched: fetched,
+        daysTotal: _fetchedDays.length,
+        hrNew: hrNew,
+        sleepNew: sleepNew,
+        duration: DateTime.now().difference(syncStarted),
+        ok: caughtError == null && lastSyncError == null,
       );
       if (caughtError != null) {
         syncSpan?.recordError(caughtError, caughtTrace);

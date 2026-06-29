@@ -1,9 +1,11 @@
 import 'dart:async';
-import 'dart:typed_data';
 
+import 'package:dartastic_opentelemetry/dartastic_opentelemetry.dart'
+    as otel_sdk;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutterrific_opentelemetry/flutterrific_opentelemetry.dart'
-    hide Logger;
+    hide LogLevel, Logger;
 import 'package:package_info_plus/package_info_plus.dart';
 
 import 'app_log.dart';
@@ -37,6 +39,13 @@ class OpenTelemetryService {
   static const bool metricsEnabled = true;
   static const bool logsEnabled = true;
   static const bool autoLogEventsEnabled = false;
+  static const Duration metricExportInterval = Duration(seconds: 60);
+  static const Duration metricExportTimeout = Duration(seconds: 30);
+  static const Duration logBatchScheduleDelay = Duration(seconds: 5);
+  static const Duration logBatchExportTimeout = Duration(seconds: 30);
+  static const int logBatchMaxQueueSize = 2048;
+  static const int logBatchMaxExportBatchSize = 512;
+  static const int maxLogBodyLength = 8192;
 
   final NavigatorObserver _routeObserver;
 
@@ -46,6 +55,14 @@ class OpenTelemetryService {
   Future<void>? _initializeFuture;
   Future<void>? _trustedCertsFuture;
   _OpenWatchOtelLifecycleObserver? _lifecycleObserver;
+  bool _appLogSinkAttached = false;
+  UILogger? _appLogEmitter;
+  otel_sdk.Counter<int>? _logRecordsCounter;
+  otel_sdk.Counter<int>? _historySyncRunsCounter;
+  otel_sdk.Counter<int>? _historySyncDaysFetchedCounter;
+  otel_sdk.Counter<int>? _historySyncHrRecordsCounter;
+  otel_sdk.Counter<int>? _historySyncSleepRecordsCounter;
+  otel_sdk.Histogram<double>? _historySyncDurationHistogram;
 
   bool get isInitialized => _initialized;
 
@@ -115,6 +132,15 @@ class OpenTelemetryService {
 
   @visibleForTesting
   bool get configuredTracingEnabledByDefault => tracingEnabledByDefault;
+
+  @visibleForTesting
+  Duration get configuredMetricExportInterval => metricExportInterval;
+
+  @visibleForTesting
+  Duration get configuredLogBatchScheduleDelay => logBatchScheduleDelay;
+
+  @visibleForTesting
+  int get configuredLogBatchMaxExportBatchSize => logBatchMaxExportBatchSize;
 
   /// Wire up a future that resolves once the host's user-installed
   /// certificate store (e.g. Android user CA bundle, corporate MITM
@@ -196,19 +222,28 @@ class OpenTelemetryService {
                 OtlpHttpMetricExporter(
                   OtlpHttpMetricExporterConfig(endpoint: endpoint),
                 ),
-                interval: const Duration(seconds: 60),
-                timeout: const Duration(seconds: 30),
+                interval: metricExportInterval,
+                timeout: metricExportTimeout,
               )
             : null,
-        logRecordExporter: logsEnabled
-            ? OtlpHttpLogRecordExporter(
-                OtlpHttpLogRecordExporterConfig(endpoint: endpoint),
+        logRecordProcessor: logsEnabled
+            ? BatchLogRecordProcessor(
+                OtlpHttpLogRecordExporter(
+                  OtlpHttpLogRecordExporterConfig(endpoint: endpoint),
+                ),
+                const otel_sdk.BatchLogRecordProcessorConfig(
+                  maxQueueSize: logBatchMaxQueueSize,
+                  scheduleDelay: logBatchScheduleDelay,
+                  maxExportBatchSize: logBatchMaxExportBatchSize,
+                  exportTimeout: logBatchExportTimeout,
+                ),
               )
             : null,
         enableMetrics: metricsEnabled,
         enableLogs: logsEnabled,
         enableAutoLogEvents: autoLogEventsEnabled,
       );
+      _configureAppSignals(version);
       _replacePackageLifecycleObserver();
       _initialized = true;
       _initFailed = false;
@@ -223,6 +258,183 @@ class OpenTelemetryService {
       AppLog.instance.error('otel', 'initialization failed: $e\n$stack');
     } finally {
       _initializeFuture = null;
+    }
+  }
+
+  void _configureAppSignals(String version) {
+    if (metricsEnabled) {
+      final meter = FlutterOTel.meter(name: 'openwatch.app', version: version);
+      _logRecordsCounter = meter.createCounter<int>(
+        name: 'openwatch.log.records',
+        unit: '{record}',
+        description: 'App log records emitted by OpenWatch.',
+      );
+      _historySyncRunsCounter = meter.createCounter<int>(
+        name: 'openwatch.history.sync.runs',
+        unit: '{sync}',
+        description: 'Completed OpenWatch history sync attempts.',
+      );
+      _historySyncDaysFetchedCounter = meter.createCounter<int>(
+        name: 'openwatch.history.sync.days_fetched',
+        unit: '{day}',
+        description: 'History day fetches completed during sync.',
+      );
+      _historySyncHrRecordsCounter = meter.createCounter<int>(
+        name: 'openwatch.history.sync.hr_records',
+        unit: '{record}',
+        description: 'Heart-rate records newly ingested during sync.',
+      );
+      _historySyncSleepRecordsCounter = meter.createCounter<int>(
+        name: 'openwatch.history.sync.sleep_records',
+        unit: '{record}',
+        description: 'Sleep records newly ingested during sync.',
+      );
+      _historySyncDurationHistogram = meter.createHistogram<double>(
+        name: 'openwatch.history.sync.duration',
+        unit: 'ms',
+        description: 'History sync duration.',
+        boundaries: const [
+          250,
+          500,
+          1000,
+          2500,
+          5000,
+          10000,
+          30000,
+          60000,
+          120000,
+        ],
+      );
+    }
+
+    if (logsEnabled) {
+      _appLogEmitter = FlutterOTel.logger('openwatch.app_log');
+      _attachAppLogSink();
+    }
+  }
+
+  void _attachAppLogSink() {
+    if (_appLogSinkAttached) return;
+    final existing = AppLog.instance.entries;
+    AppLog.instance.addSink(_emitAppLogEntry);
+    _appLogSinkAttached = true;
+    for (final entry in existing) {
+      _emitAppLogEntry(entry);
+    }
+  }
+
+  void _emitAppLogEntry(LogEntry entry) {
+    final logger = _appLogEmitter;
+    if (logger == null) return;
+    final attributes = <String, Object>{
+      'log.tag': _safeAttributeString(entry.tag, maxLength: 64),
+      'log.level': entry.level.name,
+    };
+    final spanContext = currentSpan?.spanContext;
+    if (spanContext != null && spanContext.isValid) {
+      attributes['trace_id'] = spanContext.traceId.toString();
+      attributes['span_id'] = spanContext.spanId.toString();
+    }
+    final body = _safeLogBody(entry.message);
+    if (body.length < entry.message.length) {
+      attributes['log.truncated'] = true;
+      attributes['log.original_length'] = entry.message.length;
+    }
+
+    try {
+      logger.emit(
+        timeStamp: entry.time,
+        severityNumber: _severityFor(entry.level),
+        severityText: entry.level.name.toUpperCase(),
+        body: body,
+        attributes: attributes.toAttributes(),
+        eventName: 'openwatch.log',
+      );
+      _addCounter(_logRecordsCounter, 1, {
+        'log.level': entry.level.name,
+        'log.tag': _safeAttributeString(entry.tag, maxLength: 64),
+      });
+    } catch (e, stack) {
+      _debugTelemetryFailure('failed to emit app log to otel', e, stack);
+    }
+  }
+
+  void recordHistorySync({
+    required int daysBack,
+    required int daysFetched,
+    required int daysTotal,
+    required int hrNew,
+    required int sleepNew,
+    required Duration duration,
+    required bool ok,
+  }) {
+    if (!_initialized) return;
+    final attributes = {
+      'sync.status': ok ? 'ok' : 'error',
+      'sync.days_back': daysBack,
+      'sync.days_total': daysTotal,
+    };
+    _addCounter(_historySyncRunsCounter, 1, attributes);
+    _addCounter(_historySyncDaysFetchedCounter, daysFetched, attributes);
+    _addCounter(_historySyncHrRecordsCounter, hrNew, attributes);
+    _addCounter(_historySyncSleepRecordsCounter, sleepNew, attributes);
+    _recordHistogram(
+      _historySyncDurationHistogram,
+      duration.inMilliseconds.toDouble(),
+      attributes,
+    );
+  }
+
+  static Severity _severityFor(LogLevel level) => switch (level) {
+    LogLevel.debug || LogLevel.tx || LogLevel.rx => Severity.DEBUG,
+    LogLevel.info => Severity.INFO,
+    LogLevel.warn => Severity.WARN,
+    LogLevel.error => Severity.ERROR,
+  };
+
+  void _addCounter(
+    otel_sdk.Counter<int>? counter,
+    int value,
+    Map<String, Object?> attributes,
+  ) {
+    if (counter == null || value <= 0) return;
+    try {
+      counter.addWithMap(value, _safeAttributes(attributes));
+    } catch (e, stack) {
+      _debugTelemetryFailure('failed to record otel counter', e, stack);
+    }
+  }
+
+  void _recordHistogram(
+    otel_sdk.Histogram<double>? histogram,
+    double value,
+    Map<String, Object?> attributes,
+  ) {
+    if (histogram == null) return;
+    try {
+      histogram.recordWithMap(value, _safeAttributes(attributes));
+    } catch (e, stack) {
+      _debugTelemetryFailure('failed to record otel histogram', e, stack);
+    }
+  }
+
+  static String _safeLogBody(String message) {
+    if (message.length <= maxLogBodyLength) return message;
+    return '${message.substring(0, maxLogBodyLength - 3)}...';
+  }
+
+  static String _safeAttributeString(String value, {int maxLength = 256}) {
+    if (value.length <= maxLength) return value;
+    return '${value.substring(0, maxLength - 3)}...';
+  }
+
+  static void _debugTelemetryFailure(
+    String message,
+    Object error,
+    StackTrace stack,
+  ) {
+    if (kDebugMode) {
+      debugPrint('$message: $error\n$stack');
     }
   }
 
