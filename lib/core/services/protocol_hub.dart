@@ -58,14 +58,17 @@ class ProtocolHub {
     // the push frame the watch emits whenever a notification crosses the
     // bridge. We forward it as a synthetic firmware event 1 (notification).
     //
-    // We subscribe to [ChannelADispatcher.onPushMsgReassembled] — not the
-    // legacy single-frame `onPushMsg` — because the §3.3 wire shape is a
-    // 11-byte-chunked accumulator with a flush-marker pair terminator
-    // (`FUN_00829e92`). The reassembled stream buffers chunks via the
-    // §3.3 flush marker or a 250 ms quiet window and emits one
-    // [PushMsgUint] per message; the single-frame shortcut would fan a
-    // chunked notification out into N truncated `PushMsgUint`s.
-    _pushSub = _dispatcher.onPushMsgReassembled.listen((push) {
+    // We subscribe to the legacy single-frame shortcut [onPushMsg] — it
+    // fires on the first frame of every sequence (the reassembler
+    // captures `isFirstFrame` *before* mutating it). For the legacy
+    // 2-byte wire shape `[type, content…]` the "first frame" IS the
+    // whole message, so no latency. For §3.3 chunked pushes the
+    // shortcut carries only the first chunk's text — acceptable for
+    // the ANCS bridge (the firmware mirrors whole notifications through
+    // its own §4.1 source-data path, not via `0x72` reassembly).
+    // Consumers that need the full chunked message should subscribe to
+    // [ChannelADispatcher.onPushMsgReassembled] directly.
+    _pushSub = _dispatcher.onPushMsg.listen((push) {
       // Trace every push message the firmware emits so notification
       // arrival latency (and the synthetic ANCS encoding) is visible.
       final span = OpenTelemetryService().startTrace(
