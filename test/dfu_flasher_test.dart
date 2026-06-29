@@ -340,7 +340,7 @@ void main() {
           isA<DfuException>().having(
             (e) => e.message,
             'message',
-            contains('device error'),
+            contains('Device error'),
           ),
         ),
       );
@@ -372,7 +372,7 @@ void main() {
           isA<DfuException>().having(
             (e) => e.message,
             'message',
-            contains('device error'),
+            contains('Device error'),
           ),
         ),
       );
