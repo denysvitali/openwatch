@@ -41,9 +41,7 @@ void main() {
       final f = Codec.buildChannelB(0x42, payload);
       final first = Uint8List.sublistView(f, 0, 20);
       // 8 bytes of stray "continuation" content.
-      final stray = Uint8List.fromList(
-        List<int>.generate(8, (i) => 0xAA),
-      );
+      final stray = Uint8List.fromList(List<int>.generate(8, (i) => 0xAA));
       // Finish the buffer with the original 8 trailing bytes.
       final trailing = Uint8List.sublistView(f, 20, 28);
 
@@ -63,32 +61,34 @@ void main() {
       expect(emitted, hasLength(1));
     });
 
-    test('missing chunk: reassembly exceeds fragmentTimeout, state '
-        'resets silently — NO NAK on Channel B (channel_b.dart:218-228)',
-        () async {
-      final t = _StubTransport();
-      final p = ChannelBParser(
-        t,
-        fragmentTimeout: const Duration(milliseconds: 50),
-      );
-      p.bind();
-      final emitted = <ChannelBCommand>[];
-      final sub = p.commands.listen(emitted.add);
+    test(
+      'missing chunk: reassembly exceeds fragmentTimeout, state '
+      'resets silently — NO NAK on Channel B (channel_b.dart:218-228)',
+      () async {
+        final t = _StubTransport();
+        final p = ChannelBParser(
+          t,
+          fragmentTimeout: const Duration(milliseconds: 50),
+        );
+        p.bind();
+        final emitted = <ChannelBCommand>[];
+        final sub = p.commands.listen(emitted.add);
 
-      // 100-byte payload declared but only the first fragment arrives.
-      const payloadLen = 100;
-      final f = Codec.buildChannelB(
-        0x42,
-        List<int>.generate(payloadLen, (i) => i),
-      );
-      t.inB.add(Uint8List.sublistView(f, 0, 20));
+        // 100-byte payload declared but only the first fragment arrives.
+        const payloadLen = 100;
+        final f = Codec.buildChannelB(
+          0x42,
+          List<int>.generate(payloadLen, (i) => i),
+        );
+        t.inB.add(Uint8List.sublistView(f, 0, 20));
 
-      // Wait past the 50 ms timeout — `_armTimeout` fires `_reset()`.
-      await Future<void>.delayed(const Duration(milliseconds: 120));
-      await sub.cancel();
-      expect(emitted, isEmpty, reason: 'timeout must discard, never emit');
-      expect(t.sentA, isEmpty, reason: 'firmware never NAKs frames it sent');
-    });
+        // Wait past the 50 ms timeout — `_armTimeout` fires `_reset()`.
+        await Future<void>.delayed(const Duration(milliseconds: 120));
+        await sub.cancel();
+        expect(emitted, isEmpty, reason: 'timeout must discard, never emit');
+        expect(t.sentA, isEmpty, reason: 'firmware never NAKs frames it sent');
+      },
+    );
 
     test('head-of-line blocking: parser is single-state, so an interleaved '
         'second-frame first-fragment gets APPENDED to the wrong buffer '
@@ -99,10 +99,7 @@ void main() {
       final emitted = <ChannelBCommand>[];
       final sub = p.commands.listen(emitted.add);
 
-      final a = Codec.buildChannelB(
-        0x03,
-        List<int>.generate(30, (i) => i),
-      );
+      final a = Codec.buildChannelB(0x03, List<int>.generate(30, (i) => i));
       final b = Codec.buildChannelB(
         0x04,
         List<int>.generate(30, (i) => 0x40 + i),
@@ -128,43 +125,45 @@ void main() {
       await sub.cancel();
     });
 
-    test('duplicate chunk (replay storm): same frame pushed 5× emits '
-        'EXACTLY once (FNV-1a LRU dedup, channel_b.dart:86-89 + 273-289)',
-        () async {
-      final t = _StubTransport();
-      final p = ChannelBParser(t);
-      p.bind();
-      final emitted = <ChannelBCommand>[];
-      final sub = p.commands.listen(emitted.add);
+    test(
+      'duplicate chunk (replay storm): same frame pushed 5× emits '
+      'EXACTLY once (FNV-1a LRU dedup, channel_b.dart:86-89 + 273-289)',
+      () async {
+        final t = _StubTransport();
+        final p = ChannelBParser(t);
+        p.bind();
+        final emitted = <ChannelBCommand>[];
+        final sub = p.commands.listen(emitted.add);
 
-      // 13-byte payload matching a typical 0x27 sleep push
-      // (channel_b_test.dart replay scenario).
-      final f = Codec.buildChannelB(0x27, [
-        0xC2,
-        0x01,
-        0x01,
-        0x1E,
-        0x02,
-        0x5A,
-        0x03,
-        0x3C,
-        0x04,
-        0x0F,
-        0x05,
-        0x29,
-        0x06,
-      ]);
-      for (var i = 0; i < 5; i++) {
-        t.inB.add(f);
-      }
-      await Future<void>.delayed(const Duration(milliseconds: 30));
-      await sub.cancel();
-      expect(
-        emitted,
-        hasLength(1),
-        reason: '5× replay of an identical frame must dedup to 1 emit',
-      );
-    });
+        // 13-byte payload matching a typical 0x27 sleep push
+        // (channel_b_test.dart replay scenario).
+        final f = Codec.buildChannelB(0x27, [
+          0xC2,
+          0x01,
+          0x01,
+          0x1E,
+          0x02,
+          0x5A,
+          0x03,
+          0x3C,
+          0x04,
+          0x0F,
+          0x05,
+          0x29,
+          0x06,
+        ]);
+        for (var i = 0; i < 5; i++) {
+          t.inB.add(f);
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+        await sub.cancel();
+        expect(
+          emitted,
+          hasLength(1),
+          reason: '5× replay of an identical frame must dedup to 1 emit',
+        );
+      },
+    );
 
     test('partial last chunk with bad CRC is SILENTLY dropped — no emit, '
         'no NAK (channel_b.dart:240-253)', () async {
@@ -197,22 +196,24 @@ void main() {
       expect(emitted, isEmpty);
     });
 
-    test('tiny payload (sub-MTU single chunk) emits in one frame; '
-        'continuation state is never entered (channel_b.dart:210-211)',
-        () async {
-      // 4-byte payload → frame is 6 + 4 = 10 bytes, well under MTU=20.
-      // `_onFirstFragment` populates accumulator=4=expectedLength and
-      // dispatches immediately, skipping `_state = 1`.
-      final t = _StubTransport();
-      final p = ChannelBParser(t);
-      p.bind();
+    test(
+      'tiny payload (sub-MTU single chunk) emits in one frame; '
+      'continuation state is never entered (channel_b.dart:210-211)',
+      () async {
+        // 4-byte payload → frame is 6 + 4 = 10 bytes, well under MTU=20.
+        // `_onFirstFragment` populates accumulator=4=expectedLength and
+        // dispatches immediately, skipping `_state = 1`.
+        final t = _StubTransport();
+        final p = ChannelBParser(t);
+        p.bind();
 
-      final done = p.commands.first;
-      t.inB.add(Codec.buildChannelB(0x27, [0xC2, 0x01, 0x01, 0x1E]));
-      final c = await done.timeout(const Duration(seconds: 1));
-      expect(c.cmd, 0x27);
-      expect(c.payload, [0xC2, 0x01, 0x01, 0x1E]);
-    });
+        final done = p.commands.first;
+        t.inB.add(Codec.buildChannelB(0x27, [0xC2, 0x01, 0x01, 0x1E]));
+        final c = await done.timeout(const Duration(seconds: 1));
+        expect(c.cmd, 0x27);
+        expect(c.payload, [0xC2, 0x01, 0x01, 0x1E]);
+      },
+    );
 
     test('max-size payload spanning 53 chunks reassembles cleanly '
         '(1040-byte payload under the 0x450=1104-byte firmware buffer, '
@@ -237,37 +238,39 @@ void main() {
       expect(c.payload, payload, reason: 'no bytes lost across 53 fragments');
     });
 
-    test('reassembly timeout race: a chunk arriving 75% through the '
-        'timer window CANCELS the discard (channel_b.dart:138 + 218-228)',
-        () async {
-      // First line of `_onChunk` cancels the timeout BEFORE branching.
-      // So a chunk even 1 µs before the deadline resets the timer.
-      final t = _StubTransport();
-      final p = ChannelBParser(
-        t,
-        fragmentTimeout: const Duration(milliseconds: 80),
-      );
-      p.bind();
-      final emitted = <ChannelBCommand>[];
-      final sub = p.commands.listen(emitted.add);
+    test(
+      'reassembly timeout race: a chunk arriving 75% through the '
+      'timer window CANCELS the discard (channel_b.dart:138 + 218-228)',
+      () async {
+        // First line of `_onChunk` cancels the timeout BEFORE branching.
+        // So a chunk even 1 µs before the deadline resets the timer.
+        final t = _StubTransport();
+        final p = ChannelBParser(
+          t,
+          fragmentTimeout: const Duration(milliseconds: 80),
+        );
+        p.bind();
+        final emitted = <ChannelBCommand>[];
+        final sub = p.commands.listen(emitted.add);
 
-      const payloadLen = 100;
-      final f = Codec.buildChannelB(
-        0x33,
-        List<int>.generate(payloadLen, (i) => i),
-      );
-      t.inB.add(Uint8List.sublistView(f, 0, 20));
+        const payloadLen = 100;
+        final f = Codec.buildChannelB(
+          0x33,
+          List<int>.generate(payloadLen, (i) => i),
+        );
+        t.inB.add(Uint8List.sublistView(f, 0, 20));
 
-      // At 60 ms (75% through the 80 ms timer) deliver the remainder.
-      await Future<void>.delayed(const Duration(milliseconds: 60));
-      t.inB.add(Uint8List.sublistView(f, 20));
+        // At 60 ms (75% through the 80 ms timer) deliver the remainder.
+        await Future<void>.delayed(const Duration(milliseconds: 60));
+        t.inB.add(Uint8List.sublistView(f, 20));
 
-      final c = await p.commands.first.timeout(const Duration(seconds: 1));
-      expect(c.cmd, 0x33);
-      expect(c.payload.length, payloadLen);
-      await sub.cancel();
-      expect(emitted, hasLength(1));
-    });
+        final c = await p.commands.first.timeout(const Duration(seconds: 1));
+        expect(c.cmd, 0x33);
+        expect(c.payload.length, payloadLen);
+        await sub.cancel();
+        expect(emitted, hasLength(1));
+      },
+    );
   });
 }
 
