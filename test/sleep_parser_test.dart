@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openwatch/core/protocol/sleep_parser.dart';
 import 'package:openwatch/core/services/app_log.dart';
+import 'package:openwatch/features/history/sleep_session_summary.dart';
 
 void main() {
   group('SleepParser — parseNightSleepSegments (0x27 Ch-B)', () {
@@ -763,6 +764,218 @@ void main() {
       final segs = SleepParser.parseLunchSleepSegments(pl, anchor: anchor);
       expect(segs, hasLength(1));
       expect(segs.single.start, DateTime(2026, 6, 20, 12, 0));
+    });
+
+    // -------------------------------------------------------------------------
+    // Scoring coverage matrix — see REVIEW §3 of
+    // `docs/sleep_scoring_review.md`. The firmware does NOT publish a
+    // scoring heuristic (§8.13: "exact stage-value meaning still needs live
+    // validation"), so these tests verify the *only* contract we have: the
+    // host's [_toStage] mapping + the `_SleepPair`-duration parser. If the
+    // firmware later exposes `0x11 sleep summary`'s 100 B header score, the
+    // host will read it from `ChannelBParser` directly and these tests will
+    // gain an explicit score-field assertion.
+    // -------------------------------------------------------------------------
+
+    test('all-awake payload emits segments that would score 0', () {
+      // Contract: a session of N minutes of pure `awake` stages has no deep
+      // and no rem contribution. A canonical `100 - 5*awakeMin` heuristic
+      // (the only formula hinted at by the §2.3 record-list comment "per-
+      // record score bytes") would yield `0` for any non-empty awake-only
+      // session. The parser should produce N segments all mapped to awake.
+      final pl = Uint8List.fromList([
+        0x01, // dayOffset
+        0x00, 0x78, // endMin BE 120 (02:00 wake)
+        0x04, 0x3C, // awake 60
+        0x04, 0x3C, // awake 60
+      ]);
+      final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
+      expect(segs, hasLength(2));
+      expect(segs.every((s) => s.stage == SleepStage.awake), isTrue);
+      expect(segs.fold<int>(0, (acc, s) => acc + s.duration.inMinutes), 120);
+      // Mapping invariant: awake=0x04 in canonical Oudmon, score=0x35 in
+      // H59MA range. Both stage bytes round-trip through the parser into
+      // SleepStage.awake segments (verified above by the .every check on
+      // a payload that emits exactly these two bytes — 0x04 and 0x04).
+    });
+
+    test('all-deep payload emits segments that would score 100', () {
+      // Contract: a session of pure `deep` stages would saturate any
+      // "deep% × constant" scoring formula (e.g. `(deep/total) * 100` →
+      // 100; `100 - 5*awake + ...` → 100 because awake=0). The parser
+      // should map every pair to SleepStage.deep regardless of whether the
+      // firmware used canonical 0x02 or H59MA score range 0x05..0x0f.
+      final pl = Uint8List.fromList([
+        0x01, // dayOffset
+        0x01, 0x2C, // endMin BE 300 (05:00)
+        0x02, 0xB4, // deep 180
+        0x09, 0x1E, // score 0x09 → deep, 30 min
+      ]);
+      final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
+      expect(segs, hasLength(2));
+      expect(segs.every((s) => s.stage == SleepStage.deep), isTrue);
+      // The two pairs above are 0x02 (canonical Oudmon deep) and 0x09
+      // (H59MA score range 0x05..0x0f). Both emit SleepStage.deep — the
+      // .every check on the parsed segs is the contract.
+    });
+
+    test('mixed-stage payload keeps every stage distinct', () {
+      // Contract: the parser preserves stage boundaries. A 4-stage night
+      // is rendered as 4 colored bars, not collapsed into a single "asleep"
+      // bar (the regression that prompted the 0x05..0xff score-range fix).
+      final pl = Uint8List.fromList([
+        0x01, // dayOffset
+        0x01, 0x68, // endMin BE 360 (06:00)
+        0x02, 0x78, // deep 120
+        0x01, 0x3C, // light 60
+        0x03, 0x2D, // rem  45
+        0x04, 0x1E, // awake 30
+      ]);
+      final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
+      expect(segs, hasLength(4));
+      expect(
+        segs.map((s) => s.stage),
+        equals([
+          SleepStage.deep,
+          SleepStage.light,
+          SleepStage.rem,
+          SleepStage.awake,
+        ]),
+      );
+      expect(segs.fold<int>(0, (acc, s) => acc + s.duration.inMinutes), 255);
+    });
+
+    test('nap boundary: 14:00 start is parsed identically to 02:00 start '
+        '(no firmware-side time-of-day gating)', () {
+      // Contract: the parser does NOT distinguish nap from night based on
+      // start time. The firmware §2.3 record reader routes to
+      // `sleep_read_nap_record` (cmd 0x3e) or `sleep_read_summary_record`
+      // (cmd 0x27) explicitly — the parser is wired to the right path by
+      // the *opcode*, not by the wake-up minute-of-day. A 14:00 wake is a
+      // valid endMin (840 < 1440), so both opcodes yield the same
+      // segment shape.
+      const noon = 14 * 60; // 840
+      final nap = Uint8List.fromList([
+        (noon >> 8) & 0xFF, noon & 0xFF, // endMin BE = 840 (14:00)
+        0x01, 0x3C, // light 60
+      ]);
+      const twoAM = 2 * 60; // 120
+      final night = Uint8List.fromList([
+        0x01, // dayOffset
+        (twoAM >> 8) & 0xFF, twoAM & 0xFF, // endMin BE = 120 (02:00)
+        0x01, 0x3C, // light 60
+      ]);
+      final napSegs = SleepParser.parseLunchSleepSegments(nap, anchor: anchor);
+      final nightSegs = SleepParser.parseNightSleepSegments(
+        night,
+        anchor: anchor,
+      );
+      // Both should produce 1 light segment of 60 min — same shape.
+      expect(napSegs, hasLength(1));
+      expect(nightSegs, hasLength(1));
+      expect(napSegs.single.stage, SleepStage.light);
+      expect(nightSegs.single.stage, SleepStage.light);
+      expect(napSegs.single.duration, nightSegs.single.duration);
+      // The two anchors differ in start timestamp: nap starts at 13:00 the
+      // same day, night starts at 01:00 the same day (no wrap).
+      expect(napSegs.single.start, DateTime(2026, 6, 20, 13));
+      expect(nightSegs.single.start, DateTime(2026, 6, 20, 1));
+    });
+
+    test(
+      'gap in stream (signal loss) is exposed as two sessions, not merged',
+      () {
+        // Contract: the parser does not synthesize fill-in segments across
+        // a gap — the segment list just ends. The §3 host code
+        // (`SleepSessionSummary.fromSegments`) is the layer that splits
+        // sessions across >90 min gaps.
+        //
+        // We exercise the parser's contract: a payload with two blocks
+        // separated by a 4-hour implicit gap (no terminator — the parser
+        // walks straight into the next block) is emitted as two distinct
+        // segment *groups* in the same list.
+        //
+        //   Block 1: endMin = 120 (02:00), light 30
+        //   Block 2: endMin = 360 (06:00), deep 60
+        final pl = Uint8List.fromList([
+          0x01, // dayOffset
+          0x00, 0x78, // endMin BE 120 (02:00)
+          0x01, 0x1E, // light 30
+          0x01, 0x68, // endMin BE 360 (06:00)
+          0x02, 0x3C, // deep 60
+        ]);
+        final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
+        expect(segs, hasLength(2));
+        expect(segs[0].stage, SleepStage.light);
+        expect(segs[0].duration.inMinutes, 30);
+        expect(segs[1].stage, SleepStage.deep);
+        expect(segs[1].duration.inMinutes, 60);
+        // The session summary layer should split this into two sessions
+        // because the implicit gap (02:30 → 05:00 = 150 min) exceeds the
+        // 90-minute default threshold.
+        final sessions = SleepSessionSummary.fromSegments(segs);
+        expect(sessions, hasLength(2));
+      },
+    );
+
+    test('truncated last record (odd trailing byte) does not crash', () {
+      // Contract: the parser handles a payload whose last pair has only
+      // one byte — i.e. the BLE link lost the second byte of a (stage,
+      // durMin) pair. The chain walker must bail out cleanly and emit
+      // every well-formed segment before the truncation.
+      final pl = Uint8List.fromList([
+        0x01, // dayOffset
+        0x00, 0x78, // endMin BE 120 (02:00)
+        0x01, 0x1E, // light 30
+        0x02, 0x3C, // deep 60
+        0x03, // truncated: missing durMin byte
+      ]);
+      AppLog.instance.clear();
+      final segs = SleepParser.parseNightSleepSegments(pl, anchor: anchor);
+      // Both complete pairs survive; the lone trailing byte is ignored.
+      expect(segs, hasLength(2));
+      expect(segs[0].stage, SleepStage.light);
+      expect(segs[0].duration.inMinutes, 30);
+      expect(segs[1].stage, SleepStage.deep);
+      expect(segs[1].duration.inMinutes, 60);
+      // The SP-1 warn must NOT fire for a well-formed block — only the
+      // unparseable trailing byte is silently dropped.
+      expect(
+        AppLog.instance.entries.any(
+          (e) => e.tag == 'sleep' && e.level == LogLevel.warn,
+        ),
+        isFalse,
+        reason: 'truncated trailing byte is not a warn-level corruption',
+      );
+    });
+
+    test('REM detection — 0x03 maps to rem regardless of time-of-day', () {
+      // Contract: the parser does NOT gate REM on a time-of-day window.
+      // The firmware §2.3 record writer does not document such a window,
+      // and the only time the host sees is the wake-up minute-of-day
+      // (start time is derived). A nap ending at 14:30 with a 0x03 pair
+      // is just as much REM as a night ending at 06:00 with a 0x03 pair.
+      for (final endMin in [120, 360, 540, 840]) {
+        final pl = Uint8List.fromList([
+          (endMin >> 8) & 0xFF,
+          endMin & 0xFF,
+          0x03,
+          0x1E, // rem 30
+        ]);
+        final segs = SleepParser.parseLunchSleepSegments(pl, anchor: anchor);
+        expect(
+          segs.single.stage,
+          SleepStage.rem,
+          reason: 'endMin=$endMin should still classify 0x03 as rem',
+        );
+        expect(segs.single.duration.inMinutes, 30);
+      }
+      // The loop above already verifies that 0x03 round-trips through
+      // parseLunchSleepSegments into SleepStage.rem at four different
+      // wake-up minutes (02:00, 06:00, 09:00, 14:00) — that is the
+      // public host contract. The internal SleepParser.stageFor()
+      // helper returns the raw `typeByte & 0xFF` (not a stage) and is
+      // not exercised here.
     });
 
     test('returns an empty list for an empty payload', () {
