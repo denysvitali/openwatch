@@ -266,6 +266,14 @@ class HistorySync extends ChangeNotifier {
   /// The UI can highlight these so the user sees exactly what changed.
   final Set<DateOnly> _fetchedDays = {};
 
+  /// Snapshot of [_hr.length] / [_sleep.length] taken right after
+  /// [loadFromStore] completes inside [syncAll]. The 'Sync complete'
+  /// log + the `sync.hr_new` / `sync.sleep_new` OTel attributes use
+  /// `(end - baseline)` to isolate the *over-the-wire* contribution
+  /// from records that were already on disk (HS-9).
+  int _hrBaseline = 0;
+  int _sleepBaseline = 0;
+
   // FragmentReassemblers for the two-phase `0x37` stress history (§3.20)
   // and `0x39` HRV history (§3.21) streams. They are still allocated
   // through the public getters, but HistorySync subscribes during
@@ -579,6 +587,9 @@ class HistorySync extends ChangeNotifier {
         'history',
         'Sync start (last $effectiveDaysBack days, store=${_store != null}, force=$force)',
       );
+      // _syncAllBody takes the post-loadFromStore baseline so the
+      // 'Sync complete' log + OTel attrs can isolate over-the-wire
+      // ingest from hydration (HS-9).
       Future<void> runBody() => _syncAllBody(
         effectiveDaysBack,
         force: force,
@@ -602,6 +613,20 @@ class HistorySync extends ChangeNotifier {
       _syncing = false;
       syncSpan?.setAttribute('sync.days_fetched', fetched);
       syncSpan?.setAttribute('sync.days_total', _fetchedDays.length);
+      // Emit the over-the-wire deltas so the trace can distinguish a
+      // hydration-only sync (deltas == 0) from an actual fresh ingest.
+      // _hr / _sleep may have grown during loadFromStore() inside the
+      // body; only the delta vs the post-hydration baseline is the
+      // on-wire contribution (HS-9). Clamp to >= 0 for safety in case
+      // a concurrent mutation shrinks the list between the two reads.
+      syncSpan?.setAttribute(
+        'sync.hr_new',
+        (_hr.length - _hrBaseline).clamp(0, _hr.length),
+      );
+      syncSpan?.setAttribute(
+        'sync.sleep_new',
+        (_sleep.length - _sleepBaseline).clamp(0, _sleep.length),
+      );
       if (caughtError != null) {
         syncSpan?.recordError(caughtError, caughtTrace);
         syncSpan?.end(ok: false);
@@ -623,6 +648,11 @@ class HistorySync extends ChangeNotifier {
       // Hydrate from disk so we don't drop already-stored data even
       // if the watch drops the link halfway through a re-fetch.
       await loadFromStore();
+      // Snapshot the hydrated counts so the 'Sync complete' log +
+      // OTel attrs can isolate over-the-wire ingest from hydration
+      // (HS-9).
+      _hrBaseline = _hr.length;
+      _sleepBaseline = _sleep.length;
 
       // NOTE: 0x46 (`queryDataDistribution`) is a **watch→phone notify
       // only** opcode per PROTOCOL.md §4.6 — no host→watch request
@@ -848,8 +878,12 @@ class HistorySync extends ChangeNotifier {
 
       AppLog.instance.info(
         'history',
-        'Sync complete: hr=${_hr.length} sleep=${_sleep.length} '
-            'fetched=$fetched days=${_watchDaysWithData.length}',
+        'Sync complete: hr=${_hr.length} '
+            '(+${_hr.length - _hrBaseline} new) '
+            'sleep=${_sleep.length} '
+            '(+${_sleep.length - _sleepBaseline} new) '
+            'fetched=$fetched '
+            'days=${_watchDaysWithData.length}',
       );
 
       // Final drain to catch any late-arriving frames that were queued
