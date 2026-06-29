@@ -131,7 +131,9 @@ class OtaStateMachine {
       return false;
     }
     if (status != 0) {
-      session.errorMessage = 'device error: type=$rspType status=$status';
+      session.errorMessage =
+          'device error: type=0x${rspType.toRadixString(16)} '
+          'status=0x${status.toRadixString(16)}';
       session.phase = OtaPhase.error;
       return false;
     }
