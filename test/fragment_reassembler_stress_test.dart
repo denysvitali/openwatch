@@ -22,14 +22,18 @@ import 'package:openwatch/core/protocol/codec.dart';
 void main() {
   group('ChannelB reassembler — stress', () {
     test('out-of-order arrival: stray non-magic chunk mid-reassembly '
-        'is APPENDED (continuation slot does not enforce magic; '
-        'channel_b.dart:152-175)', () async {
+        'is APPENDED then poisoned into a CRC mismatch — NO emit, NO NAK '
+        '(continuation slot does not enforce magic; channel_b.dart:152-175 '
+        '+ 240-253)', () async {
       // The firmware parser has one accumulator in `_state == 1`
       // continuation mode. Anything arriving without a leading 0xBC
       // header is accepted as raw payload bytes (unlike the first
       // fragment, which must carry the magic). This test pins that
-      // behaviour so we notice if the layer ever adds strict slot
-      // semantics.
+      // behaviour: the assembled buffer is poisoned, the CRC fails, and
+      // the frame is discarded silently — there is NO auto-NAK on
+      // Channel B (no-auto-ack note). If anyone ever adds strict per-
+      // slot validation, this test flips the assertion to expect an
+      // emit and the failure will be obvious in CI.
       final t = _StubTransport();
       final p = ChannelBParser(t);
       p.bind();
@@ -49,16 +53,19 @@ void main() {
       t.inB.add(stray);
       t.inB.add(trailing);
 
-      final c = await p.commands.first.timeout(const Duration(seconds: 2));
-      expect(c.cmd, 0x42);
-      expect(c.payload.length, payloadLen);
+      final got = p.commands.first.timeout(
+        const Duration(milliseconds: 200),
+        onTimeout: () => ChannelBCommand(-1, Uint8List(0)),
+      );
+      final c = await got;
+      expect(c.cmd, -1, reason: 'poisoned buffer must fail CRC → no emit');
       expect(
-        c.payload.sublist(14, 22),
-        List<int>.filled(8, 0xAA),
-        reason: 'stray bytes slot in at the accumulator cursor',
+        t.sentA,
+        isEmpty,
+        reason: 'firmware never NAKs unsolicited frames',
       );
       await sub.cancel();
-      expect(emitted, hasLength(1));
+      expect(emitted, isEmpty);
     });
 
     test(
@@ -91,8 +98,17 @@ void main() {
     );
 
     test('head-of-line blocking: parser is single-state, so an interleaved '
-        'second-frame first-fragment gets APPENDED to the wrong buffer '
+        'second-frame first-fragment gets APPENDED to the first frame\'s '
+        'buffer, poisoning the CRC and silencing the emit '
         '(channel_b.dart:66 — one `_buf`)', () async {
+      // The firmware parser has ONE accumulator. There is no message-id
+      // routing — so anything arriving on the stream mid-reassembly is
+      // appended to whichever frame is currently in `_state == 1`. In
+      // practice this guarantees interleaving is unsafe: the bytes of
+      // the second frame get physically copied into the first frame's
+      // `_buf`, the CRC fails, and the first frame is silently dropped.
+      // After `_reset()` the parser returns to `_state == 0` and any
+      // subsequent non-magic lead byte is dropped with a `WARN`.
       final t = _StubTransport();
       final p = ChannelBParser(t);
       p.bind();
@@ -106,23 +122,34 @@ void main() {
       );
 
       t.inB.add(Uint8List.sublistView(a, 0, 20));
-      // Second frame starts arriving before the first completes: parser
-      // is in `_state == 1`, so its 0xBC header is appended like any
-      // other continuation byte. This pins the "interleaving is unsafe"
-      // firmware-imposed invariant.
+      // Second frame's first 20 bytes get appended wholesale — the parser
+      // is in `_state == 1`, so the leading 0xBC is just another payload
+      // byte. Crucially the slice exactly matches the remaining 16 bytes
+      // (`30 - 14`), so `_dispatch()` runs and the CRC fails on the
+      // poisoned buffer.
       t.inB.add(Uint8List.sublistView(b, 0, 20));
-      // Finish the first.
+      // This tail of `a` is now arriving AFTER the CRC-fail `_reset`,
+      // so the parser is back in `_state == 0` and the lack of a 0xBC
+      // lead byte triggers "dropping chunk without 0xBC magic".
       t.inB.add(Uint8List.sublistView(a, 20));
 
-      final c = await p.commands.first.timeout(const Duration(seconds: 1));
-      expect(c.cmd, 0x03);
-      expect(c.payload.length, 30);
+      final got = p.commands.first.timeout(
+        const Duration(milliseconds: 200),
+        onTimeout: () => ChannelBCommand(-1, Uint8List(0)),
+      );
+      final c = await got;
       expect(
-        c.payload.sublist(14, 20),
-        [0x40, 0x41, 0x42, 0x43, 0x44, 0x45],
-        reason: 'parser does not enforce per-message slot semantics',
+        c.cmd,
+        -1,
+        reason: 'interleaved poisoning → CRC fail → no emit',
+      );
+      expect(
+        t.sentA,
+        isEmpty,
+        reason: 'firmware never NAKs unsolicited frames',
       );
       await sub.cancel();
+      expect(emitted, isEmpty);
     });
 
     test(
