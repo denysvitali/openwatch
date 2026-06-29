@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Network security configuration for OpenWatch.
+
+  Without this file, Android 7+ (API 24+) ignores user-installed CA
+  certificates by default — which means the OTLP collector at
+  otel.k2.k8s.best (and any HTTPS endpoint fronted by a corporate MITM
+  proxy) fails TLS verification even though `flutter_user_certificates`
+  has loaded the cert into dart:io's SecurityContext.
+
+  Declaring `<certificates src="user"/>` opts the app in to the user
+  CA store, so the user's installed MITM cert is trusted alongside the
+  system CAs. The system store remains the default trust anchor for
+  every other domain.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
