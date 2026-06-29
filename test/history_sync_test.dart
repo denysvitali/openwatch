@@ -518,17 +518,19 @@ void main() {
               (f) => f.isNotEmpty && Codec.rxChannelBCmd(f) == OpB.sleepNew,
             )
             .toList();
-        // Stress + HRV still go per-dayOffset on Channel-A.
-        // Sleep is now a single-shot consolidated poll (per GHIDRA
-        // §2.3 — one 0x27 covers every requested day in the batch).
+        // Stress + HRV still go per-dayOffset on Channel-A. Sleep also polls
+        // every needed offset with 0x27; each request can produce both night
+        // and nap responses.
         expect(stressReads, hasLength(2));
         expect(hrvReads, hasLength(2));
         expect(
           nightReads,
-          hasLength(1),
-          reason:
-              'sleep is consolidated into a single 0x27 per sync (H59MA '
-              'covers all requested days in one push)',
+          hasLength(2),
+          reason: 'today and the empty past sleep day must both be polled',
+        );
+        expect(
+          [for (final frame in nightReads) Codec.rxChannelBPayload(frame)![0]],
+          [0, 1],
         );
         sync.dispose();
         d.dispose();
@@ -638,7 +640,6 @@ void main() {
 
         await sync.syncAll(daysBack: 2);
 
-        // A single 0x27 must be sent (the consolidated H59MA batch).
         final nightReads = t.sentB
             .where(
               (f) => f.isNotEmpty && Codec.rxChannelBCmd(f) == OpB.sleepNew,
@@ -646,9 +647,13 @@ void main() {
             .toList();
         expect(
           nightReads,
-          hasLength(1),
+          hasLength(2),
           reason:
               'past day with synced sleep but no segments must be re-polled',
+        );
+        expect(
+          [for (final frame in nightReads) Codec.rxChannelBPayload(frame)![0]],
+          [0, 1],
         );
         // 0x3e must never be sent (redundant per GHIDRA §2.3).
         final lunchReads = t.sentB
@@ -729,13 +734,14 @@ void main() {
         expect(hrReads, hasLength(2));
         expect(stressReads, hasLength(2));
         expect(hrvReads, hasLength(2));
-        // Sleep is always a single consolidated 0x27 regardless of
-        // `force` — the firmware response is the same batch; only the
-        // skip-rule changes under force.
         expect(
           nightReads,
-          hasLength(1),
-          reason: 'sleep is consolidated: one 0x27 per sync',
+          hasLength(2),
+          reason: 'force must bypass the sleep skip rule for every offset',
+        );
+        expect(
+          [for (final frame in nightReads) Codec.rxChannelBPayload(frame)![0]],
+          [0, 1],
         );
         expect(lunchReads, isEmpty);
         sync.dispose();
@@ -2116,37 +2122,32 @@ void main() {
       d.dispose();
     });
 
-    test(
-      'sleep sends exactly one 0x27 read regardless of daysBack (H59MA batch)',
-      () async {
-        final t = _StubTransport();
-        final d = ChannelADispatcher(t);
-        final bParser = ChannelBParser(t);
-        d.bind();
-        final sync = _testSync(t, d, bParser: bParser);
-        await sync.syncAll(daysBack: 7);
+    test('sleep sends one 0x27 read for each needed day offset', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      final bParser = ChannelBParser(t);
+      d.bind();
+      final sync = _testSync(t, d, bParser: bParser);
+      await sync.syncAll(daysBack: 7);
 
-        final nightReads = t.sentB
-            .where(
-              (f) => f.isNotEmpty && Codec.rxChannelBCmd(f) == OpB.sleepNew,
-            )
-            .toList();
-        expect(
-          nightReads,
-          hasLength(1),
-          reason: 'sleep must be a consolidated single-shot poll',
-        );
-        // dayOffset must be 0 (today) — the firmware expands the
-        // payload to cover the requested window. Use the Channel-B
-        // payload helper, not `rxPayload` (Channel-A 16-byte helper).
-        final sub = Codec.rxChannelBPayload(nightReads.first);
-        expect(sub, isNotNull);
-        expect(sub![0], 0x00, reason: 'dayOffset must be 0');
+      final nightReads = t.sentB
+          .where((f) => f.isNotEmpty && Codec.rxChannelBCmd(f) == OpB.sleepNew)
+          .toList();
+      expect(
+        nightReads,
+        hasLength(7),
+        reason: 'sleep must poll each missing day offset',
+      );
+      // Use the Channel-B payload helper, not `rxPayload` (Channel-A
+      // 16-byte helper).
+      final offsets = [
+        for (final frame in nightReads) Codec.rxChannelBPayload(frame)![0],
+      ];
+      expect(offsets, [0, 1, 2, 3, 4, 5, 6]);
 
-        sync.dispose();
-        d.dispose();
-      },
-    );
+      sync.dispose();
+      d.dispose();
+    });
 
     test('H59MA record-list covering only today does NOT lock yesterday+ as '
         'sleep-synced (regression: Thursday/Friday data loss)', () async {
@@ -2192,15 +2193,14 @@ void main() {
       // start=22:00, end=23:00, single 60-min light segment.
       // replaceDays = { today, yesterday } (dayDelta=0 means
       // wakeDay = today; the `replaceDays` set includes today +
-      // today-1 = today + yesterday). Both days must end up
-      // in-memory cleared, but only today ends up persisted
-      // (the partial-payload path is `persist: false`,
-      // `confirmedEmpty: false`).
+      // today-1 = today + yesterday). A partial H59MA payload must
+      // not clear yesterday from memory or disk: omitted days are not
+      // proof that the user had no sleep.
       final t1Body = <int>[
         0x00, // dayDelta = today
         0x06, // blockLen: 4 (start/end LE) + 2 (one pair)
         0x28, 0x05, // startMinLE = 1320 (22:00)
-        0x3C, 0x05, // endMinLE = 1380 (23:00)
+        0x64, 0x05, // endMinLE = 1380 (23:00)
         0x01, // stage = light
         60, // dur = 60 min
       ];
@@ -2208,6 +2208,19 @@ void main() {
       t.inB.add(Codec.buildChannelB(OpB.sleepNew, payload));
 
       await future;
+
+      expect(
+        sync.dayOf(yesterday)!.sleep,
+        isNotEmpty,
+        reason:
+            'partial H59MA batch must not make the UI show yesterday '
+            'as empty',
+      );
+      expect(
+        sync.dayOf(dayBeforeYesterday)!.sleep,
+        isNotEmpty,
+        reason: 'unmentioned stored days must stay visible in memory',
+      );
 
       // Yesterday must not be locked as 'sleep'-synced in the
       // persisted store just because today's batch missed it.

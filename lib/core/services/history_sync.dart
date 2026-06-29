@@ -813,19 +813,13 @@ class HistorySync extends ChangeNotifier {
           }
         }
 
-        // Sleep for the most recent N days — the new protocol emits
-        // a single day offset per request, so we fire-and-await for
-        // each. Delta sync: a past day we have already ingested sleep
-        // for is skipped; today is always re-fetched because the
-        // watch's "night" response for the wake-up day also carries
-        // sessions that *began* in the previous calendar day (the
-        // HS-3 rationale for re-polling past days no longer holds —
-        // the watch's own per-day responses are immutable, so a
-        // second pull can only return the same segments the merge
-        // would have already deduplicated). Sleep buckets are cleared
-        // only when a replacement response is actually decoded; a
-        // missed or malformed reply must not erase the user's
-        // previously-stored night.
+        // Sleep for the most recent N days. The new protocol emits a day
+        // offset per request, so we fire-and-await each missing offset. Delta
+        // sync skips past days we already have; today is always re-fetched
+        // because the wake-up-day response can contain sessions that began
+        // the previous calendar day. Sleep buckets are cleared only when a
+        // replacement response is actually decoded; a missed or malformed
+        // reply must not erase the user's previously-stored night.
         //
         // NOTE: per GHIDRA_DECOMPILATION.md §2.3, the firmware handler
         // `channel_b_send_sleep_records` (0x0082fada) **always** emits
@@ -835,14 +829,6 @@ class HistorySync extends ChangeNotifier {
         // `0x27` suffices to get both night and lunch/nap data; a
         // separate `0x3e` send would be redundant and cause duplicate
         // responses (absorbed by ChannelBParser dedup, but wasted).
-        // Sleep sync: a single 0x27 read against today returns the
-        // consolidated H59MA night/lunch record-list covering every
-        // day in the request window. Per-dayOffset sends would be
-        // redundant — ChannelBParser dedup would absorb the duplicate
-        // emits, but the second-drain window per offset still wastes
-        // 600 ms each. The parser rebuckets each segment by its own
-        // start date so every covered day gets landed under the
-        // correct calendar entry in `_days`.
         final sleepToFetch = _daysToFetch(
           wantsDays,
           todayD,
@@ -852,18 +838,26 @@ class HistorySync extends ChangeNotifier {
           force: force,
         );
         if (sleepToFetch.isNotEmpty) {
+          final sleepOffsets = sleepToFetch.toList()..sort();
           AppLog.instance.debug(
             'history',
-            'sleep: single-shot 0x27 for days ${sleepToFetch.toList()}',
+            'sleep: 0x27 for day offsets $sleepOffsets',
           );
-          // Attribute the inbound 0x27 push to today so payload[0] == 0
-          // resolves correctly on firmware that omits the dayOffset
-          // prefix (PROTOCOL.md §4.4 footnote).
-          _currentSyncDay = todayD;
-          await transport.sendB(Commands.readSleepNewProtocol(dayOffset: 0));
-          await _drainRx(drainDuration);
-          await Future<void>.delayed(postCommandDelay);
-          _currentSyncDay = null;
+          for (final d in sleepOffsets) {
+            // Attribute inbound 0x27/0x3e pushes to the requested day so
+            // payloads that omit an offset still resolve correctly
+            // (PROTOCOL.md §4.4 footnote).
+            _currentSyncDay = todayD.addDays(-d);
+            try {
+              await transport.sendB(
+                Commands.readSleepNewProtocol(dayOffset: d),
+              );
+              await _drainRx(drainDuration);
+              await Future<void>.delayed(postCommandDelay);
+            } finally {
+              _currentSyncDay = null;
+            }
+          }
         }
       } else {
         AppLog.instance.warn(
@@ -1670,17 +1664,20 @@ class HistorySync extends ChangeNotifier {
         addedByDay.putIfAbsent(d, () => []).add(s);
       }
       final daysWithNewSleep = addedByDay.keys.toSet();
-      // For days the H59MA batch touched but didn't carry data
-      // for, we still reset the in-memory list to [] (so a stale
-      // earlier parse doesn't shadow today's view), but we do NOT
-      // persist that or stamp syncedMetrics. Re-polling on the next
-      // sync will re-cover them at negligible cost.
-      _clearSleepDays(
-        replaceDays.difference(daysWithNewSleep),
-        persist: false,
-        confirmedEmpty: false,
-      );
-      _clearSleepDays(daysWithNewSleep, persist: false);
+      if (!isH59maRecordList) {
+        // Older single-day payloads are replacement answers for their wake
+        // window, so clear the affected in-memory days before merging. H59MA
+        // record-list payloads are partial and overlapping: adjacent records
+        // can both contribute segments to the same calendar day, and omitted
+        // days are not proof of empty sleep. For H59MA, merge by segment start
+        // only and leave existing in-memory days intact.
+        _clearSleepDays(
+          replaceDays.difference(daysWithNewSleep),
+          persist: false,
+          confirmedEmpty: false,
+        );
+        _clearSleepDays(daysWithNewSleep, persist: false);
+      }
       for (final entry in addedByDay.entries) {
         final day = entry.key;
         final segments = entry.value;
