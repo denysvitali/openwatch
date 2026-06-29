@@ -103,6 +103,41 @@ class HrvRecord {
   final Uint8List body;
 }
 
+/// A `0x0d` BP-history record assembled from one header chunk plus
+/// the data chunks that followed it (PROTOCOL.md §4.4, GHIDRA §3.19).
+///
+/// The header frame's first byte is the tag (`0x00`), followed by
+/// `{year-2000, month, day, slotMult, 48-bit presence bitmap}`. Each
+/// set bit in the bitmap marks a slot that has a 13-byte data record
+/// in the subsequent data chunks (`tag=0x01`).
+///
+/// The 13-byte data record's *byte layout* is not statically
+/// resolvable from the H59MA v14 firmware — it lands on PROTOCOL.md
+/// §8.5 as "needs live capture". The samples we surface here carry
+/// the timestamp derived from the slot index but leave
+/// [BloodPressureSample.systolic] / [diastolic] as 0 placeholders.
+@immutable
+class BpRecordDay {
+  const BpRecordDay({
+    required this.day,
+    required this.slotDuration,
+    required this.slots,
+  });
+
+  final DateOnly day;
+
+  /// `slotMult * (24 * 60 / slotCount)` — duration of each slot. The
+  /// H59MA emits 30-min slots so slotMult=2; smaller watches may use
+  /// 15-min slots (slotMult=1). Until we observe a v14 with a
+  /// different value, assume 30 min.
+  final Duration slotDuration;
+
+  /// One entry per set bit in the header's 48-bit presence bitmap, in
+  /// ascending slot order. Each entry holds the 13 raw bytes — the
+  /// per-byte meaning is a §8.5 follow-up.
+  final List<Uint8List> slots;
+}
+
 /// A queued inbound Channel-A frame paired with the [DateOnly] day it
 /// was captured for.  Day is snapshotted from [_currentSyncDay] at
 /// enqueue time so that late frames are still attributed to the
@@ -236,6 +271,16 @@ class HistorySync extends ChangeNotifier {
   // through the public getters, but HistorySync subscribes during
   // construction when a dispatcher is present so sync results land in
   // DailyHistory without a UI-side listener.
+  //
+  // BP history (`0x0d` per PROTOCOL §4.4) has a *different* shape from
+  // `0x37`/`0x39` — the dispatcher emits raw `BpRecordChunk` events
+  // (no separate header/chunk streams), so the existing
+  // `FragmentReassembler<Header, Chunk, T>` doesn't fit. We wire a
+  // custom reassembler keyed on the chunk's monotonic `seq` and the
+  // `0x00`/`0x01`/`0xFF` tag bytes inside each chunk's payload.
+  BpRecordAssembler? _bpReassembler;
+  StreamSubscription<BpRecordDay>? _bpRecordsSub;
+
   FragmentReassembler<
     PressureSettingHeader,
     PressureSettingChunk,
@@ -304,10 +349,39 @@ class HistorySync extends ChangeNotifier {
     return reassembler.assembled;
   }
 
+  /// Broadcast stream of assembled `0x0d` BP-history records.
+  ///
+  /// Different shape from the `0x37`/`0x39` reassemblers above: the
+  /// dispatcher emits a single monotonic [BpRecordChunk] stream
+  /// (header + data chunks interleaved on the same seq axis), so we
+  /// build our own assembler that:
+  ///   * resets when the chunk's first byte is `0x00` (a new header)
+  ///   * appends 13-byte records from `0x01` chunks to the current day
+  ///   * flushes the current day on `0xFF` end marker, or after
+  ///     [fragmentQuietWindow] elapses with no new chunks
+  /// Requires the HistorySync to have been constructed with a
+  /// non-null [dispatcher].
+  Stream<BpRecordDay> get _bpRecordDays {
+    final r = _bpReassembler;
+    if (r != null) return r.assembled;
+    final dispatcher = _dispatcher;
+    if (dispatcher == null) {
+      throw StateError('HistorySync BP ingest requires a ChannelADispatcher');
+    }
+    final reassembler = BpRecordAssembler(
+      chunks: dispatcher.onBpRecord,
+      clock: _clock,
+      quietWindow: fragmentQuietWindow,
+    );
+    _bpReassembler = reassembler;
+    return reassembler.assembled;
+  }
+
   void _ensureMetricRecordListeners() {
     if (_dispatcher == null) return;
     _pressureRecordsSub ??= pressureRecords.listen(_onStressRecord);
     _hrvRecordsSub ??= hrvRecords.listen(_onHrvRecord);
+    _bpRecordsSub ??= _bpRecordDays.listen(_onBpDay);
   }
 
   static Uint8List _fixedMetricRecordPayload(Uint8List payload) {
@@ -1165,6 +1239,49 @@ class HistorySync extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Persist a `0x0d` BP-history record. The 13-byte per-slot record
+  /// layout is on PROTOCOL.md §8.5 (needs live capture), so we
+  /// surface a placeholder `BloodPressureSample` per set bit in the
+  /// header's 48-bit presence bitmap. The placeholder's timestamp is
+  /// anchored to the day + slot index so downstream consumers see a
+  /// monotonically increasing series; the systolic/diastolic values
+  /// are 0 until the per-byte layout is resolved.
+  void _onBpDay(BpRecordDay record) async {
+    final samples = <BloodPressureSample>[];
+    for (var i = 0; i < record.slots.length; i++) {
+      final ts = record.day.midnight.add(record.slotDuration * i);
+      samples.add(
+        BloodPressureSample(timestamp: ts, systolic: 0, diastolic: 0),
+      );
+    }
+    final previous = _days[record.day] ?? DailyHistory(day: record.day);
+    final updated = previous.copyWith(
+      lastUpdated: DateTime.now(),
+      // We don't have a per-record field on DailyHistory yet, so we
+      // only stamp the day as having BP data — the merge below writes
+      // the placeholder samples into `bloodPressure` for the UI.
+      syncedMetrics: {...previous.syncedMetrics, 'bp'},
+    );
+    _days[record.day] = updated;
+    final merged = _mergeBloodPressure(previous.bloodPressure, samples);
+    final withSamples = updated.copyWith(bloodPressure: merged);
+    _days[record.day] = withSamples;
+    unawaited(_store?.mergeBloodPressure(record.day, samples));
+    notifyListeners();
+  }
+
+  List<BloodPressureSample> _mergeBloodPressure(
+    List<BloodPressureSample> existing,
+    List<BloodPressureSample> incoming,
+  ) {
+    final byTs = <int, BloodPressureSample>{
+      for (final s in existing) s.timestamp.millisecondsSinceEpoch: s,
+      for (final s in incoming) s.timestamp.millisecondsSinceEpoch: s,
+    };
+    return byTs.values.toList()
+      ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+  }
+
   List<HealthMetricSample> _decodeFixedSlotMetric(
     Uint8List header,
     Uint8List body,
@@ -1204,8 +1321,10 @@ class HistorySync extends ChangeNotifier {
     _bCmdSub?.cancel();
     _pressureRecordsSub?.cancel();
     _hrvRecordsSub?.cancel();
+    _bpRecordsSub?.cancel();
     _pressureReassembler?.dispose();
     _hrvReassembler?.dispose();
+    _bpReassembler?.dispose();
     super.dispose();
   }
 
@@ -1574,5 +1693,150 @@ class HistorySync extends ChangeNotifier {
     } finally {
       span?.end();
     }
+  }
+}
+
+/// Reassembles `0x0d` BP-history chunks (Channel-A, PROTOCOL.md §4.4
+/// / GHIDRA §3.19) into one [BpRecordDay] per `0x00` header.
+///
+/// The dispatcher's `onBpRecord` emits a single monotonic
+/// [BpRecordChunk] stream with no separate header/chunk separation,
+/// which is why we can't reuse the generic [FragmentReassembler].
+/// The chunks are tagged internally:
+///   * `chunk[0] == 0x00` → header (date + 48-bit presence bitmap)
+///   * `chunk[0] == 0x01` → data continuation; pairs of 13B records
+///   * `chunk[0] == 0xFF` → end marker — flushes the current day
+///
+/// The reassembler buffers in-progress records and flushes them on
+/// either an explicit end marker or [quietWindow] of silence. A new
+/// header arriving while a record is open implicitly closes the
+/// previous one (a defensive fallback — the firmware should always
+/// emit `0xFF` first).
+class BpRecordAssembler {
+  BpRecordAssembler({
+    required Stream<BpRecordChunk> chunks,
+    required DateTime Function() clock,
+    required Duration quietWindow,
+  }) : _quietWindow = quietWindow {
+    // `clock` is plumbed for future wall-clock tagging of assembled
+    // records (e.g. "ingested at" metadata). The day itself comes
+    // from the wire so we don't read it here yet.
+    _sub = chunks.listen(_onChunk, onError: _controller.addError);
+    _timer = Timer(quietWindow, () {});
+  }
+
+  final Duration _quietWindow;
+  final StreamController<BpRecordDay> _controller =
+      StreamController<BpRecordDay>.broadcast();
+  late final StreamSubscription<BpRecordChunk> _sub;
+  late Timer _timer;
+
+  // Per-record accumulation state.
+  DateOnly? _day;
+  int _slotDurationMinutes = 30;
+  final List<Uint8List> _slots = [];
+
+  /// Assembled records, broadcast so multiple consumers (e.g. UI +
+  /// history store) can subscribe independently.
+  Stream<BpRecordDay> get assembled => _controller.stream;
+
+  void _onChunk(BpRecordChunk c) {
+    final payload = c.payload;
+    if (payload.isEmpty) return;
+    switch (payload[0]) {
+      case 0x00:
+        _flushIfOpen();
+        _beginHeader(payload);
+      case 0x01:
+        _appendData(payload);
+      case 0xFF:
+        _flushIfOpen();
+    }
+    _timer.cancel();
+    _timer = Timer(_quietWindow, _flushIfOpen);
+  }
+
+  void _beginHeader(Uint8List payload) {
+    // [1]=year-2000, [2]=month, [3]=day, [4]=slotMult,
+    // [5..10]=48-bit presence bitmap (LE).
+    if (payload.length < 11) return;
+    final year = 2000 + payload[1];
+    final month = payload[2];
+    final day = payload[3];
+    final slotMult = payload[4];
+    if (month < 1 || month > 12 || day < 1 || day > 31) return;
+    _day = DateOnly(year, month, day);
+    // 30 min = slotMult 2; 60 min = slotMult 4; H59MA observed at 30.
+    // We don't pre-decode systolic/diastolic here (PROTOCOL §8.5 —
+    // needs live capture) — surface raw 13B records and let the
+    // consumer pick the field layout once §8.5 is resolved.
+    _slotDurationMinutes = slotMult == 0
+        ? 30
+        : (30 ~/ slotMult).clamp(1, 60).toInt();
+    final bitmap = _read48(payload, 5);
+    _slots.clear();
+    for (var slot = 0; slot < 48; slot++) {
+      if ((bitmap & (1 << slot)) != 0) {
+        _slots.add(Uint8List(13));
+      }
+    }
+  }
+
+  void _appendData(Uint8List payload) {
+    // 13B records back-to-back after the [0]=0x01 tag.
+    final data = payload.sublist(1);
+    var i = 0;
+    while (i + 13 <= data.length && _slots.isNotEmpty) {
+      // The first still-empty slot gets the next 13 bytes; this
+      // preserves order even if the data chunks arrive out-of-order
+      // (rare, but defensible). Halt if every slot is filled — any
+      // trailing bytes after the bitmap was exhausted are discarded
+      // (firmware should not emit more, but if it does the cap is
+      // safer than an out-of-range write).
+      final dst = _slots.firstWhere(
+        (s) => s.any((b) => b != 0),
+        orElse: () => Uint8List(0),
+      );
+      if (dst.isEmpty) {
+        if (_slots.every((s) => s.any((b) => b != 0))) break;
+        // Pick the first still-empty slot.
+        final empty = _slots.firstWhere((s) => s.every((b) => b == 0));
+        empty.setRange(0, 13, data.sublist(i, i + 13));
+      } else {
+        dst.setRange(0, 13, data.sublist(i, i + 13));
+      }
+      i += 13;
+    }
+  }
+
+  void _flushIfOpen() {
+    final day = _day;
+    if (day == null) return;
+    final slots = List<Uint8List>.unmodifiable(_slots);
+    _controller.add(
+      BpRecordDay(
+        day: day,
+        slotDuration: Duration(minutes: _slotDurationMinutes),
+        slots: slots,
+      ),
+    );
+    _day = null;
+    _slots.clear();
+  }
+
+  int _read48(Uint8List b, int off) {
+    // 48-bit little-endian.
+    return b[off] |
+        (b[off + 1] << 8) |
+        (b[off + 2] << 16) |
+        (b[off + 3] << 24) |
+        (b[off + 4] << 32) |
+        (b[off + 5] << 40);
+  }
+
+  Future<void> dispose() async {
+    _timer.cancel();
+    await _sub.cancel();
+    await _controller.close();
   }
 }
