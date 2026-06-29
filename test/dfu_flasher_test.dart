@@ -315,7 +315,14 @@ void main() {
           .waitForCount(3)
           .timeout(const Duration(seconds: 1)); // "Sending metadata"
       await _waitForSendB(t);
-      _ack(t, OpB.rspOk); // ack otaInit
+      // The next two acks are back-to-back: otaInit then pocket 1.
+      // Without a microtask drain between them the second `_ack`
+      // races the flasher's `_rspWaiter` refresh and is silently
+      // dropped (the flasher's `_onRx` returns early when
+      // `_rspWaiter.isCompleted` is true). Use `_ackDrain` for the
+      // first of the pair so the flasher fully resumes (yields
+      // "Flashing" #1, sends pocket 2) before the next `_ack`.
+      await _ackDrain(t, OpB.rspOk); // ack otaInit
       _ack(t, OpB.rspOk); // ack pocket 1 → "Flashing" #1
       await watch
           .waitForCount(4)
@@ -325,20 +332,11 @@ void main() {
       await watch
           .waitForCount(5)
           .timeout(const Duration(seconds: 1)); // "Flashing" #2"
-      // No ack for otaCheck → must timeout. Use direct try/catch —
-      // expectLater + async* generators + cancelOnError sometimes
-      // leaks a stray TimeoutException to the test zone after the
-      // test body has already matched, producing a "failed after
-      // test completion" report. Direct await avoids that.
-      final doneFuture = watch.done.timeout(const Duration(seconds: 12));
-      Object? caught;
-      try {
-        await doneFuture;
-        fail('expected TimeoutException, got stream completion');
-      } on Object catch (e) {
-        caught = e;
-      }
-      expect(caught, isA<TimeoutException>());
+      // No ack for otaCheck → must timeout.
+      await expectLater(
+        watch.done.timeout(const Duration(seconds: 12)),
+        throwsA(isA<TimeoutException>()),
+      );
     });
   });
 
@@ -354,27 +352,23 @@ void main() {
           .waitForCount(2)
           .timeout(const Duration(seconds: 1)); // "Starting session"
       await _waitForSendB(t); // otaStart sent
-      // Subscribe BEFORE injecting the error so the `.then` chain is
-      // attached when `doneCompleter.completeError` fires. Otherwise
-      // the DfuException briefly sits in the Completer with no
-      // handler and the test zone reports it as unhandled.
-      final doneFuture = watch.done.timeout(const Duration(seconds: 12));
-      await _ackDrain(t, OpB.rspLowBattery);
-      Object? caught;
-      try {
-        await doneFuture;
-        fail('expected DfuException, got stream completion');
-      } on Object catch (e) {
-        caught = e;
-      }
-      expect(
-        caught,
-        isA<DfuException>().having(
-          (e) => e.message,
-          'message',
-          contains('battery too low'),
+      // Battery dies on the OTA-start RSP. Capture the expectTask
+      // (which synchronously subscribes via matcher.matchAsync) BEFORE
+      // injecting — otherwise the DfuException propagates through
+      // `_watch.onError → doneCompleter → .timeout(12s)` with no
+      // listener attached and the test zone reports it as unhandled.
+      final expectTask = expectLater(
+        watch.done.timeout(const Duration(seconds: 12)),
+        throwsA(
+          isA<DfuException>().having(
+            (e) => e.message,
+            'message',
+            contains('battery too low'),
+          ),
         ),
       );
+      await _ackDrain(t, OpB.rspLowBattery);
+      await expectTask;
     });
 
     test('RSP_LOW_BATTERY mid-transfer (after pocket 1 of 3)', () async {
@@ -395,31 +389,30 @@ void main() {
           .waitForCount(3)
           .timeout(const Duration(seconds: 1)); // "Sending metadata"
       await _waitForSendB(t);
-      _ack(t, OpB.rspOk); // ack otaInit
+      // Drain between otaInit ack and pocket 1 ack — see
+      // `timeout on otaCheck` for the rationale.
+      await _ackDrain(t, OpB.rspOk); // ack otaInit
       _ack(t, OpB.rspOk); // ack pocket 1 → "Flashing" #1
       await watch
           .waitForCount(4)
           .timeout(const Duration(seconds: 1)); // "Flashing" #1
       await _waitForSendB(t);
-      // Battery dies before pocket 2. Subscribe BEFORE injecting the
-      // error so the `.then` chain is attached when the error fires.
-      final doneFuture = watch.done.timeout(const Duration(seconds: 12));
-      await _ackDrain(t, OpB.rspLowBattery);
-      Object? caught;
-      try {
-        await doneFuture;
-        fail('expected DfuException, got stream completion');
-      } on Object catch (e) {
-        caught = e;
-      }
-      expect(
-        caught,
-        isA<DfuException>().having(
-          (e) => e.message,
-          'message',
-          contains('battery too low'),
+      // Battery dies before pocket 2. Subscribe via expectLater
+      // BEFORE injecting the error so the `.then` chain is attached
+      // when the DfuException fires (otherwise it escapes to the
+      // test zone as unhandled).
+      final expectTask = expectLater(
+        watch.done.timeout(const Duration(seconds: 12)),
+        throwsA(
+          isA<DfuException>().having(
+            (e) => e.message,
+            'message',
+            contains('battery too low'),
+          ),
         ),
       );
+      await _ackDrain(t, OpB.rspLowBattery);
+      await expectTask;
     });
 
     test('RSP_LOW_BATTERY at otaCheck (post-transfer)', () async {
@@ -440,7 +433,9 @@ void main() {
           .waitForCount(3)
           .timeout(const Duration(seconds: 1)); // "Sending metadata"
       await _waitForSendB(t);
-      _ack(t, OpB.rspOk); // ack otaInit
+      // Drain between otaInit ack and pocket 1 ack — see
+      // `timeout on otaCheck` for the rationale.
+      await _ackDrain(t, OpB.rspOk); // ack otaInit
       _ack(t, OpB.rspOk); // ack pocket 1 → "Flashing" #1
       await watch
           .waitForCount(4)
@@ -455,25 +450,20 @@ void main() {
           .waitForCount(6)
           .timeout(const Duration(seconds: 1)); // "Verifying"
       await _waitForSendB(t);
-      // Subscribe BEFORE injecting the error so the `.then` chain
-      // is attached when the error fires.
-      final doneFuture = watch.done.timeout(const Duration(seconds: 12));
-      await _ackDrain(t, OpB.rspLowBattery);
-      Object? caught;
-      try {
-        await doneFuture;
-        fail('expected DfuException, got stream completion');
-      } on Object catch (e) {
-        caught = e;
-      }
-      expect(
-        caught,
-        isA<DfuException>().having(
-          (e) => e.message,
-          'message',
-          contains('battery too low'),
+      // Subscribe via expectLater BEFORE injecting the error so the
+      // `.then` chain is attached when the DfuException fires.
+      final expectTask = expectLater(
+        watch.done.timeout(const Duration(seconds: 12)),
+        throwsA(
+          isA<DfuException>().having(
+            (e) => e.message,
+            'message',
+            contains('battery too low'),
+          ),
         ),
       );
+      await _ackDrain(t, OpB.rspLowBattery);
+      await expectTask;
     });
   });
 
@@ -489,25 +479,20 @@ void main() {
           .waitForCount(2)
           .timeout(const Duration(seconds: 1)); // "Starting session"
       await _waitForSendB(t);
-      // Subscribe BEFORE injecting the error so the `.then` chain
-      // is attached when the error fires.
-      final doneFuture = watch.done.timeout(const Duration(seconds: 12));
-      await _ackDrain(t, OpB.rspCmdStatus, status: 7);
-      Object? caught;
-      try {
-        await doneFuture;
-        fail('expected DfuException, got stream completion');
-      } on Object catch (e) {
-        caught = e;
-      }
-      expect(
-        caught,
-        isA<DfuException>().having(
-          (e) => e.message,
-          'message',
-          contains('Device error'),
+      // Subscribe via expectLater BEFORE injecting the error so the
+      // `.then` chain is attached when the DfuException fires.
+      final expectTask = expectLater(
+        watch.done.timeout(const Duration(seconds: 12)),
+        throwsA(
+          isA<DfuException>().having(
+            (e) => e.message,
+            'message',
+            contains('Device error'),
+          ),
         ),
       );
+      await _ackDrain(t, OpB.rspCmdStatus, status: 7);
+      await expectTask;
     });
 
     test('non-zero status mid-transfer surfaces DfuException', () async {
@@ -526,30 +511,28 @@ void main() {
           .waitForCount(3)
           .timeout(const Duration(seconds: 1)); // "Sending metadata"
       await _waitForSendB(t);
-      _ack(t, OpB.rspOk); // ack otaInit
+      // Drain between otaInit ack and pocket 1 ack — see
+      // `timeout on otaCheck` for the rationale.
+      await _ackDrain(t, OpB.rspOk); // ack otaInit
       _ack(t, OpB.rspOk); // ack pocket 1 → "Flashing" #1
       // Pocket 2 NAK with non-zero status. After Flashing #1 fires,
       // the flasher is sitting on `_awaitRsp()` for pocket 2 — its
       // _rspWaiter is registered, so the injected error is routed
-      // straight to that Completer. Subscribe BEFORE injecting so
-      // the `.then` chain is attached when the error fires.
-      final doneFuture = watch.done.timeout(const Duration(seconds: 12));
-      await _ackDrain(t, OpB.rspCmdStatus, status: 2);
-      Object? caught;
-      try {
-        await doneFuture;
-        fail('expected DfuException, got stream completion');
-      } on Object catch (e) {
-        caught = e;
-      }
-      expect(
-        caught,
-        isA<DfuException>().having(
-          (e) => e.message,
-          'message',
-          contains('Device error'),
+      // straight to that Completer. Subscribe via expectLater BEFORE
+      // injecting so the `.then` chain is attached when the error
+      // fires.
+      final expectTask = expectLater(
+        watch.done.timeout(const Duration(seconds: 12)),
+        throwsA(
+          isA<DfuException>().having(
+            (e) => e.message,
+            'message',
+            contains('Device error'),
+          ),
         ),
       );
+      await _ackDrain(t, OpB.rspCmdStatus, status: 2);
+      await expectTask;
     });
 
     test('Channel-B NAK code 0 (FUN_0082ee00) surfaces as device error', () {
