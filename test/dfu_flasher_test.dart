@@ -515,6 +515,14 @@ void main() {
       // `timeout on otaCheck` for the rationale.
       await _ackDrain(t, OpB.rspOk); // ack otaInit
       _ack(t, OpB.rspOk); // ack pocket 1 → "Flashing" #1
+      // Wait for the flasher to register pocket 2's _rspWaiter
+      // before injecting the NAK — otherwise the rspCmdStatus RSP
+      // would race the pocket-1 microtask cascade and land on the
+      // already-completed pocket-1 waiter (silently dropped).
+      await watch
+          .waitForCount(4)
+          .timeout(const Duration(seconds: 1)); // "Flashing" #1
+      await _waitForSendB(t);
       // Pocket 2 NAK with non-zero status. After Flashing #1 fires,
       // the flasher is sitting on `_awaitRsp()` for pocket 2 — its
       // _rspWaiter is registered, so the injected error is routed
