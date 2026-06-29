@@ -170,10 +170,14 @@ void main() {
       await watch.first.timeout(const Duration(seconds: 1)); // "Entering OTA"
       // Inject otaStart ACK so we move to "Sending metadata".
       await Future<void>.delayed(const Duration(milliseconds: 600));
-      await watch.first.timeout(const Duration(seconds: 1)); // "Starting session"
+      await watch.first.timeout(
+        const Duration(seconds: 1),
+      ); // "Starting session"
       await _waitForSendB(t); // otaStart has been sent
       t.injectRsp(OpB.rspOk); // ack otaStart
-      await watch.first.timeout(const Duration(seconds: 1)); // "Sending metadata"
+      await watch.first.timeout(
+        const Duration(seconds: 1),
+      ); // "Sending metadata"
       await _waitForSendB(t); // otaInit has been sent
       // No RSP for otaInit → must timeout.
       await expectLater(
@@ -189,7 +193,9 @@ void main() {
       final watch = _watch(flasher.flash(fw));
       await watch.first.timeout(const Duration(seconds: 1));
       await Future<void>.delayed(const Duration(milliseconds: 600));
-      await watch.first.timeout(const Duration(seconds: 1)); // "Starting session"
+      await watch.first.timeout(
+        const Duration(seconds: 1),
+      ); // "Starting session"
       await _waitForSendB(t);
       t.injectRsp(OpB.rspOk); // ack otaStart
       // No ack for otaInit → must timeout.
@@ -206,10 +212,14 @@ void main() {
       final watch = _watch(flasher.flash(fw));
       await watch.first.timeout(const Duration(seconds: 1));
       await Future<void>.delayed(const Duration(milliseconds: 600));
-      await watch.first.timeout(const Duration(seconds: 1)); // "Starting session"
+      await watch.first.timeout(
+        const Duration(seconds: 1),
+      ); // "Starting session"
       await _waitForSendB(t);
       t.injectRsp(OpB.rspOk); // ack otaStart
-      await watch.first.timeout(const Duration(seconds: 1)); // "Sending metadata"
+      await watch.first.timeout(
+        const Duration(seconds: 1),
+      ); // "Sending metadata"
       await _waitForSendB(t);
       t.injectRsp(OpB.rspOk); // ack otaInit
       // ACK both pockets (the flasher awaits an RSP per pocket).
@@ -231,7 +241,9 @@ void main() {
       final watch = _watch(flasher.flash(fw));
       await watch.first.timeout(const Duration(seconds: 1));
       await Future<void>.delayed(const Duration(milliseconds: 600));
-      await watch.first.timeout(const Duration(seconds: 1)); // "Starting session"
+      await watch.first.timeout(
+        const Duration(seconds: 1),
+      ); // "Starting session"
       await _waitForSendB(t); // otaStart sent
       t.injectRsp(OpB.rspLowBattery);
       await expectLater(
@@ -253,10 +265,14 @@ void main() {
       final watch = _watch(flasher.flash(fw));
       await watch.first.timeout(const Duration(seconds: 1)); // "Entering OTA"
       await Future<void>.delayed(const Duration(milliseconds: 600));
-      await watch.first.timeout(const Duration(seconds: 1)); // "Starting session"
+      await watch.first.timeout(
+        const Duration(seconds: 1),
+      ); // "Starting session"
       await _waitForSendB(t);
       t.injectRsp(OpB.rspOk); // ack otaStart
-      await watch.first.timeout(const Duration(seconds: 1)); // "Sending metadata"
+      await watch.first.timeout(
+        const Duration(seconds: 1),
+      ); // "Sending metadata"
       await _waitForSendB(t);
       t.injectRsp(OpB.rspOk); // ack otaInit
       // ACK pocket 1
@@ -313,7 +329,9 @@ void main() {
       final watch = _watch(flasher.flash(fw));
       await watch.first.timeout(const Duration(seconds: 1));
       await Future<void>.delayed(const Duration(milliseconds: 600));
-      await watch.first.timeout(const Duration(seconds: 1)); // "Starting session"
+      await watch.first.timeout(
+        const Duration(seconds: 1),
+      ); // "Starting session"
       await _waitForSendB(t);
       t.injectRsp(OpB.rspCmdStatus, status: 7);
       await expectLater(
@@ -335,10 +353,14 @@ void main() {
       final watch = _watch(flasher.flash(fw));
       await watch.first.timeout(const Duration(seconds: 1));
       await Future<void>.delayed(const Duration(milliseconds: 600));
-      await watch.first.timeout(const Duration(seconds: 1)); // "Starting session"
+      await watch.first.timeout(
+        const Duration(seconds: 1),
+      ); // "Starting session"
       await _waitForSendB(t);
       t.injectRsp(OpB.rspOk);
-      await watch.first.timeout(const Duration(seconds: 1)); // "Sending metadata"
+      await watch.first.timeout(
+        const Duration(seconds: 1),
+      ); // "Sending metadata"
       await _waitForSendB(t);
       t.injectRsp(OpB.rspOk); // ack otaInit
       t.injectRsp(OpB.rspOk); // pocket 1 ok
@@ -398,7 +420,9 @@ void main() {
       final watch = _watch(flasher.flash(fw));
       await watch.first.timeout(const Duration(seconds: 1)); // "Entering OTA"
       await Future<void>.delayed(const Duration(milliseconds: 600));
-      await watch.first.timeout(const Duration(seconds: 1)); // "Starting session"
+      await watch.first.timeout(
+        const Duration(seconds: 1),
+      ); // "Starting session"
       await _waitForSendB(t); // otaStart is the first Channel-B write
       // otaStart's sendB throws.
       await expectLater(
@@ -414,10 +438,14 @@ void main() {
       final watch = _watch(flasher.flash(fw));
       await watch.first.timeout(const Duration(seconds: 1));
       await Future<void>.delayed(const Duration(milliseconds: 600));
-      await watch.first.timeout(const Duration(seconds: 1)); // "Starting session"
+      await watch.first.timeout(
+        const Duration(seconds: 1),
+      ); // "Starting session"
       await _waitForSendB(t);
       t.injectRsp(OpB.rspOk);
-      await watch.first.timeout(const Duration(seconds: 1)); // "Sending metadata"
+      await watch.first.timeout(
+        const Duration(seconds: 1),
+      ); // "Sending metadata"
       await _waitForSendB(t);
       t.injectRsp(OpB.rspOk); // ack otaInit
       t.injectRsp(OpB.rspOk); // ack pocket 1
