@@ -270,9 +270,16 @@ void main() {
           .timeout(const Duration(seconds: 1)); // "Sending metadata"
       await _waitForSendB(t);
       t.injectRsp(OpB.rspOk); // ack otaInit
-      // ACK both pockets (the flasher awaits an RSP per pocket).
-      t.injectRsp(OpB.rspOk);
-      t.injectRsp(OpB.rspOk);
+      await watch
+          .waitForCount(4)
+          .timeout(const Duration(seconds: 1)); // "Flashing" #1
+      await _waitForSendB(t);
+      t.injectRsp(OpB.rspOk); // ack pocket 1
+      await watch
+          .waitForCount(5)
+          .timeout(const Duration(seconds: 1)); // "Flashing" #2
+      await _waitForSendB(t);
+      t.injectRsp(OpB.rspOk); // ack pocket 2
       // No ack for otaCheck → must timeout.
       await expectLater(
         watch.done.timeout(const Duration(seconds: 12)),
@@ -325,9 +332,11 @@ void main() {
           .timeout(const Duration(seconds: 1)); // "Sending metadata"
       await _waitForSendB(t);
       t.injectRsp(OpB.rspOk); // ack otaInit
-      // ACK pocket 1
-      t.injectRsp(OpB.rspOk);
-      // Battery dies before pocket 2
+      await watch
+          .waitForCount(4)
+          .timeout(const Duration(seconds: 1)); // "Flashing" #1
+      await _waitForSendB(t);
+      // Battery dies before pocket 2.
       t.injectRsp(OpB.rspLowBattery);
       await expectLater(
         watch.done.timeout(const Duration(seconds: 12)),
@@ -350,13 +359,19 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 600));
       await watch.waitForCount(2).timeout(const Duration(seconds: 1));
       await _waitForSendB(t);
-      t.injectRsp(OpB.rspOk);
+      t.injectRsp(OpB.rspOk); // ack otaStart
       await watch.waitForCount(3).timeout(const Duration(seconds: 1));
       await _waitForSendB(t);
-      t.injectRsp(OpB.rspOk);
-      t.injectRsp(OpB.rspOk);
-      t.injectRsp(OpB.rspOk);
+      t.injectRsp(OpB.rspOk); // ack otaInit
+      await watch.waitForCount(4).timeout(const Duration(seconds: 1));
+      await _waitForSendB(t);
+      t.injectRsp(OpB.rspOk); // ack pocket 1
+      await watch.waitForCount(5).timeout(const Duration(seconds: 1));
+      await _waitForSendB(t);
+      t.injectRsp(OpB.rspOk); // ack pocket 2
       // Now at "Verifying" — battery dies during check.
+      await watch.waitForCount(6).timeout(const Duration(seconds: 1));
+      await _waitForSendB(t);
       t.injectRsp(OpB.rspLowBattery);
       await expectLater(
         watch.done.timeout(const Duration(seconds: 12)),
@@ -471,16 +486,25 @@ void main() {
       await watch
           .waitForCount(1)
           .timeout(const Duration(seconds: 1)); // "Entering OTA"
-      await Future<void>.delayed(const Duration(milliseconds: 600));
+      // The flasher yields "Starting session" and immediately calls
+      // _send(otaStart). sendB throws FakeBleError synchronously,
+      // so the stream errors at that point. waitForCount(2) returns
+      // the cached "Starting session" event because it was yielded
+      // before the throw.
       await watch
           .waitForCount(2)
           .timeout(const Duration(seconds: 1)); // "Starting session"
-      await _waitForSendB(t); // otaStart is the first Channel-B write
-      // otaStart's sendB throws.
-      await expectLater(
-        watch.done.timeout(const Duration(seconds: 5)),
-        throwsA(isA<_FakeBleError>()),
-      );
+      // Use direct await with try/catch — expectLater sometimes
+      // re-raises the original exception instead of matching
+      // throwsA when the async* generator errors synchronously.
+      Object? caught;
+      try {
+        await watch.done.timeout(const Duration(seconds: 5));
+        fail('expected FakeBleError, got stream completion');
+      } on Object catch (e) {
+        caught = e;
+      }
+      expect(caught, isA<_FakeBleError>());
     });
 
     test('inbound stream closing mid-transfer does not deadlock', () async {
