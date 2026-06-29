@@ -12,6 +12,8 @@ import 'sleep_session_summary.dart';
 import 'widgets/hr_chart.dart';
 import 'widgets/scalar_chart.dart';
 import 'widgets/sleep_chart.dart';
+import 'widgets/sleep_trend_chart.dart';
+import 'widgets/steps_chart.dart';
 
 /// Local-first history view.
 class HistoryScreen extends ConsumerWidget {
@@ -19,15 +21,15 @@ class HistoryScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final ready = ref.watch(linkStateProvider).value == LinkState.ready;
+    final linkState =
+        ref.watch(linkStateProvider).value ?? LinkState.disconnected;
+    final ready = linkState == LinkState.ready;
     final sync = ref.watch(historySyncProvider);
     final store = ref.watch(historyStoreProvider).asData?.value;
     final manager = ref.watch(watchManagerProvider);
-    final linkState = ref.watch(linkStateProvider).value;
     final lastSyncedAt = store?.lastSyncedAt;
     final lastSyncedDayIso = store?.lastSyncedDay?.iso;
-
-    ref.listen<HistorySync>(historySyncProvider, (prev, next) {});
+    final days = sync.days;
 
     final ctx = HistoryDebugContext(
       firmware: manager.firmwareRevision.isEmpty
@@ -36,7 +38,7 @@ class HistoryScreen extends ConsumerWidget {
       hardware: manager.hardwareRevision.isEmpty
           ? null
           : manager.hardwareRevision,
-      linkState: linkState?.name,
+      linkState: linkState.name,
       lastSyncedAt: lastSyncedAt,
       lastSyncedDayIso: lastSyncedDayIso,
     );
@@ -45,44 +47,660 @@ class HistoryScreen extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('History'),
         actions: [
-          IconButton(
-            icon: const Icon(CupertinoIcons.arrow_clockwise),
-            tooltip: 'Sync now',
-            onPressed: (ready && !sync.syncing) ? () => sync.syncAll() : null,
-          ),
-          IconButton(
-            icon: const Icon(CupertinoIcons.arrow_counterclockwise),
-            tooltip: 'Full sync',
-            onPressed: (ready && !sync.syncing)
-                ? () => sync.syncAll(force: true)
-                : null,
+          PopupMenuButton<_HistoryMenuAction>(
+            tooltip: 'History options',
+            icon: const Icon(CupertinoIcons.ellipsis_circle),
+            onSelected: (action) {
+              switch (action) {
+                case _HistoryMenuAction.fullSync:
+                  _runHistorySync(context, sync, ready, force: true);
+              }
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: _HistoryMenuAction.fullSync,
+                enabled: ready && !sync.syncing,
+                child: const SizedBox(
+                  width: 220,
+                  child: Row(
+                    children: [
+                      Icon(CupertinoIcons.arrow_counterclockwise),
+                      SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text('Full resync'),
+                            Text(
+                              'Re-fetch stored days',
+                              style: TextStyle(fontSize: 12),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: () => sync.syncAll(),
+        onRefresh: () => _runHistorySync(context, sync, ready),
         child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
           children: [
-            if (sync.days.isNotEmpty) ...[
-              _SectionTitle(
-                title: 'Daily detail',
-                trailing: '${sync.days.length} days',
+            Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 860),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _HistoryOverviewCard(
+                      ready: ready,
+                      linkState: linkState,
+                      sync: sync,
+                      storeReady: store != null,
+                      days: days,
+                      onSync: () => _runHistorySync(context, sync, ready),
+                    ),
+                    if (sync.lastSyncError != null) ...[
+                      const SizedBox(height: 12),
+                      _SyncErrorBanner(message: sync.lastSyncError!),
+                    ],
+                    if (days.isNotEmpty) ...[
+                      const SizedBox(height: 14),
+                      _HistoryTrendCard(days: _recentDays(days)),
+                      const SizedBox(height: 14),
+                      _SectionTitle(
+                        title: 'Daily detail',
+                        trailing: '${days.length} days',
+                      ),
+                      const SizedBox(height: 6),
+                      _DailyDetailSelector(
+                        days: days.reversed.toList(),
+                        sync: sync,
+                        debugContext: ctx,
+                      ),
+                    ] else ...[
+                      const SizedBox(height: 14),
+                      _EmptyState(ready: ready, syncing: sync.syncing),
+                    ],
+                    if (store == null) ...[
+                      const SizedBox(height: 16),
+                      _StoreWarning(),
+                    ],
+                  ],
+                ),
               ),
-              const SizedBox(height: 6),
-              _DailyDetailSelector(
-                days: sync.days.reversed.toList(),
-                sync: sync,
-                debugContext: ctx,
-              ),
-            ] else
-              const _EmptyState(),
-            if (store == null) ...[const SizedBox(height: 16), _StoreWarning()],
+            ),
           ],
         ),
       ),
     );
   }
+}
+
+enum _HistoryMenuAction { fullSync }
+
+Future<void> _runHistorySync(
+  BuildContext context,
+  HistorySync sync,
+  bool ready, {
+  bool force = false,
+}) async {
+  final messenger = ScaffoldMessenger.of(context);
+  if (sync.syncing) return;
+  if (!ready) {
+    messenger.showSnackBar(
+      const SnackBar(content: Text('Connect your watch to sync history')),
+    );
+    return;
+  }
+
+  await sync.syncAll(force: force);
+  if (!context.mounted) return;
+  final error = sync.lastSyncError;
+  if (error != null) {
+    messenger.showSnackBar(
+      const SnackBar(content: Text('History sync failed')),
+    );
+  } else if (force) {
+    messenger.showSnackBar(
+      const SnackBar(content: Text('Full resync complete')),
+    );
+  }
+}
+
+class _HistoryOverviewCard extends StatelessWidget {
+  const _HistoryOverviewCard({
+    required this.ready,
+    required this.linkState,
+    required this.sync,
+    required this.storeReady,
+    required this.days,
+    required this.onSync,
+  });
+
+  final bool ready;
+  final LinkState linkState;
+  final HistorySync sync;
+  final bool storeReady;
+  final List<DailyHistory> days;
+  final VoidCallback onSync;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final latest = days.isEmpty ? null : days.last;
+    final progressTotal = sync.progressTotal;
+    final progress = progressTotal <= 0
+        ? null
+        : sync.progressCurrent.clamp(0, progressTotal) / progressTotal;
+    final syncHint = sync.syncing
+        ? progressTotal <= 0
+              ? 'Preparing history sync'
+              : 'Fetching day ${sync.progressCurrent.clamp(1, progressTotal)} of $progressTotal'
+        : ready
+        ? 'Pull down or use Sync history to update from the watch.'
+        : 'Connect your watch to sync local history.';
+
+    return _InsetCard(
+      padding: const EdgeInsets.all(18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 52,
+                height: 52,
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.primary.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  CupertinoIcons.chart_bar_alt_fill,
+                  color: theme.colorScheme.primary,
+                  size: 28,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Local history',
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      latest == null
+                          ? _describeLink(linkState)
+                          : 'Latest ${_formatDayTab(latest.day)}',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              _SyncStatusPill(sync: sync),
+            ],
+          ),
+          const SizedBox(height: 16),
+          if (sync.syncing) ...[
+            LinearProgressIndicator(value: progress),
+            const SizedBox(height: 10),
+          ],
+          Text(
+            syncHint,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 14),
+          _StatGrid(
+            stats: [
+              _HistoryStat(
+                icon: CupertinoIcons.calendar,
+                label: 'Stored',
+                value: '${days.length}',
+                detail: days.length == 1 ? 'day on phone' : 'days on phone',
+              ),
+              _HistoryStat(
+                icon: CupertinoIcons.clock,
+                label: 'Last sync',
+                value: sync.lastSyncedAt == null
+                    ? 'Never'
+                    : _formatRelative(sync.lastSyncedAt!),
+                detail: storeReady ? 'local watermark' : 'storage starting',
+              ),
+              _HistoryStat(
+                icon: CupertinoIcons.waveform_path,
+                label: 'Watch data',
+                value: sync.watchDaysWithData.isEmpty
+                    ? 'Unknown'
+                    : '${sync.watchDaysWithData.length}',
+                detail: 'reported last sync',
+              ),
+              _HistoryStat(
+                icon: CupertinoIcons.sparkles,
+                label: 'Fetched',
+                value: '${sync.fetchedDays.length}',
+                detail: 'new this sync',
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: ready && !sync.syncing ? onSync : null,
+              icon: sync.syncing
+                  ? const SizedBox.square(
+                      dimension: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(CupertinoIcons.arrow_2_circlepath),
+              label: Text(sync.syncing ? 'Syncing' : 'Sync history'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HistoryTrendCard extends StatelessWidget {
+  const _HistoryTrendCard({required this.days});
+
+  final List<DailyHistory> days;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final latest = days.isEmpty ? null : days.last;
+    final sleepSummary = SleepTrendSummary.fromDays(days);
+    final subtitle = days.isEmpty
+        ? 'No stored days'
+        : '${DateFormat.MMMd().format(days.first.day.midnight)} - '
+              '${DateFormat.MMMd().format(days.last.day.midnight)}';
+
+    return _InsetCard(
+      padding: const EdgeInsets.all(18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Last 7 days',
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (latest != null) ...[
+                const SizedBox(width: 12),
+                Flexible(
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: _LatestDaySummary(day: latest),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          if (latest?.hr.isNotEmpty == true) ...[
+            const SizedBox(height: 16),
+            _TrendHeader(
+              icon: CupertinoIcons.heart_fill,
+              title: 'Heart rate',
+              detail: '${_avgBpm(latest!.hr)} bpm avg',
+              tint: const Color(0xFFFF3B30),
+            ),
+            const SizedBox(height: 8),
+            MiniHrSpark(samples: latest.hr, height: 58),
+          ],
+          const SizedBox(height: 16),
+          _TrendHeader(
+            icon: CupertinoIcons.arrow_up_right,
+            title: 'Steps',
+            detail: latest?.steps == null
+                ? 'No step total'
+                : '${NumberFormat.decimalPattern().format(latest!.steps)} steps',
+            tint: theme.colorScheme.primary,
+          ),
+          const SizedBox(height: 8),
+          StepsBarChart(days: days, height: 118),
+          if (sleepSummary.hasData) ...[
+            const SizedBox(height: 16),
+            _TrendHeader(
+              icon: CupertinoIcons.moon_fill,
+              title: 'Sleep',
+              detail: 'Week avg ${_formatDuration(sleepSummary.average)}',
+              tint: const Color(0xFF5856D6),
+            ),
+            const SizedBox(height: 8),
+            SleepTrendChart(days: days, height: 118),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _LatestDaySummary extends StatelessWidget {
+  const _LatestDaySummary({required this.day});
+
+  final DailyHistory day;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final items = <String>[];
+    final avg = _avgBpm(day.hr);
+    if (avg > 0) items.add('$avg bpm');
+    if (day.steps != null) {
+      items.add('${NumberFormat.compact().format(day.steps)} steps');
+    }
+    if (day.sleep.isNotEmpty) items.add(_sleepSummary(day));
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        items.isEmpty ? _formatDayTab(day.day) : items.join(' · '),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: theme.textTheme.labelMedium?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+      ),
+    );
+  }
+}
+
+class _TrendHeader extends StatelessWidget {
+  const _TrendHeader({
+    required this.icon,
+    required this.title,
+    required this.detail,
+    required this.tint,
+  });
+
+  final IconData icon;
+  final String title;
+  final String detail;
+  final Color tint;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      children: [
+        Icon(icon, size: 17, color: tint),
+        const SizedBox(width: 7),
+        Expanded(child: Text(title, style: theme.textTheme.titleSmall)),
+        Flexible(
+          child: Text(
+            detail,
+            textAlign: TextAlign.end,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SyncStatusPill extends StatelessWidget {
+  const _SyncStatusPill({required this.sync});
+
+  final HistorySync sync;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final (label, color, icon) = switch ((
+      sync.syncing,
+      sync.lastSyncedAt,
+      sync.lastSyncError,
+    )) {
+      (true, _, _) => ('Syncing', theme.colorScheme.primary, Icons.sync),
+      (false, _, String _) => (
+        'Error',
+        theme.colorScheme.error,
+        CupertinoIcons.exclamationmark_circle,
+      ),
+      (false, null, _) => (
+        'No sync',
+        theme.colorScheme.outline,
+        Icons.cloud_off_rounded,
+      ),
+      (false, DateTime last, _) => (
+        _formatRelative(last),
+        theme.colorScheme.secondary,
+        CupertinoIcons.checkmark_circle_fill,
+      ),
+    };
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: theme.textTheme.labelSmall?.copyWith(color: color),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HistoryStat {
+  const _HistoryStat({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.detail,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+  final String detail;
+}
+
+class _StatGrid extends StatelessWidget {
+  const _StatGrid({required this.stats});
+
+  final List<_HistoryStat> stats;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = constraints.maxWidth >= 620 ? 4 : 2;
+        final width = (constraints.maxWidth - (columns - 1) * 8) / columns;
+        return Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final stat in stats)
+              SizedBox(
+                width: width.clamp(120.0, constraints.maxWidth),
+                child: _StatCell(stat: stat),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _StatCell extends StatelessWidget {
+  const _StatCell({required this.stat});
+
+  final _HistoryStat stat;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                stat.icon,
+                size: 16,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  stat.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            stat.value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            stat.detail,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SyncErrorBanner extends StatelessWidget {
+  const _SyncErrorBanner({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return _InsetCard(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            CupertinoIcons.exclamationmark_triangle,
+            color: theme.colorScheme.error,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Sync failed', style: theme.textTheme.titleSmall),
+                const SizedBox(height: 2),
+                Text(
+                  message,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+List<DailyHistory> _recentDays(List<DailyHistory> days, {int count = 7}) {
+  if (days.isEmpty) return const [];
+  final byDay = {for (final day in days) day.day: day};
+  final end = days.last.day;
+  return [
+    for (var offset = -count + 1; offset <= 0; offset++)
+      byDay[end.addDays(offset)] ?? DailyHistory(day: end.addDays(offset)),
+  ];
+}
+
+String _describeLink(LinkState state) => switch (state) {
+  LinkState.ready => 'Connected and ready to sync',
+  LinkState.connecting => 'Connecting to watch',
+  LinkState.disconnected => 'Watch disconnected',
+  LinkState.discovering => 'Discovering watch services',
+  LinkState.readingDeviceInfo => 'Reading watch info',
+};
+
+String _formatRelative(DateTime at) {
+  final delta = DateTime.now().difference(at);
+  if (delta.inMinutes < 1) return 'Just now';
+  if (delta.inMinutes < 60) return '${delta.inMinutes}m ago';
+  if (delta.inHours < 24) return '${delta.inHours}h ago';
+  return DateFormat.MMMd().format(at);
 }
 
 class _SectionTitle extends StatelessWidget {
@@ -116,11 +734,19 @@ class _SectionTitle extends StatelessWidget {
 }
 
 class _EmptyState extends StatelessWidget {
-  const _EmptyState();
+  const _EmptyState({required this.ready, required this.syncing});
+
+  final bool ready;
+  final bool syncing;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final message = syncing
+        ? 'Fetching history from your watch.'
+        : ready
+        ? 'Use Sync history to pull local watch data.'
+        : 'Connect your watch, then sync history.';
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 56),
       child: Column(
@@ -142,7 +768,8 @@ class _EmptyState extends StatelessWidget {
           Text('No history yet', style: theme.textTheme.titleMedium),
           const SizedBox(height: 4),
           Text(
-            'Tap sync after connecting your watch.',
+            message,
+            textAlign: TextAlign.center,
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
             ),
@@ -893,14 +1520,18 @@ class _NewBadge extends StatelessWidget {
 }
 
 class _InsetCard extends StatelessWidget {
-  const _InsetCard({required this.child});
+  const _InsetCard({
+    required this.child,
+    this.padding = const EdgeInsets.all(16),
+  });
 
   final Widget child;
+  final EdgeInsetsGeometry padding;
 
   @override
   Widget build(BuildContext context) {
     return Card(
-      child: Padding(padding: const EdgeInsets.all(16), child: child),
+      child: Padding(padding: padding, child: child),
     );
   }
 }
