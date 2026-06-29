@@ -138,11 +138,18 @@ class FirmwareContainer {
 
     // 4. image_chk_a (24-bit additive byte sum) — two distinct checks:
     //   * `validateImageChkA: true` — header.imageChkA must equal the
-    //     live additive sum over [body] (corruption detection). Off by
-    //     default because the firmware's summed range is unverified.
+    //     live additive sum over `container[0x50:]` (corruption
+    //     detection). Off by default because the firmware's summed
+    //     range is unverified at runtime.
     //   * `expectedImageChkA` — when provided, the header must equal
     //     this whitelist value (firmware-compatibility check).
-    final computed = _additive24(body);
+    //
+    // PROTOCOL.md §9.7: image_chk_a = sum(container[0x50:]) & 0xFFFFFFFF,
+    // high byte observed as 0x00. The summed window starts at offset 0x50
+    // (the `flags` word) — NOT at the body slice (headerSize=0x450). The
+    // earlier helper summed only the body, which diverged from the
+    // documented formula on every observed v13/v14 image.
+    final computed = _additive24From(bytes, 0x50);
     if (expected.validateImageChkA) {
       checks.add(
         VerificationCheck(
@@ -239,10 +246,15 @@ class FirmwareContainer {
     return String.fromCharCodes(out);
   }
 
-  static int _additive24(Uint8List data) {
+  /// Sums bytes from [start] to end of [data] modulo 2^24.
+  ///
+  /// Mirrors PROTOCOL.md §9.7: `image_chk_a = sum(container[0x50:]) &
+  /// 0xFFFFFFFF`. The high byte is observed as 0x00 in every shipped
+  /// v13/v14 image, hence the 24-bit mask.
+  static int _additive24From(Uint8List data, int start) {
     var sum = 0;
-    for (final b in data) {
-      sum += b & 0xFF;
+    for (var i = start; i < data.length; i++) {
+      sum += data[i] & 0xFF;
     }
     return sum & 0x00FFFFFF;
   }

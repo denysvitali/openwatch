@@ -317,16 +317,18 @@ void main() {
       },
     );
 
-    test('image_chk_a: documents the parser formula vs PROTOCOL.md §9.7', () {
+    test('image_chk_a: parser sums container[0x50:] per PROTOCOL.md §9.7', () {
       // PROTOCOL.md §9.7 specifies:
       //   image_chk_a = sum(container[0x50:]) & 0xFFFFFFFF, high byte 0x00
       // R2_ANALYSIS.md §3 confirms both v13 and v14 match this formula
       // exactly (0xc43671 / 0xce90ee).
       //
-      // However, the current parser helper `_additive24(body)` sums the
-      // body bytes (headerSize..end) — NOT the documented
-      // `container[0x50:]` window. This test pins down both values so the
-      // gap is reproducible and reviewable.
+      // The parser must sum `container[0x50:]`, NOT the body slice
+      // (headerSize=0x450..end). Prior revisions summed only the body,
+      // which diverged from the documented formula on every observed
+      // v13/v14 image (`_additive24(body) = 0xc3f5ef` vs header
+      // `0xc43671`). That false-positive would have surfaced as
+      // corruption on every OTA verify, so this test pins the fix.
       final file = File('firmwares/H59MA_1.00.14_260508.bin');
       if (!file.existsSync()) {
         markTestSkipped('Firmware file not present');
@@ -335,7 +337,6 @@ void main() {
       final bytes = file.readAsBytesSync();
       final c = FirmwareContainer.parse(bytes)!;
 
-      // Documented firmware formula: sum(container[0x50:]) & 0x00FFFFFF.
       final documented = _sumFrom(bytes, 0x50) & 0x00FFFFFF;
       final headerChkA = c.header.imageChkA & 0x00FFFFFF;
 
@@ -347,18 +348,17 @@ void main() {
             'sum(container[0x50:]) & 0x00FFFFFF',
       );
 
-      // Parser's internal helper sums the body, not container[0x50:].
-      // For the real v14 image, those two windows differ:
-      //   _additive24(body) = 0xc3f5ef
-      //   _additive24(container[0x50:]) = 0xc43671 (= header)
-      final bodySum = _sumRange(c.body, 0, c.body.length) & 0x00FFFFFF;
+      // Confirm the parser's own verify() passes when validateImageChkA
+      // is on — i.e. the fix produced a self-consistent checksum.
+      final report = c.verify(
+        expected: const FirmwareExpectations(validateImageChkA: true),
+      );
       expect(
-        bodySum == headerChkA,
-        isFalse,
+        report.failures.map((chk) => chk.name),
+        isNot(contains('image_chk_a')),
         reason:
-            'Known divergence: parser._additive24(body) does NOT match the '
-            'documented container[0x50:] sum — this is the gap that '
-            'validateImageChkA would mis-flag as corruption on a clean image.',
+            'verify(validateImageChkA: true) must pass on the clean v14 '
+            'image once the parser sums container[0x50:].',
       );
     });
 
@@ -394,14 +394,6 @@ void _writeU32le(Uint8List buf, int offset, int value) {
 int _sumFrom(Uint8List buf, int offset) {
   var s = 0;
   for (var i = offset; i < buf.length; i++) {
-    s += buf[i] & 0xFF;
-  }
-  return s;
-}
-
-int _sumRange(Uint8List buf, int start, int end) {
-  var s = 0;
-  for (var i = start; i < end; i++) {
     s += buf[i] & 0xFF;
   }
   return s;
