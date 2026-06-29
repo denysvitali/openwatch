@@ -165,6 +165,28 @@ Future<void> _waitForSendB(_StubTransport t) async {
   await Future<void>.delayed(const Duration(milliseconds: 5));
 }
 
+/// Inject a Channel-B RSP and drain the microtask queue before
+/// returning. The flasher is an `async*` generator that:
+///   1. calls `_send(...)` (which the stub records on `sentB`),
+///   2. awaits `_awaitRsp()` to register `_rspWaiter`,
+///   3. awaits another microtask whenever `_rspWaiter.complete(...)`
+///      fires from `_onRx`.
+///
+/// If we inject two RSPs back-to-back without draining in between,
+/// step (3) of the first RSP can land *after* step (1) of the second
+/// send — at which point the second RSP is consumed against the
+/// FIRST step's `_rspWaiter` (or dropped silently if no waiter is
+/// yet registered), and the first step times out 10 s later.
+///
+/// `await Future<void>.delayed(Duration.zero)` schedules a Timer
+/// whose completion microtask is queued *after* every pending
+/// microtask, so it returns only once the flasher has fully resumed
+/// from the previous RSP.
+Future<void> _ack(_StubTransport t, int type, {int status = 0}) async {
+  t.injectRsp(type, status: status);
+  await Future<void>.delayed(Duration.zero);
+}
+
 void main() {
   group('DfuFlasher pre-flight', () {
     test('rejects firmware larger than 12 MB cap (0xBB8000)', () async {
@@ -258,28 +280,29 @@ void main() {
       final flasher = DfuFlasher(t);
       final fw = _fakeFirmware(2048); // 2 pockets
       final watch = _watch(flasher.flash(fw));
-      await watch.waitForCount(1).timeout(const Duration(seconds: 1));
+      await watch
+          .waitForCount(1)
+          .timeout(const Duration(seconds: 1)); // "Entering OTA"
       await Future<void>.delayed(const Duration(milliseconds: 600));
       await watch
           .waitForCount(2)
           .timeout(const Duration(seconds: 1)); // "Starting session"
       await _waitForSendB(t);
-      t.injectRsp(OpB.rspOk); // ack otaStart
+      await _ack(t, OpB.rspOk); // ack otaStart → "Sending metadata"
       await watch
           .waitForCount(3)
           .timeout(const Duration(seconds: 1)); // "Sending metadata"
       await _waitForSendB(t);
-      t.injectRsp(OpB.rspOk); // ack otaInit
+      await _ack(t, OpB.rspOk); // ack otaInit
+      await _ack(t, OpB.rspOk); // ack pocket 1 → "Flashing" #1
       await watch
           .waitForCount(4)
           .timeout(const Duration(seconds: 1)); // "Flashing" #1
       await _waitForSendB(t);
-      t.injectRsp(OpB.rspOk); // ack pocket 1
+      await _ack(t, OpB.rspOk); // ack pocket 2 → "Flashing" #2
       await watch
           .waitForCount(5)
           .timeout(const Duration(seconds: 1)); // "Flashing" #2
-      await _waitForSendB(t);
-      t.injectRsp(OpB.rspOk); // ack pocket 2
       // No ack for otaCheck → must timeout.
       await expectLater(
         watch.done.timeout(const Duration(seconds: 12)),
@@ -300,7 +323,7 @@ void main() {
           .waitForCount(2)
           .timeout(const Duration(seconds: 1)); // "Starting session"
       await _waitForSendB(t); // otaStart sent
-      t.injectRsp(OpB.rspLowBattery);
+      await _ack(t, OpB.rspLowBattery);
       await expectLater(
         watch.done.timeout(const Duration(seconds: 12)),
         throwsA(
@@ -326,18 +349,19 @@ void main() {
           .waitForCount(2)
           .timeout(const Duration(seconds: 1)); // "Starting session"
       await _waitForSendB(t);
-      t.injectRsp(OpB.rspOk); // ack otaStart
+      await _ack(t, OpB.rspOk); // ack otaStart → "Sending metadata"
       await watch
           .waitForCount(3)
           .timeout(const Duration(seconds: 1)); // "Sending metadata"
       await _waitForSendB(t);
-      t.injectRsp(OpB.rspOk); // ack otaInit
+      await _ack(t, OpB.rspOk); // ack otaInit
+      await _ack(t, OpB.rspOk); // ack pocket 1 → "Flashing" #1
       await watch
           .waitForCount(4)
           .timeout(const Duration(seconds: 1)); // "Flashing" #1
       await _waitForSendB(t);
       // Battery dies before pocket 2.
-      t.injectRsp(OpB.rspLowBattery);
+      await _ack(t, OpB.rspLowBattery);
       await expectLater(
         watch.done.timeout(const Duration(seconds: 12)),
         throwsA(
@@ -355,24 +379,35 @@ void main() {
       final flasher = DfuFlasher(t);
       final fw = _fakeFirmware(2048); // 2 pockets
       final watch = _watch(flasher.flash(fw));
-      await watch.waitForCount(1).timeout(const Duration(seconds: 1));
+      await watch
+          .waitForCount(1)
+          .timeout(const Duration(seconds: 1)); // "Entering OTA"
       await Future<void>.delayed(const Duration(milliseconds: 600));
-      await watch.waitForCount(2).timeout(const Duration(seconds: 1));
+      await watch
+          .waitForCount(2)
+          .timeout(const Duration(seconds: 1)); // "Starting session"
       await _waitForSendB(t);
-      t.injectRsp(OpB.rspOk); // ack otaStart
-      await watch.waitForCount(3).timeout(const Duration(seconds: 1));
+      await _ack(t, OpB.rspOk); // ack otaStart → "Sending metadata"
+      await watch
+          .waitForCount(3)
+          .timeout(const Duration(seconds: 1)); // "Sending metadata"
       await _waitForSendB(t);
-      t.injectRsp(OpB.rspOk); // ack otaInit
-      await watch.waitForCount(4).timeout(const Duration(seconds: 1));
+      await _ack(t, OpB.rspOk); // ack otaInit
+      await _ack(t, OpB.rspOk); // ack pocket 1 → "Flashing" #1
+      await watch
+          .waitForCount(4)
+          .timeout(const Duration(seconds: 1)); // "Flashing" #1
       await _waitForSendB(t);
-      t.injectRsp(OpB.rspOk); // ack pocket 1
-      await watch.waitForCount(5).timeout(const Duration(seconds: 1));
-      await _waitForSendB(t);
-      t.injectRsp(OpB.rspOk); // ack pocket 2
+      await _ack(t, OpB.rspOk); // ack pocket 2 → "Flashing" #2
+      await watch
+          .waitForCount(5)
+          .timeout(const Duration(seconds: 1)); // "Flashing" #2
       // Now at "Verifying" — battery dies during check.
-      await watch.waitForCount(6).timeout(const Duration(seconds: 1));
+      await watch
+          .waitForCount(6)
+          .timeout(const Duration(seconds: 1)); // "Verifying"
       await _waitForSendB(t);
-      t.injectRsp(OpB.rspLowBattery);
+      await _ack(t, OpB.rspLowBattery);
       await expectLater(
         watch.done.timeout(const Duration(seconds: 12)),
         throwsA(
@@ -398,7 +433,7 @@ void main() {
           .waitForCount(2)
           .timeout(const Duration(seconds: 1)); // "Starting session"
       await _waitForSendB(t);
-      t.injectRsp(OpB.rspCmdStatus, status: 7);
+      await _ack(t, OpB.rspCmdStatus, status: 7);
       await expectLater(
         watch.done.timeout(const Duration(seconds: 12)),
         throwsA(
@@ -422,15 +457,18 @@ void main() {
           .waitForCount(2)
           .timeout(const Duration(seconds: 1)); // "Starting session"
       await _waitForSendB(t);
-      t.injectRsp(OpB.rspOk);
+      await _ack(t, OpB.rspOk); // ack otaStart → "Sending metadata"
       await watch
           .waitForCount(3)
           .timeout(const Duration(seconds: 1)); // "Sending metadata"
       await _waitForSendB(t);
-      t.injectRsp(OpB.rspOk); // ack otaInit
-      t.injectRsp(OpB.rspOk); // pocket 1 ok
-      // Pocket 2 NAK with non-zero status
-      t.injectRsp(OpB.rspCmdStatus, status: 2);
+      await _ack(t, OpB.rspOk); // ack otaInit
+      await _ack(t, OpB.rspOk); // ack pocket 1 → "Flashing" #1
+      // Pocket 2 NAK with non-zero status. After Flashing #1 fires,
+      // the flasher is sitting on `_awaitRsp()` for pocket 2 — its
+      // _rspWaiter is registered, so the injected error is routed
+      // straight to that Completer.
+      await _ack(t, OpB.rspCmdStatus, status: 2);
       await expectLater(
         watch.done.timeout(const Duration(seconds: 12)),
         throwsA(
@@ -518,13 +556,13 @@ void main() {
           .waitForCount(2)
           .timeout(const Duration(seconds: 1)); // "Starting session"
       await _waitForSendB(t);
-      t.injectRsp(OpB.rspOk);
+      await _ack(t, OpB.rspOk); // ack otaStart → "Sending metadata"
       await watch
           .waitForCount(3)
           .timeout(const Duration(seconds: 1)); // "Sending metadata"
       await _waitForSendB(t);
-      t.injectRsp(OpB.rspOk); // ack otaInit
-      t.injectRsp(OpB.rspOk); // ack pocket 1
+      await _ack(t, OpB.rspOk); // ack otaInit
+      await _ack(t, OpB.rspOk); // ack pocket 1 → "Flashing" #1
       // Now close the inbound stream before pocket 2 ack arrives —
       // the flasher must not hang indefinitely. We verify the rx
       // subscription is cancelled by the `finally` block.
