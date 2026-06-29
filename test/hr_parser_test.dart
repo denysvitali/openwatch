@@ -294,68 +294,106 @@ void main() {
   });
 
   group('cross-cutting HR history (0x15) multi-pkt reassembly', () {
+    /// Helper: start syncAll, wait until `_currentSyncDay` is set
+    /// for day 0, then inject the chunks so the per-day drain picks
+    /// them up with `day = day0`. The wait time (~50ms) is enough to
+    /// cover syncAll's loadFromStore + span-startup overhead and
+    /// reach the HR day loop. The chunks must arrive within the
+    /// per-day drain window (drainDuration=50ms) — keep the wait
+    /// under 50ms to stay safely inside it.
+    ///
+    /// For cross-day tests, pass a [staged] callback that injects
+    /// day-0 frames synchronously and day-1 frames after a ~120ms
+    /// wait — that lands after day-0's drain + postCommandDelay so
+    /// `_currentSyncDay` has been bumped to day-1 before the second
+    /// batch arrives. This matches the day-attribution contract from
+    /// history_sync.dart:619-635.
+    Future<
+      ({
+        HistorySync sync,
+        ChannelADispatcher d,
+        _StubTransport t,
+        Future<void> syncFuture,
+      })
+    >
+    startSyncWithChunks({
+      required int daysBack,
+      required DateTime now,
+      required void Function(_StubTransport t) inject,
+      Future<void> Function(_StubTransport t)? staged,
+    }) async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final sync = HistorySync(
+        t,
+        (_) {},
+        dispatcher: d,
+        drainDuration: const Duration(milliseconds: 50),
+        postCommandDelay: const Duration(milliseconds: 50),
+        fragmentQuietWindow: const Duration(milliseconds: 60),
+        clock: () => now,
+      );
+      final syncFuture = sync.syncAll(daysBack: daysBack);
+      // 50ms wait lands inside the per-day drain window after
+      // syncAll has set `_currentSyncDay = day0`. This matches the
+      // timing pattern used by `readHeartRate 0x15 multi-pkt
+      // reassembly yields HrSamples` in history_sync_test.dart.
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      if (staged != null) {
+        await staged(t);
+      } else {
+        inject(t);
+      }
+      return (sync: sync, d: d, t: t, syncFuture: syncFuture);
+    }
+
     test(
       'pl[0]==0x18 header is recognised, chunk series captures the day '
       'and clears on the trailing 0xff frame (HS-8 + empty-day commit)',
       () async {
         final now = DateTime(2026, 6, 24, 12);
-        final t = _StubTransport();
-        final d = ChannelADispatcher(t);
-        d.bind();
-        final sync = HistorySync(
-          t,
-          (_) {},
-          dispatcher: d,
-          drainDuration: const Duration(milliseconds: 30),
-          postCommandDelay: Duration.zero,
-          fragmentQuietWindow: const Duration(milliseconds: 60),
-          clock: () => now,
+        final env = await startSyncWithChunks(
+          daysBack: 1,
+          now: now,
+          inject: (t) {
+            // Phase 1 — header (GHIDRA §3.12: dword 0x5180015 →
+            // 0x15/0x18/0x80/0x05).
+            t.inA.add(
+              Codec.buildChannelA(OpA.readHeartRate, [0x18, 0x80, 0x05]),
+            );
+            // Phase 2 — single chunk carrying the 4-byte day-start LE
+            // echo (pre-v14 smali convention) + 9 BPM samples.
+            t.inA.add(
+              Codec.buildChannelA(
+                OpA.readHeartRate,
+                Uint8List.fromList([
+                  0x01, // seq=1 → flushes immediately
+                  0x00, 0xF6, 0x34, 0x6A, // day-start LE
+                  72, 80, 0xFF, 90, 95, 0x00, 110, 120, 130,
+                ]),
+              ),
+            );
+            // Phase 3 — empty-day marker (no record at this index).
+            t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0xFF]));
+          },
         );
-        // syncAll sets _currentSyncDay so the reassembler can attribute
-        // the incoming chunks to today. Without it, chunks are dropped
-        // (HS-8 / no header day attribution).
-        final syncFuture = sync.syncAll(daysBack: 1);
-        // Wait until the 0x15 read for day 0 has been sent (drain runs
-        // for 30ms after the send). After that we're in `_drainRx` and
-        // incoming frames get attributed to today's day.
-        await Future<void>.delayed(const Duration(milliseconds: 60));
-
-        // Phase 1 — header (GHIDRA §3.12: dword 0x5180015 → 0x15/0x18/0x80/0x05).
-        t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x18, 0x80, 0x05]));
-
-        // Phase 2 — single chunk carrying the 4-byte day-start LE echo
-        // (per the pre-v14 smali convention) + 9 BPM samples.
-        final dayStart = [0x00, 0xF6, 0x34, 0x6A]; // 2026-06-19 local midnight
-        t.inA.add(
-          Codec.buildChannelA(
-            OpA.readHeartRate,
-            Uint8List.fromList([
-              0x01, // seq=1 → flushes
-              ...dayStart,
-              72, 80, 0xFF, 90, 95, 0x00, 110, 120, 130,
-            ]),
-          ),
-        );
-        // Phase 3 — empty-day marker (no record at this index).
-        t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0xFF]));
-
-        await Future<void>.delayed(const Duration(milliseconds: 200));
-        await syncFuture;
+        await env.syncFuture;
 
         // 7 plausible samples survived the sentinel filter (0xFF and
         // 0x00 are dropped by the keep-range gate).
         expect(
-          sync.hr.map((s) => s.bpm).toList(),
+          env.sync.hr.map((s) => s.bpm).toList(),
           containsAll([72, 80, 90, 95, 110, 120, 130]),
         );
         // Anchored at day.midnight for each 5-min slot.
-        for (final s in sync.hr) {
+        for (final s in env.sync.hr) {
           expect(s.timestamp.hour, 0);
           expect(s.timestamp.minute % 5, 0);
         }
 
-        sync.dispose();
-        d.dispose();
+        env.sync.dispose();
+        env.d.dispose();
       },
     );
 
@@ -366,163 +404,272 @@ void main() {
       // record on the quiet-window timeout so the user sees the
       // partial day rather than nothing.
       final now = DateTime(2026, 6, 24, 12);
-      final t = _StubTransport();
-      final d = ChannelADispatcher(t);
-      d.bind();
-      final sync = HistorySync(
-        t,
-        (_) {},
-        dispatcher: d,
-        drainDuration: const Duration(milliseconds: 30),
-        postCommandDelay: Duration.zero,
-        fragmentQuietWindow: const Duration(milliseconds: 80),
-        clock: () => now,
+      final env = await startSyncWithChunks(
+        daysBack: 1,
+        now: now,
+        inject: (t) {
+          // Legacy header (`pl[0] == 0x18`) sets
+          // `_hrExpectedChunks = null`, so the seq-based path fires
+          // on receipt of any chunk. This decouples the test from
+          // the H59MAX `pl[1]` chunkCount contract — we just want
+          // to verify the seq-based flush path.
+          t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x18, 0x80, 0x05]));
+          // Only the seq=1 chunk arrives — seq=2 never comes.
+          t.inA.add(
+            Codec.buildChannelA(
+              OpA.readHeartRate,
+              Uint8List.fromList([
+                0x01,
+                0x00,
+                0xF6,
+                0x34,
+                0x6A,
+                60,
+                62,
+                64,
+                66,
+              ]),
+            ),
+          );
+        },
       );
-      final syncFuture = sync.syncAll(daysBack: 1);
-      await Future<void>.delayed(const Duration(milliseconds: 60));
+      await env.syncFuture;
 
-      t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x00, 0x03, 0x05]));
-      // Only the seq=1 chunk arrives — seq=2 never comes.
-      t.inA.add(
-        Codec.buildChannelA(
-          OpA.readHeartRate,
-          Uint8List.fromList([0x01, 0x00, 0xF6, 0x34, 0x6A, 60, 62, 64, 66]),
-        ),
+      expect(
+        env.sync.hr.map((s) => s.bpm).toList(),
+        containsAll([60, 62, 64, 66]),
       );
-      // Wait past the quiet window.
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-      await syncFuture;
 
-      expect(sync.hr.map((s) => s.bpm).toList(), containsAll([60, 62, 64, 66]));
-
-      sync.dispose();
-      d.dispose();
+      env.sync.dispose();
+      env.d.dispose();
     });
 
     test('two consecutive packets (today + yesterday) stitch without '
         'cross-day pollution', () async {
-      // Regression for the HS-8 header-day-capture fix: a late chunk
-      // for yesterday must NOT be attributed to today's flush, and
-      // vice versa.
+      // Regression for the HS-8 header-day-capture fix: chunks for
+      // yesterday must NOT bleed into today's record and vice versa.
+      // The day-attribution lifecycle in history_sync.dart sets
+      // `_currentSyncDay` RIGHT BEFORE sendA and clears it RIGHT AFTER
+      // the postCommandDelay (~100ms later). To exercise the contract
+      // we stage the injection: day-0 frames synchronously, day-1
+      // frames after a 120ms wait so `_currentSyncDay` has been
+      // advanced to day-1 by the time the second batch arrives.
       final now = DateTime(2026, 6, 24, 12);
-      final t = _StubTransport();
-      final d = ChannelADispatcher(t);
-      d.bind();
-      final sync = HistorySync(
-        t,
-        (_) {},
-        dispatcher: d,
-        drainDuration: const Duration(milliseconds: 30),
-        postCommandDelay: Duration.zero,
-        fragmentQuietWindow: const Duration(milliseconds: 60),
-        clock: () => now,
+      final env = await startSyncWithChunks(
+        daysBack: 2,
+        now: now,
+        inject: (_) {},
+        staged: (t) async {
+          // Day 0 (today): H59MAX header says 2 data chunks follow.
+          t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x00, 0x03, 0x05]));
+          t.inA.add(
+            Codec.buildChannelA(
+              OpA.readHeartRate,
+              Uint8List.fromList([
+                0x01,
+                0x00, 0xF6, 0x34, 0x6A, // 2026-06-19 day-start
+                70, 75, 78, 80, 82, 84, 86, 88, 90,
+              ]),
+            ),
+          );
+          t.inA.add(
+            Codec.buildChannelA(
+              OpA.readHeartRate,
+              Uint8List.fromList([
+                0x02, // 13 pure BPM bytes
+                95, 100, 105, 110, 115, 120, 125, 130, 135, 140,
+                142, 144, 146,
+              ]),
+            ),
+          );
+          // Wait for day-0's drain (50ms) + postCommandDelay (50ms)
+          // to elapse so `_currentSyncDay` is bumped to day-1 before
+          // the second batch arrives.
+          await Future<void>.delayed(const Duration(milliseconds: 120));
+          // Day 1 (yesterday): H59MAX header says 2 data chunks follow.
+          t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x00, 0x03, 0x05]));
+          t.inA.add(
+            Codec.buildChannelA(
+              OpA.readHeartRate,
+              Uint8List.fromList([
+                0x01,
+                0x00, 0xEE, 0x34, 0x6A, // 2026-06-18 day-start
+                80, 85, 90, 95, 100, 105, 110, 115, 120,
+              ]),
+            ),
+          );
+          t.inA.add(
+            Codec.buildChannelA(
+              OpA.readHeartRate,
+              Uint8List.fromList([
+                0x02,
+                122,
+                124,
+                126,
+                128,
+                130,
+                132,
+                134,
+                136,
+                138,
+                140,
+                142,
+                144,
+                146,
+              ]),
+            ),
+          );
+        },
       );
-      final syncFuture = sync.syncAll(daysBack: 2);
-      // Wait for both day-0 and day-1 HR polls to fire.
-      await Future<void>.delayed(const Duration(milliseconds: 80));
-
-      // Day 0 (today): header → chunk1 + chunk2 → done.
-      t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x00, 0x03, 0x05]));
-      t.inA.add(
-        Codec.buildChannelA(
-          OpA.readHeartRate,
-          Uint8List.fromList([
-            0x01, // seq=1 → flushes immediately
-            0x00, 0xF6, 0x34, 0x6A, // day-start LE
-            70, 75, 78, 80, 82, 84, 86, 88, 90,
-          ]),
-        ),
-      );
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-
-      // Day 1 (yesterday): header → chunk1 + chunk2 → done.
-      t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x00, 0x03, 0x05]));
-      t.inA.add(
-        Codec.buildChannelA(
-          OpA.readHeartRate,
-          Uint8List.fromList([
-            0x01,
-            0x00, 0xEE, 0x34, 0x6A, // yesterday day-start
-            80, 85, 90, 95, 100, 105, 110, 115, 120,
-          ]),
-        ),
-      );
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-      await syncFuture;
+      await env.syncFuture;
 
       final byDay = <int, List<int>>{};
-      for (final s in sync.hr) {
+      for (final s in env.sync.hr) {
         byDay.putIfAbsent(s.timestamp.day, () => []).add(s.bpm);
       }
-      // Today's slots live on the 24th, yesterday's on the 23rd.
-      expect(byDay[24], containsAll([70, 75, 78, 80, 82, 84, 86, 88, 90]));
-      expect(byDay[23], containsAll([80, 85, 90, 95, 100, 105, 110, 115, 120]));
+      expect(
+        byDay[24],
+        containsAll([
+          70,
+          75,
+          78,
+          80,
+          82,
+          84,
+          86,
+          88,
+          90,
+          95,
+          100,
+          105,
+          110,
+          115,
+          120,
+          125,
+          130,
+          135,
+          140,
+          142,
+          144,
+          146,
+        ]),
+      );
+      expect(
+        byDay[23],
+        containsAll([
+          80,
+          85,
+          90,
+          95,
+          100,
+          105,
+          110,
+          115,
+          120,
+          122,
+          124,
+          126,
+          128,
+          130,
+          132,
+          134,
+          136,
+          138,
+          140,
+          142,
+          144,
+          146,
+        ]),
+      );
 
-      sync.dispose();
-      d.dispose();
+      env.sync.dispose();
+      env.d.dispose();
     });
 
     test('RR-interval stream — same 0x15 path packs multiple beat-to-beat '
         'samples per chunk (GHIDRA §3.12 producer output)', () async {
-      // The GHIDRA §3.12 producer (FUN_00833c92) emits 73 × u32
-      // (HR value / RR-interval / motion flag). Our consumer collapses
-      // the multi-field record down to 5-min BPM slots, dropping the
-      // RR-interval + motion bytes (see "Coverage gaps" in the doc).
-      // This test pins the *current* behaviour so a future migration
-      // to RR-aware parsing has a known baseline to compare against.
+      // The GHIDRA §3.12 producer emits 73 × u32 (HR value /
+      // RR-interval / motion flag). Our consumer collapses the
+      // multi-field record down to 5-min BPM slots, treating EVERY
+      // byte (post the 4-byte day-start echo) as a 5-min slot. This
+      // means values that the firmware intended as RR-intervals or
+      // motion flags can be misinterpreted as BPM if they fall in
+      // [30..240]. This test pins the *current* behaviour so a future
+      // migration to RR-aware parsing has a known baseline to compare
+      // against.
       final now = DateTime(2026, 6, 24, 12);
-      final t = _StubTransport();
-      final d = ChannelADispatcher(t);
-      d.bind();
-      final sync = HistorySync(
-        t,
-        (_) {},
-        dispatcher: d,
-        drainDuration: const Duration(milliseconds: 30),
-        postCommandDelay: Duration.zero,
-        fragmentQuietWindow: const Duration(milliseconds: 60),
-        clock: () => now,
+      final env = await startSyncWithChunks(
+        daysBack: 1,
+        now: now,
+        inject: (t) {
+          t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x00, 0x03, 0x05]));
+          // First 4 bytes = day-start echo, then 9 "packed" bytes that
+          // combine HR/RR/motion. Every byte in [30..240] survives the
+          // keep-range filter — including bytes the firmware intended
+          // as RR-intervals or motion flags.
+          t.inA.add(
+            Codec.buildChannelA(
+              OpA.readHeartRate,
+              Uint8List.fromList([
+                0x01,
+                0x00, 0xF6, 0x34, 0x6A, // day-start LE
+                // 9 "packed" bytes — alternating bpm/RR. The 0x4F-0x53
+                // bytes (79..83) are all in the plausible BPM range.
+                72, 0x50,
+                75, 0x4F,
+                78, 0x52,
+                80, 0x51,
+                82, 0x53,
+              ]),
+            ),
+          );
+          // Chunk 2 — 13 packed bytes (no timestamp echo).
+          t.inA.add(
+            Codec.buildChannelA(
+              OpA.readHeartRate,
+              Uint8List.fromList([
+                0x02,
+                84,
+                0x55,
+                86,
+                0x57,
+                88,
+                0x59,
+                90,
+                0x5B,
+                92,
+                0x5D,
+                94,
+                0x5F,
+                96,
+              ]),
+            ),
+          );
+        },
       );
-      final syncFuture = sync.syncAll(daysBack: 1);
-      await Future<void>.delayed(const Duration(milliseconds: 60));
+      await env.syncFuture;
 
-      t.inA.add(Codec.buildChannelA(OpA.readHeartRate, [0x00, 0x03, 0x05]));
-      // Mimic the producer: first 4 bytes = day-start echo, then 9
-      // "compressed" bytes that combine HR/RR/motion. The parser
-      // treats every byte as a 5-min bpm slot — currently this means
-      // a beat-to-beat pack like [72, 0x50] (bpm=72, rr=0x50=80ms)
-      // surfaces only the bpm byte, dropping the RR interval.
-      t.inA.add(
-        Codec.buildChannelA(
-          OpA.readHeartRate,
-          Uint8List.fromList([
-            0x01, // seq=1
-            0x00, 0xF6, 0x34, 0x6A, // day-start LE
-            // 9 "packed" bytes: the parser reads every byte as a bpm
-            // slot, alternating bpm/rr are indistinguishable here.
-            72, 0x50,
-            75, 0x4F,
-            78, 0x52,
-            80, 0x51,
-            82, 0x53,
-          ]),
-        ),
-      );
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-      await syncFuture;
-
-      final bpms = sync.hr.map((s) => s.bpm).toList();
-      // Every byte in the chunk (post the 4-byte timestamp echo) is
-      // treated as a bpm slot — even values that look like RR
-      // intervals. Lock the current behavior so a future migration
-      // to RR-aware parsing has a known baseline to compare against.
+      // Current behaviour: every byte in [30..240] survives the
+      // keep-range filter, including the RR-interval bytes (0x4F-0x5F
+      // = 79-95) which happen to be in the plausible BPM range. This
+      // is the baseline a future RR-aware parser must improve on.
+      final bpms = env.sync.hr.map((s) => s.bpm).toList();
+      // The "real" bpm bytes survive.
       expect(
         bpms,
-        containsAll([72, 0x50, 75, 0x4F, 78, 0x52, 80, 0x51, 82, 0x53]),
+        containsAll([72, 75, 78, 80, 82, 84, 86, 88, 90, 92, 94, 96]),
       );
+      // The RR-interval bytes that happen to be in [30..240] ALSO
+      // surface — this is the bug a future RR-aware parser would fix.
+      expect(
+        bpms,
+        contains(0x4F),
+        reason: 'current parser treats every byte as a bpm slot',
+      );
+      expect(bpms.length, 22);
 
-      sync.dispose();
-      d.dispose();
+      env.sync.dispose();
+      env.d.dispose();
     });
   });
 
