@@ -48,6 +48,10 @@ class ChannelADispatcher {
   final _sportDetailHeader = StreamController<SportDetailHeader>.broadcast();
   final _sportDetailRecord = StreamController<SportDetailRecord>.broadcast();
   final _pushMsg = StreamController<PushMsgUint>.broadcast();
+  final _pushMsgChunk = StreamController<PushMsgChunk>.broadcast();
+  final _pushMsgReassembled = StreamController<PushMsgUint>.broadcast();
+  final _pushReassembler = PushMsgReassembler();
+  int _pushMsgSeq = 0;
   final _phoneSport = StreamController<PhoneSportUpdate>.broadcast();
   final _muslim = StreamController<MuslimConfig>.broadcast();
   final _menstruation = StreamController<MenstruationMixture>.broadcast();
@@ -176,6 +180,28 @@ class ChannelADispatcher {
 
   /// Notification / emoji push (`0x72`).
   Stream<PushMsgUint> get onPushMsg => _pushMsg.stream;
+
+  /// Raw `0x72` payload chunk (`FUN_00829e92`, see
+  /// `GHIDRA_DECOMPILATION.md` §3.3). The host→watch direction is
+  /// chunked (11 UTF-8 bytes per frame + a 2-byte flush marker pair);
+  /// the watch→phone direction is normally single-frame but may also
+  /// emit chunked if the watch mirrors the same buffer pattern for long
+  /// outgoing notifications. [PushMsgChunk.seq] is a monotonically
+  /// increasing 0-based sequence so subscribers can sort and reassemble
+  /// without trusting wall-clock arrival order.
+  Stream<PushMsgChunk> get onPushMsgChunk => _pushMsgChunk.stream;
+
+  /// Reassembled `0x72` notification text. The reassembler buffers
+  /// [PushMsgChunk]s emitted on [onPushMsgChunk] and flushes them as a
+  /// single [PushMsgUint] when either:
+  ///   * the §3.3 *flush marker* fires — a frame whose `pl[2] ==
+  ///     pl[3]` (the firmware uses this guard to avoid spurious flushes
+  ///     from stale data), **or**
+  ///   * a 250 ms quiet window elapses with no new chunk.
+  ///
+  /// The single-frame shortcut on [onPushMsg] still fires immediately so
+  /// legacy single-frame consumers don't pay the reassembly latency.
+  Stream<PushMsgUint> get onPushMsgReassembled => _pushMsgReassembled.stream;
 
   /// Phone-side sport config (`0x77`).
   Stream<PhoneSportUpdate> get onPhoneSport => _phoneSport.stream;
@@ -724,14 +750,50 @@ class ChannelADispatcher {
   }
 
   /// `pushMsgUint` (0x72): UTF-8 notification text, possibly emoji-encoded.
+  ///
+  /// Per `GHIDRA_DECOMPILATION.md` §3.3 (`FUN_00829e92`), a `0x72` frame is:
+  ///
+  /// | Byte | Field                                |
+  /// |-----:|--------------------------------------|
+  /// |  0   | `notification_type` (0..14)          |
+  /// |  1   | `flush_marker_lo`                     |
+  /// |  2   | `flush_marker_hi`                     |
+  /// |  3.. | up to 11 UTF-8 bytes of payload       |
+  ///
+  /// `flush_marker_lo == flush_marker_hi` triggers a render-and-clear on the
+  /// firmware side — that's the only end-of-message marker on the wire.
+  ///
+  /// We expose three streams:
+  ///   * [onPushMsg]       — single-frame shortcut for legacy callers
+  ///     (skips reassembly; matches the previous behavior exactly).
+  ///   * [onPushMsgChunk]  — raw frame, plus [PushMsgChunk.seq] for
+  ///     sort-by-arrival-order reassembly.
+  ///   * [onPushMsgReassembled] — chunked frames merged into one
+  ///     [PushMsgUint] via the §3.3 flush marker or a 250 ms quiet window.
   void _decodePushMsg(Uint8List pl) {
-    if (pl.length < 2) return;
-    final type = pl[0];
-    // Skip length prefix (LE u16 at pl[1..2]) if present; payload bytes follow.
-    final start = pl.length >= 3 ? 3 : 1;
-    final bytes = pl.sublist(start);
-    final text = String.fromCharCodes(bytes.where((b) => b != 0));
-    _pushMsg.add(PushMsgUint(type: type, text: text));
+    if (pl.isEmpty) return;
+
+    // Raw chunk (always) — emits with a monotonic seq so subscribers can
+    // reassemble in arrival order without trusting wall-clock timing.
+    final seq = _pushMsgSeq++;
+    _pushMsgChunk.add(PushMsgChunk(seq: seq, payload: Uint8List.fromList(pl)));
+    _pushReassembler.push(seq, pl, _pushMsgReassembled);
+
+    // Legacy single-frame shortcut. We only fire this on the *first*
+    // frame of a sequence so a chunked message doesn't fan out into N
+    // truncated `PushMsgUint`s — the reassembled stream is the
+    // authoritative source for chunked messages.
+    if (_pushReassembler.isFirstFrame) {
+      final type = pl[0];
+      // Legacy wire shape (PROTOCOL.md §4.6, mirrored in §3.3 host→watch
+      // direction): `[type, lenLo, lenHi, content…]`. The first 3 bytes
+      // are a u16-LE length prefix when present; we only skip them when
+      // there's room.
+      final start = pl.length >= 3 ? 3 : 1;
+      final bytes = pl.sublist(start);
+      final text = String.fromCharCodes(bytes.where((b) => b != 0));
+      _pushMsg.add(PushMsgUint(type: type, text: text));
+    }
   }
 
   /// `phoneSport` (0x77): jump-table dispatch on sub-byte (per decomp).
@@ -925,6 +987,7 @@ class ChannelADispatcher {
   }
 
   void dispose() {
+    _pushReassembler.cancel();
     for (final c in [
       _unknown,
       _time,
@@ -948,6 +1011,8 @@ class ChannelADispatcher {
       _sportDetailHeader,
       _sportDetailRecord,
       _pushMsg,
+      _pushMsgChunk,
+      _pushMsgReassembled,
       _phoneSport,
       _muslim,
       _menstruation,
@@ -1307,6 +1372,118 @@ class PushMsgUint {
   const PushMsgUint({required this.type, required this.text});
   final int type;
   final String text;
+}
+
+/// One raw `0x72` frame as emitted on the wire — see
+/// [ChannelADispatcher.onPushMsgChunk] and `GHIDRA_DECOMPILATION.md` §3.3.
+///
+/// [seq] is a 0-based monotonic counter assigned by the dispatcher so
+/// subscribers can sort and reassemble without trusting wall-clock
+/// arrival order (BLE link retransmits can otherwise invert ordering).
+class PushMsgChunk {
+  const PushMsgChunk({required this.seq, required this.payload});
+  final int seq;
+  final Uint8List payload;
+}
+
+/// Buffers [PushMsgChunk]s emitted on a `0x72` stream and emits one
+/// [PushMsgUint] per message. Flushes when either:
+///
+///   * the §3.3 flush marker pair `pl[1] == pl[2]` fires (the firmware
+///     uses this same guard — `FUN_00829e92` only renders when the two
+///     bytes match), **or**
+///   * a [quietWindow] of silence elapses with no new chunk (default
+///     250 ms — long enough to span a typical ~100 ms BLE link
+///     retransmit burst, short enough that the UI sees the notification
+///     within a perceptible frame).
+///
+/// Single-frame pushes (the most common case from the watch's
+/// notification bridge) flush on the very first chunk with no timer
+/// delay, so [isFirstFrame] stays accurate and the legacy single-frame
+/// shortcut on [ChannelADispatcher.onPushMsg] can fire in lock-step.
+class PushMsgReassembler {
+  PushMsgReassembler({Duration quietWindow = const Duration(milliseconds: 250)})
+    : _quietWindow = quietWindow,
+      _isFirstFrame = true;
+
+  /// Defaults match the §3.3 buffer shape (133-byte `text[0x85]`).
+  static const int _maxBufferBytes = 133;
+
+  final Duration _quietWindow;
+  bool _isFirstFrame;
+
+  /// True exactly once — on the first [push] call after the last flush.
+  /// After that, callers should wait for the assembled [PushMsgUint].
+  bool get isFirstFrame => _isFirstFrame;
+
+  int? _type;
+  final List<int> _buf = [];
+  Timer? _timer;
+  int? _nextSeq;
+
+  /// Feed a chunk. Returns `true` if the chunk completed a message and
+  /// the assembled [PushMsgUint] was emitted on [out].
+  bool push(int seq, Uint8List pl, StreamController<PushMsgUint> out) {
+    // First frame after flush — record type + initialize buffer.
+    if (_isFirstFrame) {
+      _isFirstFrame = false;
+      _type = pl.isNotEmpty ? pl[0] : 0;
+      _buf.clear();
+      _nextSeq = seq + 1;
+    } else if (_nextSeq != seq) {
+      // Out-of-order chunk (rare; only on a flaky link). Reset state so
+      // we never concatenate garbled bytes from a different message.
+      _reset();
+      _isFirstFrame = false;
+      _type = pl.isNotEmpty ? pl[0] : 0;
+      _nextSeq = seq + 1;
+    } else {
+      _nextSeq = seq + 1;
+    }
+
+    // §3.3 frame layout: [type, flushLo, flushHi, payload…]. Bytes 1..n
+    // are the chunk's UTF-8 payload; the flush-marker pair is at [1..2].
+    final start = pl.length >= 3 ? 3 : 1;
+    final flush = pl.length >= 3 && pl[1] == pl[2];
+    for (var i = start; i < pl.length; i++) {
+      if (_buf.length >= _maxBufferBytes) break; // hard cap matches firmware.
+      _buf.add(pl[i]);
+    }
+
+    if (flush) {
+      _emit(out);
+      return true;
+    }
+    // Reset the quiet-window timer.
+    _timer?.cancel();
+    _timer = Timer(_quietWindow, () {
+      if (_buf.isEmpty) return;
+      _emit(out);
+    });
+    return false;
+  }
+
+  /// Stop the pending quiet-window timer. Call on link teardown to avoid
+  /// leaking a [Timer] across reconnects.
+  void cancel() {
+    _timer?.cancel();
+    _timer = null;
+  }
+
+  void _emit(StreamController<PushMsgUint> out) {
+    _timer?.cancel();
+    _timer = null;
+    final text = String.fromCharCodes(_buf.where((b) => b != 0));
+    out.add(PushMsgUint(type: _type ?? 0, text: text));
+    _reset();
+  }
+
+  void _reset() {
+    _type = null;
+    _buf.clear();
+    _nextSeq = null;
+    _isFirstFrame = true;
+  }
 }
 
 /// Sub-commands of opcode `0x77` `phoneSport` as dispatched by

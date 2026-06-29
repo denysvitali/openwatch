@@ -23,9 +23,11 @@ final _log = AppLog.instance;
 ///   * `FUN_00839ac4` — pushes the ANCS data to the host app over Channel-A.
 ///
 /// On the host side the watch pushes notifications via Channel-A opcode `0x72`,
-/// which [ChannelADispatcher.onPushMsg] surfaces as [PushMsgUint]. This class
-/// models the firmware's internal state so the host can keep a coherent view
-/// of active ANCS sessions even though only one transport is in play.
+/// which [ChannelADispatcher.onPushMsgReassembled] surfaces as [PushMsgUint]
+/// after §3.3-style multi-frame chunking has been collapsed into one
+/// notification. This class models the firmware's internal state so the host
+/// can keep a coherent view of active ANCS sessions even though only one
+/// transport is in play.
 class AncsClient {
   AncsClient();
 

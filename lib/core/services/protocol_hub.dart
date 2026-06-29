@@ -57,7 +57,15 @@ class ProtocolHub {
     // Mirror the firmware's `ancs_handle_msg` path: Channel-A opcode 0x72 is
     // the push frame the watch emits whenever a notification crosses the
     // bridge. We forward it as a synthetic firmware event 1 (notification).
-    _pushSub = _dispatcher.onPushMsg.listen((push) {
+    //
+    // We subscribe to [ChannelADispatcher.onPushMsgReassembled] — not the
+    // legacy single-frame `onPushMsg` — because the §3.3 wire shape is a
+    // 11-byte-chunked accumulator with a flush-marker pair terminator
+    // (`FUN_00829e92`). The reassembled stream buffers chunks via the
+    // §3.3 flush marker or a 250 ms quiet window and emits one
+    // [PushMsgUint] per message; the single-frame shortcut would fan a
+    // chunked notification out into N truncated `PushMsgUint`s.
+    _pushSub = _dispatcher.onPushMsgReassembled.listen((push) {
       // Trace every push message the firmware emits so notification
       // arrival latency (and the synthetic ANCS encoding) is visible.
       final span = OpenTelemetryService().startTrace(

@@ -99,6 +99,139 @@ void main() {
       expect(msg.text, contains('Hello'));
     });
 
+    test(
+      'onPushMsgChunk emits one chunk per inbound 0x72 frame with seq',
+      () async {
+        final t = _StubTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final chunks = <PushMsgChunk>[];
+        final sub = d.onPushMsgChunk.listen(chunks.add);
+        // Three frames, each carrying a non-flush marker pair, so the
+        // reassembler doesn't fire mid-stream.
+        t.inA.add(
+          Codec.buildChannelA(OpA.pushMsgUint, [
+            0x02,
+            0xAA,
+            0xBB,
+            ...'Slack:'.codeUnits,
+          ]),
+        );
+        t.inA.add(
+          Codec.buildChannelA(OpA.pushMsgUint, [
+            0x02,
+            0xAA,
+            0xBB,
+            ...' dinner?'.codeUnits,
+          ]),
+        );
+        t.inA.add(
+          Codec.buildChannelA(OpA.pushMsgUint, [
+            0x02,
+            0xCC,
+            0xCC, // flush marker pair → ends the message
+            ...' '.codeUnits,
+          ]),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        await sub.cancel();
+        expect(chunks, hasLength(3));
+        expect(chunks.map((c) => c.seq).toList(), [0, 1, 2]);
+      },
+    );
+
+    test('onPushMsgReassembled concatenates chunks triggered by the §3.3 flush '
+        'marker pair', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final got = d.onPushMsgReassembled.first;
+      t.inA.add(
+        Codec.buildChannelA(OpA.pushMsgUint, [
+          0x09,
+          0xDE,
+          0xAD,
+          ...'Slack:'.codeUnits,
+        ]),
+      );
+      t.inA.add(
+        Codec.buildChannelA(OpA.pushMsgUint, [
+          0x09,
+          0xDE,
+          0xAD,
+          ...' dinner?'.codeUnits,
+        ]),
+      );
+      // Final frame's flush_marker pair triggers an immediate emit.
+      t.inA.add(
+        Codec.buildChannelA(OpA.pushMsgUint, [
+          0x09,
+          0xBE,
+          0xBE, // flush marker pair (byte[1] == byte[2])
+          ...' !'.codeUnits,
+        ]),
+      );
+      final msg = await got.timeout(const Duration(seconds: 1));
+      expect(msg.type, 0x09);
+      expect(msg.text, contains('Slack: dinner?'));
+      expect(msg.text, endsWith(' !'));
+    });
+
+    test('onPushMsgReassembled emits after a quiet window when no flush marker '
+        'arrives', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final got = d.onPushMsgReassembled.first;
+      // No flush marker pair on either frame — the reassembler has to
+      // fall back to the 250 ms quiet window.
+      t.inA.add(
+        Codec.buildChannelA(OpA.pushMsgUint, [
+          0x05,
+          0xAA,
+          0xBB,
+          ...'part one'.codeUnits,
+        ]),
+      );
+      t.inA.add(
+        Codec.buildChannelA(OpA.pushMsgUint, [
+          0x05,
+          0xCC,
+          0xDD,
+          ...' part two'.codeUnits,
+        ]),
+      );
+      final msg = await got.timeout(const Duration(seconds: 2));
+      expect(msg.type, 0x05);
+      expect(msg.text, 'part one part two');
+    });
+
+    test('onPushMsg still fires for single-frame pushes even when reassembler '
+        'is mid-flight (legacy shortcut)', () async {
+      final t = _StubTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      final legacyGot = d.onPushMsg.first;
+      final reassembledGot = d.onPushMsgReassembled.first;
+      // Single non-chunked push: should fire BOTH onPushMsg (legacy
+      // shortcut) and onPushMsgReassembled (after the quiet window).
+      t.inA.add(
+        Codec.buildChannelA(OpA.pushMsgUint, [
+          0x02,
+          5,
+          0,
+          ...'Hello'.codeUnits,
+        ]),
+      );
+      final legacy = await legacyGot.timeout(const Duration(seconds: 1));
+      final reassembled = await reassembledGot.timeout(
+        const Duration(seconds: 2),
+      );
+      expect(legacy.type, 0x02);
+      expect(legacy.text, contains('Hello'));
+      expect(reassembled.text, contains('Hello'));
+    });
+
     test('DND read sub emits state', () async {
       final t = _StubTransport();
       final d = ChannelADispatcher(t);
