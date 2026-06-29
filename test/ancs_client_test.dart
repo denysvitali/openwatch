@@ -44,6 +44,22 @@ void main() {
       },
     );
 
+    test('onFirmwareEvent(1) lands post-header tail bytes on title so '
+        'toPushMsg round-trips Oudmon-bridged notification text', () async {
+      final c = AncsClient();
+      final id = c.addClient();
+      c.onFirmwareEvent(1, id, [
+        // 8-byte ANCS header
+        0x00, 0x00, 0x09, 0x00, 0x00, 0x00, 0x01, 0x00,
+        // Oudmon tail = the bridged notification text
+        ...'Slack: dinner?'.codeUnits,
+      ], action: 0x00);
+      final push = c.toPushMsg(id);
+      expect(push, isNotNull);
+      expect(push!.type, 9);
+      expect(push.text, contains('Slack: dinner?'));
+    });
+
     test('onFirmwareEvent(2) action=0 emits AncsDataSource', () async {
       final c = AncsClient();
       final events = <AncsEvent>[];

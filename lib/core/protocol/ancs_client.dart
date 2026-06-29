@@ -80,8 +80,22 @@ class AncsClient {
         _emit(AncsConnect(id: clientId, name: state.name));
       case 1:
         // Notification source event — parsed body at `FUN_00839fee`.
+        // The 8-byte header carries CategoryId/Count; any bytes past
+        // that are the Oudmon-bridged notification text. The watch
+        // only surfaces a single string per push (PROTOCOL.md §4.6
+        // PushMsgUint), so we land it on `title` to keep
+        // [toPushMsg] round-trippable for callers that want to
+        // re-encode the same notification back over `0x72`. ANCS-
+        // compliant sources (e.g. native iOS ANCS clients) never
+        // deliver a tail here — attribute data arrives on the
+        // separate `event == 2, action == 1` path.
         final parsed = _parseNotificationSource(data);
         if (parsed != null) {
+          if (data.length > 8) {
+            final tail = data.sublist(8);
+            final text = String.fromCharCodes(tail.where((b) => b != 0));
+            if (text.isNotEmpty) parsed.title = text;
+          }
           state.lastNotification = parsed;
           _emit(
             AncsNotification(
