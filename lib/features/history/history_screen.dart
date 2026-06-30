@@ -8,6 +8,8 @@ import '../../core/ble/ble_transport.dart';
 import '../../core/providers/app_providers.dart';
 import '../../core/services/history_debug_export.dart';
 import '../../core/services/history_sync.dart';
+import '../widgets/inset_card.dart';
+import '../widgets/sync_status_pill.dart';
 import 'sleep_session_summary.dart';
 import 'widgets/hr_chart.dart';
 import 'widgets/scalar_chart.dart';
@@ -208,7 +210,7 @@ class _HistoryOverviewCard extends StatelessWidget {
         ? 'Pull down or use Sync history to update from the watch.'
         : 'Connect your watch to sync local history.';
 
-    return _InsetCard(
+    return InsetCard(
       padding: const EdgeInsets.all(18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -253,7 +255,7 @@ class _HistoryOverviewCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 10),
-              _SyncStatusPill(sync: sync),
+              SyncStatusPill(sync: sync),
             ],
           ),
           const SizedBox(height: 16),
@@ -281,7 +283,7 @@ class _HistoryOverviewCard extends StatelessWidget {
                 label: 'Last sync',
                 value: sync.lastSyncedAt == null
                     ? 'Never'
-                    : _formatRelative(sync.lastSyncedAt!),
+                    : formatRelativeTime(sync.lastSyncedAt!),
                 detail: storeReady ? 'local watermark' : 'storage starting',
               ),
               _HistoryStat(
@@ -335,7 +337,7 @@ class _HistoryTrendCard extends StatelessWidget {
         : '${DateFormat.MMMd().format(days.first.day.midnight)} - '
               '${DateFormat.MMMd().format(days.last.day.midnight)}';
 
-    return _InsetCard(
+    return InsetCard(
       padding: const EdgeInsets.all(18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -378,7 +380,7 @@ class _HistoryTrendCard extends StatelessWidget {
             _TrendHeader(
               icon: CupertinoIcons.heart_fill,
               title: 'Heart rate',
-              detail: '${_avgBpm(latest!.hr)} bpm avg',
+              detail: '${avgBpm(latest!.hr)} bpm avg',
               tint: const Color(0xFFFF3B30),
             ),
             const SizedBox(height: 8),
@@ -421,7 +423,7 @@ class _LatestDaySummary extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final items = <String>[];
-    final avg = _avgBpm(day.hr);
+    final avg = avgBpm(day.hr);
     if (avg > 0) items.add('$avg bpm');
     if (day.steps != null) {
       items.add('${NumberFormat.compact().format(day.steps)} steps');
@@ -479,58 +481,6 @@ class _TrendHeader extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _SyncStatusPill extends StatelessWidget {
-  const _SyncStatusPill({required this.sync});
-
-  final HistorySync sync;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final (label, color, icon) = switch ((
-      sync.syncing,
-      sync.lastSyncedAt,
-      sync.lastSyncError,
-    )) {
-      (true, _, _) => ('Syncing', theme.colorScheme.primary, Icons.sync),
-      (false, _, String _) => (
-        'Error',
-        theme.colorScheme.error,
-        CupertinoIcons.exclamationmark_circle,
-      ),
-      (false, null, _) => (
-        'No sync',
-        theme.colorScheme.outline,
-        Icons.cloud_off_rounded,
-      ),
-      (false, DateTime last, _) => (
-        _formatRelative(last),
-        theme.colorScheme.secondary,
-        CupertinoIcons.checkmark_circle_fill,
-      ),
-    };
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 14, color: color),
-          const SizedBox(width: 4),
-          Text(
-            label,
-            style: theme.textTheme.labelSmall?.copyWith(color: color),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -645,7 +595,7 @@ class _SyncErrorBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return _InsetCard(
+    return InsetCard(
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -694,14 +644,6 @@ String _describeLink(LinkState state) => switch (state) {
   LinkState.discovering => 'Discovering watch services',
   LinkState.readingDeviceInfo => 'Reading watch info',
 };
-
-String _formatRelative(DateTime at) {
-  final delta = DateTime.now().difference(at);
-  if (delta.inMinutes < 1) return 'Just now';
-  if (delta.inMinutes < 60) return '${delta.inMinutes}m ago';
-  if (delta.inHours < 24) return '${delta.inHours}h ago';
-  return DateFormat.MMMd().format(at);
-}
 
 class _SectionTitle extends StatelessWidget {
   const _SectionTitle({required this.title, required this.trailing});
@@ -784,7 +726,7 @@ class _StoreWarning extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return _InsetCard(
+    return InsetCard(
       child: Row(
         children: [
           Icon(Icons.storage_rounded, color: theme.colorScheme.tertiary),
@@ -994,7 +936,7 @@ class _DayDetailPage extends StatelessWidget {
                   icon: CupertinoIcons.heart_fill,
                   label: displayDay.hr.isEmpty
                       ? '-'
-                      : '${_avgBpm(displayDay.hr)} bpm',
+                      : '${avgBpm(displayDay.hr)} bpm',
                   tint: const Color(0xFFFF3B30),
                 ),
                 _MetricPill(
@@ -1013,14 +955,14 @@ class _DayDetailPage extends StatelessWidget {
                   icon: CupertinoIcons.bolt_fill,
                   label: displayDay.stress.isEmpty
                       ? '-'
-                      : '${_avgValue(displayDay.stress)} stress',
+                      : '${avgValue(displayDay.stress).round()} stress',
                   tint: const Color(0xFFFF9500),
                 ),
                 _MetricPill(
                   icon: CupertinoIcons.chart_bar_fill,
                   label: displayDay.hrv.isEmpty
                       ? '-'
-                      : '${_avgValue(displayDay.hrv)} ms',
+                      : '${avgValue(displayDay.hrv).round()} ms',
                   tint: const Color(0xFF34C759),
                 ),
                 _MetricPill(
@@ -1036,7 +978,7 @@ class _DayDetailPage extends StatelessWidget {
               const SizedBox(height: 20),
               _ChartHeader(
                 title: 'Heart rate',
-                detail: '${_avgBpm(displayDay.hr)} bpm avg',
+                detail: '${avgBpm(displayDay.hr)} bpm avg',
               ),
               const SizedBox(height: 10),
               SizedBox(height: 184, child: HrLineChart(samples: displayDay.hr)),
@@ -1190,18 +1132,6 @@ String _formatDayHeader(DateOnly d) {
     return 'Yesterday · ${DateFormat.MMMd().format(d.midnight)}';
   }
   return DateFormat('EEEE · MMM d').format(d.midnight);
-}
-
-int _avgBpm(List<HrSample> samples) {
-  if (samples.isEmpty) return 0;
-  final sum = samples.fold<int>(0, (a, s) => a + s.bpm);
-  return (sum / samples.length).round();
-}
-
-int _avgValue(List<HealthMetricSample> samples) {
-  if (samples.isEmpty) return 0;
-  final sum = samples.fold<int>(0, (a, s) => a + s.value);
-  return (sum / samples.length).round();
 }
 
 String _formatBp(BloodPressureSample sample) =>
@@ -1489,7 +1419,7 @@ String _scalarRange(List<HealthMetricSample> samples, {String unit = ''}) {
   final max = values.reduce((a, b) => a > b ? a : b);
   final suffix = unit.isEmpty ? '' : ' $unit';
   return '${samples.length} samples · min $min$suffix · '
-      'avg ${_avgValue(samples)}$suffix · max $max$suffix';
+      'avg ${avgValue(samples).round()}$suffix · max $max$suffix';
 }
 
 String _latestScalar(List<HealthMetricSample> samples) =>
@@ -1515,23 +1445,6 @@ class _NewBadge extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-class _InsetCard extends StatelessWidget {
-  const _InsetCard({
-    required this.child,
-    this.padding = const EdgeInsets.all(16),
-  });
-
-  final Widget child;
-  final EdgeInsetsGeometry padding;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(padding: padding, child: child),
     );
   }
 }

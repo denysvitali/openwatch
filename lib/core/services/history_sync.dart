@@ -36,6 +36,20 @@ class HealthMetricSample {
   final int value;
 }
 
+/// Rounded mean BPM across [samples], or `0` when empty.
+int avgBpm(List<HrSample> samples) {
+  if (samples.isEmpty) return 0;
+  final sum = samples.fold<int>(0, (a, s) => a + s.bpm);
+  return (sum / samples.length).round();
+}
+
+/// Mean value across [samples], or `0` when empty.
+double avgValue(List<HealthMetricSample> samples) {
+  if (samples.isEmpty) return 0;
+  final sum = samples.fold<int>(0, (a, s) => a + s.value);
+  return sum / samples.length;
+}
+
 /// A blood-pressure sample.
 @immutable
 class BloodPressureSample {

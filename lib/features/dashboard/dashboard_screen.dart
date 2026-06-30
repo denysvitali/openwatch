@@ -10,6 +10,8 @@ import '../../core/services/history_sync.dart';
 import '../history/widgets/hr_chart.dart';
 import '../history/widgets/sleep_trend_chart.dart';
 import '../history/widgets/steps_chart.dart';
+import '../widgets/inset_card.dart';
+import '../widgets/sync_status_pill.dart';
 
 /// Device overview: connection state, firmware, battery, steps + quick actions.
 class DashboardScreen extends ConsumerWidget {
@@ -25,7 +27,7 @@ class DashboardScreen extends ConsumerWidget {
         ? device!.platformName
         : 'Watch';
     final today = sync.days.isEmpty ? null : sync.days.last;
-    final heartRate = manager.lastHeartRate ?? _avgBpm(today?.hr ?? const []);
+    final heartRate = manager.lastHeartRate ?? avgBpm(today?.hr ?? const []);
 
     return Scaffold(
       appBar: AppBar(
@@ -97,12 +99,6 @@ class DashboardScreen extends ConsumerWidget {
     LinkState.discovering => 'Discovering services',
     LinkState.readingDeviceInfo => 'Reading device info',
   };
-
-  static int _avgBpm(List<HrSample> samples) {
-    if (samples.isEmpty) return 0;
-    final sum = samples.fold<int>(0, (a, s) => a + s.bpm);
-    return (sum / samples.length).round();
-  }
 }
 
 class _DeviceHeroCard extends StatelessWidget {
@@ -131,7 +127,7 @@ class _DeviceHeroCard extends StatelessWidget {
         ? theme.colorScheme.secondary
         : theme.colorScheme.onSurfaceVariant;
 
-    return _InsetCard(
+    return InsetCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -324,7 +320,7 @@ class _MetricTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return _InsetCard(
+    return InsetCard(
       padding: const EdgeInsets.all(14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -385,7 +381,7 @@ class _RecentActivityCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     if (sync.days.isEmpty) {
-      return _InsetCard(
+      return InsetCard(
         child: Row(
           children: [
             Icon(CupertinoIcons.chart_bar, color: theme.colorScheme.primary),
@@ -411,7 +407,7 @@ class _RecentActivityCard extends StatelessWidget {
     final sleepSummary = SleepTrendSummary.fromDays(recent);
     final today = sync.days.last;
 
-    return _InsetCard(
+    return InsetCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -420,7 +416,7 @@ class _RecentActivityCard extends StatelessWidget {
               Expanded(
                 child: Text('Activity', style: theme.textTheme.titleLarge),
               ),
-              _SyncPill(sync: sync),
+              SyncStatusPill(sync: sync),
             ],
           ),
           const SizedBox(height: 2),
@@ -458,7 +454,7 @@ class _RecentActivityCard extends StatelessWidget {
 
   String _subtitle(DailyHistory today) {
     final parts = <String>[];
-    final avg = _avgBpm(today.hr);
+    final avg = avgBpm(today.hr);
     if (avg > 0) parts.add('$avg bpm avg');
     if (today.steps != null) {
       parts.add('${NumberFormat.decimalPattern().format(today.steps)} steps');
@@ -473,12 +469,6 @@ class _RecentActivityCard extends StatelessWidget {
     return parts.isEmpty
         ? DateFormat.yMMMd().format(today.day.midnight)
         : parts.join(' · ');
-  }
-
-  static int _avgBpm(List<HrSample> samples) {
-    if (samples.isEmpty) return 0;
-    final sum = samples.fold<int>(0, (a, s) => a + s.bpm);
-    return (sum / samples.length).round();
   }
 }
 
@@ -627,81 +617,6 @@ class _InfoPill extends StatelessWidget {
           Text(label, style: theme.textTheme.labelMedium),
         ],
       ),
-    );
-  }
-}
-
-class _SyncPill extends StatelessWidget {
-  const _SyncPill({required this.sync});
-  final HistorySync sync;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final (label, color, icon) = switch ((
-      sync.syncing,
-      sync.lastSyncedAt,
-      sync.lastSyncError,
-    )) {
-      (true, _, _) => ('Syncing', theme.colorScheme.primary, Icons.sync),
-      (false, _, String e) => (
-        'Error',
-        theme.colorScheme.error,
-        CupertinoIcons.exclamationmark_circle,
-      ),
-      (false, null, _) => (
-        'No sync',
-        theme.colorScheme.outline,
-        Icons.cloud_off_rounded,
-      ),
-      (false, DateTime l, _) => (
-        _formatRelative(l),
-        theme.colorScheme.secondary,
-        CupertinoIcons.checkmark_circle_fill,
-      ),
-    };
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 14, color: color),
-          const SizedBox(width: 4),
-          Text(
-            label,
-            style: theme.textTheme.labelSmall?.copyWith(color: color),
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _formatRelative(DateTime when) {
-    final delta = DateTime.now().difference(when);
-    if (delta.inMinutes < 1) return 'Just now';
-    if (delta.inMinutes < 60) return '${delta.inMinutes}m ago';
-    if (delta.inHours < 24) return '${delta.inHours}h ago';
-    return DateFormat.MMMd().format(when);
-  }
-}
-
-class _InsetCard extends StatelessWidget {
-  const _InsetCard({
-    required this.child,
-    this.padding = const EdgeInsets.all(16),
-  });
-
-  final Widget child;
-  final EdgeInsetsGeometry padding;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(padding: padding, child: child),
     );
   }
 }
