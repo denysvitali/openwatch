@@ -343,9 +343,13 @@ List<HealthMetricSample> _parseScalarSamples(List raw) => [
 DailyHistory _withoutFutureSamples(DailyHistory history, DateTime now) {
   return history.copyWith(
     hr: _clipHrSamples(history.hr, now),
-    stress: _clipScalarSamples(history.stress, now),
-    hrv: _clipScalarSamples(history.hrv, now),
-    bloodPressure: _clipBpSamples(history.bloodPressure, now),
+    stress: _clipByTimestamp(history.stress, now, (s) => s.timestamp),
+    hrv: _clipByTimestamp(history.hrv, now, (s) => s.timestamp),
+    bloodPressure: _clipByTimestamp(
+      history.bloodPressure,
+      now,
+      (s) => s.timestamp,
+    ),
   );
 }
 
@@ -364,23 +368,14 @@ List<HrSample> _clipHrSamples(Iterable<HrSample> samples, DateTime now) {
     ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
 }
 
-List<HealthMetricSample> _clipScalarSamples(
-  Iterable<HealthMetricSample> samples,
+List<T> _clipByTimestamp<T>(
+  Iterable<T> samples,
   DateTime now,
+  DateTime Function(T) timestampOf,
 ) {
   return [
     for (final sample in samples)
-      if (!sample.timestamp.isAfter(now)) sample,
-  ];
-}
-
-List<BloodPressureSample> _clipBpSamples(
-  Iterable<BloodPressureSample> samples,
-  DateTime now,
-) {
-  return [
-    for (final sample in samples)
-      if (!sample.timestamp.isAfter(now)) sample,
+      if (!timestampOf(sample).isAfter(now)) sample,
   ];
 }
 
@@ -666,48 +661,20 @@ class HistoryStore {
   /// timestamp, sorts ascending, and writes the file back. Samples with
   /// identical `timestamp` are replaced by the new value (a re-fetched
   /// slot supersedes the previous read).
-  Future<DailyHistory> mergeHr(
-    DateOnly day,
-    Iterable<HrSample> hrSamples,
-  ) async {
-    // Spans the read + dedupe + write pass for HR.
-    final span = OpenTelemetryService().startChildSpan(
-      'store.history.merge_hr',
-      attributes: {'store.day.iso': day.iso, 'store.op': 'merge_hr'},
-    );
-    try {
-      // Read-modify-write must be atomic per-day; otherwise a parallel
-      // mergeSleep/mergeHr can interleave a write between our read and
-      // our write, losing the parallel call's updates. See the
-      // [_writeQueue] rationale.
-      return await _enqueueForDayReturning<DailyHistory>(day.iso, () async {
-        final now = DateTime.now();
-        final current = await readDay(day);
-        final byTs = <int, HrSample>{
-          for (final h in _clipHrSamples(current.hr, now))
-            h.timestamp.millisecondsSinceEpoch: h,
-        };
-        for (final h in _clipHrSamples(hrSamples, now)) {
-          byTs[h.timestamp.millisecondsSinceEpoch] = h;
-        }
-        final merged = byTs.values.toList()
-          ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
-        final stamped = current.copyWith(
-          hr: merged,
-          lastUpdated: DateTime.now(),
-          syncedMetrics: {...current.syncedMetrics, 'hr'},
-        );
-        final raw = jsonEncode(stamped.toJson());
-        await _fileFor(day).writeAsString(raw, flush: true);
-        return stamped;
-      });
-    } catch (e, st) {
-      span?.recordError(e, st);
-      rethrow;
-    } finally {
-      span?.end();
-    }
-  }
+  // Read-modify-write must be atomic per-day; otherwise a parallel
+  // mergeSleep/mergeHr can interleave a write between our read and
+  // our write, losing the parallel call's updates. See the
+  // [_writeQueue] rationale.
+  Future<DailyHistory> mergeHr(DateOnly day, Iterable<HrSample> hrSamples) =>
+      _mergeSamples(
+        day,
+        hrSamples,
+        metricName: 'hr',
+        select: (h) => h.hr,
+        copy: (h, merged) => h.copyWith(hr: merged),
+        clip: _clipHrSamples,
+        timestampOf: (s) => s.timestamp,
+      );
 
   /// Merges [segments] into the existing sleep list for [day] and writes
   /// back. Sleep segments are deduped by `start` minute — re-fetching a
@@ -787,69 +754,50 @@ class HistoryStore {
   Future<DailyHistory> mergeStress(
     DateOnly day,
     Iterable<HealthMetricSample> samples,
-  ) => _mergeScalarSamples(
+  ) => _mergeSamples(
     day,
     samples,
     metricName: 'stress',
     select: (h) => h.stress,
     copy: (h, merged) => h.copyWith(stress: merged),
+    clip: (s, now) => _clipByTimestamp(s, now, (m) => m.timestamp),
+    timestampOf: (s) => s.timestamp,
   );
 
   Future<DailyHistory> mergeHrv(
     DateOnly day,
     Iterable<HealthMetricSample> samples,
-  ) => _mergeScalarSamples(
+  ) => _mergeSamples(
     day,
     samples,
     metricName: 'hrv',
     select: (h) => h.hrv,
     copy: (h, merged) => h.copyWith(hrv: merged),
+    clip: (s, now) => _clipByTimestamp(s, now, (m) => m.timestamp),
+    timestampOf: (s) => s.timestamp,
   );
 
   Future<DailyHistory> mergeBloodPressure(
     DateOnly day,
     Iterable<BloodPressureSample> samples,
-  ) async {
-    final span = OpenTelemetryService().startChildSpan(
-      'store.history.merge_bp',
-      attributes: {'store.day.iso': day.iso, 'store.op': 'merge_bp'},
-    );
-    try {
-      return await _enqueueForDayReturning<DailyHistory>(day.iso, () async {
-        final now = DateTime.now();
-        final current = await readDay(day);
-        final byTs = <int, BloodPressureSample>{
-          for (final b in _clipBpSamples(current.bloodPressure, now))
-            b.timestamp.millisecondsSinceEpoch: b,
-        };
-        for (final b in _clipBpSamples(samples, now)) {
-          byTs[b.timestamp.millisecondsSinceEpoch] = b;
-        }
-        final merged = byTs.values.toList()
-          ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
-        final stamped = current.copyWith(
-          bloodPressure: merged,
-          lastUpdated: DateTime.now(),
-          syncedMetrics: {...current.syncedMetrics, 'bp'},
-        );
-        final raw = jsonEncode(stamped.toJson());
-        await _fileFor(day).writeAsString(raw, flush: true);
-        return stamped;
-      });
-    } catch (e, st) {
-      span?.recordError(e, st);
-      rethrow;
-    } finally {
-      span?.end();
-    }
-  }
+  ) => _mergeSamples(
+    day,
+    samples,
+    metricName: 'bp',
+    select: (h) => h.bloodPressure,
+    copy: (h, merged) => h.copyWith(bloodPressure: merged),
+    clip: (s, now) => _clipByTimestamp(s, now, (b) => b.timestamp),
+    timestampOf: (s) => s.timestamp,
+  );
 
-  Future<DailyHistory> _mergeScalarSamples(
+  Future<DailyHistory> _mergeSamples<T>(
     DateOnly day,
-    Iterable<HealthMetricSample> samples, {
+    Iterable<T> samples, {
     required String metricName,
-    required List<HealthMetricSample> Function(DailyHistory) select,
-    required DailyHistory Function(DailyHistory, List<HealthMetricSample>) copy,
+    required List<T> Function(DailyHistory) select,
+    required DailyHistory Function(DailyHistory, List<T>) copy,
+    required List<T> Function(Iterable<T>, DateTime) clip,
+    required DateTime Function(T) timestampOf,
   }) async {
     final span = OpenTelemetryService().startChildSpan(
       'store.history.merge_$metricName',
@@ -859,15 +807,15 @@ class HistoryStore {
       return await _enqueueForDayReturning<DailyHistory>(day.iso, () async {
         final now = DateTime.now();
         final current = await readDay(day);
-        final byTs = <int, HealthMetricSample>{
-          for (final s in _clipScalarSamples(select(current), now))
-            s.timestamp.millisecondsSinceEpoch: s,
+        final byTs = <int, T>{
+          for (final s in clip(select(current), now))
+            timestampOf(s).millisecondsSinceEpoch: s,
         };
-        for (final s in _clipScalarSamples(samples, now)) {
-          byTs[s.timestamp.millisecondsSinceEpoch] = s;
+        for (final s in clip(samples, now)) {
+          byTs[timestampOf(s).millisecondsSinceEpoch] = s;
         }
         final merged = byTs.values.toList()
-          ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+          ..sort((a, b) => timestampOf(a).compareTo(timestampOf(b)));
         final stamped = copy(
           current.copyWith(
             lastUpdated: DateTime.now(),
