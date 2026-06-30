@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ble/ble_transport.dart';
 import '../../core/providers/app_providers.dart';
+import '../widgets/section_header.dart';
 
 /// Wristband sensor settings: HR auto-measure interval, enable toggle,
 /// and optional low/high alarm thresholds.
@@ -41,7 +42,7 @@ class SensorSettingsScreen extends ConsumerWidget {
               leading: Icon(Icons.info_outline, color: Colors.orange),
               title: Text('Heart rate not supported on this device'),
             ),
-          const _SectionHeader('Heart rate'),
+          const SectionHeader('Heart rate'),
           SwitchListTile(
             secondary: const Icon(Icons.favorite),
             title: const Text('Auto-measure'),
@@ -68,7 +69,7 @@ class SensorSettingsScreen extends ConsumerWidget {
               ),
             ),
           ),
-          const _SectionHeader('Alarm thresholds'),
+          const SectionHeader('Alarm thresholds'),
           ListTile(
             leading: const Icon(Icons.trending_down),
             title: const Text('Low HR alarm'),
@@ -162,24 +163,5 @@ class SensorSettingsScreen extends ConsumerWidget {
         ).showSnackBar(SnackBar(content: Text('Failed to apply: $e')));
       }
     }
-  }
-}
-
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader(this.title);
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
-      child: Text(
-        title.toUpperCase(),
-        style: Theme.of(context).textTheme.labelMedium?.copyWith(
-          color: Theme.of(context).colorScheme.primary,
-          letterSpacing: 1,
-        ),
-      ),
-    );
   }
 }

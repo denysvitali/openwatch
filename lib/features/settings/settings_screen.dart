@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/ble/ble_transport.dart';
 import '../../core/providers/app_providers.dart';
 import '../../core/services/settings_service.dart';
+import '../widgets/section_header.dart';
 
 /// Device + app settings, including the offline-first cloud toggle.
 class SettingsScreen extends ConsumerWidget {
@@ -21,7 +22,7 @@ class SettingsScreen extends ConsumerWidget {
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
         children: [
-          const _SectionHeader('Device'),
+          const SectionHeader('Device'),
           ListTile(
             leading: const Icon(Icons.vibration),
             title: const Text('Find device'),
@@ -89,7 +90,7 @@ class SettingsScreen extends ConsumerWidget {
                 ? () => _confirmReset(context, manager.factoryReset)
                 : null,
           ),
-          const _SectionHeader('Cloud sync'),
+          const SectionHeader('Cloud sync'),
           SwitchListTile(
             secondary: Icon(
               settings.cloudSyncEnabled ? Icons.cloud_done : Icons.cloud_off,
@@ -128,7 +129,7 @@ class SettingsScreen extends ConsumerWidget {
                 ],
               ),
             ),
-          const _SectionHeader('Diagnostics'),
+          const SectionHeader('Diagnostics'),
           ListTile(
             leading: const Icon(Icons.bug_report_outlined),
             title: const Text('Logs'),
@@ -144,7 +145,7 @@ class SettingsScreen extends ConsumerWidget {
             ),
             onTap: () => _confirmClearHistory(context, ref),
           ),
-          const _SectionHeader('About'),
+          const SectionHeader('About'),
           ListTile(
             leading: const Icon(Icons.link_off),
             title: const Text('Disconnect'),
@@ -264,25 +265,6 @@ class SettingsScreen extends ConsumerWidget {
             child: const Text('Enable'),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader(this.title);
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
-      child: Text(
-        title.toUpperCase(),
-        style: Theme.of(context).textTheme.labelMedium?.copyWith(
-          color: Theme.of(context).colorScheme.primary,
-          letterSpacing: 1,
-        ),
       ),
     );
   }

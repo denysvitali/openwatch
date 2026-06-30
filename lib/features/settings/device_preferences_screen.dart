@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/ble/ble_transport.dart';
 import '../../core/providers/app_providers.dart';
 import '../../core/services/watch_manager.dart';
+import '../widgets/section_header.dart';
 
 /// Watch-side preferences surfaced from `PROTOCOL.md` §4.2.
 ///
@@ -24,7 +25,7 @@ class DevicePreferencesScreen extends ConsumerWidget {
       appBar: AppBar(title: const Text('Watch preferences')),
       body: ListView(
         children: [
-          const _SectionHeader('Display'),
+          const SectionHeader('Display'),
           _PreferenceTile(
             icon: Icons.access_time_filled,
             title: 'Time format',
@@ -61,7 +62,7 @@ class DevicePreferencesScreen extends ConsumerWidget {
             onTap: () => _pickId(context, 'Wallpaper id', manager.setWallpaper),
           ),
           if (caps.bloodPressure || caps.hrv || caps.stress || caps.bloodOxygen)
-            const _SectionHeader('Auto-measure'),
+            const SectionHeader('Auto-measure'),
           if (caps.bloodOxygen)
             _PreferenceTile(
               icon: CupertinoIcons.drop_fill,
@@ -102,7 +103,7 @@ class DevicePreferencesScreen extends ConsumerWidget {
               enabled: ready,
               onTap: () => _pickBpWindow(context, manager),
             ),
-          const _SectionHeader('Reminders'),
+          const SectionHeader('Reminders'),
           _PreferenceTile(
             icon: Icons.do_not_disturb_on,
             title: 'Do not disturb',
@@ -124,7 +125,7 @@ class DevicePreferencesScreen extends ConsumerWidget {
             enabled: ready,
             onTap: () => _pickDrinkAlarm(context, manager),
           ),
-          const _SectionHeader('Goals'),
+          const SectionHeader('Goals'),
           _PreferenceTile(
             icon: Icons.flag,
             title: 'Daily goals',
@@ -516,25 +517,6 @@ class DevicePreferencesScreen extends ConsumerWidget {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
-  }
-}
-
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader(this.title);
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
-      child: Text(
-        title.toUpperCase(),
-        style: Theme.of(context).textTheme.labelMedium?.copyWith(
-          color: Theme.of(context).colorScheme.primary,
-          letterSpacing: 1,
-        ),
-      ),
-    );
   }
 }
 
