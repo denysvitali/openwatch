@@ -55,12 +55,19 @@ class Codec {
   static Uint8List rxPayload(Uint8List frame) =>
       Uint8List.sublistView(frame, 1, 15);
 
-  static int _sum8(Uint8List b, int start, int end) {
+  static int _sum8(Uint8List b, int start, int end) =>
+      additiveChecksum(b.sublist(start, end));
+
+  /// Sums each byte (masked `0xFF`) of [data] and masks the total to
+  /// [maskBits] bits. Shared by every additive-checksum site in the protocol
+  /// layer (Channel-A 8-bit, DFU/OTA 16-bit, firmware container 24-bit).
+  static int additiveChecksum(Iterable<int> data, {int maskBits = 8}) {
     var sum = 0;
-    for (var i = start; i < end; i++) {
-      sum += b[i];
+    for (final b in data) {
+      sum += b & 0xFF;
     }
-    return sum & 0xFF;
+    final mask = (1 << maskBits) - 1;
+    return sum & mask;
   }
 
   // ---------------------------------------------------------------------------

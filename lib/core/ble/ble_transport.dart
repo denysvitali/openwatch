@@ -251,7 +251,7 @@ class BleTransport implements Fee7Host {
     if (!valid) {
       // Log the raw bytes so a checksum/length mismatch is diagnosable.
       final expected = frame.length >= 16
-          ? (frame.sublist(0, 15).fold<int>(0, (a, b) => a + b) & 0xFF)
+          ? Codec.additiveChecksum(frame.sublist(0, 15))
           : -1;
       _log.frame(
         'rx',

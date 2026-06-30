@@ -2,6 +2,8 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 
+import 'codec.dart';
+
 /// Parser + verifier for the H59MA firmware container header.
 ///
 /// Mirrors `tool/fwtool/internal/format/format.go` (Go). Field offsets are
@@ -58,17 +60,17 @@ class FirmwareContainer {
     if (!_startsWith(bytes, expectedMagic)) return null;
 
     final header = FirmwareHeader(
-      loadSize: _readU32le(bytes, 0x04),
-      firmwareSize: _readU32le(bytes, 0x08),
-      imageChkA: _readU32le(bytes, 0x0C),
+      loadSize: Codec.readU32le(bytes, 0x04),
+      firmwareSize: Codec.readU32le(bytes, 0x08),
+      imageChkA: Codec.readU32le(bytes, 0x0C),
       version: _readAscii(bytes, 0x10, 24).trim(),
       hwId: _readAscii(bytes, 0x30, 16).trim(),
-      const5C: _readU32le(bytes, 0x5C),
+      const5C: Codec.readU32le(bytes, 0x5C),
       signatureA: Uint8List.sublistView(bytes, 0x60, 0x6C),
-      flashAppStart: _readU32le(bytes, 0x6C),
+      flashAppStart: Codec.readU32le(bytes, 0x6C),
       imageDigest: Uint8List.sublistView(bytes, 0x1C4, 0x1E4),
-      flashAppEnd: _readU32le(bytes, 0x22C),
-      bodySize: _readU32le(bytes, 0x58),
+      flashAppEnd: Codec.readU32le(bytes, 0x22C),
+      bodySize: Codec.readU32le(bytes, 0x58),
     );
 
     final body = Uint8List.sublistView(
@@ -149,7 +151,7 @@ class FirmwareContainer {
     // (the `flags` word) — NOT at the body slice (headerSize=0x450). The
     // earlier helper summed only the body, which diverged from the
     // documented formula on every observed v13/v14 image.
-    final computed = _additive24From(bytes, 0x50);
+    final computed = Codec.additiveChecksum(bytes.skip(0x50), maskBits: 24);
     if (expected.validateImageChkA) {
       checks.add(
         VerificationCheck(
@@ -233,9 +235,6 @@ class FirmwareContainer {
     return true;
   }
 
-  static int _readU32le(Uint8List b, int off) =>
-      b[off] | (b[off + 1] << 8) | (b[off + 2] << 16) | (b[off + 3] << 24);
-
   static String _readAscii(Uint8List b, int off, int len) {
     final out = <int>[];
     for (var i = 0; i < len && off + i < b.length; i++) {
@@ -244,19 +243,6 @@ class FirmwareContainer {
       out.add(v);
     }
     return String.fromCharCodes(out);
-  }
-
-  /// Sums bytes from [start] to end of [data] modulo 2^24.
-  ///
-  /// Mirrors PROTOCOL.md §9.7: `image_chk_a = sum(container[0x50:]) &
-  /// 0xFFFFFFFF`. The high byte is observed as 0x00 in every shipped
-  /// v13/v14 image, hence the 24-bit mask.
-  static int _additive24From(Uint8List data, int start) {
-    var sum = 0;
-    for (var i = start; i < data.length; i++) {
-      sum += data[i] & 0xFF;
-    }
-    return sum & 0x00FFFFFF;
   }
 }
 

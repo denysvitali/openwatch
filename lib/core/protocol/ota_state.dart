@@ -73,11 +73,7 @@ class OtaStateMachine {
   /// Computes CRC16 + additive checksum. Called by the flasher before `init`.
   void computeChecksums() {
     session.crc16 = Codec.crc16(session.image);
-    var sum = 0;
-    for (final b in session.image) {
-      sum += b & 0xFF;
-    }
-    session.additive = sum & 0xFFFF;
+    session.additive = Codec.additiveChecksum(session.image, maskBits: 16);
   }
 
   /// Transitions to a new phase after validating the precondition. Returns

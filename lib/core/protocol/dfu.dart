@@ -42,7 +42,7 @@ class DfuFlasher {
       await _awaitRsp();
 
       yield const DfuProgress('Sending metadata');
-      final checksum = _additive16(firmware);
+      final checksum = Codec.additiveChecksum(firmware, maskBits: 16);
       final crc = Codec.crc16(firmware);
       await _send(OpB.otaInit, [
         0x01,
@@ -106,14 +106,6 @@ class DfuFlasher {
 
   Future<void> _send(int cmd, [List<int> payload = const []]) =>
       _transport.sendB(Codec.buildChannelB(cmd, payload));
-
-  static int _additive16(Uint8List data) {
-    var sum = 0;
-    for (final b in data) {
-      sum += b;
-    }
-    return sum & 0xFFFF;
-  }
 }
 
 class DfuException implements Exception {
