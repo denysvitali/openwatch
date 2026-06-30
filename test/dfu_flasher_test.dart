@@ -2,29 +2,17 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:openwatch/core/ble/ble_transport.dart';
 import 'package:openwatch/core/protocol/codec.dart';
 import 'package:openwatch/core/protocol/dfu.dart';
 import 'package:openwatch/core/protocol/opcodes.dart';
 
-/// Minimal [BleTransport] stub that records writes and lets the test
-/// inject arbitrary Channel-B inbound frames. Mirrors the
-/// `_StubTransport` pattern in `channel_a_test.dart`, but exposes
-/// `inboundB` (the OTA path subscribes to Channel B).
-class _StubTransport implements BleTransport {
-  final inB = StreamController<Uint8List>.broadcast();
-  final sentA = <Uint8List>[];
-  final sentB = <Uint8List>[];
+import 'support/fake_ble_transport.dart';
+
+/// Adds the OTA-specific bits [FakeBleTransport] doesn't cover: a
+/// `sendB` error injection hook and a helper to push synthetic
+/// Channel-B RSP frames straight at `inboundB`.
+class _StubTransport extends FakeBleTransport {
   Object? sendBError;
-  bool closed = false;
-
-  @override
-  Stream<Uint8List> get inboundB => inB.stream;
-
-  @override
-  Future<void> sendA(Uint8List frame) async {
-    sentA.add(frame);
-  }
 
   @override
   Future<void> sendB(Uint8List framed) async {
@@ -49,13 +37,6 @@ class _StubTransport implements BleTransport {
     // _onRx.
     frame[6] = status & 0xFF;
     inB.add(frame);
-  }
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) {
-    // close()/dispose()/etc. — no-op for the stub.
-    if (invocation.memberName == #close) return null;
-    return null;
   }
 }
 

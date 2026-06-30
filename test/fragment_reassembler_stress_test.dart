@@ -1,10 +1,10 @@
-import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:openwatch/core/ble/ble_transport.dart';
 import 'package:openwatch/core/protocol/channel_b.dart';
 import 'package:openwatch/core/protocol/codec.dart';
+
+import 'support/fake_ble_transport.dart';
 
 /// Stress-tests the H59MA Channel-B fragment reassembler under realistic
 /// BLE conditions. Mirrors `FUN_0082efea`/`FUN_0082f098` (firmware refs in
@@ -34,7 +34,7 @@ void main() {
       // Channel B (no-auto-ack note). If anyone ever adds strict per-
       // slot validation, this test flips the assertion to expect an
       // emit and the failure will be obvious in CI.
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final p = ChannelBParser(t);
       p.bind();
       final emitted = <ChannelBCommand>[];
@@ -72,7 +72,7 @@ void main() {
       'missing chunk: reassembly exceeds fragmentTimeout, state '
       'resets silently — NO NAK on Channel B (channel_b.dart:218-228)',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final p = ChannelBParser(
           t,
           fragmentTimeout: const Duration(milliseconds: 50),
@@ -109,7 +109,7 @@ void main() {
       // `_buf`, the CRC fails, and the first frame is silently dropped.
       // After `_reset()` the parser returns to `_state == 0` and any
       // subsequent non-magic lead byte is dropped with a `WARN`.
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final p = ChannelBParser(t);
       p.bind();
       final emitted = <ChannelBCommand>[];
@@ -152,7 +152,7 @@ void main() {
       'duplicate chunk (replay storm): same frame pushed 5× emits '
       'EXACTLY once (FNV-1a LRU dedup, channel_b.dart:86-89 + 273-289)',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final p = ChannelBParser(t);
         p.bind();
         final emitted = <ChannelBCommand>[];
@@ -190,7 +190,7 @@ void main() {
 
     test('partial last chunk with bad CRC is SILENTLY dropped — no emit, '
         'no NAK (channel_b.dart:240-253)', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final p = ChannelBParser(t);
       p.bind();
       final emitted = <ChannelBCommand>[];
@@ -226,7 +226,7 @@ void main() {
         // 4-byte payload → frame is 6 + 4 = 10 bytes, well under MTU=20.
         // `_onFirstFragment` populates accumulator=4=expectedLength and
         // dispatches immediately, skipping `_state = 1`.
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final p = ChannelBParser(t);
         p.bind();
 
@@ -241,7 +241,7 @@ void main() {
     test('max-size payload spanning 53 chunks reassembles cleanly '
         '(1040-byte payload under the 0x450=1104-byte firmware buffer, '
         'channel_b.dart:66)', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final p = ChannelBParser(t);
       p.bind();
 
@@ -267,7 +267,7 @@ void main() {
       () async {
         // First line of `_onChunk` cancels the timeout BEFORE branching.
         // So a chunk even 1 µs before the deadline resets the timer.
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final p = ChannelBParser(
           t,
           fragmentTimeout: const Duration(milliseconds: 80),
@@ -295,24 +295,4 @@ void main() {
       },
     );
   });
-}
-
-/// Minimal transport stub — exposes only the channels the parser uses.
-class _StubTransport implements BleTransport {
-  final inB = StreamController<Uint8List>.broadcast();
-  final sentA = <Uint8List>[];
-
-  @override
-  Stream<Uint8List> get inboundB => inB.stream;
-
-  @override
-  Future<void> sendA(Uint8List frame) async {
-    sentA.add(frame);
-  }
-
-  @override
-  Future<void> sendB(Uint8List framed) async {}
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) => null;
 }

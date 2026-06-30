@@ -1,28 +1,12 @@
-import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:openwatch/core/ble/ble_transport.dart';
 import 'package:openwatch/core/protocol/channel_a.dart';
 import 'package:openwatch/core/protocol/codec.dart';
 import 'package:openwatch/core/protocol/commands.dart';
 import 'package:openwatch/core/protocol/opcodes.dart';
 
-class _StubTransport implements BleTransport {
-  final inA = StreamController<Uint8List>.broadcast();
-
-  @override
-  Stream<Uint8List> get inboundA => inA.stream;
-
-  @override
-  Future<void> sendA(Uint8List frame) async {}
-
-  @override
-  Future<void> sendB(Uint8List framed) async {}
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) => null;
-}
+import 'support/fake_ble_transport.dart';
 
 void main() {
   group('ChannelADispatcher', () {
@@ -32,7 +16,7 @@ void main() {
       // 0x16010000 / 0 / 0x200001 / 0x3000). It does NOT carry the
       // watch's current RTC — the host wall-clock is the only truthful
       // signal we have for "setTime acknowledged".
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final got = d.onTime.first;
@@ -66,7 +50,7 @@ void main() {
     });
 
     test('realTimeHeartRate emits plausible bpm only', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final samples = <int>[];
@@ -82,7 +66,7 @@ void main() {
     });
 
     test('pushMsgUint extracts text and skips null padding', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final got = d.onPushMsg.first;
@@ -102,7 +86,7 @@ void main() {
     test(
       'onPushMsgChunk emits one chunk per inbound 0x72 frame with seq',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final chunks = <PushMsgChunk>[];
@@ -142,7 +126,7 @@ void main() {
 
     test('onPushMsgReassembled concatenates chunks triggered by the §3.3 flush '
         'marker pair', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final got = d.onPushMsgReassembled.first;
@@ -179,7 +163,7 @@ void main() {
 
     test('onPushMsgReassembled emits after a quiet window when no flush marker '
         'arrives', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final got = d.onPushMsgReassembled.first;
@@ -208,7 +192,7 @@ void main() {
 
     test('onPushMsg still fires for single-frame pushes even when reassembler '
         'is mid-flight (legacy shortcut)', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final legacyGot = d.onPushMsg.first;
@@ -233,7 +217,7 @@ void main() {
     });
 
     test('DND read sub emits state', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final got = d.onDnd.first;
@@ -244,7 +228,7 @@ void main() {
     });
 
     test('DND read decodes enable byte + 4-byte time window', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final got = d.onDnd.first;
@@ -260,7 +244,7 @@ void main() {
     });
 
     test('DND read decodes enable byte 0x02 as disabled', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final got = d.onDnd.first;
@@ -271,7 +255,7 @@ void main() {
     });
 
     test('readSitLong 0x26 decodes BCD window + flags + interval', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final got = d.onSedentary.first;
@@ -298,7 +282,7 @@ void main() {
     });
 
     test('readSitLong 0x26 flags bit 0 maps to enabled=false', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final got = d.onSedentary.first;
@@ -321,7 +305,7 @@ void main() {
     test(
       'heartRateSetting 0x16 read decodes enabled + interval + alarms',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final got = d.onHeartRateSetting.first;
@@ -345,7 +329,7 @@ void main() {
     );
 
     test('heartRateSetting 0x16 read disabled maps enabled=false', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final got = d.onHeartRateSetting.first;
@@ -367,7 +351,7 @@ void main() {
     });
 
     test('heartRateSetting 0x16 write ack decodes from shifted layout', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final got = d.onHeartRateSetting.first;
@@ -392,7 +376,7 @@ void main() {
     });
 
     test('bloodOxygenSetting 0x2c decodes 1-bit SpO2 toggle', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final got = d.onBloodOxygen.first;
@@ -407,7 +391,7 @@ void main() {
     test(
       'bloodOxygenSetting 0x2c disabled maps value 0 to enabled=false',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final got = d.onBloodOxygen.first;
@@ -421,7 +405,7 @@ void main() {
     test(
       'muslim 0x7a stub flag fires on [0x7A, 0xFF] (unimplemented RE)',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final got = d.onMuslim.first;
@@ -437,7 +421,7 @@ void main() {
     );
 
     test('muslim 0x7a non-stub frame leaves stubbed=false', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final got = d.onMuslim.first;
@@ -452,7 +436,7 @@ void main() {
     test(
       'pressureSetting 0x36 decodes 1-bit on/off setting (sub echo + value)',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final got = d.onPressure.first;
@@ -467,7 +451,7 @@ void main() {
     test(
       'pressureSetting 0x36 disabled maps value 0 to enabled=false',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final got = d.onPressure.first;
@@ -479,7 +463,7 @@ void main() {
     );
 
     test('touchControl 0x3b read decodes sub + batch + config byte', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final got = d.onUvTouch.first;
@@ -495,7 +479,7 @@ void main() {
     test(
       'touchControl 0x3b batch mode (req[1]!=0) sets batchMode=true',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final got = d.onUvTouch.first;
@@ -508,7 +492,7 @@ void main() {
     );
 
     test('bpData 0x0d emits chunk with monotonic seq', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final got = d.onBpRecord.first;
@@ -521,7 +505,7 @@ void main() {
     });
 
     test('bpData 0x0d seq increments per chunk', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final chunks = <BpRecordChunk>[];
@@ -558,7 +542,7 @@ void main() {
     test(
       'stress history 0x37 header (pl[2]==0x1E) routes to onPressureSettingHeader',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final got = d.onPressureSettingHeader.first;
@@ -574,7 +558,7 @@ void main() {
     test(
       'stress history 0x37 non-header frame routes to onPressureSettingChunk',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final got = d.onPressureSettingChunk.first;
@@ -596,7 +580,7 @@ void main() {
     );
 
     test('stress history 0x37 firmware chunk strips seq byte', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final got = d.onPressureSettingChunk.first;
@@ -610,7 +594,7 @@ void main() {
     test(
       'hrvSetting 0x39 header (pl[2]==0x1E) routes to onHrvHeader',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final got = d.onHrvHeader.first;
@@ -624,7 +608,7 @@ void main() {
     );
 
     test('hrvSetting 0x39 non-header frame routes to onHrvChunk', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final got = d.onHrvChunk.first;
@@ -644,7 +628,7 @@ void main() {
     });
 
     test('hrvSetting 0x39 firmware chunk strips seq byte', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final got = d.onHrvChunk.first;
@@ -656,7 +640,7 @@ void main() {
     });
 
     test('readHeartRate 0x15 header frame fires onHeartRateHeader', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       var fired = false;
@@ -675,7 +659,7 @@ void main() {
     test(
       'readHeartRate 0x15 seq-0 firmware header fires onHeartRateHeader',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         var fired = false;
@@ -693,7 +677,7 @@ void main() {
     test(
       'readHeartRate 0x15 chunk frame fires onHeartRateChunk with seq + payload',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final got = d.onHeartRateChunk.first;
@@ -717,7 +701,7 @@ void main() {
     test(
       'readHeartRate 0x15 error frame (pl[0]==0xff) fires onHeartRateError',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         var fired = false;
@@ -735,7 +719,7 @@ void main() {
     test(
       'emitFactoryReset fires onFactoryReset (host-side optimistic ack)',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         var fired = false;
@@ -750,7 +734,7 @@ void main() {
     );
 
     test('deviceReboot 0xc6 ack frame fires onRestoreKey', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       // Caller marks the outbound context (e.g. ProtocolHub does this
@@ -774,7 +758,7 @@ void main() {
       'queryDataDistribution 0x46 success frame fires onQueryDataDistribution '
       'with decoded bitmask',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         d.markDistributionQuery();
@@ -807,7 +791,7 @@ void main() {
         // 0xC6 error-flagged response now lands on
         // onQueryDataDistribution with errorFlag=true, NOT on
         // onRestoreKey.
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         d.markDistributionQuery();
@@ -850,7 +834,7 @@ void main() {
       // onRestoreKey — that was the original bug. The dispatcher
       // defaults to the distribution decoder since reboot context
       // is opt-in.
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final dist = <QueryDataDistribution>[];
@@ -874,7 +858,7 @@ void main() {
     test(
       'emitRestoreKey fires onRestoreKey (optimistic 0x6C reboot ack)',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         var fired = false;
@@ -890,7 +874,7 @@ void main() {
     );
 
     test('phoneSport start/finish (sub 0x01) decodes to startFinish', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final got = d.onPhoneSport.first;
@@ -904,7 +888,7 @@ void main() {
     test(
       'phoneSport gpsDelta (sub 0x05) decodes u24 LE steps/meters',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final got = d.onPhoneSport.first;
@@ -929,7 +913,7 @@ void main() {
     );
 
     test('factory 0xa1 sub 0x01 decodes to fullReset', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final got = d.onFactoryCommand.first;
@@ -941,7 +925,7 @@ void main() {
     });
 
     test('factory 0xa1 sub 0x07 maps to unknown action', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final got = d.onFactoryCommand.first;
@@ -953,7 +937,7 @@ void main() {
     });
 
     test('invalid frames are dropped silently', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final got = d.unknown.first.timeout(
@@ -972,7 +956,7 @@ void main() {
     test(
       'sugarLipidsSetting 0x3a read sub 0x03 (sugar) decodes feature value',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final got = d.onSugarLipids.first;
@@ -993,7 +977,7 @@ void main() {
     test(
       'sugarLipidsSetting 0x3a read sub 0x04 (lipids) decodes feature value',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final got = d.onSugarLipids.first;
@@ -1018,7 +1002,7 @@ void main() {
         // echoes the request frame unchanged — verify the dispatcher
         // surfaces writeAcksEcho=true so the host can distinguish the
         // echo shape from a regular read response.
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final got = d.onSugarLipids.first;
@@ -1044,7 +1028,7 @@ void main() {
         // value byte is zeroed out. Verify the dispatcher surfaces
         // writeAcksEcho=false so the host knows to issue a follow-up
         // read to confirm the bit flipped.
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final got = d.onSugarLipids.first;
@@ -1063,7 +1047,7 @@ void main() {
     );
 
     test('vibration 0xc7 fragments arrive on onVibrationChunk', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final chunks = <VibrationChunk>[];
@@ -1094,7 +1078,7 @@ void main() {
     });
 
     test('displayClock 0x18 echoes style + label slice', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final got = d.onDisplayClock.first;
@@ -1110,7 +1094,7 @@ void main() {
     });
 
     test('todaySport 0x48 routes totals to onTodaySport', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final got = d.onTodaySport.first;
@@ -1132,7 +1116,7 @@ void main() {
     });
 
     test('todaySport 0x48 normalizes raw calories to kcal', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final got = d.onTodaySport.first;
@@ -1154,7 +1138,7 @@ void main() {
     test(
       'readDetailSport 0x43 header frame routes to onSportDetailHeader',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final got = d.onSportDetailHeader.first;
@@ -1170,7 +1154,7 @@ void main() {
     test(
       'readDetailSport 0x43 record frame routes to onSportDetailRecord',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final got = d.onSportDetailRecord.first;
@@ -1205,7 +1189,7 @@ void main() {
     test(
       'menstruation 0x2b routes body to onMenstruation; tryParse parses 15B body',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final got = d.onMenstruation.first;

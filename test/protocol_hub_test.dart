@@ -1,47 +1,21 @@
-import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:openwatch/core/ble/ble_transport.dart';
 import 'package:openwatch/core/protocol/codec.dart';
 import 'package:openwatch/core/protocol/opcodes.dart';
 import 'package:openwatch/core/protocol/ota_state.dart';
 import 'package:openwatch/core/services/protocol_hub.dart';
 
-class _StubTransport implements BleTransport {
-  final inA = StreamController<Uint8List>.broadcast();
-  final inB = StreamController<Uint8List>.broadcast();
+import 'support/fake_ble_transport.dart';
 
-  @override
-  Stream<Uint8List> get inboundA => inA.stream;
-
-  @override
-  Stream<Uint8List> get inboundB => inB.stream;
-
-  @override
-  Future<void> sendA(Uint8List frame) async {}
-
-  @override
-  Future<void> sendB(Uint8List framed) async {}
-
-  // fee7 is optional — keep it disabled so the hub skips fee7 wiring.
-  @override
-  bool get hasFee7Write => false;
-
-  @override
-  Stream<Uint8List> get fee7Inbound => const Stream.empty();
-
-  @override
-  Future<void> sendFee7(Uint8List frame) async {}
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) => null;
-}
+/// fee7 is optional — keep it disabled for these tests so the hub skips
+/// fee7 wiring (matches every test in this file).
+FakeBleTransport _stubTransport() => FakeBleTransport()..hasFee7Write = false;
 
 void main() {
   group('ProtocolHub', () {
     test('0x72 push frame is forwarded to AncsClient stream', () async {
-      final t = _StubTransport();
+      final t = _stubTransport();
       final hub = ProtocolHub(t);
 
       final events = <String>[];
@@ -62,7 +36,7 @@ void main() {
     });
 
     test('OTA state machine builds with computed checksums', () async {
-      final t = _StubTransport();
+      final t = _stubTransport();
       final hub = ProtocolHub(t);
       final image = Uint8List.fromList(List<int>.generate(32, (i) => i));
       final sm = hub.startOta(image: image, sizeBytes: image.length);
@@ -77,11 +51,10 @@ void main() {
     });
 
     test('hub exposes hasFee7 accessor and tolerates absence', () async {
-      final t = _StubTransport();
+      final t = _stubTransport();
       final hub = ProtocolHub(t);
-      // _StubTransport.noSuchMethod returns null for every getter; that
-      // collapses `hasFee7Write` to null/false so the hub must skip fee7
-      // wiring rather than crash.
+      // hasFee7Write is explicitly false on this fake, so the hub must
+      // skip fee7 wiring rather than crash.
       expect(hub.hasFee7, isFalse);
       expect(hub.fee7, isNull);
       hub.dispose();

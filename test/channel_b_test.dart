@@ -1,39 +1,18 @@
-import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:openwatch/core/ble/ble_transport.dart';
 import 'package:openwatch/core/protocol/channel_b.dart';
 import 'package:openwatch/core/protocol/codec.dart';
 import 'package:openwatch/core/protocol/opcodes.dart';
 
-/// Minimal test double for [BleTransport]. Only the inbound-B stream and
-/// sendA hook are exercised by the parser.
-class _StubTransport implements BleTransport {
-  final inB = StreamController<Uint8List>.broadcast();
-  final sentA = <Uint8List>[];
-
-  @override
-  Stream<Uint8List> get inboundB => inB.stream;
-
-  @override
-  Future<void> sendA(Uint8List frame) async {
-    sentA.add(frame);
-  }
-
-  @override
-  Future<void> sendB(Uint8List framed) async {}
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) => null;
-}
+import 'support/fake_ble_transport.dart';
 
 void main() {
   group('ChannelBParser', () {
     test(
       'empty-payload sentinel emits immediately and does NOT auto-ACK',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final p = ChannelBParser(t);
         p.bind();
 
@@ -56,7 +35,7 @@ void main() {
     );
 
     test('CRC mismatch skips emit AND does NOT auto-NAK', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final p = ChannelBParser(t);
       p.bind();
       final f = Codec.buildChannelB(0x32, [1, 2, 3, 4, 5]);
@@ -78,7 +57,7 @@ void main() {
     });
 
     test('buildAck encodes status byte', () {
-      final p = ChannelBParser(_StubTransport());
+      final p = ChannelBParser(FakeBleTransport());
       final ack = p.buildAck(0x01, 0);
       expect(ack[0], OpA.channelBAck);
       expect(ack[1], 0x01);
@@ -86,7 +65,7 @@ void main() {
     });
 
     test('buildAck never sets the Channel-A error-flag bit (0x80)', () {
-      final p = ChannelBParser(_StubTransport());
+      final p = ChannelBParser(FakeBleTransport());
       for (final cmd in [0x00, 0x01, 0x27, 0x2a, 0x3e, 0xFF]) {
         for (final status in [0x00, 0x01, 0x02, 0xee]) {
           final ack = p.buildAck(cmd, status);
@@ -103,7 +82,7 @@ void main() {
     });
 
     test('sendAck() sends a Channel-A frame when explicitly invoked', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final p = ChannelBParser(t);
       p.bind();
       // Caller-driven ACK (e.g. during OTA file transfer where the
@@ -117,7 +96,7 @@ void main() {
     });
 
     test('unsolicited Channel-B push triggers NO TX on the wire', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final p = ChannelBParser(t);
       p.bind();
       // Send several different unsolicited pushes (different cmds +
@@ -142,7 +121,7 @@ void main() {
     });
 
     test('multi-chunk reassembly completes one command', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final p = ChannelBParser(t);
       p.bind();
       // Build a 25-byte payload; with the 6-byte header the frame is 31
@@ -164,7 +143,7 @@ void main() {
     });
 
     test('OTA direct commands do not auto-ACK', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final p = ChannelBParser(t);
       p.bind();
       final f = Uint8List.fromList([0xBC, 0x01, 0xFF, 0xFF, 0xFF, 0xFF]);
@@ -175,7 +154,7 @@ void main() {
     });
 
     test('replays of the same Channel-B frame emit once', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final p = ChannelBParser(t);
       p.bind();
       // 13-byte payload (matches a typical 0x27 sleep frame).
@@ -212,7 +191,7 @@ void main() {
     });
 
     test('distinct payloads with the same cmd are NOT deduped', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final p = ChannelBParser(t);
       p.bind();
       final emitted = <ChannelBCommand>[];
@@ -227,7 +206,7 @@ void main() {
     });
 
     test('LRU evicts oldest entry beyond the bound', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final p = ChannelBParser(t);
       p.bind();
       final emitted = <ChannelBCommand>[];
@@ -252,7 +231,7 @@ void main() {
     });
 
     test('different cmd with same payload is NOT deduped', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final p = ChannelBParser(t);
       p.bind();
       final emitted = <ChannelBCommand>[];
@@ -270,7 +249,7 @@ void main() {
     });
 
     test('H59MA live Channel-B capture frames validate and emit', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final p = ChannelBParser(t);
       p.bind();
       final emitted = <ChannelBCommand>[];

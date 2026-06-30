@@ -1,28 +1,10 @@
-import 'dart:async';
-import 'dart:typed_data';
-
 import 'package:flutter_test/flutter_test.dart';
-import 'package:openwatch/core/ble/ble_transport.dart';
 import 'package:openwatch/core/protocol/channel_a.dart';
 import 'package:openwatch/core/protocol/codec.dart';
 import 'package:openwatch/core/protocol/commands.dart';
 import 'package:openwatch/core/protocol/opcodes.dart';
 
-class _StubTransport implements BleTransport {
-  final inA = StreamController<Uint8List>.broadcast();
-
-  @override
-  Stream<Uint8List> get inboundA => inA.stream;
-
-  @override
-  Future<void> sendA(Uint8List frame) async {}
-
-  @override
-  Future<void> sendB(Uint8List framed) async {}
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) => null;
-}
+import 'support/fake_ble_transport.dart';
 
 void main() {
   group('HeartRateSetting commands', () {
@@ -83,7 +65,7 @@ void main() {
 
   group('HeartRateSetting decoder', () {
     test('read response decodes all fields', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final got = d.onHeartRateSetting.first;
@@ -105,7 +87,7 @@ void main() {
     });
 
     test('read response disabled maps to enabled=false', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final got = d.onHeartRateSetting.first;
@@ -126,7 +108,7 @@ void main() {
     });
 
     test('write ack decodes from shifted layout', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final got = d.onHeartRateSetting.first;
@@ -149,7 +131,7 @@ void main() {
     });
 
     test('write ack with tooHigh at pl[6] defaulting when absent', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final got = d.onHeartRateSetting.first;

@@ -1,8 +1,6 @@
-import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:openwatch/core/ble/ble_transport.dart';
 import 'package:openwatch/core/protocol/channel_a.dart';
 import 'package:openwatch/core/protocol/channel_b.dart';
 import 'package:openwatch/core/protocol/codec.dart';
@@ -10,31 +8,7 @@ import 'package:openwatch/core/protocol/opcodes.dart';
 import 'package:openwatch/core/services/history_store.dart';
 import 'package:openwatch/core/services/history_sync.dart';
 
-class _StubTransport implements BleTransport {
-  final inA = StreamController<Uint8List>.broadcast();
-  final inB = StreamController<Uint8List>.broadcast();
-  final sent = <Uint8List>[];
-  final sentB = <Uint8List>[];
-
-  @override
-  Stream<Uint8List> get inboundA => inA.stream;
-
-  @override
-  Stream<Uint8List> get inboundB => inB.stream;
-
-  @override
-  Future<void> sendA(Uint8List frame) async {
-    sent.add(frame);
-  }
-
-  @override
-  Future<void> sendB(Uint8List framed) async {
-    sentB.add(framed);
-  }
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) => null;
-}
+import 'support/fake_ble_transport.dart';
 
 Uint8List _channelAErrorFrame(int op, List<int> payload) {
   final f = Codec.buildChannelA(op, payload);
@@ -48,7 +22,7 @@ Uint8List _channelAErrorFrame(int op, List<int> payload) {
 }
 
 void _emitSequencedChannelARecord(
-  _StubTransport transport,
+  FakeBleTransport transport,
   int opcode,
   List<int> record,
 ) {
@@ -62,7 +36,7 @@ void _emitSequencedChannelARecord(
 }
 
 HistorySync _testSync(
-  _StubTransport t,
+  FakeBleTransport t,
   ChannelADispatcher d, {
   ChannelBParser? bParser,
   DateTime Function()? clock,
@@ -86,7 +60,7 @@ void main() {
   group('HistorySync', () {
     test('syncAll never sends 0x46 (it is a watch→phone notify-only opcode '
         'per PROTOCOL.md §4.6 — no host→watch request exists)', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final sync = _testSync(t, d);
@@ -96,7 +70,7 @@ void main() {
       // implementation sent a bare 0x46 and the firmware replied with
       // `0xC6 ERR 0xee`, forcing the `_distributionFailed` fallback.
       expect(
-        t.sent.where((f) => f.isNotEmpty && f[0] == OpA.queryDataDistribution),
+        t.sentA.where((f) => f.isNotEmpty && f[0] == OpA.queryDataDistribution),
         isEmpty,
         reason: '0x46 is watch→phone notify-only; phone must never send it',
       );
@@ -108,7 +82,7 @@ void main() {
     test(
       'syncAll blindly polls the last N days without needing 0x46',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final bp = ChannelBParser(t);
@@ -120,7 +94,7 @@ void main() {
 
         // Per-day HR reads fire for both day 0 (today) and day 1.
         expect(
-          t.sent.where((f) => f.isNotEmpty && f[0] == OpA.readHeartRate),
+          t.sentA.where((f) => f.isNotEmpty && f[0] == OpA.readHeartRate),
           hasLength(2),
         );
         // Activity summary fires on Channel-B (clamped to dayOffset ≤ 2).
@@ -133,7 +107,7 @@ void main() {
     );
 
     test('syncAll ignores concurrent calls while already syncing', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       // Use a long drain so the first syncAll stays in-flight long enough
@@ -149,19 +123,19 @@ void main() {
 
       final first = sync.syncAll(daysBack: 1);
       await Future<void>.delayed(const Duration(milliseconds: 50));
-      final sentBefore = t.sent.length;
+      final sentBefore = t.sentA.length;
 
       // Second call must return immediately and not send any frames.
       await sync.syncAll(daysBack: 1);
 
-      expect(t.sent.length, sentBefore);
+      expect(t.sentA.length, sentBefore);
       await first;
       sync.dispose();
       d.dispose();
     });
 
     test('syncAll re-fetches persisted past days with empty HR', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final sync = _testSync(t, d);
@@ -190,7 +164,7 @@ void main() {
 
       await sync.syncAll(daysBack: 2);
 
-      final hrReads = t.sent
+      final hrReads = t.sentA
           .where((f) => f.isNotEmpty && f[0] == OpA.readHeartRate)
           .toList();
       expect(
@@ -204,7 +178,7 @@ void main() {
     });
 
     test('syncAll skips persisted past days that already have HR', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final sync = _testSync(t, d);
@@ -225,7 +199,7 @@ void main() {
 
       await sync.syncAll(daysBack: 2);
 
-      final hrReads = t.sent
+      final hrReads = t.sentA
           .where((f) => f.isNotEmpty && f[0] == OpA.readHeartRate)
           .toList();
       expect(hrReads, hasLength(1));
@@ -238,7 +212,7 @@ void main() {
     test(
       'syncAll skips persisted past days that already have stress',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final sync = _testSync(t, d);
@@ -262,7 +236,7 @@ void main() {
 
         // 0x37 (pressure) frames for dayOffset=1 must be absent.
         // 0x37 for dayOffset=0 (today) is still present.
-        final stressReads = t.sent
+        final stressReads = t.sentA
             .where((f) => f.isNotEmpty && f[0] == OpA.pressure)
             .toList();
         expect(
@@ -277,7 +251,7 @@ void main() {
     );
 
     test('syncAll skips persisted past days that already have HRV', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final sync = _testSync(t, d);
@@ -297,7 +271,7 @@ void main() {
       await sync.syncAll(daysBack: 2);
 
       // 0x39 (hrv) frames for dayOffset=1 must be absent.
-      final hrvReads = t.sent
+      final hrvReads = t.sentA
           .where((f) => f.isNotEmpty && f[0] == OpA.hrv)
           .toList();
       expect(
@@ -311,7 +285,7 @@ void main() {
     });
 
     test('syncAll skips persisted past days that already have sleep', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       final bParser = ChannelBParser(t);
       d.bind();
@@ -366,7 +340,7 @@ void main() {
     });
 
     test('loadFromStore drops days removed from disk', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final store = _FakeHistoryStore(
@@ -387,7 +361,7 @@ void main() {
     test(
       'days getter returns persisted days sorted oldest to newest',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final sync = _testSync(t, d, clock: () => DateTime(2026, 6, 23));
@@ -415,7 +389,7 @@ void main() {
     test(
       'hrvRecords and pressureRecords getters return broadcast streams',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final sync = _testSync(t, d);
@@ -457,7 +431,7 @@ void main() {
     );
 
     test('lastSyncedAt is set after successful sync', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final store = _FakeHistoryStore();
@@ -479,7 +453,7 @@ void main() {
         // not "file present". A day that exists in the store with
         // zero stress / sleep samples is a partial sync and must be
         // re-polled to fill the gap.
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final bParser = ChannelBParser(t);
@@ -507,10 +481,10 @@ void main() {
 
         // HR for yesterday IS skipped (has data).
         // Stress + HRV for yesterday are NOT skipped (empty).
-        final stressReads = t.sent
+        final stressReads = t.sentA
             .where((f) => f.isNotEmpty && f[0] == OpA.pressure)
             .toList();
-        final hrvReads = t.sent
+        final hrvReads = t.sentA
             .where((f) => f.isNotEmpty && f[0] == OpA.hrv)
             .toList();
         final nightReads = t.sentB
@@ -540,7 +514,7 @@ void main() {
     test(
       'syncAll skips persisted past days that were confirmed empty for stress',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final sync = _testSync(t, d);
@@ -561,7 +535,7 @@ void main() {
 
         await sync.syncAll(daysBack: 2);
 
-        final stressReads = t.sent
+        final stressReads = t.sentA
             .where((f) => f.isNotEmpty && f[0] == OpA.pressure)
             .toList();
         expect(
@@ -578,7 +552,7 @@ void main() {
     test(
       'syncAll skips persisted past days that were confirmed empty for HRV',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final sync = _testSync(t, d);
@@ -597,7 +571,7 @@ void main() {
 
         await sync.syncAll(daysBack: 2);
 
-        final hrvReads = t.sent
+        final hrvReads = t.sentA
             .where((f) => f.isNotEmpty && f[0] == OpA.hrv)
             .toList();
         expect(
@@ -620,7 +594,7 @@ void main() {
         // day the previous batch didn't carry data for — not a hard
         // "firmware said empty" signal. The skip-rule must therefore
         // consult `hasData`, not `syncedMetrics`, for sleep.
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         final bParser = ChannelBParser(t);
         d.bind();
@@ -675,7 +649,7 @@ void main() {
     test(
       'syncAll force=true re-fetches persisted past days for every metric',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         final bParser = ChannelBParser(t);
         d.bind();
@@ -710,13 +684,13 @@ void main() {
         await sync.syncAll(daysBack: 2, force: true);
 
         // Force must bypass every per-metric skip rule.
-        final hrReads = t.sent
+        final hrReads = t.sentA
             .where((f) => f.isNotEmpty && f[0] == OpA.readHeartRate)
             .toList();
-        final stressReads = t.sent
+        final stressReads = t.sentA
             .where((f) => f.isNotEmpty && f[0] == OpA.pressure)
             .toList();
-        final hrvReads = t.sent
+        final hrvReads = t.sentA
             .where((f) => f.isNotEmpty && f[0] == OpA.hrv)
             .toList();
         final nightReads = t.sentB
@@ -752,7 +726,7 @@ void main() {
     test(
       'unsolicited 0x46 push from the watch does NOT throw or break sync',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final now = DateTime(2026, 6, 23, 23, 59);
@@ -777,7 +751,7 @@ void main() {
     );
 
     test('readHeartRate 0x15 multi-pkt reassembly yields HrSamples', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final sync = _testSync(t, d);
@@ -829,7 +803,7 @@ void main() {
       'readHeartRate 0x15 only strips the single 4-byte record header',
       () async {
         final now = DateTime(2026, 6, 24, 12);
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final sync = _testSync(t, d, clock: () => now);
@@ -924,7 +898,7 @@ void main() {
     test('readHeartRate 0x15 assembles out-of-order chunks and suppresses '
         'duplicates', () async {
       final now = DateTime(2026, 6, 24, 12);
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final sync = _testSync(t, d, clock: () => now);
@@ -994,7 +968,7 @@ void main() {
     test(
       'readHeartRate 0x15 seq-0 firmware header waits for all chunks',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final sync = _testSync(t, d);
@@ -1057,7 +1031,7 @@ void main() {
         // lastSyncError — and lets the next pass re-pull them once the
         // watch's RTC catches up. See history_sync._flushHrChunks.
         final now = DateTime(2026, 6, 23, 9);
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final sync = _testSync(t, d, clock: () => now);
@@ -1114,7 +1088,7 @@ void main() {
         // cannot have measured a sample it hasn't reached yet). No offset
         // is inferred and no timestamp is shifted.
         final now = DateTime(2026, 6, 23, 17, 36);
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final sync = _testSync(t, d, clock: () => now);
@@ -1162,7 +1136,7 @@ void main() {
     );
 
     test('syncAll sends local day-start seconds for 0x15 HR history', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final now = DateTime(2026, 6, 23, 12, 34);
@@ -1173,7 +1147,7 @@ void main() {
       // syncAll no longer sends 0x46 — it blind-polls day 0 directly.
       await Future<void>.delayed(const Duration(milliseconds: 20));
       await Future<void>.delayed(const Duration(milliseconds: 150));
-      final sent = t.sent.firstWhere(
+      final sent = t.sentA.firstWhere(
         (f) => f.isNotEmpty && f[0] == OpA.readHeartRate,
         orElse: () => Uint8List(0),
       );
@@ -1194,7 +1168,7 @@ void main() {
     test(
       'readHeartRate 0x15 error frame (pl[0]==0xff) clears pending chunks',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final sync = _testSync(t, d);
@@ -1232,7 +1206,7 @@ void main() {
       'queryDataDistribution 0x46|0x80 error response surfaces errorFlag '
       'via onQueryDataDistribution (regression for pattern-disjunction bug)',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final errorEvents = <QueryDataDistribution>[];
@@ -1259,7 +1233,7 @@ void main() {
 
     test('late Channel-A HR frame is attributed to correct day even when '
         'sync loop has moved on (HS-8)', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final bp = ChannelBParser(t);
@@ -1335,7 +1309,7 @@ void main() {
 
     test('0xFF empty-day frame is attributed to correct day when captured '
         '(HS-8)', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final sync = _testSync(t, d);
@@ -1389,7 +1363,7 @@ void main() {
       'stress history 0x37 header + 4 chunks assembles into one '
       'PressureRecord (regression for §3.20 two-phase wire format)',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final sync = _testSync(t, d);
@@ -1434,7 +1408,7 @@ void main() {
 
     test('HRV history 0x39 header + 4 chunks assembles into one '
         'HrvRecord (regression for §3.21 two-phase wire format)', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final sync = _testSync(t, d);
@@ -1469,7 +1443,7 @@ void main() {
     test('stress history 0x37 two back-to-back records emit two '
         'PressureRecords (regression for reassembler over multiple '
         'phases)', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final sync = _testSync(t, d);
@@ -1500,7 +1474,7 @@ void main() {
     test(
       'stress history 0x37 fixed slots are stored on the matching day',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final now = DateTime(2026, 6, 23, 23, 59);
@@ -1545,7 +1519,7 @@ void main() {
     test(
       'syncAll skips sleep and activity commands when ChannelBParser is null (HS-5)',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final sync = _testSync(t, d, bParser: null);
@@ -1579,7 +1553,7 @@ void main() {
 
         // HR sync should still proceed normally.
         expect(
-          t.sent.where((f) => f.isNotEmpty && f[0] == OpA.readHeartRate),
+          t.sentA.where((f) => f.isNotEmpty && f[0] == OpA.readHeartRate),
           isNotEmpty,
         );
 
@@ -1591,7 +1565,7 @@ void main() {
     test(
       'syncAll sends only 0x27 sleep (not redundant 0x3e) when ChannelBParser is provided',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         final bParser = ChannelBParser(t);
         d.bind();
@@ -1627,7 +1601,7 @@ void main() {
     test(
       'syncAll preserves persisted sleep when sleep fetch has no response',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         final bParser = ChannelBParser(t);
         d.bind();
@@ -1675,7 +1649,7 @@ void main() {
     test(
       'explicit empty sleep response clears persisted wake window',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         final bParser = ChannelBParser(t);
         d.bind();
@@ -1708,7 +1682,7 @@ void main() {
 
     test('activity summary 0x2a parses dayOffset=0 as a valid today entry '
         'after yesterday (HS-7)', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       final bParser = ChannelBParser(t);
       d.bind();
@@ -1769,7 +1743,7 @@ void main() {
 
     test('activity summary 0x2a parses all three day offsets in firmware order '
         '[2, 1, 0] (HS-7)', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       final bParser = ChannelBParser(t);
       d.bind();
@@ -1809,7 +1783,7 @@ void main() {
     test(
       'activity summary 0x2a first entry dayOffset=0 is not a terminator (HS-7)',
       () async {
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         final bParser = ChannelBParser(t);
         d.bind();
@@ -1846,7 +1820,7 @@ void main() {
 
     test('activity summary 0x2a with all-zero body preserves nulls, '
         'not previous-day totals (HS-6)', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       final bParser = ChannelBParser(t);
       d.bind();
@@ -1912,7 +1886,7 @@ void main() {
 
     test('activity summary 0x2a with zero steps but non-zero calories '
         'keeps steps=0 (HS-6)', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       final bParser = ChannelBParser(t);
       d.bind();
@@ -1953,7 +1927,7 @@ void main() {
 
     test('activity summary 0x2a absurd-clamped values become null '
         'instead of 0 (HS-6)', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       final bParser = ChannelBParser(t);
       d.bind();
@@ -2012,7 +1986,7 @@ void main() {
 
     test('0x43 sport detail defers totals until final page arrives '
         '(regression for partial paged response)', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final now = DateTime(2026, 6, 21, 12);
@@ -2083,7 +2057,7 @@ void main() {
 
     test('0x43 sport detail single-page response (page==total-1) writes '
         'totals immediately', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final now = DateTime(2026, 6, 21, 12);
@@ -2123,7 +2097,7 @@ void main() {
     });
 
     test('sleep sends one 0x27 read for each needed day offset', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       final bParser = ChannelBParser(t);
       d.bind();
@@ -2151,7 +2125,7 @@ void main() {
 
     test('H59MA record-list covering only today does NOT lock yesterday+ as '
         'sleep-synced (regression: Thursday/Friday data loss)', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       final bParser = ChannelBParser(t);
       d.bind();

@@ -2,38 +2,13 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:openwatch/core/ble/ble_transport.dart';
 import 'package:openwatch/core/protocol/channel_a.dart';
 import 'package:openwatch/core/protocol/codec.dart';
 import 'package:openwatch/core/protocol/hr_parser.dart';
 import 'package:openwatch/core/protocol/opcodes.dart';
 import 'package:openwatch/core/services/history_sync.dart';
 
-class _StubTransport implements BleTransport {
-  final inA = StreamController<Uint8List>.broadcast();
-  final inB = StreamController<Uint8List>.broadcast();
-  final sent = <Uint8List>[];
-  final sentB = <Uint8List>[];
-
-  @override
-  Stream<Uint8List> get inboundA => inA.stream;
-
-  @override
-  Stream<Uint8List> get inboundB => inB.stream;
-
-  @override
-  Future<void> sendA(Uint8List frame) async {
-    sent.add(frame);
-  }
-
-  @override
-  Future<void> sendB(Uint8List framed) async {
-    sentB.add(framed);
-  }
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) => null;
-}
+import 'support/fake_ble_transport.dart';
 
 void main() {
   group('isPlausibleBpm', () {
@@ -312,17 +287,17 @@ void main() {
       ({
         HistorySync sync,
         ChannelADispatcher d,
-        _StubTransport t,
+        FakeBleTransport t,
         Future<void> syncFuture,
       })
     >
     startSyncWithChunks({
       required int daysBack,
       required DateTime now,
-      required void Function(_StubTransport t) inject,
-      Future<void> Function(_StubTransport t)? staged,
+      required void Function(FakeBleTransport t) inject,
+      Future<void> Function(FakeBleTransport t)? staged,
     }) async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final sync = HistorySync(
@@ -679,7 +654,7 @@ void main() {
     /// GHIDRA §3.20/§3.21 and waits past the reassembler's quiet
     /// window. Returns the assembled records.
     Future<List<T>> captureRecords<T>({
-      required _StubTransport t,
+      required FakeBleTransport t,
       required ChannelADispatcher d,
       required HistorySync sync,
       required int opcode,
@@ -727,7 +702,7 @@ void main() {
 
     test('0x39 hrvSettings 49-byte record assembles to slotId + 48 '
         'half-hour samples (GHIDRA §3.21)', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final sync = HistorySync(
@@ -767,7 +742,7 @@ void main() {
 
     test('0x37 stress (pressure) record uses the same normalised shape — '
         'GHIDRA §3.20 confirms `slotId + 48 half-hour samples`', () async {
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final sync = HistorySync(
@@ -809,7 +784,7 @@ void main() {
         // Some firmwares pad the trailing chunk with zeros or send an
         // extra byte; the post-6edc267 normaliser clips anything past
         // 49 bytes so the body stays a clean 45-byte slice.
-        final t = _StubTransport();
+        final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final sync = HistorySync(
@@ -859,7 +834,7 @@ void main() {
       // Defensive: a watch that only ships the first chunk (e.g. the
       // user aborted, or the firmware returned a partial record) must
       // still surface a typed record rather than throwing.
-      final t = _StubTransport();
+      final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
       final sync = HistorySync(
