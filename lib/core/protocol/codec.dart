@@ -168,3 +168,23 @@ class Codec {
   static int readU32be(List<int> b, int off) =>
       (b[off] << 24) | (b[off + 1] << 16) | (b[off + 2] << 8) | b[off + 3];
 }
+
+// ---------------------------------------------------------------------------
+// Cross-channel setting shapes.
+//
+// `HrvSetting` is produced by both the Channel-A `0x39` decoder and the
+// vendor `0xFEE7` `0x39` decoder (see `GHIDRA_DECOMPILATION.md` §8.1). It
+// lives here — not on either dispatcher — so both sides share the same type
+// without one dispatcher having to import the other.
+// ---------------------------------------------------------------------------
+
+/// HRV auto-measure setting (`0x39` on both Channel A and 0xFEE7).
+///
+/// Mirrors `Commands.setHrvSetting`'s write layout (enabled flag +
+/// interval in minutes); the watch returns the same shape in the read
+/// response, so both producers emit and consumers expect this struct.
+class HrvSetting {
+  const HrvSetting({required this.enabled, required this.intervalMinutes});
+  final bool enabled;
+  final int intervalMinutes;
+}

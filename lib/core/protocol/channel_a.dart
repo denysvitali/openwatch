@@ -1113,12 +1113,6 @@ class PressureSettingChunk {
   final Uint8List payload;
 }
 
-class HrvSetting {
-  const HrvSetting({required this.enabled, required this.intervalMinutes});
-  final bool enabled;
-  final int intervalMinutes;
-}
-
 /// Heart-rate auto-measure config (`0x16`).
 ///
 /// Per `PROTOCOL.md` §4.3 the read response carries:
