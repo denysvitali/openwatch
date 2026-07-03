@@ -21,49 +21,56 @@ final _log = AppLog.instance;
 class ChannelADispatcher {
   ChannelADispatcher(this._transport);
 
-  final BleTransport _transport;
+  final WatchLink _transport;
 
-  final _unknown = StreamController<ChannelAFrame>.broadcast();
-  final _time = StreamController<DateTime>.broadcast();
-  final _dnd = StreamController<DndState>.broadcast();
-  final _heartRateRecord = StreamController<HeartRateRecord>.broadcast();
-  final _heartRateHeader = StreamController<void>.broadcast();
-  final _heartRateChunk = StreamController<HeartRateChunk>.broadcast();
-  final _heartRateError = StreamController<void>.broadcast();
-  final _heartRateSetting = StreamController<HeartRateSetting>.broadcast();
-  final _bloodOxygen = StreamController<BloodOxygenSetting>.broadcast();
-  final _bpRecord = StreamController<BpRecordChunk>.broadcast();
+  /// Every broadcast controller created via [_ctrl]; closed by [dispose] so
+  /// adding a new opcode stream never requires touching the teardown list.
+  final List<StreamController<Object?>> _controllers = [];
+
+  StreamController<T> _ctrl<T>() {
+    final c = StreamController<T>.broadcast();
+    _controllers.add(c);
+    return c;
+  }
+
+  late final _unknown = _ctrl<ChannelAFrame>();
+  late final _time = _ctrl<DateTime>();
+  late final _dnd = _ctrl<DndState>();
+  late final _heartRateRecord = _ctrl<HeartRateRecord>();
+  late final _heartRateHeader = _ctrl<void>();
+  late final _heartRateChunk = _ctrl<HeartRateChunk>();
+  late final _heartRateError = _ctrl<void>();
+  late final _heartRateSetting = _ctrl<HeartRateSetting>();
+  late final _bloodOxygen = _ctrl<BloodOxygenSetting>();
+  late final _bpRecord = _ctrl<BpRecordChunk>();
   int _bpRecordSeq = 0;
-  final _pressureSettingHeader =
-      StreamController<PressureSettingHeader>.broadcast();
-  final _pressureSettingChunk =
-      StreamController<PressureSettingChunk>.broadcast();
-  final _pressure = StreamController<PressureReading>.broadcast();
-  final _hrvHeader = StreamController<HrvSettingHeader>.broadcast();
-  final _hrvChunk = StreamController<HrvSettingChunk>.broadcast();
-  final _sugarLipids = StreamController<SugarLipidsSetting>.broadcast();
-  final _uvTouch = StreamController<UvTouchSetting>.broadcast();
-  final _sedentary = StreamController<SedentaryConfig>.broadcast();
-  final _todaySport = StreamController<SportTotals>.broadcast();
-  final _sportDetailHeader = StreamController<SportDetailHeader>.broadcast();
-  final _sportDetailRecord = StreamController<SportDetailRecord>.broadcast();
-  final _pushMsg = StreamController<PushMsgUint>.broadcast();
-  final _pushMsgChunk = StreamController<PushMsgChunk>.broadcast();
-  final _pushMsgReassembled = StreamController<PushMsgUint>.broadcast();
+  late final _pressureSettingHeader = _ctrl<PressureSettingHeader>();
+  late final _pressureSettingChunk = _ctrl<PressureSettingChunk>();
+  late final _pressure = _ctrl<PressureReading>();
+  late final _hrvHeader = _ctrl<HrvSettingHeader>();
+  late final _hrvChunk = _ctrl<HrvSettingChunk>();
+  late final _sugarLipids = _ctrl<SugarLipidsSetting>();
+  late final _uvTouch = _ctrl<UvTouchSetting>();
+  late final _sedentary = _ctrl<SedentaryConfig>();
+  late final _todaySport = _ctrl<SportTotals>();
+  late final _sportDetailHeader = _ctrl<SportDetailHeader>();
+  late final _sportDetailRecord = _ctrl<SportDetailRecord>();
+  late final _pushMsg = _ctrl<PushMsgUint>();
+  late final _pushMsgChunk = _ctrl<PushMsgChunk>();
+  late final _pushMsgReassembled = _ctrl<PushMsgUint>();
   final _pushReassembler = PushMsgReassembler();
   int _pushMsgSeq = 0;
-  final _phoneSport = StreamController<PhoneSportUpdate>.broadcast();
-  final _muslim = StreamController<MuslimConfig>.broadcast();
-  final _menstruation = StreamController<MenstruationMixture>.broadcast();
-  final _realtimeHr = StreamController<int>.broadcast();
-  final _factoryReset = StreamController<void>.broadcast();
-  final _restoreKey = StreamController<void>.broadcast();
-  final _factoryCommand = StreamController<FactoryCommand>.broadcast();
-  final _vibrationChunks = StreamController<VibrationChunk>.broadcast();
+  late final _phoneSport = _ctrl<PhoneSportUpdate>();
+  late final _muslim = _ctrl<MuslimConfig>();
+  late final _menstruation = _ctrl<MenstruationMixture>();
+  late final _realtimeHr = _ctrl<int>();
+  late final _factoryReset = _ctrl<void>();
+  late final _restoreKey = _ctrl<void>();
+  late final _factoryCommand = _ctrl<FactoryCommand>();
+  late final _vibrationChunks = _ctrl<VibrationChunk>();
   int _vibrationSeq = 0;
-  final _displayClock = StreamController<DisplayClockResponse>.broadcast();
-  final _queryDataDistribution =
-      StreamController<QueryDataDistribution>.broadcast();
+  late final _displayClock = _ctrl<DisplayClockResponse>();
+  late final _queryDataDistribution = _ctrl<QueryDataDistribution>();
 
   /// Fires once per `0x01` setTime ACK, carrying the host's wall-clock
   /// time at the moment the watch confirmed the sync. The 14-byte payload
@@ -993,42 +1000,7 @@ class ChannelADispatcher {
 
   void dispose() {
     _pushReassembler.cancel();
-    for (final c in [
-      _unknown,
-      _time,
-      _dnd,
-      _heartRateRecord,
-      _heartRateHeader,
-      _heartRateChunk,
-      _heartRateError,
-      _heartRateSetting,
-      _bloodOxygen,
-      _bpRecord,
-      _pressureSettingHeader,
-      _pressureSettingChunk,
-      _pressure,
-      _hrvHeader,
-      _hrvChunk,
-      _sugarLipids,
-      _uvTouch,
-      _sedentary,
-      _todaySport,
-      _sportDetailHeader,
-      _sportDetailRecord,
-      _pushMsg,
-      _pushMsgChunk,
-      _pushMsgReassembled,
-      _phoneSport,
-      _muslim,
-      _menstruation,
-      _realtimeHr,
-      _factoryReset,
-      _restoreKey,
-      _factoryCommand,
-      _vibrationChunks,
-      _displayClock,
-      _queryDataDistribution,
-    ]) {
+    for (final c in _controllers) {
       c.close();
     }
   }

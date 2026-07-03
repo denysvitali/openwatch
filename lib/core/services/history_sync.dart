@@ -247,7 +247,7 @@ class HistorySync extends ChangeNotifier {
 
   /// Quiet window passed to the stress/HRV fragment reassemblers.
   final Duration fragmentQuietWindow;
-  final BleTransport transport;
+  final WatchLink transport;
   final ChannelADispatcher? _dispatcher;
   final ChannelBParser? _bParser;
   HistoryStore? _store;

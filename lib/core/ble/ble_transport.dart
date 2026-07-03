@@ -24,6 +24,26 @@ enum LinkState {
   ready,
 }
 
+/// Frame-level surface of the watch link consumed by the protocol and
+/// service layers (`ChannelADispatcher`, `ChannelBParser`, `WatchManager`,
+/// `HistorySync`, `DfuFlasher`, …).
+///
+/// [BleTransport] is the production implementation; tests substitute
+/// `FakeBleTransport` without touching GATT. Connection management
+/// (connect / disconnect / device) stays on the concrete [BleTransport],
+/// which only the UI layer needs.
+abstract interface class WatchLink implements Fee7Host {
+  ValueListenable<LinkState> get state;
+  bool get isReady;
+  String get hardwareRevision;
+  String get firmwareRevision;
+  Stream<Uint8List> get inboundA;
+  Stream<Uint8List> get inboundB;
+  Future<void> sendA(Uint8List frame);
+  Future<Uint8List> requestA(Uint8List frame, {Duration timeout});
+  Future<void> sendB(Uint8List framed);
+}
+
 /// GATT transport for the Oudmon two-channel protocol.
 ///
 /// * Channel A — 16-byte commands, write-with-response, opcode-correlated
@@ -33,7 +53,7 @@ enum LinkState {
 ///
 /// All writes funnel through a single serialized queue: at most one GATT
 /// operation is in flight at a time (mirroring the firmware's `notifyLock`).
-class BleTransport implements Fee7Host {
+class BleTransport implements WatchLink {
   BleTransport();
 
   BluetoothDevice? _device;
@@ -64,11 +84,16 @@ class BleTransport implements Fee7Host {
   final Map<int, List<Completer<Uint8List>>> _pending = {};
 
   int packageLength = BleUuids.defaultPackageLength;
+  @override
   String hardwareRevision = '';
+  @override
   String firmwareRevision = '';
 
+  @override
   ValueListenable<LinkState> get state => _state;
+  @override
   Stream<Uint8List> get inboundA => _inboundA.stream;
+  @override
   Stream<Uint8List> get inboundB => _inboundB.stream;
 
   /// Inbound 16-byte frames received on the vendor `0xFEE7` notify
@@ -79,6 +104,7 @@ class BleTransport implements Fee7Host {
   Stream<Uint8List> get fee7Inbound => _inboundFee7.stream;
 
   BluetoothDevice? get device => _device;
+  @override
   bool get isReady => _state.value == LinkState.ready;
 
   // ---------------------------------------------------------------------------
@@ -230,23 +256,28 @@ class BleTransport implements Fee7Host {
     }
   }
 
-  void _onChannelA(List<int> data) {
-    // Inbound Channel-A frame: traced as a consumer-side notification so
-    // latency from GATT notify to the dispatcher is measurable.
+  /// Wraps one inbound GATT notification in a consumer `ble.rx` span so
+  /// latency from notify to dispatcher is measurable per channel.
+  void _withRxSpan(
+    String channel,
+    List<int> data,
+    void Function(Uint8List) body,
+  ) {
     final span = OpenTelemetryService().startTrace(
       'ble.rx',
       kind: SpanKind.consumer,
-      attributes: {'ble.channel': 'A', 'ble.frame.length': data.length},
+      attributes: {'ble.channel': channel, 'ble.frame.length': data.length},
     );
     try {
-      _onChannelATraced(data, span);
+      body(Uint8List.fromList(data));
     } finally {
       span?.end();
     }
   }
 
-  void _onChannelATraced(List<int> data, OTelSpan? span) {
-    final frame = Uint8List.fromList(data);
+  void _onChannelA(List<int> data) => _withRxSpan('A', data, _onChannelAFrame);
+
+  void _onChannelAFrame(Uint8List frame) {
     final valid = Codec.isValidChannelA(frame);
     if (!valid) {
       // Log the raw bytes so a checksum/length mismatch is diagnosable.
@@ -257,7 +288,7 @@ class BleTransport implements Fee7Host {
         'rx',
         'RX-A(DROPPED len=${frame.length}'
             '${frame.length == 16 ? " cksum got=0x${frame[15].toRadixString(16)} want=0x${expected.toRadixString(16)}" : ""})',
-        data,
+        frame,
         level: LogLevel.warn,
       );
       return;
@@ -267,7 +298,7 @@ class BleTransport implements Fee7Host {
       'rx',
       'RX-A op=0x${opcode.toRadixString(16)}'
           '${Codec.rxIsError(frame) ? " ERR" : ""}',
-      data,
+      frame,
     );
 
     // Persistent push: PackageLength negotiation for Channel B.
@@ -287,56 +318,34 @@ class BleTransport implements Fee7Host {
     _inboundA.add(frame);
   }
 
-  void _onChannelB(List<int> data) {
-    // Inbound Channel-B frame (large data); traced as a consumer so we can
-    // see chunk rate + size distribution.
-    final span = OpenTelemetryService().startTrace(
-      'ble.rx',
-      kind: SpanKind.consumer,
-      attributes: {'ble.channel': 'B', 'ble.frame.length': data.length},
-    );
-    try {
-      _log.frame('rx', 'RX-B', data);
-      _inboundB.add(Uint8List.fromList(data));
-    } finally {
-      span?.end();
-    }
-  }
+  void _onChannelB(List<int> data) => _withRxSpan('B', data, (frame) {
+    _log.frame('rx', 'RX-B', frame);
+    _inboundB.add(frame);
+  });
 
-  void _onFee7(List<int> data) {
-    // Inbound vendor 0xFEE7 frame; one span per notification so the fee7
-    // dispatcher can be monitored independently of the canonical channels.
-    final span = OpenTelemetryService().startTrace(
-      'ble.rx',
-      kind: SpanKind.consumer,
-      attributes: {'ble.channel': 'fee7', 'ble.frame.length': data.length},
-    );
-    try {
-      final frame = Uint8List.fromList(data);
-      if (!Codec.isValidChannelA(frame)) {
-        _log.frame(
-          'rx',
-          'RX-FEE7(DROPPED len=${frame.length})',
-          data,
-          level: LogLevel.warn,
-        );
-        return;
-      }
-      // Use rxOpcodeRaw — fee7 opcodes are dense in 0x80..0xff where the
-      // top bit is part of the opcode namespace, not an error indicator.
-      final opcode = Codec.rxOpcodeRaw(frame);
-      _log.frame('rx', 'RX-FEE7 op=0x${opcode.toRadixString(16)}', data);
-      _inboundFee7.add(frame);
-    } finally {
-      span?.end();
+  void _onFee7(List<int> data) => _withRxSpan('fee7', data, (frame) {
+    if (!Codec.isValidChannelA(frame)) {
+      _log.frame(
+        'rx',
+        'RX-FEE7(DROPPED len=${frame.length})',
+        frame,
+        level: LogLevel.warn,
+      );
+      return;
     }
-  }
+    // Use rxOpcodeRaw — fee7 opcodes are dense in 0x80..0xff where the
+    // top bit is part of the opcode namespace, not an error indicator.
+    final opcode = Codec.rxOpcodeRaw(frame);
+    _log.frame('rx', 'RX-FEE7 op=0x${opcode.toRadixString(16)}', frame);
+    _inboundFee7.add(frame);
+  });
 
   // ---------------------------------------------------------------------------
   // Channel A: commands
   // ---------------------------------------------------------------------------
 
   /// Sends a Channel-A command frame (fire-and-forget). Rejected before ready.
+  @override
   Future<void> sendA(Uint8List frame) {
     _requireReady();
     _log.frame('tx', 'TX-A op=0x${frame[0].toRadixString(16)}', frame);
@@ -345,6 +354,7 @@ class BleTransport implements Fee7Host {
 
   /// Sends a Channel-A command and waits for the matching opcode response.
   /// Returns the first matching 16-byte frame, or throws on timeout.
+  @override
   Future<Uint8List> requestA(
     Uint8List frame, {
     Duration timeout = const Duration(seconds: 5),
@@ -400,6 +410,7 @@ class BleTransport implements Fee7Host {
   // ---------------------------------------------------------------------------
 
   /// Sends a fully-framed Channel-B buffer, sliced into [packageLength] chunks.
+  @override
   Future<void> sendB(Uint8List framed) async {
     // Channel-B bulk transfer: spans the whole sliced send so we can
     // correlate total bytes and chunk count against downstream OTA speed.
@@ -562,7 +573,8 @@ class BleTransport implements Fee7Host {
           await d.disconnect();
         } catch (_) {}
       }
-      _state.value = LinkState.disconnected;
+      // _onDisconnected() above already set LinkState.disconnected; setting
+      // it again here would fire a second spurious notification.
       ok = true;
     } catch (e, stack) {
       span?.recordError(e, stack);

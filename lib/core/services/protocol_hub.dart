@@ -112,7 +112,7 @@ class ProtocolHub {
     });
   }
 
-  final BleTransport _transport;
+  final WatchLink _transport;
   late final ChannelADispatcher _dispatcher;
   late final ChannelBParser _parser;
   late final AncsClient _ancs;

@@ -33,10 +33,11 @@ final _log = AppLog.instance;
 /// complete frame; we do the same.
 class ChannelBParser {
   ChannelBParser(
-    this._transport, {
+    WatchLink transport, {
     this.fragmentTimeout = const Duration(seconds: 2),
-  }) : _inboundB = _transport.inboundB,
-       _sendA = _transport.sendA,
+  }) : _inboundB = transport.inboundB,
+       _sendA = transport.sendA,
+       _sendB = transport.sendB,
        // 4× the fragment timeout is plenty to absorb a BLE-link replay
        // storm while still allowing a legitimate re-emit after the watch
        // comes back from sleep (the firmware pushes 0x27/0x2a/0x3e on
@@ -45,11 +46,13 @@ class ChannelBParser {
          milliseconds: (fragmentTimeout.inMilliseconds * 4).clamp(2000, 60000),
        );
 
-  final BleTransport _transport;
   final Stream<Uint8List> _inboundB;
 
   /// Sends a fully-built Channel-A response (used for ACK/NAK).
   final Future<void> Function(Uint8List) _sendA;
+
+  /// Sends a framed Channel-B buffer (chunked, write-without-response).
+  final Future<void> Function(Uint8List) _sendB;
 
   /// Max time to wait between fragments before discarding the in-progress
   /// frame. Firmware uses `m_ble_packet_timer_id` at 2000 ms (`FUN_0082f098`).
@@ -121,7 +124,7 @@ class ChannelBParser {
   /// Wraps a payload as a Channel-B frame and sends it via the transport's
   /// `sendB` (chunked, no-response). Mirrors `FUN_0082ece0`.
   Future<void> sendB(int cmd, [List<int> payload = const []]) =>
-      _transport.sendB(Codec.buildChannelB(cmd, payload));
+      _sendB(Codec.buildChannelB(cmd, payload));
 
   /// Sends an ACK/NAK frame on Channel A. See [buildAck] for the wire
   /// format. **Callers should not invoke this for unsolicited Channel-B

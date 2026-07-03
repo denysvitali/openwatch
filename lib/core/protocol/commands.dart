@@ -829,4 +829,12 @@ enum MeasureType {
 
   const MeasureType(this.id);
   final int id;
+
+  /// Resolves a wire-level measurement type id, or `null` if unknown.
+  static MeasureType? fromId(int id) {
+    for (final t in values) {
+      if (t.id == id) return t;
+    }
+    return null;
+  }
 }

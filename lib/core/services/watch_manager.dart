@@ -40,7 +40,7 @@ class WatchManager extends ChangeNotifier {
     _onLinkState();
   }
 
-  final BleTransport _transport;
+  final WatchLink _transport;
   bool autoSyncTime;
   StreamSubscription<Uint8List>? _inboundSub;
   StreamSubscription<StatusResponse>? _fee7StatusSub;
@@ -331,14 +331,14 @@ class WatchManager extends ChangeNotifier {
       return;
     }
     var finalValue = false;
-    switch (r.type) {
-      case 1:
-      case 6:
+    switch (MeasureType.fromId(r.type)) {
+      case MeasureType.heartRate:
+      case MeasureType.realtimeHeartRate:
         if (r.bpm != null) {
           lastHeartRate = r.bpm;
           finalValue = true;
         }
-      case 2:
+      case MeasureType.bloodPressure:
         final sbp = r.systolic;
         final dbp = r.diastolic;
         if (sbp != null &&
@@ -351,16 +351,18 @@ class WatchManager extends ChangeNotifier {
           lastBloodPressureDiastolic = dbp;
           finalValue = true;
         }
-      case 8:
+      case MeasureType.pressure:
         if (r.value > 1 && r.value < 100) {
           lastStress = r.value;
           finalValue = true;
         }
-      case 10:
+      case MeasureType.hrv:
         if (r.value > 1 && r.value < 255) {
           lastHrv = r.value;
           finalValue = true;
         }
+      default:
+        break;
     }
     if (finalValue) {
       _measuringTypes.remove(r.type);

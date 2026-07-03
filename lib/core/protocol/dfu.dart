@@ -20,7 +20,7 @@ class DfuProgress {
 /// pockets → check → end. Each step waits for the device's unified RSP frame.
 class DfuFlasher {
   DfuFlasher(this._transport);
-  final BleTransport _transport;
+  final WatchLink _transport;
 
   static const int _pocketSize = 1024;
 
