@@ -22,22 +22,32 @@ class Fee7Dispatcher {
 
   final Fee7Service _service;
 
+  /// Every broadcast controller created via [_ctrl]; closed by [dispose] so
+  /// adding a new opcode stream never requires touching the teardown list.
+  final List<StreamController<Object?>> _controllers = [];
+
+  StreamController<T> _ctrl<T>() {
+    final c = StreamController<T>.broadcast();
+    _controllers.add(c);
+    return c;
+  }
+
   // Typed opcode streams.
-  final _spo2Hr = StreamController<SpO2HrUpdate>.broadcast();
-  final _capability = StreamController<CapabilityBlock>.broadcast();
-  final _bloodOxygen = StreamController<BloodOxygenUpdate>.broadcast();
-  final _hrv = StreamController<HrvSetting>.broadcast();
-  final _handshake = StreamController<HandshakeResponse>.broadcast();
-  final _alert = StreamController<AlertTrigger>.broadcast();
-  final _findPhone = StreamController<FindPhoneEvent>.broadcast();
-  final _status = StreamController<StatusResponse>.broadcast();
-  final _mode = StreamController<ModeControl>.broadcast();
-  final _modeCont = StreamController<ModeControlCont>.broadcast();
-  final _long = StreamController<LongResponse>.broadcast();
-  final _ota = StreamController<OtaTrigger>.broadcast();
-  final _vibration = StreamController<VibrationPattern>.broadcast();
-  final _unary = StreamController<UnaryOpcode>.broadcast();
-  final _unknown = StreamController<UnaryOpcode>.broadcast();
+  late final _spo2Hr = _ctrl<SpO2HrUpdate>();
+  late final _capability = _ctrl<CapabilityBlock>();
+  late final _bloodOxygen = _ctrl<BloodOxygenUpdate>();
+  late final _hrv = _ctrl<HrvSetting>();
+  late final _handshake = _ctrl<HandshakeResponse>();
+  late final _alert = _ctrl<AlertTrigger>();
+  late final _findPhone = _ctrl<FindPhoneEvent>();
+  late final _status = _ctrl<StatusResponse>();
+  late final _mode = _ctrl<ModeControl>();
+  late final _modeCont = _ctrl<ModeControlCont>();
+  late final _long = _ctrl<LongResponse>();
+  late final _ota = _ctrl<OtaTrigger>();
+  late final _vibration = _ctrl<VibrationPattern>();
+  late final _unary = _ctrl<UnaryOpcode>();
+  late final _unknown = _ctrl<UnaryOpcode>();
 
   /// `0x36` SpO2/HR read or set; `pl[0]` selects read vs set.
   Stream<SpO2HrUpdate> get onSpO2Hr => _spo2Hr.stream;
@@ -110,15 +120,6 @@ class Fee7Dispatcher {
     // Use rxOpcodeRaw (no error-flag strip) because the fee7 opcode table
     // is dense in the 0x80..0xff range where the high bit is part of the
     // opcode, not an error indicator. See GHIDRA_DECOMPILATION.md §8.
-    if (frame.length >= 2 && frame[1] == Fee7.modeControlCont) {
-      _modeCont.add(
-        ModeControlCont(
-          step: frame[0] & 0xFF,
-          payload: Uint8List.sublistView(frame, 2, 15),
-        ),
-      );
-      return;
-    }
     final opcode = Codec.rxOpcodeRaw(frame);
     final pl = Codec.rxPayload(frame);
 
@@ -283,23 +284,7 @@ class Fee7Dispatcher {
   }
 
   void dispose() {
-    for (final c in [
-      _spo2Hr,
-      _capability,
-      _bloodOxygen,
-      _hrv,
-      _handshake,
-      _alert,
-      _findPhone,
-      _status,
-      _mode,
-      _modeCont,
-      _long,
-      _ota,
-      _vibration,
-      _unary,
-      _unknown,
-    ]) {
+    for (final c in _controllers) {
       c.close();
     }
   }

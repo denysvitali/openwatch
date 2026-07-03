@@ -304,21 +304,49 @@ void main() {
       await svc.dispose();
     });
 
-    test('routes reversed 0x6a mode-control continuation response', () async {
+    test('routes 0x6a mode-control continuation response', () async {
       final host = _StubHost();
       final svc = Fee7Service.attach(host);
       final d = Fee7Dispatcher(svc);
       d.bind();
 
       final got = d.onModeControlCont.first;
-      final frame = Codec.buildChannelA(0x08, [Fee7.modeControlCont, 0x42]);
+      final frame = Codec.buildChannelA(Fee7.modeControlCont, [0x08, 0x42]);
       host.inbound.add(frame);
 
       final m = await got.timeout(const Duration(seconds: 1));
       expect(m.step, 0x08);
-      expect(m.payload.first, 0x42);
+      expect(m.payload[1], 0x42);
       await svc.dispose();
     });
+
+    test(
+      'frame with 0x6a in payload is not misrouted as continuation',
+      () async {
+        final host = _StubHost();
+        final svc = Fee7Service.attach(host);
+        final d = Fee7Dispatcher(svc);
+        d.bind();
+
+        var contFired = false;
+        d.onModeControlCont.listen((_) => contFired = true);
+        final got = d.onModeControl.first;
+        // 0x69 mode-control frame whose first payload byte (frame[1]) happens
+        // to be 0x6a — must dispatch on frame[0], not swallow as a
+        // continuation.
+        final frame = Codec.buildChannelA(Fee7.modeControl, [
+          Fee7.modeControlCont,
+          0x03,
+        ]);
+        host.inbound.add(frame);
+
+        final m = await got.timeout(const Duration(seconds: 1));
+        expect(m.step, Fee7.modeControlCont);
+        await Future<void>.delayed(Duration.zero);
+        expect(contFired, isFalse);
+        await svc.dispose();
+      },
+    );
 
     test('routes 0xc3 OTA trigger and detects routesToOta flag', () async {
       final host = _StubHost();
