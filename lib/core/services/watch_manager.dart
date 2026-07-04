@@ -37,6 +37,15 @@ class WatchManager extends ChangeNotifier {
       _fee7StatusSub = fee7.onStatus.listen(_onFee7Status);
       _fee7HandshakeSub = fee7.onHandshake.listen(_onFee7Handshake);
     }
+    // Channel-A `0x24` clock-alarm slot read — see PROTOCOL.md §4.3.
+    // We keep a slot-indexed map so the UI can show "slot 2 is empty"
+    // without rebuilding the list from raw stream events.
+    _alarmSub = _hub.channelA.onAlarm.listen(_onAlarm);
+    // Channel-A `0x1d` now-playing push — see PROTOCOL.md §4.1 line 194.
+    // The watch forwards iOS media-state changes through this opcode;
+    // we keep only the latest payload (no history) and let the
+    // dashboard render a compact card.
+    _musicSub = _hub.channelA.onMusic.listen(_onMusic);
     _onLinkState();
   }
 
@@ -45,6 +54,8 @@ class WatchManager extends ChangeNotifier {
   StreamSubscription<Uint8List>? _inboundSub;
   StreamSubscription<StatusResponse>? _fee7StatusSub;
   StreamSubscription<HandshakeResponse>? _fee7HandshakeSub;
+  StreamSubscription<Alarm>? _alarmSub;
+  StreamSubscription<MusicRsp>? _musicSub;
   late final ProtocolHub _hub;
   LinkState _last = LinkState.disconnected;
   bool _handshaking = false;
@@ -82,6 +93,39 @@ class WatchManager extends ChangeNotifier {
   String? lastMeasurementError;
   bool initialized = false;
 
+  // -- Clock alarms ----------------------------------------------------------
+  //
+  // PROTOCOL.md §4.3 — slot 0..4. We keep the latest read per slot in a
+  // small map so the UI can show "slot 3 is empty" without coalescing
+  // [onAlarm] events itself. The getter returns slots sorted by index
+  // so the UI always renders in the same order.
+
+  /// Number of clock-alarm slots advertised by the watch.
+  static const int alarmSlotCount = 5;
+
+  final Map<int, Alarm> _alarms = {};
+  bool _alarmsLoading = false;
+
+  /// Latest now-playing metadata pushed by the watch (`0x1d`). Null
+  /// until the first push arrives; the dashboard uses an empty
+  /// `track` (see [MusicRsp.track]) as the signal to hide the card.
+  /// We intentionally do NOT clear this on link drop — a reconnect
+  /// typically re-pushes within a couple of seconds, and a flash to
+  /// empty during the gap is more annoying than the slightly-stale
+  /// card is misleading.
+  MusicRsp? nowPlaying;
+
+  /// Slot-sorted snapshot of every alarm we have read so far. Slots
+  /// the watch never replied to are absent from the list.
+  List<Alarm> get alarms {
+    final out = _alarms.values.toList()
+      ..sort((a, b) => a.slot.compareTo(b.slot));
+    return List.unmodifiable(out);
+  }
+
+  /// `true` while [refreshAlarms] is awaiting slot reads.
+  bool get alarmsLoading => _alarmsLoading;
+
   String get hardwareRevision => _transport.hardwareRevision;
   String get firmwareRevision => _transport.firmwareRevision;
   bool get isReady => _transport.isReady;
@@ -102,6 +146,7 @@ class WatchManager extends ChangeNotifier {
       _handshaking = false;
       _measuringTypes.clear();
       lastMeasurementError = null;
+      _alarms.clear();
       _stepTimer?.cancel();
       _batteryTimer?.cancel();
       _stepTimer = null;
@@ -761,6 +806,112 @@ class WatchManager extends ChangeNotifier {
     AppLog.instance.debug('watch', 'ancs event: ${e.runtimeType}');
   }
 
+  /// Cache the latest `0x24` reply into the slot-indexed [alarms]
+  /// map and notify listeners. Anything routed here is a healthy
+  /// read; error-flagged frames get diverted to [ChannelADispatcher.unknown].
+  void _onAlarm(Alarm a) {
+    _alarms[a.slot] = a;
+    AppLog.instance.debug(
+      'alarm',
+      'slot=${a.slot} en=${a.enabled} ${a.labelTime} '
+          'mask=0x${a.weekMask.toRadixString(16)}',
+    );
+    notifyListeners();
+  }
+
+  /// Cache the latest `0x1d` now-playing push. Field order is
+  /// inferred (see [MusicRsp]) — the debug log captures every byte
+  /// the decoder produced so the first live capture can re-validate
+  /// the layout without re-instrumenting.
+  void _onMusic(MusicRsp rsp) {
+    nowPlaying = rsp;
+    AppLog.instance.debug(
+      'music',
+      'track="${rsp.track}" playing=${rsp.isPlaying} '
+          'progress=${rsp.progress} volume=${rsp.volume}',
+    );
+    notifyListeners();
+  }
+
+  // -- Clock alarms ----------------------------------------------------------
+
+  /// Re-read every clock-alarm slot (`0..alarmSlotCount-1`) and return
+  /// the accumulated map. Times out after [timeout] with whatever
+  /// slots have answered so far — a flaky link should still surface
+  /// the slots it managed to receive rather than blocking the UI.
+  Future<List<Alarm>> refreshAlarms({
+    Duration timeout = const Duration(seconds: 2),
+  }) => _withActionSpan('refresh_alarms', () async {
+    if (!_transport.isReady) {
+      AppLog.instance.warn('alarm', 'refresh requested while not ready');
+      return alarms;
+    }
+    _alarmsLoading = true;
+    notifyListeners();
+    try {
+      _alarms.clear();
+      final seen = <int>{};
+      final completer = Completer<void>();
+      late StreamSubscription<Alarm> sub;
+      sub = _hub.channelA.onAlarm.listen((a) {
+        if (a.slot >= 0 && a.slot < alarmSlotCount) seen.add(a.slot);
+        if (seen.length >= alarmSlotCount && !completer.isCompleted) {
+          completer.complete();
+        }
+      });
+      try {
+        for (var slot = 0; slot < alarmSlotCount; slot++) {
+          await _transport.sendA(Commands.readAlarm(slot));
+        }
+        await completer.future.timeout(timeout);
+      } on TimeoutException {
+        AppLog.instance.warn(
+          'alarm',
+          'refresh timed out after ${seen.length}/$alarmSlotCount slots',
+        );
+      } finally {
+        await sub.cancel();
+      }
+      return alarms;
+    } finally {
+      _alarmsLoading = false;
+      notifyListeners();
+    }
+  });
+
+  /// Push an alarm slot to the watch (`0x23`). The wire `en` flag is
+  /// 1 for [Alarm.enabled] true, 2 for false.
+  Future<void> setAlarm(Alarm alarm) => _withActionSpan(
+    'set_alarm',
+    () => _transport.sendA(
+      Commands.setAlarm(
+        index: alarm.slot,
+        enabled: alarm.enabled,
+        hour: alarm.hour,
+        minute: alarm.minute,
+        weekdays: alarm.weekdays,
+      ),
+    ),
+  );
+
+  /// Disable a clock-alarm slot in place, preserving its current
+  /// time so the user can re-arm without re-entering hour/minute.
+  Future<void> deleteAlarm({required int slot}) =>
+      _withActionSpan('delete_alarm', () async {
+        final existing = _alarms[slot];
+        await setAlarm(
+          Alarm(
+            slot: slot,
+            enabled: false,
+            hour: existing?.hour ?? 7,
+            minute: existing?.minute ?? 0,
+            weekdays:
+                existing?.weekdays ??
+                const [false, false, false, false, false, false, false],
+          ),
+        );
+      });
+
   @override
   void dispose() {
     _stepTimer?.cancel();
@@ -769,6 +920,8 @@ class WatchManager extends ChangeNotifier {
     unawaited(_inboundSub?.cancel());
     unawaited(_fee7StatusSub?.cancel());
     unawaited(_fee7HandshakeSub?.cancel());
+    unawaited(_alarmSub?.cancel());
+    unawaited(_musicSub?.cancel());
     _hub.dispose();
     super.dispose();
   }

@@ -16,6 +16,9 @@ class SettingsScreen extends ConsumerWidget {
     final settings = ref.watch(settingsProvider);
     final settingsNotifier = ref.read(settingsProvider.notifier);
     final manager = ref.watch(watchManagerProvider);
+    final armedAlarmCount = manager.alarms
+        .where((alarm) => alarm.enabled)
+        .length;
     final ready = (ref.watch(linkStateProvider).value) == LinkState.ready;
 
     return Scaffold(
@@ -65,6 +68,16 @@ class SettingsScreen extends ConsumerWidget {
             subtitle: const Text('HR interval, alarms'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => context.push('/sensor-settings'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.alarm),
+            title: const Text('Clock alarms'),
+            subtitle: Text(
+              armedAlarmCount == 0 ? 'None armed' : '$armedAlarmCount armed',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            enabled: ready,
+            onTap: ready ? () => context.push('/alarms') : null,
           ),
           ListTile(
             leading: const Icon(Icons.tune),
@@ -136,6 +149,16 @@ class SettingsScreen extends ConsumerWidget {
             subtitle: const Text('BLE traffic & events — copy to share'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => context.push('/logs'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.bloodtype_outlined),
+            title: const Text('BP raw bytes'),
+            subtitle: const Text(
+              '13-byte BP records, byte-by-byte. '
+              'See PROTOCOL.md §8.5 — needs live capture.',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => context.push('/bp-debug'),
           ),
           ListTile(
             leading: const Icon(Icons.delete_sweep),

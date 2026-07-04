@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../features/alarms/alarms_screen.dart';
 import '../../features/dashboard/dashboard_screen.dart';
+import '../../features/debug/bp_debug_screen.dart';
 import '../../features/firmware/firmware_screen.dart';
 import '../../features/health/health_screen.dart';
 import '../../features/history/history_screen.dart';
@@ -46,6 +48,18 @@ final appRouterProvider = Provider<GoRouter>(
         name: 'logs',
         parentNavigatorKey: _rootNavigatorKey,
         builder: (context, state) => const LogsScreen(),
+      ),
+      GoRoute(
+        path: '/bp-debug',
+        name: 'bp-debug',
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) => const BpDebugScreen(),
+      ),
+      GoRoute(
+        path: '/alarms',
+        name: 'alarms',
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) => const AlarmsScreen(),
       ),
       GoRoute(
         path: '/history',

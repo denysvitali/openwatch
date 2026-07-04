@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/ble/ble_transport.dart';
+import '../../core/protocol/channel_a.dart';
 import '../../core/providers/app_providers.dart';
 import '../../core/services/history_sync.dart';
 import '../history/widgets/hr_chart.dart';
@@ -28,6 +29,11 @@ class DashboardScreen extends ConsumerWidget {
         : 'Watch';
     final today = sync.days.isEmpty ? null : sync.days.last;
     final heartRate = manager.lastHeartRate ?? avgBpm(today?.hr ?? const []);
+    final armedAlarms = manager.alarms.where((alarm) => alarm.enabled).toList()
+      ..sort((a, b) {
+        final ah = a.hour.compareTo(b.hour);
+        return ah != 0 ? ah : a.minute.compareTo(b.minute);
+      });
 
     return Scaffold(
       appBar: AppBar(
@@ -68,7 +74,11 @@ class DashboardScreen extends ConsumerWidget {
                 firmware: manager.firmwareRevision,
                 hardware: manager.hardwareRevision,
               ),
-              const SizedBox(height: 12),
+              if (manager.nowPlaying != null &&
+                  manager.nowPlaying!.track.isNotEmpty) ...[
+                _NowPlayingCard(music: manager.nowPlaying!),
+                const SizedBox(height: 12),
+              ],
               _MetricGrid(
                 steps: manager.todaySteps ?? today?.steps,
                 calories: manager.todayCalories ?? today?.energyKcal,
@@ -85,6 +95,12 @@ class DashboardScreen extends ConsumerWidget {
                 syncTime: manager.syncTime,
                 syncHistory: sync.syncAll,
               ),
+              const SizedBox(height: 12),
+              if (armedAlarms.isNotEmpty)
+                _AlarmsSummary(
+                  count: armedAlarms.length,
+                  next: armedAlarms.first,
+                ),
             ],
           ),
         ),
@@ -594,6 +610,47 @@ class _QuickActions extends StatelessWidget {
   }
 }
 
+/// Compact inset card showing how many clock alarms the user has set
+/// and the earliest one. Tapping the card opens the alarms editor.
+class _AlarmsSummary extends StatelessWidget {
+  const _AlarmsSummary({required this.count, required this.next});
+
+  final int count;
+  final Alarm next;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final time = next.labelTime;
+    return InkWell(
+      onTap: () => GoRouter.of(context).push('/alarms'),
+      borderRadius: BorderRadius.circular(12),
+      child: InsetCard(
+        child: Row(
+          children: [
+            Icon(Icons.alarm, color: theme.colorScheme.primary),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Clock alarms', style: theme.textTheme.titleSmall),
+                  const SizedBox(height: 2),
+                  Text(
+                    '$count armed — next at $time',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+            const Icon(CupertinoIcons.chevron_right),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _InfoPill extends StatelessWidget {
   const _InfoPill({required this.icon, required this.label});
 
@@ -615,6 +672,110 @@ class _InfoPill extends StatelessWidget {
           Icon(icon, size: 15, color: theme.colorScheme.onSurfaceVariant),
           const SizedBox(width: 6),
           Text(label, style: theme.textTheme.labelMedium),
+        ],
+      ),
+    );
+  }
+}
+
+/// Surfaces the watch's now-playing push (`0x1d`) without taking over
+/// the screen — a compact inset that sits between the hero card and
+/// the metric grid.
+///
+/// Only rendered when [WatchManager.nowPlaying] is non-null AND
+/// carries a non-empty track name. The `MusicRsp` decoder emits an
+/// empty `track` when the wire bytes don't include one, so hiding
+/// the card on `track.isEmpty` keeps a malformed push from showing
+/// as a blank row.
+class _NowPlayingCard extends StatelessWidget {
+  const _NowPlayingCard({required this.music});
+
+  final MusicRsp music;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final tint = music.isPlaying
+        ? theme.colorScheme.primary
+        : theme.colorScheme.onSurfaceVariant;
+    return InsetCard(
+      child: Row(
+        children: [
+          // Album-art placeholder. H59MA firmware does not expose a
+          // thumbnail on the 0x1d wire frame (PROTOCOL.md §3.1) so
+          // the card is intentionally art-less; a future live capture
+          // with embedded artwork would slot in here.
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: tint.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(
+              music.isPlaying
+                  ? CupertinoIcons.music_note_2
+                  : CupertinoIcons.pause_circle,
+              color: tint,
+              size: 26,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Now playing',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  music.track,
+                  style: theme.textTheme.titleMedium,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          // Volume as a single glyph chip — keeps the card compact
+          // and avoids a second progress bar that would compete with
+          // the metric grid below.
+          _VolumeChip(volume: music.volume),
+        ],
+      ),
+    );
+  }
+}
+
+class _VolumeChip extends StatelessWidget {
+  const _VolumeChip({required this.volume});
+  final int volume;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final icon = volume == 0
+        ? CupertinoIcons.volume_off
+        : volume < 64
+        ? CupertinoIcons.volume_down
+        : CupertinoIcons.volume_up;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: theme.colorScheme.onSurfaceVariant),
+          const SizedBox(width: 4),
+          Text('$volume', style: theme.textTheme.labelMedium),
         ],
       ),
     );

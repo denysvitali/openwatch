@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 
 import '../ble/ble_transport.dart';
+import '../services/bp_raw_store.dart';
 import '../services/cloud_api.dart';
 import '../services/firmware_service.dart';
 import '../services/history_store.dart';
@@ -146,6 +147,13 @@ final historyStoreProvider = FutureProvider<HistoryStore>(
   (ref) => HistoryStore.open(),
 );
 
+/// Sidecar store for the raw 13-byte BP records whose per-byte
+/// layout is on PROTOCOL.md §8.5 as "needs live capture". The BP
+/// debug screen reads this; the regular app surface does not.
+final bpRawStoreProvider = FutureProvider<BpRawStore>(
+  (ref) => BpRawStore.open(),
+);
+
 /// Singleton [HistorySync] wired against the [BleTransport] + a
 /// persistent [HistoryStore]. Built once and reused across all screens
 /// — `HistorySync` is a `ChangeNotifier` so any `Consumer*` watching it
@@ -172,6 +180,11 @@ final historySyncProvider = ChangeNotifierProvider<HistorySync>((ref) {
   ref.listen(historyStoreProvider, (_, next) {
     next.whenData((store) {
       sync.bindStore(store);
+    });
+  }, fireImmediately: true);
+  ref.listen(bpRawStoreProvider, (_, next) {
+    next.whenData((raw) {
+      sync.bindRawStore(raw);
     });
   }, fireImmediately: true);
 

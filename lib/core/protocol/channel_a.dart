@@ -71,6 +71,8 @@ class ChannelADispatcher {
   int _vibrationSeq = 0;
   late final _displayClock = _ctrl<DisplayClockResponse>();
   late final _queryDataDistribution = _ctrl<QueryDataDistribution>();
+  late final _music = _ctrl<MusicRsp>();
+  late final _alarm = _ctrl<Alarm>();
 
   /// Fires once per `0x01` setTime ACK, carrying the host's wall-clock
   /// time at the moment the watch confirmed the sync. The 14-byte payload
@@ -246,6 +248,18 @@ class ChannelADispatcher {
   /// `GHIDRA_DECOMPILATION.md` §3.5).
   Stream<DisplayClockResponse> get onDisplayClock => _displayClock.stream;
 
+  /// Clock-alarm slot read (`0x24`). See [Alarm] for the record shape
+  /// and `PROTOCOL.md` §4.3 for the wire layout.
+  Stream<Alarm> get onAlarm => _alarm.stream;
+
+  /// Now-playing push (`0x1d`). The watch re-broadcasts the metadata
+  /// whenever iOS media state changes. See [MusicRsp] for the
+  /// inferred wire layout — the only opcode in the persistent
+  /// notify-listener registry without a fixed payload spec, so
+  /// treat the field order as plausible until the first live
+  /// capture re-validates it.
+  Stream<MusicRsp> get onMusic => _music.stream;
+
   /// Data-distribution bitmask (`0x46`). The watch reports which of the
   /// last 32 days have stored health data; bit *d* ⇒ day *d* (where
   /// day 0 is today). See `PROTOCOL.md` §4.6.
@@ -309,6 +323,8 @@ class ChannelADispatcher {
         _decodePushMsg(pl);
       case OpA.displayClock:
         _decodeDisplayClock(pl);
+      case OpA.readAlarm:
+        _decodeAlarm(pl);
       case OpA.phoneSport:
         _decodePhoneSport(pl);
       case OpA.muslim:
@@ -339,6 +355,8 @@ class ChannelADispatcher {
         _decodeVibration(pl);
       case 0xa1 || 0x21:
         _decodeFactory(pl);
+      case OpA.musicNotify:
+        _decodeMusic(pl);
       // 0xff (factory-reset trigger, see OpA.factoryReset + FUN_0082cde8)
       // intentionally has NO switch arm: the handler does not queue a
       // response, so nothing will ever land in decode() for this opcode.
@@ -898,6 +916,47 @@ class ChannelADispatcher {
     );
   }
 
+  /// `musicNotify` (0x1d) — now-playing push forwarded from the watch's
+  /// ANCS / iOS-media bridge.
+  ///
+  /// The on-wire layout is inferred from the symmetric host→watch
+  /// `executeMusicSend` (`0x06 → [(playing^1), progress, volume, UTF-8 name]`,
+  /// see `PROTOCOL.md` §4.8 line 463). Per `PROTOCOL.md` §3.1 the
+  /// `MusicSwitch playing` boolean is XOR-1 inverted, so a wire byte
+  /// of `0` means "playing" and `1` means "paused".
+  ///
+  /// This decoder is best-effort: `0x1d` is in the persistent
+  /// notify-listener registry pre-registered by the APK (`PROTOCOL.md`
+  /// §4.1 line 194) but is **not** statically resolved to a fixed
+  /// payload in H59MA v14 — there are no live captures of the
+  /// payload bytes, so the field ordering is inferred. Treat
+  /// [MusicRsp] fields as plausibly-ordered; the dashboard hides
+  /// the card entirely when the wire bytes look malformed.
+  void _decodeMusic(Uint8List pl) {
+    if (pl.length < 4) {
+      _log.warn('music', 'dropped short 0x1d frame (len=${pl.length})');
+      return;
+    }
+    final playing = (pl[0] ^ 0x01) != 0;
+    final progress = pl[1] & 0xFF;
+    final volume = pl[2] & 0xFF;
+    // Skip a leading null (often used as a fill byte between the
+    // header fields and the start of the UTF-8 string) and strip any
+    // trailing null padding so the UI never shows stray "·" glyphs.
+    var start = 3;
+    if (start < pl.length && pl[start] == 0) start++;
+    final rawTitle = pl.sublist(start);
+    final title = String.fromCharCodes(rawTitle.where((b) => b != 0)).trim();
+    _music.add(
+      MusicRsp(
+        isPlaying: playing,
+        progress: progress,
+        volume: volume,
+        track: title,
+      ),
+    );
+  }
+
   /// `vibrationResponse` (0xc7) — fragmented motor-pattern reply. Each
   /// fragment carries up to 14 payload bytes; the firmware emits up to 6
   /// chunks per play request (`FUN_0082b938` + `min(duration, 6)`). We
@@ -906,6 +965,35 @@ class ChannelADispatcher {
   void _decodeVibration(Uint8List pl) {
     _vibrationChunks.add(
       VibrationChunk(seq: _vibrationSeq++, payload: Uint8List.fromList(pl)),
+    );
+  }
+
+  /// `readAlarm` (0x24) — clock-alarm slot read.
+  ///
+  /// Per `PROTOCOL.md` §4.3 the response is
+  /// `[idx, en(0..2), hourBCD, minuteBCD, day0..day6]` (11 bytes
+  /// total). `en == 0` is treated as "disabled" — the docs say the
+  /// value range is 0..2 but 0 only appears on freshly-flashed
+  /// devices, so mapping it explicitly avoids surfacing a phantom
+  /// disabled alarm.
+  void _decodeAlarm(Uint8List pl) {
+    if (pl.length < 4) return;
+    final idx = pl[0];
+    final enabled = pl[1] == 1;
+    final hour = Codec.fromBcd(pl[2]);
+    final minute = Codec.fromBcd(pl[3]);
+    final weekdays = List<bool>.generate(7, (i) {
+      final b = pl.length > 4 + i ? pl[4 + i] : 0;
+      return b != 0;
+    });
+    _alarm.add(
+      Alarm(
+        slot: idx,
+        enabled: enabled,
+        hour: hour,
+        minute: minute,
+        weekdays: weekdays,
+      ),
     );
   }
 
@@ -1250,6 +1338,89 @@ class SedentaryConfig {
 
   /// Nudge interval in minutes (clamped to ≤ 60 by the firmware).
   final int interval;
+}
+
+/// One clock-alarm slot (`0x24` read response).
+///
+/// `weekdays[0]` is Sunday (Sun..Sat order matches the wire
+/// `day0..day6` from `PROTOCOL.md` §4.3).
+class Alarm {
+  const Alarm({
+    required this.slot,
+    required this.enabled,
+    required this.hour,
+    required this.minute,
+    this.weekdays = const [false, false, false, false, false, false, false],
+  });
+
+  /// Firmware slot index `0..4` (clock alarms).
+  final int slot;
+
+  /// Whether the alarm is armed.
+  final bool enabled;
+
+  /// 24-hour hour, `0..23`.
+  final int hour;
+
+  /// Minute, `0..59`.
+  final int minute;
+
+  /// `weekdays[i] == true` means "fire on day i", Sun..Sat.
+  final List<bool> weekdays;
+
+  /// Packed bitmask (`Σ(weekdays[i] << i)`).
+  int get weekMask {
+    var m = 0;
+    for (var i = 0; i < weekdays.length && i < 7; i++) {
+      if (weekdays[i]) m |= 1 << i;
+    }
+    return m;
+  }
+
+  /// `true` if any weekday is selected.
+  bool get repeats => weekdays.any((d) => d);
+
+  /// `HH:MM` 24-hour formatted time.
+  String get labelTime {
+    final hh = hour.toString().padLeft(2, '0');
+    final mm = minute.toString().padLeft(2, '0');
+    return '$hh:$mm';
+  }
+
+  Alarm copyWith({
+    int? slot,
+    bool? enabled,
+    int? hour,
+    int? minute,
+    List<bool>? weekdays,
+  }) => Alarm(
+    slot: slot ?? this.slot,
+    enabled: enabled ?? this.enabled,
+    hour: hour ?? this.hour,
+    minute: minute ?? this.minute,
+    weekdays: weekdays ?? this.weekdays,
+  );
+
+  @override
+  bool operator ==(Object other) =>
+      other is Alarm &&
+      other.slot == slot &&
+      other.enabled == enabled &&
+      other.hour == hour &&
+      other.minute == minute &&
+      _listEq(other.weekdays, weekdays);
+
+  @override
+  int get hashCode =>
+      Object.hash(slot, enabled, hour, minute, Object.hashAll(weekdays));
+
+  static bool _listEq(List<bool> a, List<bool> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
 }
 
 /// Activity totals from `0x48 todaySport`.
@@ -1768,4 +1939,48 @@ class QueryDataDistribution {
 
   final int mask;
   final bool errorFlag;
+}
+
+/// Now-playing push from the watch (`0x1d`).
+///
+/// The `0x1d` opcode is the only entry in the persistent
+/// notify-listener registry (`PROTOCOL.md` §4.1 line 194) that is
+/// **not** statically resolved to a fixed payload in H59MA v14 — every
+/// other entry (`0x02` InnerCamera, `0x2f` PackageLength,
+/// `0x73` DeviceNotify, `0x78` DeviceSportNotify) has a documented
+/// byte shape. The wire layout we decode is inferred from the
+/// symmetric host→watch `executeMusicSend` command documented in
+/// `PROTOCOL.md` §4.8 (line 463 — `[(playing^1), progress, volume,
+/// UTF-8 name]`), so the field order is the most plausible
+/// reconstruction but should be re-validated on the first live
+/// capture.
+///
+/// The decoder ([ChannelADispatcher._decodeMusic]) drops frames
+/// shorter than 4 bytes; a sub-4-byte frame cannot carry a
+/// meaningful track name and is treated as wire-level corruption.
+class MusicRsp {
+  const MusicRsp({
+    required this.isPlaying,
+    required this.progress,
+    required this.volume,
+    required this.track,
+  });
+
+  /// `true` when the watch says the media player is playing. The wire
+  /// byte is XOR-1 inverted per `PROTOCOL.md` §3.1 — the decoder
+  /// un-inverts before constructing this record.
+  final bool isPlaying;
+
+  /// Playback position 0..255. Host-side UI can map this to a fraction
+  /// of the track; the actual track duration is not on the wire.
+  final int progress;
+
+  /// Media volume 0..255. The watch renders this directly in the OS
+  /// volume UI; hosts may show it as a percentage.
+  final int volume;
+
+  /// Best-effort UTF-8 track title (no artist/album on the wire). Empty
+  /// when the watch emits a header-only frame; the dashboard uses that
+  /// as the signal to hide the card rather than render a blank row.
+  final String track;
 }

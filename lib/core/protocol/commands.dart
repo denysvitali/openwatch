@@ -300,6 +300,8 @@ class Commands {
       Codec.buildChannelA(OpA.readAlarm, [index & 0xFF]);
 
   /// `SetAlarmReq` (0x23): `[idx, enabled, hourBCD, minBCD, day0..day6]`.
+  /// The enable byte follows the watch's common toggle convention:
+  /// `1 = enabled`, `2 = disabled`.
   static Uint8List setAlarm({
     required int index,
     required bool enabled,
@@ -318,7 +320,7 @@ class Commands {
     final days = List<int>.generate(7, (i) => (weekdays[i]) ? 1 : 0);
     return Codec.buildChannelA(OpA.setAlarm, [
       index & 0xFF,
-      enabled ? 1 : 0,
+      enabled ? 1 : 2,
       Codec.toBcd(hour),
       Codec.toBcd(minute),
       ...days,
@@ -678,7 +680,7 @@ class Commands {
     final days = List<int>.generate(7, (i) => (weekdays[i]) ? 1 : 0);
     return Codec.buildChannelA(OpA.setDrinkAlarm, [
       _clamp(index, 0, 7),
-      enabled ? 1 : 0,
+      enabled ? 1 : 2,
       Codec.toBcd(hour),
       Codec.toBcd(minute),
       ...days,

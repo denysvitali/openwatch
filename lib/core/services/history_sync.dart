@@ -12,6 +12,7 @@ import '../protocol/fragment_reassembler.dart';
 import '../protocol/opcodes.dart';
 import '../protocol/sleep_parser.dart';
 import 'app_log.dart';
+import 'bp_raw_store.dart';
 import 'history_store.dart';
 import 'opentelemetry_service.dart';
 
@@ -251,6 +252,7 @@ class HistorySync extends ChangeNotifier {
   final ChannelADispatcher? _dispatcher;
   final ChannelBParser? _bParser;
   HistoryStore? _store;
+  BpRawStore? _bpRawStore;
   final DateTime Function() _clock;
   final void Function(DailyTotals) onTotals;
   StreamSubscription<ChannelBCommand>? _bCmdSub;
@@ -535,6 +537,18 @@ class HistorySync extends ChangeNotifier {
     }
     _store = store;
     await loadFromStore();
+  }
+
+  /// Wire the sidecar [BpRawStore] used to dump the per-slot 13-byte
+  /// BP records whose field layout is on PROTOCOL.md §8.5 as
+  /// "needs live capture". The store is best-effort: missing it is
+  /// not an error — `_onBpDay` will simply not write the sidecar.
+  ///
+  /// Idempotent; rebinding to a different store discards the
+  /// previous binding without re-reading.
+  void bindRawStore(BpRawStore? store) {
+    if (identical(_bpRawStore, store)) return;
+    _bpRawStore = store;
   }
 
   /// Trigger a sync. When a [HistoryStore] is wired:
@@ -1348,6 +1362,13 @@ class HistorySync extends ChangeNotifier {
   /// anchored to the day + slot index so downstream consumers see a
   /// monotonically increasing series; the systolic/diastolic values
   /// are 0 until the per-byte layout is resolved.
+  ///
+  /// The raw 13-byte records themselves are *also* written to the
+  /// sidecar [BpRawStore] (when one is bound) — the BP debug screen
+  /// under Settings → Diagnostics renders those bytes so a future
+  /// live-capture session can map them to fields. The sidecar
+  /// survives across re-syncs because its layout is the wire format,
+  /// not the placeholder sample.
   void _onBpDay(BpRecordDay record) async {
     final samples = <BloodPressureSample>[];
     for (var i = 0; i < record.slots.length; i++) {
@@ -1369,6 +1390,12 @@ class HistorySync extends ChangeNotifier {
     final withSamples = updated.copyWith(bloodPressure: merged);
     _days[record.day] = withSamples;
     unawaited(_store?.mergeBloodPressure(record.day, samples));
+    // Best-effort sidecar: a write failure here is logged but does
+    // not block the placeholder samples from reaching the main store.
+    final raw = _bpRawStore;
+    if (raw != null) {
+      unawaited(raw.putDay(record.day, record));
+    }
     notifyListeners();
   }
 

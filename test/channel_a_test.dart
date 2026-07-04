@@ -1271,6 +1271,131 @@ void main() {
         expect(parsed.currentMonthDelta, 0);
       },
     );
+
+    // The 0x1d now-playing push is the only opcode in H59MA v14's
+    // persistent notify-listener registry that lacks a fixed payload
+    // spec; the field order is inferred from the symmetric
+    // host->watch `executeMusicSend` command (PROTOCOL.md §4.8 line 463).
+    // These tests pin the decoder's contract so the dashboard card
+    // can't quietly regress on the first live capture.
+    group('musicNotify 0x1d', () {
+      test(
+        'full frame decodes to MusicRsp with playing/progress/volume/title',
+        () async {
+          final t = FakeBleTransport();
+          final d = ChannelADispatcher(t);
+          d.bind();
+          // Channel-A frames are fixed at 16 bytes:
+          //   `[opcode][pl[0..13]][checksum]`
+          // So a 14-byte payload reserves the first 3 bytes for the
+          // header (playing^1, progress, volume) and leaves 11 bytes
+          // for the UTF-8 title. Pick a track that fits in 11 bytes
+          // when emitting realistic test fixtures — anything longer
+          // would silently truncate.
+          final f = Codec.buildChannelA(OpA.musicNotify, [
+            0x00, // playing^1 -> playing=true
+            64, // progress
+            80, // volume
+            ...'Vulfpeck'.codeUnits, // 8 bytes, fits in 11
+          ]);
+          t.inA.add(f);
+          final got = d.onMusic.first.timeout(const Duration(seconds: 1));
+          final rsp = await got;
+          expect(rsp.isPlaying, isTrue);
+          expect(rsp.progress, 64);
+          expect(rsp.volume, 80);
+          expect(rsp.track, 'Vulfpeck');
+        },
+      );
+
+      test('XOR-1 inversion flips wire 1 into playing=false', () async {
+        final t = FakeBleTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final f = Codec.buildChannelA(OpA.musicNotify, [
+          0x01, // playing^1 -> playing=false (paused)
+          0,
+          0,
+          ...'Idle'.codeUnits,
+        ]);
+        t.inA.add(f);
+        final rsp = await d.onMusic.first.timeout(const Duration(seconds: 1));
+        expect(rsp.isPlaying, isFalse);
+        expect(rsp.track, 'Idle');
+      });
+
+      test('frame with only a header (no title) emits empty track', () async {
+        final t = FakeBleTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        // buildChannelA always zero-pads subData to 14 bytes, so the
+        // "header-only" wire shape is a frame whose remaining 11
+        // bytes are all 0x00. The decoder's leading-null skip
+        // advances past the first one and then sees only zeros, so
+        // the resulting track is empty — the dashboard's "hide on
+        // empty track" guard picks it up and doesn't render a row.
+        final f = Codec.buildChannelA(OpA.musicNotify, [
+          0x00, // playing=true
+          0,
+          0,
+        ]);
+        t.inA.add(f);
+        final rsp = await d.onMusic.first.timeout(const Duration(seconds: 1));
+        expect(rsp.isPlaying, isTrue);
+        expect(rsp.progress, 0);
+        expect(rsp.volume, 0);
+        expect(rsp.track, isEmpty);
+      });
+
+      test('leading and trailing nulls are stripped from the title', () async {
+        final t = FakeBleTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        // The wire often pads with a leading NUL separator and one
+        // or more trailing NULs to align to the 16-byte slot. The
+        // decoder should drop both so the UI never shows stray
+        // glyphs. Keep the title short enough to fit (11-byte cap).
+        final f = Codec.buildChannelA(OpA.musicNotify, [
+          0x00, // playing=true
+          32, // progress
+          100, // volume
+          0x00, // leading NUL separator
+          ...'Boards'.codeUnits, // 6 bytes
+          0x00,
+          0x00, // trailing padding
+        ]);
+        t.inA.add(f);
+        final rsp = await d.onMusic.first.timeout(const Duration(seconds: 1));
+        expect(rsp.track, 'Boards');
+        expect(rsp.progress, 32);
+        expect(rsp.volume, 100);
+      });
+
+      test(
+        'sub-4-byte payload guard cannot be reached via buildChannelA',
+        () async {
+          // buildChannelA always emits a 16-byte frame with a 14-byte
+          // payload, so the `< 4 bytes` short-frame guard inside
+          // _decodeMusic is unreachable through the public dispatcher
+          // surface. We still verify the public path is well-defined
+          // by sending the smallest possible subData list (which
+          // buildChannelA zero-pads to 14) and asserting the decoder
+          // accepts it and emits an empty track rather than throwing.
+          final t = FakeBleTransport();
+          final d = ChannelADispatcher(t);
+          d.bind();
+          final f = Codec.buildChannelA(OpA.musicNotify, const []);
+          t.inA.add(f);
+          final rsp = await d.onMusic.first.timeout(const Duration(seconds: 1));
+          // buildChannelA zero-pads subData, so pl[0] = 0x00 →
+          // playing = (0 ^ 1) != 0 = true.
+          expect(rsp.isPlaying, isTrue);
+          expect(rsp.progress, 0);
+          expect(rsp.volume, 0);
+          expect(rsp.track, isEmpty);
+        },
+      );
+    });
   });
 
   group('Commands', () {
