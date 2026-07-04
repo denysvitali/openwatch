@@ -44,4 +44,60 @@ void main() {
       expect(Codec.rxOpcode(channelAFrames[1]), OpA.setAncs);
     });
   });
+
+  group('WatchManager notify frames', () {
+    test('records non-HR 0x73/0x78 dataTypes as opaque diagnostics', () async {
+      final t = FakeBleTransport();
+      final mgr = WatchManager(t, autoSyncTime: false);
+      addTearDown(mgr.dispose);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      t.inA.add(
+        Codec.buildChannelA(OpA.deviceNotify, [
+          0x09, // hypothetical ECG/PPG dataType: not in the HR allowlist
+          80, // plausible bpm byte that must not poison lastHeartRate
+          0x01,
+          0x02,
+        ]),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(mgr.lastHeartRate, isNull);
+      expect(mgr.observedUnknownNotifyTypes, contains(0x09));
+      expect(
+        mgr.lastUnknownNotifyPayload,
+        orderedEquals([0x09, 80, 0x01, 0x02, ...List.filled(10, 0)]),
+      );
+
+      t.inA.add(
+        Codec.buildChannelA(OpA.deviceSportNotify, [
+          0x0b, // another non-HR dataType on the sibling notify opcode
+          120,
+          0x03,
+        ]),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(mgr.lastHeartRate, isNull);
+      expect(mgr.observedUnknownNotifyTypes, containsAll(<int>[0x09, 0x0b]));
+      expect(
+        mgr.lastUnknownNotifyPayload,
+        orderedEquals([0x0b, 120, 0x03, ...List.filled(11, 0)]),
+      );
+    });
+
+    test('updates heart rate only for known HR notify dataTypes', () async {
+      final t = FakeBleTransport();
+      final mgr = WatchManager(t, autoSyncTime: false);
+      addTearDown(mgr.dispose);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      t.inA.add(Codec.buildChannelA(OpA.deviceSportNotify, [0x05, 99]));
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(mgr.lastHeartRate, 99);
+      expect(mgr.observedUnknownNotifyTypes, isEmpty);
+      expect(mgr.lastUnknownNotifyPayload, isNull);
+    });
+  });
 }

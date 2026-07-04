@@ -855,11 +855,12 @@ Feedback, Customer-support chat.
   (ECG) entry — it falls into the generic HR-mode-1 fallback. The §8.14 0xc1
   one-shot health-result handler returns ONE byte from `DAT_0082caf0`, incompatible
   with the documented shapes. SpO2 = PPG is on §3.10 `0x2c` (enable-bit +
-  auto-measure), NOT routed through `0x69` type=7. Resolution path: live BLE
-  capture during a `0x69` type=7 session on real hardware; cross-version Ghidra
-  pass against `H59MA_1.00.13_251230.bin` to check whether v13 carried an ECG
-  opcode that v14 dropped; sweep the `0x97..0x9F` reserved range (§8.20) for a
-  vendor-private notify opcode.
+  auto-measure), NOT routed through `0x69` type=7. Static cross-check: the v13
+  and v14 high-range FEE7 switch bytes match, and §8.20 shows `0x97..0x9F`
+  are default-slot vendor-NAK entries except `0x9D` (silent drop), so no
+  vendor-private ECG/PPG notify opcode is hiding in that reserved range.
+  Resolution path: live BLE capture during a `0x69` type=7 session on real
+  hardware.
 - **`@RequiresSignature` method set** — confirm which cloud endpoints sign at runtime.
 - **Legacy `bind` (`0x10` CMD_BIND_SUCCESS)** request layout — **not on H59MA Channel-A.**
   The §10.2 inventory (22 Channel-A handlers) does not list `0x10`; on Channel-B
