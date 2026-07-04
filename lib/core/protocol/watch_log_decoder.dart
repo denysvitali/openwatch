@@ -322,7 +322,9 @@ class WatchLogDecoder {
           return 'A 0x2f package length ${payload[0]}';
         }
       case OpA.displayClock:
-        return _summarizeDisplayClock(payload, details);
+        return _summarizeDisplayClockToggle(payload, details);
+      case OpA.watchfaceDisplayClock:
+        return _summarizeWatchfaceDisplayClock(payload, details);
       case OpA.musicNotify:
         return _summarizeMusicNotify(payload, details);
       case OpA.deviceNotify:
@@ -375,12 +377,36 @@ class WatchLogDecoder {
         '${weekMask.toRadixString(16).padLeft(2, '0')}';
   }
 
-  String _summarizeDisplayClock(
+  String _summarizeDisplayClockToggle(
+    Uint8List payload,
+    Map<String, Object?> details,
+  ) {
+    if (payload.length < 2) {
+      return 'A 0x12 display clock short payload';
+    }
+    final sub = payload[0];
+    final state = payload[1];
+    bool? enabled;
+    if (state == 1) {
+      enabled = true;
+    } else if (state == 2) {
+      enabled = false;
+    }
+    details['sub'] = _hex(sub);
+    details['state'] = state;
+    if (enabled != null) {
+      details['enabled'] = enabled;
+    }
+    return 'A 0x12 displayClock sub=${_hex(sub)} state=$state '
+        'enabled=${enabled ?? 'unknown'}';
+  }
+
+  String _summarizeWatchfaceDisplayClock(
     Uint8List payload,
     Map<String, Object?> details,
   ) {
     if (payload.length < 3) {
-      return 'A 0x18 display clock short payload';
+      return 'A 0x18 watchface display clock short payload';
     }
     final style = payload[0];
     final length = payload[1];
@@ -395,7 +421,7 @@ class WatchLogDecoder {
       'echoedLength': echoedLength,
       'echoedLabel': label,
     });
-    return 'A 0x18 displayClock style=${_hex(style)} length=$length '
+    return 'A 0x18 watchfaceDisplayClock style=${_hex(style)} length=$length '
         'echoedLength=$echoedLength label=${label.isEmpty ? 'none' : '"$label"'}';
   }
 
@@ -1180,6 +1206,8 @@ String _labelForChannelA(int opcode) {
       return 'weatherForecast';
     case OpA.displayClock:
       return 'displayClock';
+    case OpA.watchfaceDisplayClock:
+      return 'watchfaceDisplayClock';
     case OpA.displayTime:
       return 'displayTime';
     case OpA.musicNotify:

@@ -329,7 +329,7 @@ class ChannelADispatcher {
         _decodeSportDetail(pl);
       case OpA.pushMsgUint:
         _decodePushMsg(pl);
-      case OpA.displayClock:
+      case OpA.watchfaceDisplayClock:
         _decodeDisplayClock(pl);
       case OpA.readAlarm:
         _decodeAlarm(pl, _alarm);
@@ -1007,7 +1007,7 @@ class ChannelADispatcher {
     );
   }
 
-  /// `displayClock` (0x18) — watch-face / clock display response. The
+  /// `watchfaceDisplayClock` (0x18) — watch-face / clock display response. The
   /// firmware echoes the request back per `FUN_0082ccb6` (see
   /// `GHIDRA_DECOMPILATION.md` §3.5): `pl[1]` is the style selector,
   /// `pl[2]` is the echoed length (label length for style `0x01`, or the
@@ -1894,7 +1894,7 @@ class VibrationChunk {
   final Uint8List payload;
 }
 
-/// Response to a `displayClock` (0x18) request — the watch-face / clock
+/// Response to a `watchfaceDisplayClock` (0x18) request — the watch-face / clock
 /// display echo. Per `FUN_0082ccb6` (GHIDRA_DECOMPILATION.md §3.5) the
 /// firmware always echoes the request back; [style] is the sub-type
 /// selector, [length] is the request's `length` byte (or the

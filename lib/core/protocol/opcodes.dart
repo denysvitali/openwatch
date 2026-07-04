@@ -12,6 +12,7 @@ class OpA {
 
   // Display
   static const int displayClock = 0x12;
+  static const int watchfaceDisplayClock = 0x18;
   static const int displayOrientation = 0x29;
   static const int displayStyle = 0x2a;
   static const int displayTime = 0x1f;

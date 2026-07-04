@@ -297,6 +297,7 @@ Year = `BCD(byte) + 2000` (`0x7d0`).
 | DeviceWallpaperReq | `0x3f` | 01/02 | →watch | r:`[01]` w:`[02,value]` | DeviceWallpaperRsp: `pl[1]`=type; type==1⇒`pl[2..]`=UTF name | Get/set wallpaper. |
 | DeviceAvatarReq | `0x32` | — | →watch | empty subData | `pl[0]`=screenType; `pl[1..2]`=avatarWidth LE; `pl[3..4]`=height LE | On-device avatar canvas geometry. |
 | DisplayClockReq | `0x12` | 01/02 | →watch | w:`[02, en?1:2]` | state echo `pl[1]` (1/2) | Always-on/display clock. |
+| WatchfaceDisplayClockReq | `0x18` | style | both | `[style, length, label…]` | echo `[style, length, echoedLength, label…]` per GHIDRA §3.5 | Watch-face / clock-display label and BLE-name refresh path. Distinct from `0x12` always-on display-clock toggle. |
 | DisplayOrientationReq | `0x29` | 01/02 | →watch | w:`[02, p1?1:2, (p1?0:(p2?1:2))]` | status | Screen orientation/auto-rotate. |
 | DisplayStyleReq | `0x2a` | 01/02 | →watch | w:`[02, style]` | status | Display style id. |
 | DisplayTimeReq | `0x1f` | 01/02/03 | →watch | w:`[02, displayTime, displayType, alpha, 0x00, total, curr]` (idx4 reserved) | status | Screen-on duration/brightness profile (read/write/delete). |

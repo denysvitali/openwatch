@@ -189,8 +189,25 @@ void main() {
       expect(decoded.title, contains('offsets=[0, 2]'));
     });
 
-    test('summarizes display-clock echo frames', () {
-      final frame = Codec.buildChannelA(OpA.displayClock, [
+    test('summarizes display-clock toggle replies', () {
+      final frame = Codec.buildChannelA(OpA.displayClock, [OpA.mixWrite, 1]);
+
+      final decoded = const WatchLogDecoder().decodeHex(
+        frame.map((b) => b.toRadixString(16).padLeft(2, '0')).join('-'),
+      );
+
+      expect(decoded.valid, isTrue);
+      expect(decoded.details['label'], 'displayClock');
+      expect(decoded.details['sub'], '0x02');
+      expect(decoded.details['state'], 1);
+      expect(decoded.details['enabled'], isTrue);
+      expect(decoded.title, contains('displayClock sub=0x02'));
+      expect(decoded.title, contains('state=1'));
+      expect(decoded.title, contains('enabled=true'));
+    });
+
+    test('summarizes watchface display-clock echo frames', () {
+      final frame = Codec.buildChannelA(OpA.watchfaceDisplayClock, [
         0x22,
         5,
         3,
@@ -202,32 +219,35 @@ void main() {
       );
 
       expect(decoded.valid, isTrue);
-      expect(decoded.details['label'], 'displayClock');
+      expect(decoded.details['label'], 'watchfaceDisplayClock');
       expect(decoded.details['style'], 0x22);
       expect(decoded.details['length'], 5);
       expect(decoded.details['echoedLength'], 3);
       expect(decoded.details['echoedLabel'], 'ABC');
       expect(decoded.details['payload'], isNotNull);
-      expect(decoded.title, contains('displayClock style=0x22'));
+      expect(decoded.title, contains('watchfaceDisplayClock style=0x22'));
       expect(decoded.title, contains('length=5'));
       expect(decoded.title, contains('echoedLength=3'));
       expect(decoded.title, contains('label="ABC"'));
     });
 
-    test('summarizes minimal display-clock frames with no label', () {
-      final frame = Codec.buildChannelA(OpA.displayClock, [0x01, 0x02]);
+    test('summarizes minimal watchface display-clock frames with no label', () {
+      final frame = Codec.buildChannelA(OpA.watchfaceDisplayClock, [
+        0x01,
+        0x02,
+      ]);
 
       final decoded = const WatchLogDecoder().decodeHex(
         frame.map((b) => b.toRadixString(16).padLeft(2, '0')).join('-'),
       );
 
       expect(decoded.valid, isTrue);
-      expect(decoded.details['label'], 'displayClock');
+      expect(decoded.details['label'], 'watchfaceDisplayClock');
       expect(decoded.details['style'], 0x01);
       expect(decoded.details['length'], 2);
       expect(decoded.details['echoedLength'], 0);
       expect(decoded.details['echoedLabel'], '');
-      expect(decoded.title, contains('displayClock style=0x01'));
+      expect(decoded.title, contains('watchfaceDisplayClock style=0x01'));
       expect(decoded.title, contains('length=2'));
       expect(decoded.title, contains('echoedLength=0'));
       expect(decoded.title, contains('label=none'));

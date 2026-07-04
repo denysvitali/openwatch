@@ -1077,7 +1077,7 @@ void main() {
       await sub.cancel();
     });
 
-    test('displayClock 0x18 echoes style + label slice', () async {
+    test('watchfaceDisplayClock 0x18 echoes style + label slice', () async {
       final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
@@ -1085,7 +1085,7 @@ void main() {
       // Style 0x02 = label style, slot 0; length 0x05 echoes 5 label bytes.
       final label = [0x4f, 0x5f, 0x46, 0x41, 0x43]; // "O_FAC"
       final payload = <int>[0x02, 0x05, 0x05, ...label];
-      t.inA.add(Codec.buildChannelA(OpA.displayClock, payload));
+      t.inA.add(Codec.buildChannelA(OpA.watchfaceDisplayClock, payload));
       final r = await got.timeout(const Duration(seconds: 1));
       expect(r.style, 0x02);
       expect(r.length, 0x05);
