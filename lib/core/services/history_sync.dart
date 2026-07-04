@@ -141,10 +141,8 @@ class BpRecordDay {
 
   final DateOnly day;
 
-  /// `slotMult * (24 * 60 / slotCount)` — duration of each slot. The
-  /// H59MA emits 30-min slots so slotMult=2; smaller watches may use
-  /// 15-min slots (slotMult=1). Until we observe a v14 with a
-  /// different value, assume 30 min.
+  /// Slot duration derived from the header's `slotMult`. Observed
+  /// H59MA records use 15-minute units (`slotMult=2` => 30 minutes).
   final Duration slotDuration;
 
   /// One entry per set bit in the header's 48-bit presence bitmap, in
@@ -1881,6 +1879,7 @@ class BpRecordAssembler {
   // Per-record accumulation state.
   DateOnly? _day;
   int _slotDurationMinutes = 30;
+  int _nextSlotIndex = 0;
   final List<Uint8List> _slots = [];
 
   /// Assembled records, broadcast so multiple consumers (e.g. UI +
@@ -1913,15 +1912,18 @@ class BpRecordAssembler {
     final slotMult = payload[4];
     if (month < 1 || month > 12 || day < 1 || day > 31) return;
     _day = DateOnly(year, month, day);
-    // 30 min = slotMult 2; 60 min = slotMult 4; H59MA observed at 30.
+    // Observed H59MA encoding: slotMult is a 15-minute unit count
+    // (`2` => 30 minutes). A zero value is invalid on the wire, but
+    // defaulting to the observed cadence preserves timestamps.
     // We don't pre-decode systolic/diastolic here (PROTOCOL §8.5 —
     // needs live capture) — surface raw 13B records and let the
     // consumer pick the field layout once §8.5 is resolved.
     _slotDurationMinutes = slotMult == 0
         ? 30
-        : (30 ~/ slotMult).clamp(1, 60).toInt();
+        : (slotMult * 15).clamp(15, 60).toInt();
     final bitmap = _read48(payload, 5);
     _slots.clear();
+    _nextSlotIndex = 0;
     for (var slot = 0; slot < 48; slot++) {
       if ((bitmap & (1 << slot)) != 0) {
         _slots.add(Uint8List(13));
@@ -1933,25 +1935,9 @@ class BpRecordAssembler {
     // 13B records back-to-back after the [0]=0x01 tag.
     final data = payload.sublist(1);
     var i = 0;
-    while (i + 13 <= data.length && _slots.isNotEmpty) {
-      // The first still-empty slot gets the next 13 bytes; this
-      // preserves order even if the data chunks arrive out-of-order
-      // (rare, but defensible). Halt if every slot is filled — any
-      // trailing bytes after the bitmap was exhausted are discarded
-      // (firmware should not emit more, but if it does the cap is
-      // safer than an out-of-range write).
-      final dst = _slots.firstWhere(
-        (s) => s.any((b) => b != 0),
-        orElse: () => Uint8List(0),
-      );
-      if (dst.isEmpty) {
-        if (_slots.every((s) => s.any((b) => b != 0))) break;
-        // Pick the first still-empty slot.
-        final empty = _slots.firstWhere((s) => s.every((b) => b == 0));
-        empty.setRange(0, 13, data.sublist(i, i + 13));
-      } else {
-        dst.setRange(0, 13, data.sublist(i, i + 13));
-      }
+    while (i + 13 <= data.length && _nextSlotIndex < _slots.length) {
+      _slots[_nextSlotIndex].setRange(0, 13, data.sublist(i, i + 13));
+      _nextSlotIndex++;
       i += 13;
     }
   }
@@ -1969,6 +1955,7 @@ class BpRecordAssembler {
     );
     _day = null;
     _slots.clear();
+    _nextSlotIndex = 0;
   }
 
   int _read48(Uint8List b, int off) {

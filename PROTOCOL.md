@@ -370,7 +370,7 @@ the generic bitmap below.
 | BloodOxygenSettingReq | `0x2c` | 01/02 | →watch | w:`[02, en(0/1)]` | read: `[1]`enable | SpO2 auto-measure on/off. |
 | BpSettingReq | `0x0c` | 01/02 | →watch | w:`[02,en,sH,sM,eH,eM,multiple]` | read: `[1]`en,`[2..5]`window,`[6]`multiple | BP auto-measure window. |
 | BpReadConformReq | `0x0e` | — | →watch | `[0x00]`=ok / `[0xFF]`=fail | (none; BP history via `0x0d`) | Ack a BP measurement result. |
-| BpDataRsp (no req) | `0x0d` | — | watch→ | n/a | hdr `[0]=00`{`[1]`yr-2000,`[2]`mo,`[3]`d,`[4]`slotMult,`[5..10]`48-bit presence bitmap}; data `[0]=01`{13B records}; `0xFF`=end | BP history records. |
+| BpDataRsp (no req) | `0x0d` | — | watch→ | n/a | hdr `[0]=00`{`[1]`yr-2000,`[2]`mo,`[3]`d,`[4]`slotMult,`[5..10]`48-bit presence bitmap}; `slotMult` is observed as 15-minute units (`2`=30 min); data `[0]=01`{opaque 13B records}; `0xFF`=end | BP history records. OpenWatch preserves raw slots; systolic/diastolic byte mapping remains §8.5 work. |
 | HRVReq | `0x39` | index | →watch | `[index]` | multi-pkt (`[0]=00`{size,range=30}, `[0]=01`{offset days-back + samples}, `0xFF`=end). stride 13B. | Read HRV history for a day index. |
 | PressureReq | `0x37` | index | →watch | `[index]` | multi-pkt (same scheme as HRV). stride 13B. | Read stress history for a day index. |
 | PressureSettingReq | `0x38` | 01/02 | →watch | w:`[02,en(0/1)]` | read: `[1]`enable; response echoes `[0x38,sub,value]` | Stress/pressure auto-measure enable bit. H59MA v14 has no confirmed Channel-A HRV auto-measure setting; the old APK-era `0x38` HRV setting row is stale for this firmware. |
@@ -861,6 +861,15 @@ Feedback, Customer-support chat.
   vendor-private ECG/PPG notify opcode is hiding in that reserved range.
   Resolution path: live BLE capture during a `0x69` type=7 session on real
   hardware.
+- **BP-history raw slot field split** (`0x0d` BpDataRsp) — header/date/bitmap
+  reassembly is implemented, and OpenWatch stores each 13B slot raw in the
+  `bp_raw` sidecar so captures are not lost. Do not decode
+  systolic/diastolic yet: GHIDRA's persistent-history descriptor notes the
+  underlying BP table as keyed records with hourly 4-byte slots (§persistent
+  history descriptors), while the host-visible stream uses tagged `0x00` /
+  `0x01` / `0xFF` frames with opaque 13B records. Resolution path: correlate
+  live `0x0d` frames with known manual/cuff readings and update the raw-slot
+  parser only when the byte mapping is proven.
 - **`@RequiresSignature` method set** — confirm which cloud endpoints sign at runtime.
 - **Legacy `bind` (`0x10` CMD_BIND_SUCCESS)** request layout — **not on H59MA Channel-A.**
   The §10.2 inventory (22 Channel-A handlers) does not list `0x10`; on Channel-B
