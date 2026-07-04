@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/ble/ble_transport.dart';
-import '../../core/protocol/commands.dart';
 import '../../core/providers/app_providers.dart';
 
 /// DIY watch-face designer (Channel B `0x3a` upload).
@@ -45,8 +43,8 @@ class _WatchFaceDesignerScreenState
 
   @override
   Widget build(BuildContext context) {
-    final ready = (ref.watch(linkStateProvider).value) == LinkState.ready;
     final manager = ref.watch(watchManagerProvider);
+    final ready = manager.isReady;
     // Reasonable default canvas; firmware uses screen geometry. Most
     // H59MA-class devices are 240×280. The Oudmon SDK's coordinates
     // are device-relative; we use the manager's reported dims when
@@ -146,8 +144,7 @@ class _WatchFaceDesignerScreenState
       final elements = _elements
           .map((e) => (type: e.type, x: e.x, y: e.y, r: e.r, g: e.g, b: e.b))
           .toList();
-      final frame = Commands.writeCustomWatchFace(elements);
-      await ref.read(bleTransportProvider).sendB(frame);
+      await ref.read(watchManagerProvider).writeCustomWatchFace(elements);
       _toast('Sent ${elements.length} elements');
     } catch (e) {
       _toast('Send failed: $e');
