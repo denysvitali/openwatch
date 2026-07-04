@@ -189,6 +189,54 @@ void main() {
       expect(decoded.title, contains('offsets=[0, 2]'));
     });
 
+    test('summarizes music notify frames with decoded metadata', () {
+      final frame = Codec.buildChannelA(OpA.musicNotify, [
+        0x00, // playing^1 -> playing=true
+        64,
+        80,
+        ...'Vulfpeck'.codeUnits,
+      ]);
+
+      final decoded = const WatchLogDecoder().decodeHex(
+        frame.map((b) => b.toRadixString(16).padLeft(2, '0')).join('-'),
+      );
+
+      expect(decoded.valid, isTrue);
+      expect(decoded.details['label'], 'musicNotify');
+      expect(decoded.details['playing'], isTrue);
+      expect(decoded.details['progress'], 64);
+      expect(decoded.details['volume'], 80);
+      expect(decoded.details['track'], 'Vulfpeck');
+      expect(decoded.title, contains('music playing=true'));
+      expect(decoded.title, contains('track="Vulfpeck"'));
+    });
+
+    test(
+      'summarizes music notify frames after trimming null title padding',
+      () {
+        final frame = Codec.buildChannelA(OpA.musicNotify, [
+          0x01, // playing^1 -> playing=false
+          0,
+          10,
+          0,
+          ...'Idle'.codeUnits,
+          0,
+          0,
+        ]);
+
+        final decoded = const WatchLogDecoder().decodeHex(
+          frame.map((b) => b.toRadixString(16).padLeft(2, '0')).join('-'),
+        );
+
+        expect(decoded.valid, isTrue);
+        expect(decoded.details['playing'], isFalse);
+        expect(decoded.details['volume'], 10);
+        expect(decoded.details['track'], 'Idle');
+        expect(decoded.title, contains('music playing=false'));
+        expect(decoded.title, contains('track="Idle"'));
+      },
+    );
+
     test('summarizes FEE7 status responses from the vendor notify UUID', () {
       final frame = Codec.buildChannelA(Fee7.statusResponse, [80, 0xab]);
 

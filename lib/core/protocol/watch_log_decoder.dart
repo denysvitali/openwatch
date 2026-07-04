@@ -321,6 +321,8 @@ class WatchLogDecoder {
           details['packageLength'] = payload[0];
           return 'A 0x2f package length ${payload[0]}';
         }
+      case OpA.musicNotify:
+        return _summarizeMusicNotify(payload, details);
       case OpA.deviceNotify:
         return 'A 0x73 device notify payload=${_compactHex(payload)}';
       case OpA.queryDataDistribution:
@@ -369,6 +371,32 @@ class WatchLogDecoder {
         'time=${hour.toString().padLeft(2, '0')}:'
         '${minute.toString().padLeft(2, '0')} weekMask=0x'
         '${weekMask.toRadixString(16).padLeft(2, '0')}';
+  }
+
+  String _summarizeMusicNotify(
+    Uint8List payload,
+    Map<String, Object?> details,
+  ) {
+    if (payload.length < 4) {
+      return 'A 0x1d music notify short payload';
+    }
+    final playing = (payload[0] ^ 0x01) != 0;
+    final progress = payload[1] & 0xFF;
+    final volume = payload[2] & 0xFF;
+    var start = 3;
+    if (start < payload.length && payload[start] == 0) start++;
+    final title = String.fromCharCodes(
+      payload.sublist(start).where((b) => b != 0),
+    ).trim();
+    details.addAll({
+      'playing': playing,
+      'progress': progress,
+      'volume': volume,
+      'track': title,
+    });
+    final trackSummary = title.isEmpty ? 'untitled' : '"$title"';
+    return 'A 0x1d music playing=$playing progress=$progress '
+        'volume=$volume track=$trackSummary';
   }
 
   String _summarizeFee7(
@@ -1126,6 +1154,8 @@ String _labelForChannelA(int opcode) {
       return 'weatherForecast';
     case OpA.displayTime:
       return 'displayTime';
+    case OpA.musicNotify:
+      return 'musicNotify';
     case OpA.queryDataDistribution:
       return 'queryDataDistribution';
     default:
