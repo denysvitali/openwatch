@@ -8,6 +8,16 @@ import 'opcodes.dart';
 class Commands {
   Commands._();
 
+  static const List<bool> _noWeekdays = [
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+  ];
+
   /// `SetTimeReq` (0x01): `[BCD y,mo,d,h,mi,s][flags]` where `flags`:
   ///   * `0xFF` → skip the seconds-tick re-init at the end of the handler
   ///     (`FUN_0082bb4e` skips `FUN_00827956()`/`FUN_008276d2()`).
@@ -307,25 +317,17 @@ class Commands {
     required bool enabled,
     required int hour,
     required int minute,
-    List<bool> weekdays = const [
-      false,
-      false,
-      false,
-      false,
-      false,
-      false,
-      false,
-    ],
-  }) {
-    final days = List<int>.generate(7, (i) => (weekdays[i]) ? 1 : 0);
-    return Codec.buildChannelA(OpA.setAlarm, [
-      index & 0xFF,
-      enabled ? 1 : 2,
-      Codec.toBcd(hour),
-      Codec.toBcd(minute),
-      ...days,
-    ]);
-  }
+    List<bool> weekdays = _noWeekdays,
+  }) => Codec.buildChannelA(
+    OpA.setAlarm,
+    _alarmSlotPayload(
+      index: index & 0xFF,
+      enabled: enabled,
+      hour: hour,
+      minute: minute,
+      weekdays: weekdays,
+    ),
+  );
 
   /// `WeatherForecastReq` (0x1a): push one day of weather.
   static Uint8List weather({
@@ -667,28 +669,34 @@ class Commands {
     required bool enabled,
     required int hour,
     required int minute,
-    List<bool> weekdays = const [
-      false,
-      false,
-      false,
-      false,
-      false,
-      false,
-      false,
-    ],
-  }) {
-    final days = List<int>.generate(7, (i) => (weekdays[i]) ? 1 : 0);
-    return Codec.buildChannelA(OpA.setDrinkAlarm, [
-      _clamp(index, 0, 7),
-      enabled ? 1 : 2,
-      Codec.toBcd(hour),
-      Codec.toBcd(minute),
-      ...days,
-    ]);
-  }
+    List<bool> weekdays = _noWeekdays,
+  }) => Codec.buildChannelA(
+    OpA.setDrinkAlarm,
+    _alarmSlotPayload(
+      index: _clamp(index, 0, 7),
+      enabled: enabled,
+      hour: hour,
+      minute: minute,
+      weekdays: weekdays,
+    ),
+  );
 
   static Uint8List readDrinkAlarm(int index) =>
       Codec.buildChannelA(OpA.readDrinkAlarm, [_clamp(index, 0, 7)]);
+
+  static List<int> _alarmSlotPayload({
+    required int index,
+    required bool enabled,
+    required int hour,
+    required int minute,
+    required List<bool> weekdays,
+  }) => [
+    index,
+    enabled ? 1 : 2,
+    Codec.toBcd(hour),
+    Codec.toBcd(minute),
+    for (var i = 0; i < 7; i++) (i < weekdays.length && weekdays[i]) ? 1 : 0,
+  ];
 
   // ---------------------------------------------------------------------------
   // Channel-B helpers — DIY watch face and other LargeData actions.

@@ -10,9 +10,11 @@ import 'package:openwatch/core/services/watch_manager.dart';
 
 import 'support/fake_ble_transport.dart';
 
-/// Helper: build a `0x24` readAlarm reply with the given decoded
-/// fields. Mirrors the wire layout documented in PROTOCOL.md §4.3.
+/// Helper: build a `0x24` readAlarm / `0x28` readDrinkAlarm reply with
+/// the given decoded fields. Mirrors the shared wire layout documented
+/// in PROTOCOL.md §4.3.
 Uint8List _alarmReply({
+  int opcode = OpA.readAlarm,
   required int slot,
   required bool enabled,
   required int hour,
@@ -20,7 +22,7 @@ Uint8List _alarmReply({
   List<bool> weekdays = const [false, false, false, false, false, false, false],
 }) {
   final days = List<int>.generate(7, (i) => weekdays[i] ? 1 : 0);
-  return Codec.buildChannelA(OpA.readAlarm, [
+  return Codec.buildChannelA(opcode, [
     slot & 0xFF,
     enabled ? 1 : 2,
     Codec.toBcd(hour),
@@ -112,6 +114,29 @@ void main() {
         expect(pl[5], 0); // Mo
       },
     );
+
+    test('setAlarm and setDrinkAlarm share the 11-byte slot layout', () {
+      final clock = Codec.rxPayload(
+        Commands.setAlarm(
+          index: 2,
+          enabled: false,
+          hour: 7,
+          minute: 5,
+          weekdays: const [true, false, false, false, false, false, true],
+        ),
+      );
+      final drink = Codec.rxPayload(
+        Commands.setDrinkAlarm(
+          index: 2,
+          enabled: false,
+          hour: 7,
+          minute: 5,
+          weekdays: const [true, false, false, false, false, false, true],
+        ),
+      );
+      expect(clock.sublist(0, 11), drink.sublist(0, 11));
+      expect(clock[1], 2); // disabled = 2
+    });
   });
 
   group('Alarm dispatcher', () {
@@ -173,6 +198,33 @@ void main() {
       expect(a.hour, 0);
       expect(a.minute, 0);
       expect(a.weekdays, List<bool>.filled(7, false));
+    });
+
+    test('readDrinkAlarm 0x28 uses same decoder on separate stream', () async {
+      final t = FakeBleTransport();
+      final d = ChannelADispatcher(t);
+      d.bind();
+      var clockFired = false;
+      final clockSub = d.onAlarm.listen((_) => clockFired = true);
+      final got = d.onDrinkAlarm.first;
+      final f = _alarmReply(
+        opcode: OpA.readDrinkAlarm,
+        slot: 7,
+        enabled: true,
+        hour: 14,
+        minute: 25,
+        weekdays: const [true, false, true, false, true, false, true],
+      );
+      t.inA.add(f);
+      final a = await got.timeout(const Duration(seconds: 1));
+      expect(a.slot, 7);
+      expect(a.enabled, isTrue);
+      expect(a.hour, 14);
+      expect(a.minute, 25);
+      expect(a.weekMask, 0x55);
+      await Future<void>.delayed(Duration.zero);
+      expect(clockFired, isFalse);
+      await clockSub.cancel();
     });
   });
 

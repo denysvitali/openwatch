@@ -73,6 +73,7 @@ class ChannelADispatcher {
   late final _queryDataDistribution = _ctrl<QueryDataDistribution>();
   late final _music = _ctrl<MusicRsp>();
   late final _alarm = _ctrl<Alarm>();
+  late final _drinkAlarm = _ctrl<Alarm>();
 
   /// Fires once per `0x01` setTime ACK, carrying the host's wall-clock
   /// time at the moment the watch confirmed the sync. The 14-byte payload
@@ -248,9 +249,16 @@ class ChannelADispatcher {
   /// `GHIDRA_DECOMPILATION.md` §3.5).
   Stream<DisplayClockResponse> get onDisplayClock => _displayClock.stream;
 
-  /// Clock-alarm slot read (`0x24`). See [Alarm] for the record shape
-  /// and `PROTOCOL.md` §4.3 for the wire layout.
+  /// Clock-alarm slot read (`0x24`). See [Alarm] for the shared
+  /// alarm/reminder record shape and `PROTOCOL.md` §4.3 for the wire
+  /// layout.
   Stream<Alarm> get onAlarm => _alarm.stream;
+
+  /// Drink/sedentary reminder slot read (`0x28`). The payload uses the
+  /// same 11-byte shape as [onAlarm] but has an extended slot range
+  /// (`0..7`). Kept on a separate stream so clock-alarm UI state cannot
+  /// be polluted by reminder reads.
+  Stream<Alarm> get onDrinkAlarm => _drinkAlarm.stream;
 
   /// Now-playing push (`0x1d`). The watch re-broadcasts the metadata
   /// whenever iOS media state changes. See [MusicRsp] for the
@@ -324,7 +332,9 @@ class ChannelADispatcher {
       case OpA.displayClock:
         _decodeDisplayClock(pl);
       case OpA.readAlarm:
-        _decodeAlarm(pl);
+        _decodeAlarm(pl, _alarm);
+      case OpA.readDrinkAlarm:
+        _decodeAlarm(pl, _drinkAlarm);
       case OpA.phoneSport:
         _decodePhoneSport(pl);
       case OpA.muslim:
@@ -968,7 +978,7 @@ class ChannelADispatcher {
     );
   }
 
-  /// `readAlarm` (0x24) — clock-alarm slot read.
+  /// `readAlarm` (0x24) / `readDrinkAlarm` (0x28) — alarm slot read.
   ///
   /// Per `PROTOCOL.md` §4.3 the response is
   /// `[idx, en(0..2), hourBCD, minuteBCD, day0..day6]` (11 bytes
@@ -976,7 +986,7 @@ class ChannelADispatcher {
   /// value range is 0..2 but 0 only appears on freshly-flashed
   /// devices, so mapping it explicitly avoids surfacing a phantom
   /// disabled alarm.
-  void _decodeAlarm(Uint8List pl) {
+  void _decodeAlarm(Uint8List pl, StreamController<Alarm> sink) {
     if (pl.length < 4) return;
     final idx = pl[0];
     final enabled = pl[1] == 1;
@@ -986,7 +996,7 @@ class ChannelADispatcher {
       final b = pl.length > 4 + i ? pl[4 + i] : 0;
       return b != 0;
     });
-    _alarm.add(
+    sink.add(
       Alarm(
         slot: idx,
         enabled: enabled,
@@ -1340,7 +1350,7 @@ class SedentaryConfig {
   final int interval;
 }
 
-/// One clock-alarm slot (`0x24` read response).
+/// One alarm/reminder slot (`0x24` / `0x28` read response).
 ///
 /// `weekdays[0]` is Sunday (Sun..Sat order matches the wire
 /// `day0..day6` from `PROTOCOL.md` §4.3).
@@ -1353,7 +1363,8 @@ class Alarm {
     this.weekdays = const [false, false, false, false, false, false, false],
   });
 
-  /// Firmware slot index `0..4` (clock alarms).
+  /// Firmware slot index. Clock alarms use `0..4`; drink reminders use
+  /// `0..7`.
   final int slot;
 
   /// Whether the alarm is armed.
