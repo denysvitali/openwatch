@@ -245,7 +245,7 @@ class Fee7 {
   static const int miscAncs = 0x60; // FUN_0082be90
 
   // Status
-  static const int statusResponse = 0x61; // 'a' — battery / step counters
+  static const int statusResponse = 0x61; // 'a' — live u32 status snapshot
 
   // Mode control (multi-step + continuation)
   static const int modeControl = 0x69; // 'i'
@@ -253,7 +253,7 @@ class Fee7 {
 
   // Low-range switch8 entries that mirror Channel-A features
   static const int camera = 0x02; // FUN_0082c4d4
-  static const int battery = 0x03; // FUN_0082bc7e
+  static const int battery = 0x03; // [0x03, percent, charging]
   static const int bindAncs = 0x04; // FUN_0082c432
   static const int timeFormat = 0x0a; // FUN_0082b9c6
   static const int bpSetting = 0x0c; // FUN_0082c0de

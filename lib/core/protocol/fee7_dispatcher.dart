@@ -38,6 +38,7 @@ class Fee7Dispatcher {
   late final _bloodOxygen = _ctrl<BloodOxygenUpdate>();
   late final _hrv = _ctrl<HrvSetting>();
   late final _handshake = _ctrl<HandshakeResponse>();
+  late final _battery = _ctrl<Fee7BatteryResponse>();
   late final _alert = _ctrl<AlertTrigger>();
   late final _findPhone = _ctrl<FindPhoneEvent>();
   late final _status = _ctrl<StatusResponse>();
@@ -66,13 +67,16 @@ class Fee7Dispatcher {
   /// `0x48` 'H' handshake — 15-byte device-info payload.
   Stream<HandshakeResponse> get onHandshake => _handshake.stream;
 
+  /// `0x03` direct battery response: percent + charging flag.
+  Stream<Fee7BatteryResponse> get onBattery => _battery.stream;
+
   /// `0x50` 'P' alert trigger; payload[1..N] decoded.
   Stream<AlertTrigger> get onAlert => _alert.stream;
 
   /// `0x51` 'Q' find-phone event; `pl[1]==1` arms the pattern.
   Stream<FindPhoneEvent> get onFindPhone => _findPhone.stream;
 
-  /// `0x61` 'a' status response: battery + step counters.
+  /// `0x61` 'a' status response: 32-bit live status snapshot.
   Stream<StatusResponse> get onStatus => _status.stream;
 
   /// `0x69` 'i' multi-step mode control (start).
@@ -139,6 +143,8 @@ class Fee7Dispatcher {
         );
       case Fee7.handshakeResponse:
         _handshake.add(_decodeHandshakeResponse(frame, pl));
+      case Fee7.battery:
+        _battery.add(_decodeBatteryResponse(pl));
       case Fee7.alertTrigger:
         _alert.add(_decodeAlertTrigger(pl));
       case Fee7.findPhoneEvent:
@@ -255,14 +261,17 @@ class Fee7Dispatcher {
     return FindPhoneEvent(armsPattern: armsPattern, payload: pl);
   }
 
-  StatusResponse _decodeStatusResponse(Uint8List pl) {
-    final battery = pl.isNotEmpty ? pl[0] : 0;
-    final stepsLowByte = pl.length >= 2 ? pl[1] : 0;
-    return StatusResponse(
-      battery: battery,
-      stepsLowByte: stepsLowByte,
+  Fee7BatteryResponse _decodeBatteryResponse(Uint8List pl) {
+    return Fee7BatteryResponse(
+      percent: pl.isNotEmpty ? pl[0] : null,
+      charging: pl.length >= 2 ? pl[1] != 0 : null,
       payload: pl,
     );
+  }
+
+  StatusResponse _decodeStatusResponse(Uint8List pl) {
+    final statusValue = pl.length >= 4 ? Codec.readU32le(pl, 0) : 0;
+    return StatusResponse(statusValue: statusValue, payload: pl);
   }
 
   ModeControl _decodeModeControl(Uint8List pl) {
@@ -358,6 +367,25 @@ class HandshakeResponse {
   final int? status;
 }
 
+/// `0x03` direct battery response from FEE7.
+///
+/// H59MA v14 builds `[0x03, percent, charging]` at body offset `0x587e`.
+class Fee7BatteryResponse {
+  const Fee7BatteryResponse({
+    required this.percent,
+    required this.charging,
+    required this.payload,
+  });
+
+  /// Battery percentage, or `null` when a malformed short payload was decoded.
+  final int? percent;
+
+  /// `true` when the firmware's charge-state helper returned non-zero.
+  final bool? charging;
+
+  final Uint8List payload;
+}
+
 /// `0x50` 'P' alert trigger; payload bytes carry the alarm pattern.
 class AlertTrigger {
   const AlertTrigger({required this.payload});
@@ -372,21 +400,29 @@ class FindPhoneEvent {
   final Uint8List payload;
 }
 
-/// `0x61` 'a' status response: battery percentage + step counter low byte.
+/// `0x61` 'a' status response: 32-bit live status snapshot.
 ///
-/// The firmware sends `pl[0]=battery` and `pl[1]=steps & 0xFF`. For the
-/// full step counter the host must combine with the cumulative value pushed
-/// separately (not modeled here yet — see `GHIDRA_DECOMPILATION.md` §3).
+/// The firmware sends `pl[0..3] = DAT_0082bfd4 + 0x2c` as a little-endian
+/// u32, or an all-zero idle ACK when the producer side has nothing new.
+/// Older code treated the low bytes as battery/step aliases; keep those
+/// accessors so existing callers do not break while newer code can use the
+/// explicit [statusValue] and [statusLowByte] names.
 class StatusResponse {
-  StatusResponse({
-    required this.battery,
-    required this.stepsLowByte,
-    Uint8List? payload,
-  }) : payload = payload ?? _empty;
-  final int battery;
+  StatusResponse({required this.statusValue, Uint8List? payload})
+    : payload = payload ?? _empty;
+
+  final int statusValue;
+
+  bool get isIdle => statusValue == 0;
+
+  int get statusLowByte => statusValue & 0xFF;
+
+  /// Back-compat alias for older code that interpreted the low byte as battery.
+  int get battery => statusLowByte;
 
   /// Low byte of the step counter (`pl[1]`). Truncated to 8 bits.
-  final int stepsLowByte;
+  int get stepsLowByte => (statusValue >> 8) & 0xFF;
+
   final Uint8List payload;
 
   /// Back-compat alias for the older `steps` field.

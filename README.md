@@ -58,11 +58,11 @@ Working: device scan/connect, handshake, time sync, capability detection,
 find-device, today's steps/calories, live heart-rate, notification enable,
 factory reset, offline-first cloud toggle, firmware fetch-and-store + OTA flow.
 
-Needs live-capture verification (flagged in `PROTOCOL.md` §8.5): battery push
-opcode, ECG/PPG notify opcodes, legacy APK-layer bind (`0x10`) layout, and
-remaining health history field splits. Channel B CRC is resolved as
-CRC-16/MODBUS from firmware. Health history reads (HR/sleep/sport) and
-watch-face upload are scaffolded but not yet surfaced in the UI.
+Needs live-capture verification (flagged in `PROTOCOL.md` §8.5): ECG/PPG
+notify opcodes, legacy APK-layer bind (`0x10`) layout, and remaining health
+history field splits. Channel B CRC is resolved as CRC-16/MODBUS from firmware.
+Health history reads (HR/sleep/sport) and watch-face upload are scaffolded but
+not yet surfaced in the UI.
 
 ## Legal
 

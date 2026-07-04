@@ -150,19 +150,42 @@ void main() {
       },
     );
 
-    test('routes 0x61 to StatusResponse stream with battery+steps', () async {
+    test('routes 0x03 to direct battery stream', () async {
+      final host = _StubHost();
+      final svc = Fee7Service.attach(host);
+      final d = Fee7Dispatcher(svc);
+      d.bind();
+
+      final got = d.onBattery.first;
+      final frame = Codec.buildChannelA(Fee7.battery, [85, 1]);
+      host.inbound.add(frame);
+
+      final b = await got.timeout(const Duration(seconds: 1));
+      expect(b.percent, 85);
+      expect(b.charging, isTrue);
+      await svc.dispose();
+    });
+
+    test('routes 0x61 to StatusResponse stream with status u32', () async {
       final host = _StubHost();
       final svc = Fee7Service.attach(host);
       final d = Fee7Dispatcher(svc);
       d.bind();
 
       final got = d.onStatus.first;
-      final frame = Codec.buildChannelA(Fee7.statusResponse, [85, 1234 & 0xFF]);
+      final frame = Codec.buildChannelA(Fee7.statusResponse, [
+        0x78,
+        0x56,
+        0x34,
+        0x12,
+      ]);
       host.inbound.add(frame);
 
       final s = await got.timeout(const Duration(seconds: 1));
-      expect(s.battery, 85);
-      expect(s.steps, 1234 & 0xFF);
+      expect(s.statusValue, 0x12345678);
+      expect(s.statusLowByte, 0x78);
+      expect(s.isIdle, isFalse);
+      expect(s.battery, 0x78); // back-compat alias
       await svc.dispose();
     });
 
@@ -399,7 +422,7 @@ void main() {
       await svc.dispose();
     });
 
-    test('0x61 status low-byte step counter', () async {
+    test('0x61 status keeps back-compat low-byte aliases', () async {
       final host = _StubHost();
       final svc = Fee7Service.attach(host);
       final d = Fee7Dispatcher(svc);
@@ -410,6 +433,8 @@ void main() {
       host.inbound.add(frame);
 
       final s = await got.timeout(const Duration(seconds: 1));
+      expect(s.statusValue, 0xAB50);
+      expect(s.statusLowByte, 80);
       expect(s.battery, 80);
       expect(s.stepsLowByte, 0xAB);
       expect(s.steps, 0xAB); // back-compat alias

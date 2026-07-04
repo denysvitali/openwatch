@@ -424,8 +424,30 @@ void main() {
       },
     );
 
+    test('summarizes FEE7 battery responses from the vendor notify UUID', () {
+      final frame = Codec.buildChannelA(Fee7.battery, [80, 1]);
+
+      final decoded = const WatchLogDecoder().decodeHex(
+        frame.map((b) => b.toRadixString(16).padLeft(2, '0')).join('-'),
+        uuid: _fee7,
+      );
+
+      expect(decoded.valid, isTrue);
+      expect(decoded.channel, WatchLogChannel.fee7);
+      expect(decoded.details['label'], 'battery');
+      expect(decoded.title, contains('battery 80%'));
+      expect(decoded.title, contains('charging=true'));
+      expect(decoded.details['batteryPercent'], 80);
+      expect(decoded.details['charging'], isTrue);
+    });
+
     test('summarizes FEE7 status responses from the vendor notify UUID', () {
-      final frame = Codec.buildChannelA(Fee7.statusResponse, [80, 0xab]);
+      final frame = Codec.buildChannelA(Fee7.statusResponse, [
+        0x78,
+        0x56,
+        0x34,
+        0x12,
+      ]);
 
       final decoded = const WatchLogDecoder().decodeHex(
         frame.map((b) => b.toRadixString(16).padLeft(2, '0')).join('-'),
@@ -435,10 +457,11 @@ void main() {
       expect(decoded.valid, isTrue);
       expect(decoded.channel, WatchLogChannel.fee7);
       expect(decoded.details['label'], 'status');
-      expect(decoded.title, contains('status battery=80%'));
-      expect(decoded.title, contains('stepsLowByte=0xab'));
-      expect(decoded.details['batteryPercent'], 80);
-      expect(decoded.details['stepsLowByte'], 0xab);
+      expect(decoded.title, contains('status value=0x12345678'));
+      expect(decoded.title, contains('low=0x78'));
+      expect(decoded.details['statusValue'], 0x12345678);
+      expect(decoded.details['statusLowByte'], 0x78);
+      expect(decoded.details['idle'], isFalse);
     });
 
     test(

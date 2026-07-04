@@ -42,7 +42,7 @@ Platforms: Android (primary, signed release APK via CI), iOS, macOS, Linux, Wind
 
 Working: device scan/connect, handshake, time sync, capability detection, find-device, today's steps/calories, live heart-rate, notification enable, factory reset, offline-first cloud toggle, firmware fetch-and-store + OTA flow.
 
-Needs live-capture verification (flagged in `PROTOCOL.md` §8.5): battery push opcode, ECG/PPG notify opcodes, legacy APK-layer bind (`0x10`) layout, and remaining health-history field splits. Channel B CRC is resolved as CRC-16/MODBUS from firmware. Health history reads (HR/sleep/sport) and watch-face upload are scaffolded but not yet surfaced in the UI.
+Needs live-capture verification (flagged in `PROTOCOL.md` §8.5): ECG/PPG notify opcodes, legacy APK-layer bind (`0x10`) layout, and remaining health-history field splits. Channel B CRC is resolved as CRC-16/MODBUS from firmware. Health history reads (HR/sleep/sport) and watch-face upload are scaffolded but not yet surfaced in the UI.
 
 ## Codebase architecture
 
@@ -67,7 +67,7 @@ Two logical GATT channels on one connection:
 - **Channel B** (`de5bf728`) — `0xBC`-magic, length-prefixed, CRC-16/MODBUS-protected large payloads sliced into MTU-sized chunks; used for OTA, files, and custom watch faces.
 - **Vendor `0xFEE7`** (optional) — parallel 16-byte command path; SpO2, find-phone, vibration, OTA triggers. See `GHIDRA_DECOMPILATION.md` §8.
 
-`PROTOCOL.md` is the single source of truth for opcodes, encodings, and CRC variants. Do not invent fields — if a value isn't documented there, treat it as "needs live capture" (the §8.5 list calls out battery push, ECG/PPG, bind layout, and remaining health-history splits).
+`PROTOCOL.md` is the single source of truth for opcodes, encodings, and CRC variants. Do not invent fields — if a value isn't documented there, treat it as "needs live capture" (the §8.5 list calls out ECG/PPG, legacy bind layout, and remaining health-history splits).
 
 ### Layering (read top-to-bottom)
 

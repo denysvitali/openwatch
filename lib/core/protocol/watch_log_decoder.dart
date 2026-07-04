@@ -583,15 +583,25 @@ class WatchLogDecoder {
     Map<String, Object?> details,
   ) {
     switch (opcode) {
+      case Fee7.battery:
+        final battery = payload.isNotEmpty ? payload[0] : null;
+        final charging = payload.length >= 2 ? payload[1] != 0 : null;
+        details.addAll({'batteryPercent': battery, 'charging': charging});
+        return 'FEE7 ${_hex(opcode)} battery'
+            '${battery == null ? '' : ' $battery%'}'
+            '${charging == null ? '' : ' charging=$charging'}';
       case Fee7.statusResponse:
-        final battery = payload.isNotEmpty ? payload[0] : 0;
-        final stepsLowByte = payload.length >= 2 ? payload[1] : 0;
+        final statusValue = payload.length >= 4
+            ? Codec.readU32le(payload, 0)
+            : 0;
+        final statusLowByte = statusValue & 0xFF;
         details.addAll({
-          'batteryPercent': battery,
-          'stepsLowByte': stepsLowByte,
+          'statusValue': statusValue,
+          'statusLowByte': statusLowByte,
+          'idle': statusValue == 0,
         });
-        return 'FEE7 ${_hex(opcode)} status battery=$battery% '
-            'stepsLowByte=${_hex(stepsLowByte)}';
+        return 'FEE7 ${_hex(opcode)} status value=${_hex32(statusValue)} '
+            'low=${_hex(statusLowByte)} idle=${statusValue == 0}';
       case Fee7.otaTrigger:
         final routesToOta = payload.length >= 3 && payload[2] == 1;
         details['routesToOta'] = routesToOta;
@@ -1436,6 +1446,8 @@ String _labelForChannelB(int cmd) {
 
 String _labelForFee7(int opcode) {
   switch (opcode) {
+    case Fee7.battery:
+      return 'battery';
     case Fee7.spo2HrUpdate:
       return 'spo2HrUpdate';
     case Fee7.capabilityBlock:

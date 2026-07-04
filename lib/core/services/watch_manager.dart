@@ -34,6 +34,7 @@ class WatchManager extends ChangeNotifier {
     // before subscribing.
     final fee7 = _hub.fee7;
     if (fee7 != null) {
+      _fee7BatterySub = fee7.onBattery.listen(_onFee7Battery);
       _fee7StatusSub = fee7.onStatus.listen(_onFee7Status);
       _fee7HandshakeSub = fee7.onHandshake.listen(_onFee7Handshake);
     }
@@ -52,6 +53,7 @@ class WatchManager extends ChangeNotifier {
   final WatchLink _transport;
   bool autoSyncTime;
   StreamSubscription<Uint8List>? _inboundSub;
+  StreamSubscription<Fee7BatteryResponse>? _fee7BatterySub;
   StreamSubscription<StatusResponse>? _fee7StatusSub;
   StreamSubscription<HandshakeResponse>? _fee7HandshakeSub;
   StreamSubscription<Alarm>? _alarmSub;
@@ -210,13 +212,12 @@ class WatchManager extends ChangeNotifier {
       // Fire-and-forget for the periodic stats — but wait briefly so the
       // initial replies land before we declare "ready" to the UI.
       final fresh = DateTime.now();
+      final initialReplyOpcodes = {OpA.todaySport};
+      if (!_hub.hasFee7) initialReplyOpcodes.add(OpA.battery);
       await Future.wait([
         refreshSteps(),
         refreshBattery(),
-        _waitForReplies(const Duration(milliseconds: 400), {
-          OpA.todaySport,
-          OpA.battery,
-        }),
+        _waitForReplies(const Duration(milliseconds: 400), initialReplyOpcodes),
       ]);
       // Touch `fresh` so the analyzer is happy if we ever drop the call.
       fresh.toString();
@@ -252,11 +253,10 @@ class WatchManager extends ChangeNotifier {
         }
       case OpA.battery:
         // BatteryRsp: [0]=percent, [1]=charging flag.
-        if (pl.isNotEmpty && pl[0] <= 100) {
-          batteryPercent = pl[0];
-          charging = pl.length > 1 && pl[1] != 0;
-          notifyListeners();
-        }
+        _updateBattery(
+          percent: pl.isNotEmpty ? pl[0] : null,
+          charging: pl.length > 1 ? pl[1] != 0 : null,
+        );
       case OpA.realTimeHeartRate:
         // pl[0] = instantaneous bpm. Log every frame (even out-of-range) so
         // a firmware that pushes 0x00/0xFF during sensor warm-up is
@@ -328,19 +328,36 @@ class WatchManager extends ChangeNotifier {
     }
   }
 
-  /// `0x61` 'a' status push — battery + step counter. Updates the
-  /// shared [batteryPercent] field so the UI reflects the watch's
-  /// real-time state without waiting for the 15-minute poll.
-  void _onFee7Status(StatusResponse s) {
-    final pct = s.battery & 0xFF;
-    if (pct <= 100) {
-      batteryPercent = pct;
-      notifyListeners();
+  void _updateBattery({int? percent, bool? charging}) {
+    var changed = false;
+    if (percent != null && percent <= 100 && batteryPercent != percent) {
+      batteryPercent = percent;
+      changed = true;
     }
-    // Step counter is exposed via `s.stepsLowByte` for diagnostics.
+    if (charging != null && this.charging != charging) {
+      this.charging = charging;
+      changed = true;
+    }
+    if (changed) notifyListeners();
+  }
+
+  /// `0x03` direct FEE7 battery response.
+  void _onFee7Battery(Fee7BatteryResponse b) {
+    _updateBattery(percent: b.percent, charging: b.charging);
     AppLog.instance.debug(
       'fee7',
-      'status battery=$pct stepsLow=0x${s.stepsLowByte.toRadixString(16)}',
+      'battery percent=${b.percent ?? '-'} charging=${b.charging ?? '-'}',
+    );
+  }
+
+  /// `0x61` 'a' status snapshot. The low byte mirrors the live status source
+  /// used for battery-like updates, while the full u32 remains diagnostic.
+  void _onFee7Status(StatusResponse s) {
+    _updateBattery(percent: s.statusLowByte);
+    AppLog.instance.debug(
+      'fee7',
+      'status value=0x${s.statusValue.toRadixString(16)} '
+          'low=0x${s.statusLowByte.toRadixString(16)} idle=${s.isIdle}',
     );
   }
 
@@ -350,16 +367,13 @@ class WatchManager extends ChangeNotifier {
   /// from the transport-level handshake.
   void _onFee7Handshake(HandshakeResponse h) {
     final pct = h.batteryPercent;
-    if (pct != null && pct <= 100) {
-      batteryPercent = pct;
-    }
     // status: low byte = flags, high byte = state. Bit 0 of the low
     // byte is the charge flag per GHIDRA §8.2 — invert our convention
     // so `charging==true` means actively charging.
-    if (h.status != null) {
-      charging = (h.status! & 0x01) != 0;
-    }
-    notifyListeners();
+    _updateBattery(
+      percent: pct,
+      charging: h.status == null ? null : (h.status! & 0x01) != 0,
+    );
     AppLog.instance.debug(
       'fee7',
       'handshake battery=${pct ?? '-'} charging=$charging status=0x'
@@ -455,10 +469,13 @@ class WatchManager extends ChangeNotifier {
     () => _transport.sendA(Commands.readTodaySport()),
   );
 
-  Future<void> refreshBattery() => _withActionSpan(
-    'refresh_battery',
-    () => _transport.sendA(Commands.readBattery()),
-  );
+  Future<void> refreshBattery() => _withActionSpan('refresh_battery', () {
+    final fee7 = _hub.fee7Service;
+    if (fee7 != null) {
+      return fee7.sendCommand(Codec.buildChannelA(Fee7.battery));
+    }
+    return _transport.sendA(Commands.readBattery());
+  });
 
   /// Waits until the [BleTransport] has received a frame for each opcode in
   /// [opcodes], or [timeout] elapses. Used during the handshake to avoid
@@ -922,6 +939,7 @@ class WatchManager extends ChangeNotifier {
     _batteryTimer?.cancel();
     _transport.state.removeListener(_onLinkState);
     unawaited(_inboundSub?.cancel());
+    unawaited(_fee7BatterySub?.cancel());
     unawaited(_fee7StatusSub?.cancel());
     unawaited(_fee7HandshakeSub?.cancel());
     unawaited(_alarmSub?.cancel());

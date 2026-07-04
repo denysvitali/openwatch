@@ -430,6 +430,18 @@ REALTIMEHEARTRATE=6, ECG=7, PRESSURE=8, BLOOD_SUGAR=9, HRV=0xa, BODY_TEMPERATURE
 | MuslimRemindReq | `0x52` | 01/02 + dataType@[1] | both | read-alg:`[01,03]`; alg-write:`[02,03,algIdx,asrIdx]`; timer:`[02,01,p1..p6]`; DND:`[02,02,sHBCD,sMBCD,eHBCD,eMBCD,sw,weekday,cycle(0x3c/0x78/0xb4)]` | **MuslimRemindRsp** `pl[1]`=dataType: t1 `[2]`idx`[3]`en`[4]`hBCD`[5]`mBCD`[6]`offset`[7]`advance; t2 window+`[6]`sw`[7]`weekday`[8]`cycle; t3 `[2]`algIdx`[3]`asrIdx | Prayer reminders / adhan alarms. |
 | MuslimTargetReq | `0x7b` | 01/02 + targetType@[1] | both | r:`[01,type]`; t1:`[02,01]+target(4B)[+en?1:2]`; t2:`[02,02]+n(1B)+target(4B)`; t3:`[02,03]+[open?1:2]+n+target(4B)`; t4/5:`[02,type]+fields+2B items` | **MuslimTargetRsp** branches on `pl[1]`: threeIsOpen/hundredIsOpen/nIsOpen, nTargetNum, muslimTarget(4B LE), enable, paged customerPriseList(4B ints) | Tasbih/dhikr counter targets. |
 
+#### FEE7 battery / status side channel
+
+The optional `0xFEE7` service uses the same 16-byte additive-checksum frame as
+Channel A, but its opcode namespace is independent and the high bit is not a
+Channel-A error flag.
+
+| Name | Opcode | Dir | Request | Response | Notes |
+|---|---:|---|---|---|---|
+| BatteryStatus | `0x03` | both | bare opcode | `[percent, chargingFlag]` | Direct battery response. Verified in H59MA v14 at body offset `0x587e`: byte 1 is the percent helper result, byte 2 is non-zero when the charge-state helper is non-zero. |
+| Fee7Handshake | `0x48` (`'H'`) | both | bare opcode | 15-byte frame: hw version bytes, fw version bytes, battery counter `% 100`, status u16 | First vendor-side info block; OpenWatch decodes battery/status from this when present. |
+| LiveStatus | `0x61` (`'a'`) | both | bare opcode | active: `statusValue u32LE`; idle: all-zero ACK | Reads `DAT_0082bfd4 + 0x2c` at body offset `0x5ae6`. The low byte mirrors the live status source used for battery-like updates, but hosts should keep the full u32 for diagnostics. |
+
 ### 4.6 Channel-A status responses (no request class found here)
 
 | Name | Opcode | Dir | Response | Meaning |
@@ -867,6 +879,9 @@ Feedback, Customer-support chat.
 > - 12 MB size cap (`0xBB8000`) — pre-flight guard present in `DfuFlasher.flash`.
 > - Channel-A OTA switch opcode (`0x0f`) — emitted via `Commands.switchToOta()`
 >   before the Channel-B flow.
+> - FEE7 battery/status side channel — `0x03` direct battery response,
+>   `0x48` handshake battery/status block, and `0x61` live u32 status snapshot
+>   are decoded by `Fee7Dispatcher` / `WatchManager`.
 > - Firmware version string parsing — `FirmwareVersion.parse` strips the
 >   hardware prefix (`H59MA_1.00.13` → `1.00.13`) and is used in the firmware
 >   screen + dashboard for display.
