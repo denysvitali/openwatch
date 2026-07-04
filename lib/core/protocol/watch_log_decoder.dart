@@ -288,6 +288,20 @@ class WatchLogDecoder {
           return 'A 0x48 today sport steps=${totals.steps} '
               'kcal=${totals.calories} distance=${totals.distanceMeters}m';
         }
+      case OpA.readAlarm:
+        return _summarizeAlarmRead(
+          opcode,
+          payload,
+          details,
+          label: 'clock alarm',
+        );
+      case OpA.readDrinkAlarm:
+        return _summarizeAlarmRead(
+          opcode,
+          payload,
+          details,
+          label: 'drink alarm',
+        );
       case OpA.startMeasure:
         final parsed = HrParser.parseStartMeasureReply(payload);
         if (parsed != null) {
@@ -320,6 +334,41 @@ class WatchLogDecoder {
     }
     return 'A ${_hex(opcode)} ${_labelForChannelA(opcode)} '
         'payload=${_compactHex(payload)}';
+  }
+
+  String _summarizeAlarmRead(
+    int opcode,
+    Uint8List payload,
+    Map<String, Object?> details, {
+    required String label,
+  }) {
+    if (payload.length < 4) {
+      return 'A ${_hex(opcode)} $label short payload';
+    }
+    final slot = payload[0];
+    final enabled = payload[1] == 1;
+    final hour = Codec.fromBcd(payload[2]);
+    final minute = Codec.fromBcd(payload[3]);
+    final weekdays = [
+      for (var i = 0; i < 7; i++)
+        if (payload.length > 4 + i && payload[4 + i] != 0) i,
+    ];
+    var weekMask = 0;
+    for (final day in weekdays) {
+      weekMask |= 1 << day;
+    }
+    details.addAll({
+      'slot': slot,
+      'enabled': enabled,
+      'hour': hour,
+      'minute': minute,
+      'weekMask': weekMask,
+      'weekdays': weekdays,
+    });
+    return 'A ${_hex(opcode)} $label slot=$slot enabled=$enabled '
+        'time=${hour.toString().padLeft(2, '0')}:'
+        '${minute.toString().padLeft(2, '0')} weekMask=0x'
+        '${weekMask.toRadixString(16).padLeft(2, '0')}';
   }
 
   String _summarizeHeartRateFrame(
@@ -1019,6 +1068,14 @@ String _labelForChannelA(int opcode) {
       return 'hrvHistory';
     case OpA.readDetailSport:
       return 'readDetailSport';
+    case OpA.setAlarm:
+      return 'setAlarm';
+    case OpA.readAlarm:
+      return 'readAlarm';
+    case OpA.setDrinkAlarm:
+      return 'setDrinkAlarm';
+    case OpA.readDrinkAlarm:
+      return 'readDrinkAlarm';
     case OpA.todaySport:
       return 'todaySport';
     case OpA.packageLength:

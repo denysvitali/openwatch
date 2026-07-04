@@ -112,6 +112,62 @@ void main() {
       expect(encoded, contains('"distanceMeters":80'));
     });
 
+    test('summarizes clock alarm read replies', () {
+      final frame = Codec.buildChannelA(OpA.readAlarm, [
+        2,
+        1,
+        Codec.toBcd(6),
+        Codec.toBcd(30),
+        0,
+        1,
+        1,
+        1,
+        1,
+        1,
+        0,
+      ]);
+
+      final decoded = const WatchLogDecoder().decodeHex(
+        frame.map((b) => b.toRadixString(16).padLeft(2, '0')).join('-'),
+      );
+
+      expect(decoded.valid, isTrue);
+      expect(decoded.details['label'], 'readAlarm');
+      expect(decoded.title, contains('clock alarm slot=2'));
+      expect(decoded.title, contains('time=06:30'));
+      expect(decoded.details['enabled'], isTrue);
+      expect(decoded.details['weekMask'], 0x3e);
+      expect(decoded.details['weekdays'], [1, 2, 3, 4, 5]);
+    });
+
+    test('summarizes drink alarm read replies separately', () {
+      final frame = Codec.buildChannelA(OpA.readDrinkAlarm, [
+        7,
+        2,
+        Codec.toBcd(14),
+        Codec.toBcd(25),
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+      ]);
+
+      final decoded = const WatchLogDecoder().decodeHex(
+        frame.map((b) => b.toRadixString(16).padLeft(2, '0')).join('-'),
+      );
+
+      expect(decoded.valid, isTrue);
+      expect(decoded.details['label'], 'readDrinkAlarm');
+      expect(decoded.title, contains('drink alarm slot=7'));
+      expect(decoded.title, contains('enabled=false'));
+      expect(decoded.title, contains('weekMask=0x55'));
+      expect(decoded.details['hour'], 14);
+      expect(decoded.details['minute'], 25);
+    });
+
     test('decodes a multi-line log packet across channels', () {
       // A realistic capture: Ch-A battery reply, Ch-A heart-rate setting,
       // Ch-B nap sleep. All three frames stitched into one log blob.
