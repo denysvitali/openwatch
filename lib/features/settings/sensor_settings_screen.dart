@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/ble/ble_transport.dart';
 import '../../core/providers/app_providers.dart';
 import '../widgets/section_header.dart';
 
@@ -18,7 +17,7 @@ class SensorSettingsScreen extends ConsumerWidget {
     final settings = ref.watch(settingsProvider);
     final settingsNotifier = ref.read(settingsProvider.notifier);
     final manager = ref.watch(watchManagerProvider);
-    final ready = (ref.watch(linkStateProvider).value) == LinkState.ready;
+    final ready = manager.isReady;
     final caps = manager.capabilities;
     final hrSupported = caps.heart;
 

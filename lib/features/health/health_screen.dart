@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../core/ble/ble_transport.dart';
 import '../../core/providers/app_providers.dart';
 
 /// Health metrics. Heart rate is wired to the live-measure commands; the
@@ -14,7 +13,7 @@ class HealthScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final manager = ref.watch(watchManagerProvider);
-    final ready = (ref.watch(linkStateProvider).value) == LinkState.ready;
+    final ready = manager.isReady;
     final caps = manager.capabilities;
     final hrSupported = caps.heart;
     final bpSystolic = manager.lastBloodPressureSystolic;

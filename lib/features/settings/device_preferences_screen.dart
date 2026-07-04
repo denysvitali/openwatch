@@ -2,7 +2,6 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/ble/ble_transport.dart';
 import '../../core/providers/app_providers.dart';
 import '../../core/services/watch_manager.dart';
 import '../widgets/section_header.dart';
@@ -18,7 +17,7 @@ class DevicePreferencesScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final manager = ref.watch(watchManagerProvider);
-    final ready = (ref.watch(linkStateProvider).value) == LinkState.ready;
+    final ready = manager.isReady;
     final caps = manager.capabilities;
 
     return Scaffold(

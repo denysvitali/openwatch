@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../core/ble/ble_transport.dart';
 import '../../core/providers/app_providers.dart';
 import '../../core/services/settings_service.dart';
 import '../widgets/section_header.dart';
@@ -19,7 +18,7 @@ class SettingsScreen extends ConsumerWidget {
     final armedAlarmCount = manager.alarms
         .where((alarm) => alarm.enabled)
         .length;
-    final ready = (ref.watch(linkStateProvider).value) == LinkState.ready;
+    final ready = manager.isReady;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
