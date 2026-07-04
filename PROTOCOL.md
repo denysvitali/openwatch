@@ -506,6 +506,10 @@ name-format control. The decompiled writer clears fixed-size destinations but
 does not visibly clamp the supplied length before copy, so host code should
 enforce these maxima.
 
+OpenWatch parses the `0x01` writable config TLVs and the `0x03` static version
+TLVs; other subcommands remain command builders/status-only until captures show
+additional response bodies.
+
 ### 4.9 Channel-B OTA (DfuHandle)
 
 | Name | cmd | Dir | Request | Response | Meaning |

@@ -133,6 +133,43 @@ void main() {
       expect(decoded.details['fileRecordBytes'], 9);
     });
 
+    test('summarizes Channel B device-info static TLVs', () {
+      final frame = Codec.buildChannelB(OpB.deviceInfoConfig, [
+        0x03,
+        0x01,
+        0x06,
+        0x01,
+        0x07,
+        ..._ascii('H59MAX_'),
+        0x02,
+        0x07,
+        ..._ascii('H59MAX_'),
+        0x03,
+        0x0a,
+        ..._ascii('H59MA_V1.0'),
+        0x04,
+        0x06,
+        ..._ascii('H59MA_'),
+        0x05,
+        0x08,
+        ..._ascii('1.00.14_'),
+        0x06,
+        0x06,
+        ..._ascii('260508'),
+      ]);
+
+      final report = const WatchLogDecoder().decodeNrfConnectLog(
+        _line(_chB, frame),
+      );
+
+      final decoded = report.frames.single;
+      expect(decoded.valid, isTrue);
+      expect(decoded.title, contains('device info static'));
+      expect(decoded.details['label'], 'deviceInfoConfig');
+      expect(decoded.details['hardwareId'], 'H59MA_V1.0');
+      expect(decoded.details['firmwareVersion'], 'H59MA_1.00.14_260508');
+    });
+
     test('summarizes clock alarm read replies', () {
       final frame = Codec.buildChannelA(OpA.readAlarm, [
         2,
@@ -653,6 +690,8 @@ DecodedLogFrame _decodeA(int opcode, List<int> payload) {
   final frame = Codec.buildChannelA(opcode, payload);
   return const WatchLogDecoder().decodeHex(_hexBytes(frame));
 }
+
+List<int> _ascii(String value) => value.codeUnits;
 
 String _hexBytes(List<int> bytes) =>
     bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join('-');

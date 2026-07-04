@@ -752,6 +752,14 @@ class Commands {
   static Uint8List deviceInfoQuery() =>
       Codec.buildChannelB(OpB.deviceInfoConfig, [0x01]);
 
+  /// `DeviceInfoConfig` sub-cmd `0x03`: read fixed firmware version TLVs.
+  ///
+  /// H59MA v14 emits six slots (`H59MAX_`, `H59MAX_`, `H59MA_V1.0`,
+  /// `H59MA_`, `1.00.14_`, build code). See `PROTOCOL.md` §4.8 and
+  /// `GHIDRA_DECOMPILATION.md` §2.7.
+  static Uint8List deviceInfoStatic() =>
+      Codec.buildChannelB(OpB.deviceInfoConfig, [0x03]);
+
   /// `DeviceInfoConfig` sub-cmd `0x02`: write one or more TLV slots and
   /// commit the settings blob0.
   ///

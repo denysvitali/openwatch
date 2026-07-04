@@ -83,6 +83,63 @@ void main() {
     });
   });
 
+  group('DeviceInfoStatic parser', () {
+    test('decodes the 0x03 fixed version-string TLV shape', () {
+      final body = Uint8List.fromList([
+        0x03,
+        0x01,
+        0x06,
+        0x01,
+        0x07,
+        ..._ascii('H59MAX_'),
+        0x02,
+        0x07,
+        ..._ascii('H59MAX_'),
+        0x03,
+        0x0a,
+        ..._ascii('H59MA_V1.0'),
+        0x04,
+        0x06,
+        ..._ascii('H59MA_'),
+        0x05,
+        0x08,
+        ..._ascii('1.00.14_'),
+        0x06,
+        0x06,
+        ..._ascii('260508'),
+      ]);
+
+      final info = DeviceInfoStatic.tryParse(body);
+
+      expect(info, isNotNull);
+      expect(info!.count, 6);
+      expect(info.modelName, 'H59MAX_');
+      expect(info.productName, 'H59MAX_');
+      expect(info.hardwareId, 'H59MA_V1.0');
+      expect(info.firmwarePrefix, 'H59MA_');
+      expect(info.firmwareVersionPart, '1.00.14_');
+      expect(info.firmwareVersion, 'H59MA_1.00.14_260508');
+      expect(info.buildCode, '260508');
+    });
+
+    test('tryParse returns null for truncated 0x03 TLVs', () {
+      final body = Uint8List.fromList([
+        0x03,
+        0x01,
+        0x01,
+        0x01,
+        0x07,
+        ..._ascii('H59'),
+      ]);
+      expect(DeviceInfoStatic.tryParse(body), isNull);
+    });
+
+    test('tryParse returns null for sub-cmds other than 0x03', () {
+      final body = Uint8List.fromList([0x01, 0x01, 0x00]);
+      expect(DeviceInfoStatic.tryParse(body), isNull);
+    });
+  });
+
   group('Commands.h59FileTable* builders', () {
     test('h59FileTableList wraps the raw u32 cursor in 0x41', () {
       final frame = Commands.h59FileTableList(cursorOrMinRecordId: 0x12345678);
@@ -102,6 +159,15 @@ void main() {
       final payload = Codec.rxChannelBPayload(frame);
       expect(payload, isNotNull);
       expect(payload!, <int>[0x01]);
+    });
+
+    test('deviceInfoStatic wraps [0x5a, 0x03] in Channel-B framing', () {
+      final frame = Commands.deviceInfoStatic();
+      expect(frame[0], Codec.channelBMagic);
+      expect(frame[1], OpB.deviceInfoConfig);
+      final payload = Codec.rxChannelBPayload(frame);
+      expect(payload, isNotNull);
+      expect(payload!, <int>[0x03]);
     });
 
     test('deviceInfoWrite emits [0x5a, 0x02, count, ...tlvs]', () {

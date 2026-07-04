@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'codec.dart';
+import 'device_info.dart';
 import 'hr_parser.dart';
 import 'opcodes.dart';
 
@@ -735,8 +736,50 @@ class WatchLogDecoder {
         details['fileRecordCount'] = count;
         details['fileRecordBytes'] = recordBytes;
         return 'B 0x42 H59 file list records=$count bytes=$recordBytes';
+      case OpB.deviceInfoConfig:
+        return _summarizeDeviceInfoConfig(payload, details);
     }
     return 'B ${_hex(cmd)} ${_labelForChannelB(cmd)} '
+        'payload=${_compactHex(payload)}';
+  }
+
+  String _summarizeDeviceInfoConfig(
+    Uint8List payload,
+    Map<String, Object?> details,
+  ) {
+    if (payload.isEmpty) return 'B 0x5a device info empty payload';
+
+    final sub = payload[0] & 0xff;
+    details['sub'] = _hex(sub);
+
+    if (sub == 0x01) {
+      final cfg = DeviceInfoConfig.tryParse(payload);
+      if (cfg == null) return 'B 0x5a device info query invalid TLV';
+      details['tlvCount'] = cfg.count;
+      return 'B 0x5a device info query tlvs=${cfg.count}';
+    }
+
+    if (sub == 0x03) {
+      final info = DeviceInfoStatic.tryParse(payload);
+      if (info == null) return 'B 0x5a device info static invalid TLV';
+      details.addAll({
+        'tlvCount': info.count,
+        'modelName': info.modelName,
+        'productName': info.productName,
+        'hardwareId': info.hardwareId,
+        'firmwareVersion': info.firmwareVersion,
+        'buildCode': info.buildCode,
+      });
+      return 'B 0x5a device info static ${info.firmwareVersion ?? 'unknown'}';
+    }
+
+    if (payload.length >= 3 && sub == 0x5a) {
+      details['status'] = payload[1] & 0xff;
+      details['error'] = payload[2] & 0xff;
+      return 'B 0x5a device info status=${payload[1]} err=${payload[2]}';
+    }
+
+    return 'B 0x5a device info sub=${_hex(sub)} '
         'payload=${_compactHex(payload)}';
   }
 }
@@ -1387,6 +1430,8 @@ String _labelForChannelB(int cmd) {
       return 'h59FileChunk';
     case OpB.h59FileDelete:
       return 'h59FileDelete';
+    case OpB.deviceInfoConfig:
+      return 'deviceInfoConfig';
     default:
       return 'unknown';
   }
