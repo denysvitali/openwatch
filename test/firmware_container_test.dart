@@ -93,6 +93,24 @@ void main() {
       expect(report.isValid, isTrue);
     });
 
+    for (final expected in _realFirmwareHeaders) {
+      test('verifies exact ${expected.version} header whitelist', () {
+        final c = _parseFirmwareFixture(expected.fileName);
+        if (c == null) return;
+        final report = c.verify(
+          expected: FirmwareExpectations(
+            versionPrefix: 'H59MA_',
+            hwIdPrefix: 'H59MA_',
+            expectedImageChkA: expected.imageChkA,
+            expectedFlashAppEnd: expected.flashAppEnd,
+            validateImageChkA: true,
+          ),
+        );
+        expect(report.summary(), 'verification: 9/9 checks passed');
+        expect(report.isValid, isTrue);
+      });
+    }
+
     test('detects version-prefix mismatch', () {
       final c = _parseFirmwareFixture('H59MA_1.00.14_260508.bin');
       if (c == null) return;
@@ -111,6 +129,18 @@ void main() {
       );
       expect(report.isValid, isFalse);
       expect(report.failures.map((c) => c.name), contains('hw_id_prefix'));
+    });
+
+    test('detects flash_app_end mismatch', () {
+      final c = _parseFirmwareFixture('H59MA_1.00.14_260508.bin');
+      if (c == null) return;
+      final report = c.verify(
+        expected: FirmwareExpectations(
+          expectedFlashAppEnd: c.header.flashAppEnd ^ 0x01,
+        ),
+      );
+      expect(report.isValid, isFalse);
+      expect(report.failures.map((c) => c.name), contains('flash_app_end'));
     });
 
     test('detects body corruption via image_chk_a (validateImageChkA)', () {
@@ -235,7 +265,7 @@ void main() {
       // 0x228 const_228 0x0e85d101
       _writeU32le(container, 0x228, 0x0e85d101);
 
-      // 0x22c flash_app_end — pick something plausible (start + body+0x400)
+      // 0x22c flash_app_end — synthetic per-build bound.
       _writeU32le(container, 0x22c, 0x00826400 + bodyLen);
 
       // 0x330..0x33f erase_marker (16 bytes of 0xFF)
@@ -255,9 +285,8 @@ void main() {
       // 0x0c image_chk_a — documented formula per PROTOCOL.md §9.7:
       //   sum(container[0x50:]) & 0x00FFFFFF, high byte 0x00.
       // We fill this LAST so the value reflects all header fields above.
-      // Note: the parser's _additive24() helper currently sums the body,
-      // not container[0x50:]; the divergence is documented in the matrix
-      // and exercised in 'image_chk_a formula' below.
+      // Keep this formula aligned with
+      // FirmwareContainer.verify(validateImageChkA: true).
       final sum = _sumFrom(container, 0x50) & 0x00FFFFFF;
       container[0x0c] = sum & 0xFF;
       container[0x0d] = (sum >> 8) & 0xFF;
@@ -313,29 +342,24 @@ void main() {
       expect(FirmwareContainer.parse(container), isNull);
     });
 
-    test(
-      'rejects a container whose load_address / flash_app_start is wrong',
-      () {
-        final container = buildSyntheticContainer(
-          version: 'H59MA_1.00.14_260508',
-          hwId: 'H59MA_V1.0',
-          bodyLen: 0x100,
-        );
-        // Move flash_app_start somewhere unexpected.
-        _writeU32le(container, 0x6c, 0x00100000);
-        final c = FirmwareContainer.parse(container);
-        // Parsing succeeds (parser does not validate the address), but
-        // verify() with the documented HW load address should fail.
-        expect(c, isNotNull);
-        expect(c!.header.flashAppStart, 0x00100000);
-        // Verify via version-prefix check is still fine; flash_app_start
-        // value is captured as-is for the caller to inspect.
-        final report = c.verify();
-        expect(report.isValid, isTrue);
-        // Manual assertion: parser reads but does not assert load address.
-        expect(c.header.flashAppStart, isNot(0x00826400));
-      },
-    );
+    test('parses but does not enforce flash_app_start by default', () {
+      final container = buildSyntheticContainer(
+        version: 'H59MA_1.00.14_260508',
+        hwId: 'H59MA_V1.0',
+        bodyLen: 0x100,
+      );
+      // Move flash_app_start somewhere unexpected.
+      _writeU32le(container, 0x6c, 0x00100000);
+      final c = FirmwareContainer.parse(container);
+      // Parsing succeeds; verify() does not enforce this address by default.
+      expect(c, isNotNull);
+      expect(c!.header.flashAppStart, 0x00100000);
+      // flash_app_start is captured as-is; callers that need a hardware
+      // whitelist should inspect it directly.
+      final report = c.verify();
+      expect(report.isValid, isTrue);
+      expect(c.header.flashAppStart, isNot(0x00826400));
+    });
 
     test('image_chk_a: parser sums container[0x50:] per PROTOCOL.md §9.7', () {
       // PROTOCOL.md §9.7 specifies:

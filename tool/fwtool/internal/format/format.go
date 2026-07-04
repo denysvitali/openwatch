@@ -58,8 +58,8 @@ const (
 	headerImageDigestOff  = 0x1C4 // 32 bytes — per-build signature/digest
 	headerImageDigestSize = 32
 
-	headerConst228Offset  = 0x228 // u32 LE (constant)
-	headerFlashAppEndOff  = 0x22C // u32 LE (per-build, follows body_size)
+	headerConst228Offset = 0x228 // u32 LE (constant)
+	headerFlashAppEndOff = 0x22C // u32 LE (per-build app-region bound)
 
 	headerPayloadOffset = 0x450 // start of ARM-Thumb code
 )
@@ -84,8 +84,8 @@ type Header struct {
 	SDKID uint32 `json:"sdk_id"`
 	// BodySize is the exact size of body.bin = container - 0x450.
 	// Was previously mislabeled "unknown32_b".
-	BodySize  uint32 `json:"body_size"`
-	Const5C   uint32 `json:"const_5c"` // constant 0x7e6b4cf9 — NOT a timestamp
+	BodySize uint32 `json:"body_size"`
+	Const5C  uint32 `json:"const_5c"` // constant 0x7e6b4cf9 — NOT a timestamp
 	// SignatureA is the 12-byte constant blob at 0x60..0x6b.
 	// The prior 16-byte "signature" was 4 bytes too long and absorbed FlashAppStart.
 	SignatureA     string `json:"signature_a_hex"`
@@ -128,7 +128,7 @@ type Section struct {
 	Name   string `json:"name"`
 	Offset int64  `json:"offset"`
 	Size   int64  `json:"size"`
-	Kind   string `json:"kind"`            // header, signature, payload, embedded-asset, unknown
+	Kind   string `json:"kind"`             // header, signature, payload, embedded-asset, unknown
 	Format string `json:"format,omitempty"` // png, jpeg, riff, utf16le, ...
 	Note   string `json:"note,omitempty"`
 }
@@ -243,16 +243,16 @@ func decodeHeader(buf []byte) (Header, []NamedField) {
 	fields := []NamedField{
 		{0x00, headerMagicSize, "magic", h.Magic, hex.EncodeToString(buf[0x00:0x04]), "H59MA signature E5 C3 BD 81"},
 		{0x04, 4, "load_size", h.LoadSize, hex.EncodeToString(buf[0x04:0x08]), "bytes the bootloader copies to RAM (= body_size + 0x400)"},
-		{0x08, 4, "firmware_size", h.FirmwareSize, hex.EncodeToString(buf[0x08:0x0C]), "total image size on disk (little-endian u32)"},
+		{0x08, 4, "firmware_size", h.FirmwareSize, hex.EncodeToString(buf[0x08:0x0C]), "duplicate of load_size (= body_size + 0x400)"},
 		{0x0C, 4, "image_chk_a", h.ImageChkA, hex.EncodeToString(buf[0x0C:0x10]), "additive byte-sum: sum(container[0x50:]) & 0xffffffff; NOT CRC32, NOT a timestamp"},
-		{0x10, headerVersionSize, "version_string", h.Version, hex.EncodeToString(buf[0x10:0x10+headerVersionSize]), "ASCII, e.g. H59MA_1.00.13_251230"},
-		{0x30, headerHWIDSize, "hw_id", h.HWID, hex.EncodeToString(buf[0x30:0x30+headerHWIDSize]), "hardware identifier, e.g. H59MA_V1.0"},
+		{0x10, headerVersionSize, "version_string", h.Version, hex.EncodeToString(buf[0x10 : 0x10+headerVersionSize]), "ASCII, e.g. H59MA_1.00.13_251230"},
+		{0x30, headerHWIDSize, "hw_id", h.HWID, hex.EncodeToString(buf[0x30 : 0x30+headerHWIDSize]), "hardware identifier, e.g. H59MA_V1.0"},
 		{0x40, 16, "reserved", nil, hex.EncodeToString(buf[0x40:0x50]), "zero padding"},
 		{0x50, 4, "flags", h.Flags, hex.EncodeToString(buf[0x50:0x54]), "build/feature flags"},
 		{0x54, 4, "sdk_id", h.SDKID, hex.EncodeToString(buf[0x54:0x58]), "0x00092793 in observed samples"},
 		{0x58, 4, "body_size", h.BodySize, hex.EncodeToString(buf[0x58:0x5C]), "exact size of body.bin (= container - 0x450)"},
 		{0x5C, 4, "const_5c", h.Const5C, hex.EncodeToString(buf[0x5C:0x60]), "constant 0x7e6b4cf9 (byte-identical across builds); first u32 of GUID 7e6b4cf9-c511-11eb-8282-f74a0c0cef5b; NOT a build timestamp"},
-		{0x60, headerSignatureASize, "signature_a", h.SignatureA, hex.EncodeToString(buf[0x60:0x60+headerSignatureASize]), "12-byte constant blob; algorithm unknown"},
+		{0x60, headerSignatureASize, "signature_a", h.SignatureA, hex.EncodeToString(buf[0x60 : 0x60+headerSignatureASize]), "12-byte constant blob; algorithm unknown"},
 		{0x6C, 4, "flash_app_start", h.FlashAppStart, hex.EncodeToString(buf[0x6C:0x70]), "app region start = flash_base + 0x400"},
 		{0x70, 4, "flash_app_start2", h.FlashAppStart2, hex.EncodeToString(buf[0x70:0x74]), "duplicate of flash_app_start @ 0x6C"},
 		{0x74, 4, "reserved", nil, hex.EncodeToString(buf[0x74:0x78]), "zero"},
@@ -261,10 +261,10 @@ func decodeHeader(buf []byte) (Header, []NamedField) {
 		{0xB4, 4, "const_b4", h.ConstB4, hex.EncodeToString(buf[0xB4:0xB8]), "constant 0x1201a39e"},
 		{0xB8, 8, "sdk_string", h.SDKString, hex.EncodeToString(buf[0xB8:0xC0]), "ASCII, e.g. sdk#####"},
 		{0x1C0, 4, "reserved", nil, hex.EncodeToString(buf[0x1C0:0x1C4]), "zero (leading zero padding of image_digest slot)"},
-		{0x1C4, headerImageDigestSize, "image_digest", h.ImageDigest, hex.EncodeToString(buf[0x1C4:0x1C4+headerImageDigestSize]), "per-build 32-byte digest/signature field; algorithm and bootloader validation unresolved; NOT sha256 of any contiguous window of the image"},
+		{0x1C4, headerImageDigestSize, "image_digest", h.ImageDigest, hex.EncodeToString(buf[0x1C4 : 0x1C4+headerImageDigestSize]), "per-build 32-byte digest/signature field; algorithm and bootloader validation unresolved; NOT sha256 of any contiguous window of the image"},
 		{0x1E4, 68, "reserved", nil, hex.EncodeToString(buf[0x1E4:0x228]), "zero padding"},
 		{0x228, 4, "const_228", h.Const228, hex.EncodeToString(buf[0x228:0x22C]), "constant 0x0e85d101"},
-		{0x22C, 4, "flash_app_end", h.FlashAppEnd, hex.EncodeToString(buf[0x22C:0x230]), "app region end (= flash_app_start + load_size)"},
+		{0x22C, 4, "flash_app_end", h.FlashAppEnd, hex.EncodeToString(buf[0x22C:0x230]), "per-build app-region bound; not derived from flash_app_start + load_size"},
 		{0x230, 256, "reserved", nil, hex.EncodeToString(buf[0x230:0x330]), "zero padding"},
 		{0x330, 16, "erase_marker1", nil, hex.EncodeToString(buf[0x330:0x340]), "all 0xFF"},
 		{0x340, 256, "reserved", nil, hex.EncodeToString(buf[0x340:0x440]), "zero padding"},

@@ -886,9 +886,9 @@ The table sits in v13's trailing region (`0x21576..0x23440`) which v14 simply do
 ## 10. Open Questions
 
 1. **`image_digest` algorithm** — the 32-byte `0x1c4` field is SHA-256-sized, but no SHA-256 init constants exist in the body (§8 crypto negatives). Is the digest computed by the build host only (never verified on-device), or verified by ROM/bootloader code outside this OTA slice?
-2. **`0x0C` additive checksum exact formula** — the byte-sum is close but not an exact match to either `body` or `container[0x60:]` ranges (§3). What is the precise covered range and accumulator width?
+2. ~~**`0x0C` additive checksum exact formula**~~ — **resolved:** `sum(container[0x50:]) & 0xffffffff` (observed high byte `0x00`) matches both v13 and v14. It is not over `body` or `container[0x60:]`.
 3. **`const_b4 = 0x1201a39e`, `const_228 = 0x0e85d101`, `const_5c = 0x7e6b4cf9`** — fixed across builds; product/SDK/key IDs? The `0x5c` value is the head of the constant GUID, but the role of `b4`/`228` is unknown.
 4. **`0xfee7` vendor service** — its `0xfea1`/`0xfec9`/`0xfea2` characteristics point to flash handlers (`0x0082e87b`, `0x0082e8cf`); is this an alternate command/OTA path or a legacy/cloud profile? Handler code lives below the OTA body and was not disassembled.
 5. **`wrong signature! Read %8X != Requried %8X`** — gated by a 32-bit magic compare, not a crypto signature. What magic value, and where is the comparison performed (likely the excluded bootloader region)?
 6. **Boot/vector region** — the real Cortex-M vector table, reset handler, and the `BootOnce` dual-bank logic live in flash ≤`0x826400`, outside both OTA bodies. Obtaining a full-flash dump would let us verify the load/verify path end-to-end.
-7. **`flash_app_end @0x22c`** (`0x00847860` v13 / `0x00845c14` v14) sits ~`0x18000` above the body's computed end (`0x849840` / `0x8479fc`); the discrepancy direction differs per build. Does this field bound the *writable app slot* rather than the image, and what occupies the gap?
+7. **`flash_app_end @0x22c`** (`0x00847860` v13 / `0x00845c14` v14) is below the computed body end (`0x849840` / `0x8479fc`) by `0x1fe0` / `0x1de8`, and is not `flash_app_start + load_size`. Does this field bound a bootloader-defined writable app slot rather than the image, and what occupies the excluded tail?

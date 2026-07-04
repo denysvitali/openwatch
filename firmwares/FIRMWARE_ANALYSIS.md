@@ -457,7 +457,7 @@ The watch implements an **ANCS client** that subscribes to the iPhone's `7905F43
 
 - `m_ota_write_flag_id` string at v13 body `0x90ac`, v14 `0x90ae` (the `ota_write_flag` literal is at `+2`).
 - The OTA payload is loaded into flash starting at the **app region** (`flash_base + 0x400 = 0x826400`) by the bootloader; the trampoline at the start of the body is then jumped to.
-- The `load_size` field = `body_size + 0x400` (`0x23840` / `0x219fc`); `flash_app_end` (`0x47860` / `0x45c14`) is the load region's upper bound (also = `flash_app_start + load_size`).
+- The `load_size` field = `body_size + 0x400` (`0x23840` / `0x219fc`). `flash_app_end` is a per-build app-region bound at header `0x22c` (v13 `0x00847860`, v14 `0x00845c14`), not `flash_app_start + load_size`; keep it as an explicit header value until bootloader behavior is captured.
 - Channel-B DfuHandle flow (`PROTOCOL.md` §4.9 / §5.4) sends file data via `bc` frames through `de5bf72a`. The watch reassembles, writes each chunk to flash, and on completion reboots into the new image.
 - The header's `image_chk_a @0x0c` is `sum(container[0x50:]) & 0xffffffff`. The 32-byte `image_digest @0x1c4` is the other apparent integrity field, but `body.bin` itself does not validate it. The OTA data path checks the first container word (`e5 c3 bd 81`, little-endian `0x81bdc3e5`) and writes only bytes after the 0x50-byte header. The `0x8721bee2` check at `0x00840724` is persistent config-blob validation, not OTA validation. Bootloader-side digest validation remains outside this OTA body.
 
@@ -514,7 +514,7 @@ The `53 63 65 6e 65 5f 42` ("Scene_B") at v13 `0x21f25` is the first visible ASC
 | Channel-B parser | `0x8c32..` | `0x8bea..` | relocated (−0x48) |
 | CRC table address | body `0x2100c` | body `0x1f3c0` | relocated |
 | Trampoline entry | `0x00826741` | `0x00826665` | build-specific |
-| `flash_app_end` | `0x00847860` | `0x00845c14` | follows new size |
+| `flash_app_end` | `0x00847860` | `0x00845c14` | per-build bound; not formula-derived |
 | Build banner (`__DATE__`) | `Thu Mar 17 10:58:10 2022` | identical | same toolchain |
 
 ### Verdict: size/bug-fix release, not a feature release

@@ -140,6 +140,7 @@ class _FirmwareScreenState extends ConsumerState<FirmwareScreen> {
         expected: const FirmwareExpectations(
           versionPrefix: 'H59MA_',
           hwIdPrefix: 'H59MA_',
+          validateImageChkA: true,
         ),
       );
       AppLog.instance.info(

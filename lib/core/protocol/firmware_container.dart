@@ -141,8 +141,7 @@ class FirmwareContainer {
     // 4. image_chk_a (24-bit additive byte sum) — two distinct checks:
     //   * `validateImageChkA: true` — header.imageChkA must equal the
     //     live additive sum over `container[0x50:]` (corruption
-    //     detection). Off by default because the firmware's summed
-    //     range is unverified at runtime.
+    //     detection).
     //   * `expectedImageChkA` — when provided, the header must equal
     //     this whitelist value (firmware-compatibility check).
     //
@@ -198,22 +197,15 @@ class FirmwareContainer {
       );
     }
 
-    // 7. flash_app_end sanity — opt-in. The firmware RE table in
-    // FIRMWARE_ANALYSIS.md §"Field-by-field" claims
-    // `flash_app_end == flash_app_start + load_size`, but the v14 image
-    // we have does not match that formula (0x845c14 vs the expected
-    // 0x847dfc). Until that's resolved, this check is only run when
-    // the caller asks for it explicitly via
-    // `expected.checkFlashAppEnd`.
-    if (expected.checkFlashAppEnd) {
-      final expectedEnd = header.flashAppStart + header.loadSize;
+    // 7. flash_app_end whitelist. This is a per-build header field, not a
+    // derived size formula, so callers must provide an exact expected value.
+    if (expected.expectedFlashAppEnd != null) {
+      final expectedEnd = expected.expectedFlashAppEnd!;
       checks.add(
         VerificationCheck(
           name: 'flash_app_end',
           passed: header.flashAppEnd == expectedEnd,
           detail:
-              'flashAppStart=0x${header.flashAppStart.toRadixString(16)} '
-              'loadSize=0x${header.loadSize.toRadixString(16)} '
               'flashAppEnd=0x${header.flashAppEnd.toRadixString(16)} '
               'expected=0x${expectedEnd.toRadixString(16)}',
         ),
@@ -285,8 +277,8 @@ class FirmwareExpectations {
     this.versionPrefix,
     this.hwIdPrefix,
     this.expectedImageChkA,
+    this.expectedFlashAppEnd,
     this.validateImageChkA = false,
-    this.checkFlashAppEnd = false,
   });
   final String? versionPrefix;
   final String? hwIdPrefix;
@@ -300,10 +292,9 @@ class FirmwareExpectations {
   /// sum over `container[0x50:]` (corruption detection).
   final bool validateImageChkA;
 
-  /// When `true`, verify `flash_app_end == flash_app_start + load_size`.
-  /// Off by default because the firmware RE table value does not match
-  /// the v14 image we have — likely a documentation error in the RE.
-  final bool checkFlashAppEnd;
+  /// When non-null, verify `header.flashAppEnd` equals this per-build
+  /// whitelist value.
+  final int? expectedFlashAppEnd;
 }
 
 /// One named verification check.
