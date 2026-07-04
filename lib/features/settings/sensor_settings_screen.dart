@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/providers/app_providers.dart';
+import '../../core/services/watch_manager.dart';
 import '../widgets/section_header.dart';
 
 /// Wristband sensor settings: HR auto-measure interval, enable toggle,
@@ -140,7 +141,7 @@ class SensorSettingsScreen extends ConsumerWidget {
   Future<void> _applyToDevice(
     BuildContext context,
     WidgetRef ref,
-    dynamic manager,
+    WatchManager manager,
   ) async {
     final settings = ref.read(settingsProvider);
     try {
