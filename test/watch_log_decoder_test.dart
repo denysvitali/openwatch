@@ -253,6 +253,72 @@ void main() {
       expect(decoded.title, contains('label=none'));
     });
 
+    test('summarizes common display and setting replies', () {
+      final dnd = _decodeA(OpA.dnd, [OpA.mixWrite, 1, 22, 0, 7, 30]);
+      expect(dnd.details['label'], 'doNotDisturb');
+      expect(dnd.details['enabled'], isTrue);
+      expect(dnd.details['startHour'], 22);
+      expect(dnd.details['endMinute'], 30);
+      expect(dnd.title, contains('window=22:00-07:30'));
+
+      final timeFormat = _decodeA(OpA.timeFormat, [OpA.mixWrite, 0, 1]);
+      expect(timeFormat.details['label'], 'timeFormat');
+      expect(timeFormat.details['is24Hour'], isTrue);
+      expect(timeFormat.details['metric'], isFalse);
+      expect(timeFormat.title, contains('is24Hour=true'));
+      expect(timeFormat.title, contains('metric=false'));
+
+      final orientation = _decodeA(OpA.displayOrientation, [
+        OpA.mixWrite,
+        1,
+        2,
+      ]);
+      expect(orientation.details['label'], 'displayOrientation');
+      expect(orientation.details['autoRotate'], isTrue);
+      expect(orientation.details['landscape'], isFalse);
+      expect(orientation.title, contains('autoRotate=true'));
+
+      final displayStyle = _decodeA(OpA.displayStyle, [OpA.mixWrite, 7]);
+      expect(displayStyle.details['label'], 'displayStyle');
+      expect(displayStyle.details['style'], 7);
+
+      final displayTime = _decodeA(OpA.displayTime, [
+        OpA.mixWrite,
+        30,
+        1,
+        200,
+        0,
+        4,
+        2,
+      ]);
+      expect(displayTime.details['label'], 'displayTime');
+      expect(displayTime.details['displayTime'], 30);
+      expect(displayTime.details['alpha'], 200);
+      expect(displayTime.title, contains('index=2/4'));
+
+      final brightness = _decodeA(OpA.brightness, [OpA.mixWrite, 9]);
+      expect(brightness.details['label'], 'brightness');
+      expect(brightness.details['level'], 9);
+
+      final degree = _decodeA(OpA.degreeSwitch, [OpA.mixWrite, 1, 2]);
+      expect(degree.details['label'], 'degreeSwitch');
+      expect(degree.details['enabled'], isTrue);
+      expect(degree.details['isCelsius'], isFalse);
+      expect(degree.title, contains('unit=F'));
+
+      final palm = _decodeA(OpA.palmScreen, [OpA.mixWrite, 1, 2, 6]);
+      expect(palm.details['label'], 'palmScreen');
+      expect(palm.details['enabled'], isTrue);
+      expect(palm.details['secondary'], isFalse);
+      expect(palm.details['commitFlag'], isTrue);
+
+      final intell = _decodeA(OpA.intell, [OpA.mixWrite, 1, 12]);
+      expect(intell.details['label'], 'intell');
+      expect(intell.details['enabled'], isTrue);
+      expect(intell.details['delaySeconds'], 12);
+      expect(intell.title, contains('delay=12s'));
+    });
+
     test('summarizes music notify frames with decoded metadata', () {
       final frame = Codec.buildChannelA(OpA.musicNotify, [
         0x00, // playing^1 -> playing=true
@@ -562,6 +628,14 @@ String _line(String uuid, List<int> bytes) =>
 String _lineAt(String time, String uuid, List<int> bytes) =>
     'I\t$time\tNotification received from $uuid, value: (0x) '
     '${bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join('-')}';
+
+DecodedLogFrame _decodeA(int opcode, List<int> payload) {
+  final frame = Codec.buildChannelA(opcode, payload);
+  return const WatchLogDecoder().decodeHex(_hexBytes(frame));
+}
+
+String _hexBytes(List<int> bytes) =>
+    bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join('-');
 
 List<int> _bytes(String hex) => [
   for (final match in RegExp(r'[0-9A-Fa-f]{2}').allMatches(hex))

@@ -252,6 +252,10 @@ class WatchLogDecoder {
           details['batteryPercent'] = payload[0];
           return 'A 0x03 battery ${payload[0]}%';
         }
+      case OpA.dnd:
+        return _summarizeDnd(payload, details);
+      case OpA.timeFormat:
+        return _summarizeTimeFormat(payload, details);
       case OpA.readHeartRate:
         return _summarizeHeartRateFrame(payload, details);
       case OpA.heartRateSetting:
@@ -325,6 +329,32 @@ class WatchLogDecoder {
         return _summarizeDisplayClockToggle(payload, details);
       case OpA.watchfaceDisplayClock:
         return _summarizeWatchfaceDisplayClock(payload, details);
+      case OpA.displayOrientation:
+        return _summarizeDisplayOrientation(payload, details);
+      case OpA.displayStyle:
+        return _summarizeByteSetting(
+          opcode,
+          payload,
+          details,
+          label: 'displayStyle',
+          field: 'style',
+        );
+      case OpA.displayTime:
+        return _summarizeDisplayTime(payload, details);
+      case OpA.brightness:
+        return _summarizeByteSetting(
+          opcode,
+          payload,
+          details,
+          label: 'brightness',
+          field: 'level',
+        );
+      case OpA.degreeSwitch:
+        return _summarizeDegreeSwitch(payload, details);
+      case OpA.palmScreen:
+        return _summarizePalmScreen(payload, details);
+      case OpA.intell:
+        return _summarizeIntell(payload, details);
       case OpA.musicNotify:
         return _summarizeMusicNotify(payload, details);
       case OpA.deviceNotify:
@@ -377,6 +407,37 @@ class WatchLogDecoder {
         '${weekMask.toRadixString(16).padLeft(2, '0')}';
   }
 
+  String _summarizeDnd(Uint8List payload, Map<String, Object?> details) {
+    if (payload.length < 6) return 'A 0x06 doNotDisturb short payload';
+    final enabled = _wireBool12(payload[1]);
+    details.addAll({
+      'sub': _hex(payload[0]),
+      'enabled': enabled,
+      'startHour': payload[2],
+      'startMinute': payload[3],
+      'endHour': payload[4],
+      'endMinute': payload[5],
+    });
+    return 'A 0x06 doNotDisturb sub=${_hex(payload[0])} '
+        'enabled=${enabled ?? 'unknown'} '
+        'window=${_hhmm(payload[2], payload[3])}-${_hhmm(payload[4], payload[5])}';
+  }
+
+  String _summarizeTimeFormat(Uint8List payload, Map<String, Object?> details) {
+    if (payload.length < 2) return 'A 0x0a timeFormat short payload';
+    final is24Hour = payload[1] == 0 ? true : (payload[1] == 1 ? false : null);
+    final metric = payload.length >= 3
+        ? (payload[2] == 0 ? true : (payload[2] == 1 ? false : null))
+        : null;
+    details.addAll({
+      'sub': _hex(payload[0]),
+      'is24Hour': is24Hour,
+      'metric': metric,
+    });
+    return 'A 0x0a timeFormat sub=${_hex(payload[0])} '
+        'is24Hour=${is24Hour ?? 'unknown'} metric=${metric ?? 'unknown'}';
+  }
+
   String _summarizeDisplayClockToggle(
     Uint8List payload,
     Map<String, Object?> details,
@@ -386,12 +447,7 @@ class WatchLogDecoder {
     }
     final sub = payload[0];
     final state = payload[1];
-    bool? enabled;
-    if (state == 1) {
-      enabled = true;
-    } else if (state == 2) {
-      enabled = false;
-    }
+    final enabled = _wireBool12(state);
     details['sub'] = _hex(sub);
     details['state'] = state;
     if (enabled != null) {
@@ -423,6 +479,106 @@ class WatchLogDecoder {
     });
     return 'A 0x18 watchfaceDisplayClock style=${_hex(style)} length=$length '
         'echoedLength=$echoedLength label=${label.isEmpty ? 'none' : '"$label"'}';
+  }
+
+  String _summarizeDisplayOrientation(
+    Uint8List payload,
+    Map<String, Object?> details,
+  ) {
+    if (payload.length < 3) {
+      return 'A 0x29 displayOrientation short payload';
+    }
+    final autoRotate = _wireBool12(payload[1]);
+    final landscape = _wireBool12(payload[2]);
+    details.addAll({
+      'sub': _hex(payload[0]),
+      'autoRotate': autoRotate,
+      'landscape': landscape,
+    });
+    return 'A 0x29 displayOrientation sub=${_hex(payload[0])} '
+        'autoRotate=${autoRotate ?? 'unknown'} '
+        'landscape=${landscape ?? 'unknown'}';
+  }
+
+  String _summarizeByteSetting(
+    int opcode,
+    Uint8List payload,
+    Map<String, Object?> details, {
+    required String label,
+    required String field,
+  }) {
+    if (payload.length < 2) {
+      return 'A ${_hex(opcode)} $label short payload';
+    }
+    details['sub'] = _hex(payload[0]);
+    details[field] = payload[1];
+    return 'A ${_hex(opcode)} $label sub=${_hex(payload[0])} '
+        '$field=${payload[1]}';
+  }
+
+  String _summarizeDisplayTime(
+    Uint8List payload,
+    Map<String, Object?> details,
+  ) {
+    if (payload.length < 7) return 'A 0x1f displayTime short payload';
+    details.addAll({
+      'sub': _hex(payload[0]),
+      'displayTime': payload[1],
+      'displayType': payload[2],
+      'alpha': payload[3],
+      'reserved': payload[4],
+      'total': payload[5],
+      'current': payload[6],
+    });
+    return 'A 0x1f displayTime sub=${_hex(payload[0])} '
+        'time=${payload[1]} type=${payload[2]} alpha=${payload[3]} '
+        'index=${payload[6]}/${payload[5]}';
+  }
+
+  String _summarizeDegreeSwitch(
+    Uint8List payload,
+    Map<String, Object?> details,
+  ) {
+    if (payload.length < 3) return 'A 0x19 degreeSwitch short payload';
+    final enabled = _wireBool12(payload[1]);
+    final isCelsius = _wireBool12(payload[2]);
+    details.addAll({
+      'sub': _hex(payload[0]),
+      'enabled': enabled,
+      'isCelsius': isCelsius,
+    });
+    return 'A 0x19 degreeSwitch sub=${_hex(payload[0])} '
+        'enabled=${enabled ?? 'unknown'} '
+        'unit=${isCelsius == null ? 'unknown' : (isCelsius ? 'C' : 'F')}';
+  }
+
+  String _summarizePalmScreen(Uint8List payload, Map<String, Object?> details) {
+    if (payload.length < 4) return 'A 0x05 palmScreen short payload';
+    final enabled = _wireBool12(payload[1]);
+    final secondary = _wireBool12(payload[2]);
+    final commitFlag = (payload[3] & 0x04) != 0;
+    details.addAll({
+      'sub': _hex(payload[0]),
+      'enabled': enabled,
+      'secondary': secondary,
+      'commitFlag': commitFlag,
+      'flags': _hex(payload[3]),
+    });
+    return 'A 0x05 palmScreen sub=${_hex(payload[0])} '
+        'enabled=${enabled ?? 'unknown'} secondary=${secondary ?? 'unknown'} '
+        'commitFlag=$commitFlag flags=${_hex(payload[3])}';
+  }
+
+  String _summarizeIntell(Uint8List payload, Map<String, Object?> details) {
+    if (payload.length < 3) return 'A 0x09 intell short payload';
+    final enabled = _wireBool12(payload[1]);
+    details.addAll({
+      'sub': _hex(payload[0]),
+      'enabled': enabled,
+      'delaySeconds': payload[2],
+    });
+    return 'A 0x09 intell sub=${_hex(payload[0])} '
+        'enabled=${enabled ?? 'unknown'} delay=${payload[2]}s';
   }
 
   String _summarizeMusicNotify(
@@ -1160,6 +1316,10 @@ String _labelForChannelA(int opcode) {
       return 'battery';
     case OpA.dnd:
       return 'doNotDisturb';
+    case OpA.palmScreen:
+      return 'palmScreen';
+    case OpA.intell:
+      return 'intell';
     case OpA.timeFormat:
       return 'timeFormat';
     case OpA.bpSetting:
@@ -1208,8 +1368,16 @@ String _labelForChannelA(int opcode) {
       return 'displayClock';
     case OpA.watchfaceDisplayClock:
       return 'watchfaceDisplayClock';
+    case OpA.degreeSwitch:
+      return 'degreeSwitch';
+    case OpA.brightness:
+      return 'brightness';
     case OpA.displayTime:
       return 'displayTime';
+    case OpA.displayOrientation:
+      return 'displayOrientation';
+    case OpA.displayStyle:
+      return 'displayStyle';
     case OpA.musicNotify:
       return 'musicNotify';
     case OpA.queryDataDistribution:
@@ -1279,6 +1447,16 @@ String _compactHex(Iterable<int> bytes) =>
     bytes.map((b) => (b & 0xff).toRadixString(16).padLeft(2, '0')).join('-');
 
 List<String> _hexList(Iterable<int> bytes) => [for (final b in bytes) _hex(b)];
+
+bool? _wireBool12(int value) => switch (value) {
+  1 => true,
+  2 => false,
+  _ => null,
+};
+
+String _hhmm(int hour, int minute) =>
+    '${hour.toString().padLeft(2, '0')}:'
+    '${minute.toString().padLeft(2, '0')}';
 
 List<int> _daysWithData(int mask) => [
   for (var d = 0; d < 32; d++)
