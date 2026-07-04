@@ -409,33 +409,27 @@ class WatchLogDecoder {
 
   String _summarizeDnd(Uint8List payload, Map<String, Object?> details) {
     if (payload.length < 6) return 'A 0x06 doNotDisturb short payload';
-    final enabled = _wireBool12(payload[1]);
+    final sub = _addSub(details, payload[0]);
+    final enabled = _addWireBool12(details, 'enabled', payload[1]);
     details.addAll({
-      'sub': _hex(payload[0]),
-      'enabled': enabled,
       'startHour': payload[2],
       'startMinute': payload[3],
       'endHour': payload[4],
       'endMinute': payload[5],
     });
-    return 'A 0x06 doNotDisturb sub=${_hex(payload[0])} '
-        'enabled=${enabled ?? 'unknown'} '
+    return 'A 0x06 doNotDisturb sub=$sub enabled=${_boolText(enabled)} '
         'window=${_hhmm(payload[2], payload[3])}-${_hhmm(payload[4], payload[5])}';
   }
 
   String _summarizeTimeFormat(Uint8List payload, Map<String, Object?> details) {
     if (payload.length < 2) return 'A 0x0a timeFormat short payload';
-    final is24Hour = payload[1] == 0 ? true : (payload[1] == 1 ? false : null);
-    final metric = payload.length >= 3
-        ? (payload[2] == 0 ? true : (payload[2] == 1 ? false : null))
-        : null;
-    details.addAll({
-      'sub': _hex(payload[0]),
-      'is24Hour': is24Hour,
-      'metric': metric,
-    });
-    return 'A 0x0a timeFormat sub=${_hex(payload[0])} '
-        'is24Hour=${is24Hour ?? 'unknown'} metric=${metric ?? 'unknown'}';
+    final sub = _addSub(details, payload[0]);
+    final is24Hour = _wireBoolInverted01(payload[1]);
+    final metric = payload.length >= 3 ? _wireBoolInverted01(payload[2]) : null;
+    details['is24Hour'] = is24Hour;
+    details['metric'] = metric;
+    return 'A 0x0a timeFormat sub=$sub '
+        'is24Hour=${_boolText(is24Hour)} metric=${_boolText(metric)}';
   }
 
   String _summarizeDisplayClockToggle(
@@ -447,14 +441,14 @@ class WatchLogDecoder {
     }
     final sub = payload[0];
     final state = payload[1];
-    final enabled = _wireBool12(state);
-    details['sub'] = _hex(sub);
+    final subHex = _addSub(details, sub);
     details['state'] = state;
+    final enabled = _wireBool12(state);
     if (enabled != null) {
       details['enabled'] = enabled;
     }
-    return 'A 0x12 displayClock sub=${_hex(sub)} state=$state '
-        'enabled=${enabled ?? 'unknown'}';
+    return 'A 0x12 displayClock sub=$subHex state=$state '
+        'enabled=${_boolText(enabled)}';
   }
 
   String _summarizeWatchfaceDisplayClock(
@@ -488,16 +482,12 @@ class WatchLogDecoder {
     if (payload.length < 3) {
       return 'A 0x29 displayOrientation short payload';
     }
-    final autoRotate = _wireBool12(payload[1]);
-    final landscape = _wireBool12(payload[2]);
-    details.addAll({
-      'sub': _hex(payload[0]),
-      'autoRotate': autoRotate,
-      'landscape': landscape,
-    });
-    return 'A 0x29 displayOrientation sub=${_hex(payload[0])} '
-        'autoRotate=${autoRotate ?? 'unknown'} '
-        'landscape=${landscape ?? 'unknown'}';
+    final sub = _addSub(details, payload[0]);
+    final autoRotate = _addWireBool12(details, 'autoRotate', payload[1]);
+    final landscape = _addWireBool12(details, 'landscape', payload[2]);
+    return 'A 0x29 displayOrientation sub=$sub '
+        'autoRotate=${_boolText(autoRotate)} '
+        'landscape=${_boolText(landscape)}';
   }
 
   String _summarizeByteSetting(
@@ -510,10 +500,9 @@ class WatchLogDecoder {
     if (payload.length < 2) {
       return 'A ${_hex(opcode)} $label short payload';
     }
-    details['sub'] = _hex(payload[0]);
+    final sub = _addSub(details, payload[0]);
     details[field] = payload[1];
-    return 'A ${_hex(opcode)} $label sub=${_hex(payload[0])} '
-        '$field=${payload[1]}';
+    return 'A ${_hex(opcode)} $label sub=$sub $field=${payload[1]}';
   }
 
   String _summarizeDisplayTime(
@@ -521,8 +510,8 @@ class WatchLogDecoder {
     Map<String, Object?> details,
   ) {
     if (payload.length < 7) return 'A 0x1f displayTime short payload';
+    final sub = _addSub(details, payload[0]);
     details.addAll({
-      'sub': _hex(payload[0]),
       'displayTime': payload[1],
       'displayType': payload[2],
       'alpha': payload[3],
@@ -530,7 +519,7 @@ class WatchLogDecoder {
       'total': payload[5],
       'current': payload[6],
     });
-    return 'A 0x1f displayTime sub=${_hex(payload[0])} '
+    return 'A 0x1f displayTime sub=$sub '
         'time=${payload[1]} type=${payload[2]} alpha=${payload[3]} '
         'index=${payload[6]}/${payload[5]}';
   }
@@ -540,45 +529,33 @@ class WatchLogDecoder {
     Map<String, Object?> details,
   ) {
     if (payload.length < 3) return 'A 0x19 degreeSwitch short payload';
-    final enabled = _wireBool12(payload[1]);
-    final isCelsius = _wireBool12(payload[2]);
-    details.addAll({
-      'sub': _hex(payload[0]),
-      'enabled': enabled,
-      'isCelsius': isCelsius,
-    });
-    return 'A 0x19 degreeSwitch sub=${_hex(payload[0])} '
-        'enabled=${enabled ?? 'unknown'} '
+    final sub = _addSub(details, payload[0]);
+    final enabled = _addWireBool12(details, 'enabled', payload[1]);
+    final isCelsius = _addWireBool12(details, 'isCelsius', payload[2]);
+    return 'A 0x19 degreeSwitch sub=$sub '
+        'enabled=${_boolText(enabled)} '
         'unit=${isCelsius == null ? 'unknown' : (isCelsius ? 'C' : 'F')}';
   }
 
   String _summarizePalmScreen(Uint8List payload, Map<String, Object?> details) {
     if (payload.length < 4) return 'A 0x05 palmScreen short payload';
-    final enabled = _wireBool12(payload[1]);
-    final secondary = _wireBool12(payload[2]);
+    final sub = _addSub(details, payload[0]);
+    final enabled = _addWireBool12(details, 'enabled', payload[1]);
+    final secondary = _addWireBool12(details, 'secondary', payload[2]);
     final commitFlag = (payload[3] & 0x04) != 0;
-    details.addAll({
-      'sub': _hex(payload[0]),
-      'enabled': enabled,
-      'secondary': secondary,
-      'commitFlag': commitFlag,
-      'flags': _hex(payload[3]),
-    });
-    return 'A 0x05 palmScreen sub=${_hex(payload[0])} '
-        'enabled=${enabled ?? 'unknown'} secondary=${secondary ?? 'unknown'} '
+    details.addAll({'commitFlag': commitFlag, 'flags': _hex(payload[3])});
+    return 'A 0x05 palmScreen sub=$sub '
+        'enabled=${_boolText(enabled)} secondary=${_boolText(secondary)} '
         'commitFlag=$commitFlag flags=${_hex(payload[3])}';
   }
 
   String _summarizeIntell(Uint8List payload, Map<String, Object?> details) {
     if (payload.length < 3) return 'A 0x09 intell short payload';
-    final enabled = _wireBool12(payload[1]);
-    details.addAll({
-      'sub': _hex(payload[0]),
-      'enabled': enabled,
-      'delaySeconds': payload[2],
-    });
-    return 'A 0x09 intell sub=${_hex(payload[0])} '
-        'enabled=${enabled ?? 'unknown'} delay=${payload[2]}s';
+    final sub = _addSub(details, payload[0]);
+    final enabled = _addWireBool12(details, 'enabled', payload[1]);
+    details.addAll({'delaySeconds': payload[2]});
+    return 'A 0x09 intell sub=$sub '
+        'enabled=${_boolText(enabled)} delay=${payload[2]}s';
   }
 
   String _summarizeMusicNotify(
@@ -1448,11 +1425,31 @@ String _compactHex(Iterable<int> bytes) =>
 
 List<String> _hexList(Iterable<int> bytes) => [for (final b in bytes) _hex(b)];
 
+String _addSub(Map<String, Object?> details, int sub) {
+  final hex = _hex(sub);
+  details['sub'] = hex;
+  return hex;
+}
+
+bool? _addWireBool12(Map<String, Object?> details, String field, int value) {
+  final parsed = _wireBool12(value);
+  details[field] = parsed;
+  return parsed;
+}
+
 bool? _wireBool12(int value) => switch (value) {
   1 => true,
   2 => false,
   _ => null,
 };
+
+bool? _wireBoolInverted01(int value) => switch (value) {
+  0 => true,
+  1 => false,
+  _ => null,
+};
+
+String _boolText(bool? value) => value?.toString() ?? 'unknown';
 
 String _hhmm(int hour, int minute) =>
     '${hour.toString().padLeft(2, '0')}:'
