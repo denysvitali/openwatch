@@ -148,6 +148,15 @@ void main() {
       expect(f[7], 0x00);
     });
 
+    test('bindAncs uses FEE7 0x04 shape with 12 model bytes', () {
+      final f = Commands.bindAncs('ABCDEFGHIJKLMNO');
+      expect(f[0], OpA.bindAncs);
+      expect(f[1], OpA.mixWrite);
+      expect(f[2], 0x0a);
+      expect(f.sublist(3, 15), 'ABCDEFGHIJKL'.codeUnits);
+      expect(Codec.isValidChannelA(f), isTrue);
+    });
+
     test('factoryReset sends 0xff with the "fff" magic payload', () {
       final f = Commands.factoryReset();
       expect(f[0], OpA.factoryReset);

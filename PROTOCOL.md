@@ -413,11 +413,11 @@ REALTIMEHEARTRATE=6, ECG=7, PRESSURE=8, BLOOD_SUGAR=9, HRV=0xa, BODY_TEMPERATURE
 | AppSport (notify) | `0x77` | — | watch→ | n/a | `b0`=gpsStatus; if==6 ts=`bytesToInt(b[2..6])` LE | Watch requests phone GPS-sport sync. |
 | AppGps (notify) | `0x74` | — | watch→ | n/a | same as AppSport | Watch GPS sync notify. |
 
-### 4.5 Notifications / weather / Muslim (Channel A)
+### 4.5 Notifications / weather / Muslim (Channel A + FEE7 bind)
 
 | Name | Opcode | Sub | Dir | Request | Response | Meaning |
 |---|---|---|---|---|---|---|
-| BindAncsReq | `0x04` | `0x02` | →watch | `[02, verBucket, UTF-8 MODEL≤13B]` (verBucket: 0x0a SDK29/30, 0x09 SDK28, 0x08 SDK26/27, else 0); fallback `[02]` | status | Register phone identity for ANCS attribute parsing. |
+| BindAncsReq | `0x04` | `0x02` | →watch | FEE7-native on H59MA v14: `[02, verBucket, UTF-8 MODEL≤12B]` (APK uses `verBucket`: 0x0a SDK29/30, 0x09 SDK28, 0x08 SDK26/27, else 0). Firmware stores a 12-byte model slot from request offset 3. | one-byte ACK `[0x04]` | Register phone identity for ANCS attribute parsing. OpenWatch sends this over FEE7 when available; Channel-A frame fallback is retained for older transports. |
 | SetANCSReq | `0x60` | — | →watch | `[FF,9F,FF,FF]` | **ReadANCSRsp**: `pl[0..1]`=stateMask u16 LE | Subscribe ANCS categories (near-all). |
 | SetMessagePushReq | `0x61` | — | →watch | empty | **ReadMessagePushRsp**: deviceSupport1/2/3 = ints @off 2/4/6 | Query message-push capability. |
 | PushMsgUintReq | `0x72` | — | →watch | `[type, argB, argC, content…]` | **PhoneNotifyRsp** (push): `action=pl[0]&0xff`; isReject ⇔ action==1 | Push a notification to watch. |
@@ -849,14 +849,15 @@ Feedback, Customer-support chat.
   opcode that v14 dropped; sweep the `0x97..0x9F` reserved range (§8.20) for a
   vendor-private notify opcode.
 - **`@RequiresSignature` method set** — confirm which cloud endpoints sign at runtime.
-- **`bind` (`0x10` CMD_BIND_SUCCESS)** request layout — **not on H59MA Channel-A.**
+- **Legacy `bind` (`0x10` CMD_BIND_SUCCESS)** request layout — **not on H59MA Channel-A.**
   The §10.2 inventory (22 Channel-A handlers) does not list `0x10`; on Channel-B
   it falls into the `0x08..0x10` default slot (`NAK code 0`). The actual device-side
   bind state transition is on `0xFEE7` `0x04` (`fee7_handle_bind_ancs_04`,
-  GHIDRA §8.5 lines 4735/4824). The Oudmon SDK's `0x10` is a phone-side/app-layer
-  convention that lives in the proprietary APK, not in the firmware — payload
-  reconstruction requires APK-side RE (`jadx`/`Bytecode Viewer`), not the H59MA
-  bin. Live capture is also acceptable.
+  GHIDRA §8.5 lines 4735/4824; radare2 v14 body offset `0x6032`) and OpenWatch
+  uses that path for notification enable. The Oudmon SDK's `0x10` is a
+  phone-side/app-layer convention that lives in the proprietary APK, not in the
+  firmware — payload reconstruction requires APK-side RE (`jadx`/`Bytecode Viewer`),
+  not the H59MA bin. Live capture is also acceptable.
 
 > **Resolved (post-FW-RE):**
 > - DFU init payload layout (`[0x01, size32LE, crc16LE, checksum16LE]`) — verified

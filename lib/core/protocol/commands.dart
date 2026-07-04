@@ -18,6 +18,10 @@ class Commands {
     false,
   ];
 
+  /// FEE7 `0x04` copies exactly 12 bytes from request offset 3 into the
+  /// phone-identity slot (`body.bin` v14 offset `0x9b4c`).
+  static const int _bindAncsModelBytes = 12;
+
   /// `SetTimeReq` (0x01): `[BCD y,mo,d,h,mi,s][flags]` where `flags`:
   ///   * `0xFF` → skip the seconds-tick re-init at the end of the handler
   ///     (`FUN_0082bb4e` skips `FUN_00827956()`/`FUN_008276d2()`).
@@ -295,9 +299,13 @@ class Commands {
       Codec.buildChannelA(OpA.setAncs, const [0xFF, 0x9F, 0xFF, 0xFF]);
 
   /// `BindAncsReq` (0x04): register the phone identity for ANCS parsing.
-  /// [verBucket] encodes the Android SDK level bucket (see §4.5).
+  ///
+  /// H59MA v14 handles this on the vendor `0xFEE7` service. The firmware
+  /// reads byte 1 as the bind state, treats byte 2 as a non-zero selector
+  /// (the APK uses an Android-version bucket), and copies 12 bytes from
+  /// byte 3 as the phone model.
   static Uint8List bindAncs(String model, {int verBucket = 0x0a}) {
-    final bytes = utf8Clamp(model, 13);
+    final bytes = utf8Clamp(model, _bindAncsModelBytes);
     return Codec.buildChannelA(OpA.bindAncs, [
       OpA.mixWrite,
       verBucket,

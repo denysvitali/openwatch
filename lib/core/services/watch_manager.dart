@@ -597,7 +597,13 @@ class WatchManager extends ChangeNotifier {
 
   Future<void> enableNotifications(String phoneModel) =>
       _withActionSpan('enable_notifications', () async {
-        await _transport.sendA(Commands.bindAncs(phoneModel));
+        final bind = Commands.bindAncs(phoneModel);
+        final fee7 = _hub.fee7Service;
+        if (fee7 != null) {
+          await fee7.sendCommand(bind);
+        } else {
+          await _transport.sendA(bind);
+        }
         await _transport.sendA(Commands.enableAncs());
         _hub.enableAncs(name: 'phone:$phoneModel');
       });
