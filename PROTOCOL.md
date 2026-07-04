@@ -485,6 +485,10 @@ before async handling. The implemented file table/list path is:
 OpenWatch should treat this as an H59MA-specific file-table protocol, separate
 from the APK generic file upload commands above.
 
+OpenWatch currently implements the `0x41` request builder and labels/summarizes
+`0x42` responses by count and byte length only. The per-record TLV payload is
+kept opaque until live captures map record types and field ids.
+
 **H59MA v14 device-info/config (`0x5a`).** The firmware handles this as a
 Channel-B command, not an APK generic large-data action:
 

@@ -83,6 +83,15 @@ void main() {
     });
   });
 
+  group('Commands.h59FileTable* builders', () {
+    test('h59FileTableList wraps the raw u32 cursor in 0x41', () {
+      final frame = Commands.h59FileTableList(cursorOrMinRecordId: 0x12345678);
+      expect(frame[0], Codec.channelBMagic);
+      expect(frame[1], OpB.h59FileList);
+      expect(Codec.rxChannelBPayload(frame), [0x78, 0x56, 0x34, 0x12]);
+    });
+  });
+
   group('Commands.deviceInfo* builders', () {
     test('deviceInfoQuery wraps [0x5a, 0x01] in Channel-B framing', () {
       final frame = Commands.deviceInfoQuery();

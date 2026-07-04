@@ -161,6 +161,14 @@ class OpB {
   static const int fileCheck = 0x33;
   static const int fileDelete = 0x39;
 
+  // H59MA v14 file-table path (firmware-native; separate from APK FileHandle).
+  static const int h59FileList = 0x41;
+  static const int h59FileListResponse = 0x42;
+  static const int h59FileOperation = 0x43;
+  static const int h59FileMetadata = 0x44;
+  static const int h59FileChunk = 0x45;
+  static const int h59FileDelete = 0x46;
+
   static const int customWatchFace = 0x3a;
 
   // LargeData actions (PROTOCOL.md §4.7)

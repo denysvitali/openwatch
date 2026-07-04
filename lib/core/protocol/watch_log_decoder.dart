@@ -729,6 +729,12 @@ class WatchLogDecoder {
         details['records'] = records.map((r) => r.toJson()).toList();
         return 'B 0x2a activity records=${records.length} '
             '${records.map((r) => 'd${r.dayOffset}:steps=${r.steps ?? 'n/a'}').join(', ')}';
+      case OpB.h59FileListResponse:
+        final count = payload.isEmpty ? 0 : payload[0] & 0xff;
+        final recordBytes = payload.isEmpty ? 0 : payload.length - 1;
+        details['fileRecordCount'] = count;
+        details['fileRecordBytes'] = recordBytes;
+        return 'B 0x42 H59 file list records=$count bytes=$recordBytes';
     }
     return 'B ${_hex(cmd)} ${_labelForChannelB(cmd)} '
         'payload=${_compactHex(payload)}';
@@ -1369,6 +1375,18 @@ String _labelForChannelB(int cmd) {
       return 'fileList';
     case OpB.fileDelete:
       return 'fileDelete';
+    case OpB.h59FileList:
+      return 'h59FileList';
+    case OpB.h59FileListResponse:
+      return 'h59FileListResponse';
+    case OpB.h59FileOperation:
+      return 'h59FileOperation';
+    case OpB.h59FileMetadata:
+      return 'h59FileMetadata';
+    case OpB.h59FileChunk:
+      return 'h59FileChunk';
+    case OpB.h59FileDelete:
+      return 'h59FileDelete';
     default:
       return 'unknown';
   }

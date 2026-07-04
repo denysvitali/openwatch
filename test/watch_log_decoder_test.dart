@@ -113,6 +113,26 @@ void main() {
       expect(encoded, contains('"distanceMeters":80'));
     });
 
+    test('summarizes H59MA file-table list responses opaquely', () {
+      final frame = Codec.buildChannelB(OpB.h59FileListResponse, [
+        0x02,
+        // Opaque TLV-like record bytes from FUN_0083105a. The host log
+        // decoder reports the count/size only; field semantics remain RE work.
+        0x01, 0x03, 0xAA, 0xBB, 0xCC,
+        0x02, 0x02, 0x10, 0x20,
+      ]);
+
+      final report = const WatchLogDecoder().decodeNrfConnectLog(
+        _line(_chB, frame),
+      );
+      final decoded = report.frames.single;
+      expect(decoded.valid, isTrue);
+      expect(decoded.title, contains('H59 file list records=2'));
+      expect(decoded.details['label'], 'h59FileListResponse');
+      expect(decoded.details['fileRecordCount'], 2);
+      expect(decoded.details['fileRecordBytes'], 9);
+    });
+
     test('summarizes clock alarm read replies', () {
       final frame = Codec.buildChannelA(OpA.readAlarm, [
         2,
