@@ -321,6 +321,8 @@ class WatchLogDecoder {
           details['packageLength'] = payload[0];
           return 'A 0x2f package length ${payload[0]}';
         }
+      case OpA.displayClock:
+        return _summarizeDisplayClock(payload, details);
       case OpA.musicNotify:
         return _summarizeMusicNotify(payload, details);
       case OpA.deviceNotify:
@@ -371,6 +373,30 @@ class WatchLogDecoder {
         'time=${hour.toString().padLeft(2, '0')}:'
         '${minute.toString().padLeft(2, '0')} weekMask=0x'
         '${weekMask.toRadixString(16).padLeft(2, '0')}';
+  }
+
+  String _summarizeDisplayClock(
+    Uint8List payload,
+    Map<String, Object?> details,
+  ) {
+    if (payload.length < 3) {
+      return 'A 0x18 display clock short payload';
+    }
+    final style = payload[0];
+    final length = payload[1];
+    final echoedLength = payload[2];
+    final labelStart = payload.length > 3 ? 3 : payload.length;
+    final labelEnd = (labelStart + echoedLength).clamp(0, payload.length);
+    final labelBytes = payload.sublist(labelStart, labelEnd);
+    final label = String.fromCharCodes(labelBytes.where((b) => b != 0)).trim();
+    details.addAll({
+      'style': style,
+      'length': length,
+      'echoedLength': echoedLength,
+      'echoedLabel': label,
+    });
+    return 'A 0x18 displayClock style=${_hex(style)} length=$length '
+        'echoedLength=$echoedLength label=${label.isEmpty ? 'none' : '"$label"'}';
   }
 
   String _summarizeMusicNotify(
@@ -1152,6 +1178,8 @@ String _labelForChannelA(int opcode) {
       return 'deviceNotify';
     case OpA.weatherForecast:
       return 'weatherForecast';
+    case OpA.displayClock:
+      return 'displayClock';
     case OpA.displayTime:
       return 'displayTime';
     case OpA.musicNotify:
