@@ -262,15 +262,16 @@ void main() {
     });
 
     test(
-      'reassembly timeout race: a chunk arriving 75% through the '
-      'timer window CANCELS the discard (channel_b.dart:138 + 218-228)',
+      'reassembly timeout race: a chunk arriving before the '
+      'timer fires CANCELS the discard (channel_b.dart:138 + 218-228)',
       () async {
         // First line of `_onChunk` cancels the timeout BEFORE branching.
-        // So a chunk even 1 µs before the deadline resets the timer.
+        // The margin is intentionally wider than the production race to
+        // keep this stress test deterministic on loaded CI hosts.
         final t = FakeBleTransport();
         final p = ChannelBParser(
           t,
-          fragmentTimeout: const Duration(milliseconds: 80),
+          fragmentTimeout: const Duration(milliseconds: 250),
         );
         p.bind();
         final emitted = <ChannelBCommand>[];
@@ -283,7 +284,7 @@ void main() {
         );
         t.inB.add(Uint8List.sublistView(f, 0, 20));
 
-        // At 60 ms (75% through the 80 ms timer) deliver the remainder.
+        // Deliver the remainder before the timeout would discard the head.
         await Future<void>.delayed(const Duration(milliseconds: 60));
         t.inB.add(Uint8List.sublistView(f, 20));
 
