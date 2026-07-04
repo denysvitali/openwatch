@@ -755,6 +755,34 @@ class Commands {
   static Uint8List h59FileTableList({int cursorOrMinRecordId = 0}) =>
       Codec.buildChannelB(OpB.h59FileList, Codec.u32le(cursorOrMinRecordId));
 
+  static const int _h59FileOperationPayloadBytes = 16;
+
+  /// H59MA v14 firmware-native file operation (`0x43`).
+  ///
+  /// The firmware forwards at most 16 operation bytes to the file helper, then
+  /// emits `0x44` metadata + `0x45` chunks when a record is found. Payload
+  /// fields remain opaque, so callers pass the raw operation block.
+  static Uint8List h59FileTableOperation(List<int> operationPayload) =>
+      Codec.buildChannelB(
+        OpB.h59FileOperation,
+        _h59FileOperationPayload(operationPayload),
+      );
+
+  /// H59MA v14 firmware-native file delete (`0x46`).
+  ///
+  /// Shares the same 16-byte operation payload path as `0x43`, but ships no
+  /// response; hosts verify deletion by polling `0x41` afterwards.
+  static Uint8List h59FileTableDelete(List<int> operationPayload) =>
+      Codec.buildChannelB(
+        OpB.h59FileDelete,
+        _h59FileOperationPayload(operationPayload),
+      );
+
+  static List<int> _h59FileOperationPayload(List<int> operationPayload) => [
+    for (final b in operationPayload.take(_h59FileOperationPayloadBytes))
+      b & 0xFF,
+  ];
+
   // ---------------------------------------------------------------------------
   // Channel-B device-info / config TLVs (0x5a — H59MA v14 only).
   // ---------------------------------------------------------------------------

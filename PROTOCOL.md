@@ -491,14 +491,15 @@ before async handling. The implemented file table/list path is:
 |---|---|---|---|
 | `0x41` | `[cursorOrMinRecordId u32LE]` | `0x42` payload `[count, entries...]`, max 10 entries | Each entry is length-prefixed: `[entryLen, recordType, fieldTLVs...]`. Field TLVs are `[fieldLen, fieldId, value...]`; record types `0x04`, `0x07`, `0x08` use different field sets. |
 | `0x43` | `[selector, recordId u32LE]` | `0x44` metadata then `0x45` chunks | Found records emit metadata, then chunks shaped `[chunkIndex, 0x00, up to ~500 bytes]`. |
-| `0x46` | Routed through the same async file handler, but the v14 callee only has a visible `0x43` body | Treat as needs live capture before relying on delete semantics. |
+| `0x46` | Raw operation payload, same helper family as `0x43` (forwarded up to 16B) | none | Delete sibling of `0x43` per GHIDRA §2.6/§2.11; host should poll `0x41` afterwards to verify the table changed. |
 
 OpenWatch should treat this as an H59MA-specific file-table protocol, separate
 from the APK generic file upload commands above.
 
-OpenWatch currently implements the `0x41` request builder and labels/summarizes
-`0x42` responses by count and byte length only. The per-record TLV payload is
-kept opaque until live captures map record types and field ids.
+OpenWatch implements raw request builders for `0x41`, `0x43`, and `0x46`, and
+labels/summarizes `0x42` responses by count and byte length only. The
+per-record TLV payload is kept opaque until live captures map record types and
+field ids.
 
 **H59MA v14 device-info/config (`0x5a`).** The firmware handles this as a
 Channel-B command, not an APK generic large-data action:

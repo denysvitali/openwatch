@@ -147,6 +147,28 @@ void main() {
       expect(frame[1], OpB.h59FileList);
       expect(Codec.rxChannelBPayload(frame), [0x78, 0x56, 0x34, 0x12]);
     });
+
+    test(
+      'h59FileTableOperation wraps a raw 16-byte operation block in 0x43',
+      () {
+        final frame = Commands.h59FileTableOperation([
+          for (var i = 0; i < 20; i++) 0x100 + i,
+        ]);
+        expect(frame[0], Codec.channelBMagic);
+        expect(frame[1], OpB.h59FileOperation);
+        expect(
+          Codec.rxChannelBPayload(frame),
+          List<int>.generate(16, (i) => i),
+        );
+      },
+    );
+
+    test('h59FileTableDelete wraps the same raw operation block in 0x46', () {
+      final frame = Commands.h59FileTableDelete([0x01, 0x78, 0x56, 0x34, 0x12]);
+      expect(frame[0], Codec.channelBMagic);
+      expect(frame[1], OpB.h59FileDelete);
+      expect(Codec.rxChannelBPayload(frame), [0x01, 0x78, 0x56, 0x34, 0x12]);
+    });
   });
 
   group('Commands.deviceInfo* builders', () {
