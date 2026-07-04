@@ -326,12 +326,10 @@ class WatchLogDecoder {
       case OpA.queryDataDistribution:
         if (payload.length >= 4) {
           final mask = Codec.readU32be(payload, 0);
-          final days = [
-            for (var d = 0; d < 32; d++)
-              if ((mask & (1 << d)) != 0) d,
-          ];
+          final days = _daysWithData(mask);
+          details['mask'] = mask;
           details['daysWithData'] = days;
-          return 'A 0x46 data distribution offsets=$days';
+          return 'A 0x46 data distribution mask=${_hex32(mask)} offsets=$days';
         }
     }
     return 'A ${_hex(opcode)} ${_labelForChannelA(opcode)} '
@@ -1188,10 +1186,18 @@ String _labelForFee7(int opcode) {
 
 String _hex(int v) => '0x${(v & 0xff).toRadixString(16).padLeft(2, '0')}';
 
+String _hex32(int v) =>
+    '0x${(v & 0xffffffff).toRadixString(16).padLeft(8, '0')}';
+
 String _compactHex(Iterable<int> bytes) =>
     bytes.map((b) => (b & 0xff).toRadixString(16).padLeft(2, '0')).join('-');
 
 List<String> _hexList(Iterable<int> bytes) => [for (final b in bytes) _hex(b)];
+
+List<int> _daysWithData(int mask) => [
+  for (var d = 0; d < 32; d++)
+    if ((mask & (1 << d)) != 0) d,
+];
 
 int _sum8(Uint8List b, int start, int end) {
   var sum = 0;

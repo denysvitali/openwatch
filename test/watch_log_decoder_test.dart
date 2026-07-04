@@ -169,6 +169,26 @@ void main() {
       expect(decoded.details['minute'], 25);
     });
 
+    test('summarizes data-distribution bitmask replies', () {
+      final frame = Codec.buildChannelA(OpA.queryDataDistribution, [
+        0x00,
+        0x00,
+        0x00,
+        0x05,
+      ]);
+
+      final decoded = const WatchLogDecoder().decodeHex(
+        frame.map((b) => b.toRadixString(16).padLeft(2, '0')).join('-'),
+      );
+
+      expect(decoded.valid, isTrue);
+      expect(decoded.details['label'], 'queryDataDistribution');
+      expect(decoded.details['mask'], 0x00000005);
+      expect(decoded.details['daysWithData'], [0, 2]);
+      expect(decoded.title, contains('mask=0x00000005'));
+      expect(decoded.title, contains('offsets=[0, 2]'));
+    });
+
     test('summarizes FEE7 status responses from the vendor notify UUID', () {
       final frame = Codec.buildChannelA(Fee7.statusResponse, [80, 0xab]);
 
