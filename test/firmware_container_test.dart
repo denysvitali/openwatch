@@ -4,6 +4,31 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openwatch/core/protocol/firmware_container.dart';
 
+const _realFirmwareHeaders = [
+  _ExpectedFirmwareHeader(
+    fileName: 'H59MA_1.00.13_251230.bin',
+    version: 'H59MA_1.00.13_251230',
+    loadSize: 0x23840,
+    firmwareSize: 0x23840,
+    imageChkA: 0x00ce90ee,
+    bodySize: 0x23440,
+    flashAppEnd: 0x00847860,
+    imageDigestHex:
+        '8d50aa228b80d953cbf616006c7954f46787f4f12deda09fcb0ca9a242178bb1',
+  ),
+  _ExpectedFirmwareHeader(
+    fileName: 'H59MA_1.00.14_260508.bin',
+    version: 'H59MA_1.00.14_260508',
+    loadSize: 0x219fc,
+    firmwareSize: 0x219fc,
+    imageChkA: 0x00c43671,
+    bodySize: 0x215fc,
+    flashAppEnd: 0x00845c14,
+    imageDigestHex:
+        '47d3b81a34034731132ef839435d7ee791ec57e8c6d648daff094a4d0d354648',
+  ),
+];
+
 void main() {
   group('FirmwareContainer.parse', () {
     test('returns null for too-short input', () {
@@ -20,33 +45,46 @@ void main() {
     });
 
     test('parses a real v14 container header', () {
-      final file = File('firmwares/H59MA_1.00.14_260508.bin');
-      if (!file.existsSync()) {
-        markTestSkipped('Firmware file not present in test environment');
-        return;
-      }
-      final bytes = file.readAsBytesSync();
-      final c = FirmwareContainer.parse(bytes);
-      expect(c, isNotNull);
-      expect(c!.header.version, startsWith('H59MA_'));
+      final c = _parseFirmwareFixture('H59MA_1.00.14_260508.bin');
+      if (c == null) return;
+      expect(c.header.version, startsWith('H59MA_'));
       expect(c.header.hwId, startsWith('H59MA_'));
-      expect(c.header.firmwareSize, lessThanOrEqualTo(bytes.length));
+      expect(c.header.firmwareSize, lessThanOrEqualTo(c.bytes.length));
       expect(c.header.firmwareSize, greaterThan(0));
-      expect(c.header.loadSize, lessThanOrEqualTo(bytes.length));
+      expect(c.header.loadSize, lessThanOrEqualTo(c.bytes.length));
       expect(c.body.length, c.header.bodySize);
       expect(c.header.imageDigest.length, 32);
     });
+
+    for (final expected in _realFirmwareHeaders) {
+      test('pins ${expected.version} header fields from real firmware', () {
+        final c = _parseFirmwareFixture(expected.fileName);
+        if (c == null) return;
+
+        expect(
+          c.bytes.length,
+          expected.bodySize + FirmwareContainer.headerSize,
+        );
+        expect(c.body.length, expected.bodySize);
+        expect(c.header.version, expected.version);
+        expect(c.header.hwId, 'H59MA_V1.0');
+        expect(c.header.loadSize, expected.loadSize);
+        expect(c.header.firmwareSize, expected.firmwareSize);
+        expect(c.header.imageChkA, expected.imageChkA);
+        expect(c.header.bodySize, expected.bodySize);
+        expect(c.header.const5C, 0x7e6b4cf9);
+        expect(_hex(c.header.signatureA), '11c5eb118282f74a0c0cef5b');
+        expect(c.header.flashAppStart, 0x00826400);
+        expect(c.header.flashAppEnd, expected.flashAppEnd);
+        expect(c.header.imageDigestHex, expected.imageDigestHex);
+      });
+    }
   });
 
   group('FirmwareContainer.verify', () {
     test('a real v14 image passes every default check', () {
-      final file = File('firmwares/H59MA_1.00.14_260508.bin');
-      if (!file.existsSync()) {
-        markTestSkipped('Firmware file not present');
-        return;
-      }
-      final bytes = file.readAsBytesSync();
-      final c = FirmwareContainer.parse(bytes)!;
+      final c = _parseFirmwareFixture('H59MA_1.00.14_260508.bin');
+      if (c == null) return;
       final report = c.verify();
       // Four unconditional checks: magic, load_size, firmware_size, body_size.
       // image_chk_a / flash_app_end / version_prefix / hw_id_prefix are all
@@ -56,13 +94,8 @@ void main() {
     });
 
     test('detects version-prefix mismatch', () {
-      final file = File('firmwares/H59MA_1.00.14_260508.bin');
-      if (!file.existsSync()) {
-        markTestSkipped('Firmware file not present');
-        return;
-      }
-      final bytes = file.readAsBytesSync();
-      final c = FirmwareContainer.parse(bytes)!;
+      final c = _parseFirmwareFixture('H59MA_1.00.14_260508.bin');
+      if (c == null) return;
       final report = c.verify(
         expected: const FirmwareExpectations(versionPrefix: 'ZZZZ_'),
       );
@@ -71,13 +104,8 @@ void main() {
     });
 
     test('detects HW-id prefix mismatch', () {
-      final file = File('firmwares/H59MA_1.00.14_260508.bin');
-      if (!file.existsSync()) {
-        markTestSkipped('Firmware file not present');
-        return;
-      }
-      final bytes = file.readAsBytesSync();
-      final c = FirmwareContainer.parse(bytes)!;
+      final c = _parseFirmwareFixture('H59MA_1.00.14_260508.bin');
+      if (c == null) return;
       final report = c.verify(
         expected: const FirmwareExpectations(hwIdPrefix: 'WRONG_'),
       );
@@ -86,17 +114,14 @@ void main() {
     });
 
     test('detects body corruption via image_chk_a (validateImageChkA)', () {
-      final file = File('firmwares/H59MA_1.00.14_260508.bin');
-      if (!file.existsSync()) {
-        markTestSkipped('Firmware file not present');
-        return;
-      }
-      final bytes = file.readAsBytesSync();
-      // Flip a byte in the body so the additive checksum (over body)
-      // diverges from the header.
+      final c = _parseFirmwareFixture('H59MA_1.00.14_260508.bin');
+      if (c == null) return;
+      final bytes = Uint8List.fromList(c.bytes);
+      // Flip a byte in the body so the additive checksum window diverges
+      // from the header.
       bytes[FirmwareContainer.headerSize + 0x100] ^= 0xFF;
-      final c = FirmwareContainer.parse(bytes)!;
-      final report = c.verify(
+      final corrupted = FirmwareContainer.parse(bytes)!;
+      final report = corrupted.verify(
         expected: const FirmwareExpectations(validateImageChkA: true),
       );
       expect(report.isValid, isFalse);
@@ -106,13 +131,8 @@ void main() {
 
   group('FirmwareContainer.bodySha256', () {
     test('hashes body only, not header', () {
-      final file = File('firmwares/H59MA_1.00.14_260508.bin');
-      if (!file.existsSync()) {
-        markTestSkipped('Firmware file not present');
-        return;
-      }
-      final bytes = file.readAsBytesSync();
-      final c = FirmwareContainer.parse(bytes)!;
+      final c = _parseFirmwareFixture('H59MA_1.00.14_260508.bin');
+      if (c == null) return;
       final d = c.bodySha256();
       // SHA-256 produces 32 bytes.
       expect(d.bytes.length, 32);
@@ -329,13 +349,9 @@ void main() {
       // v13/v14 image (`_additive24(body) = 0xc3f5ef` vs header
       // `0xc43671`). That false-positive would have surfaced as
       // corruption on every OTA verify, so this test pins the fix.
-      final file = File('firmwares/H59MA_1.00.14_260508.bin');
-      if (!file.existsSync()) {
-        markTestSkipped('Firmware file not present');
-        return;
-      }
-      final bytes = file.readAsBytesSync();
-      final c = FirmwareContainer.parse(bytes)!;
+      final c = _parseFirmwareFixture('H59MA_1.00.14_260508.bin');
+      if (c == null) return;
+      final bytes = c.bytes;
 
       final documented = _sumFrom(bytes, 0x50) & 0x00FFFFFF;
       final headerChkA = c.header.imageChkA & 0x00FFFFFF;
@@ -397,4 +413,40 @@ int _sumFrom(Uint8List buf, int offset) {
     s += buf[i] & 0xFF;
   }
   return s;
+}
+
+FirmwareContainer? _parseFirmwareFixture(String name) {
+  final file = File('firmwares/$name');
+  if (!file.existsSync()) {
+    markTestSkipped('Firmware file not present: ${file.path}');
+    return null;
+  }
+  final c = FirmwareContainer.parse(file.readAsBytesSync());
+  expect(c, isNotNull, reason: 'fixture should parse: ${file.path}');
+  return c;
+}
+
+String _hex(List<int> bytes) =>
+    bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join('');
+
+class _ExpectedFirmwareHeader {
+  const _ExpectedFirmwareHeader({
+    required this.fileName,
+    required this.version,
+    required this.loadSize,
+    required this.firmwareSize,
+    required this.imageChkA,
+    required this.bodySize,
+    required this.flashAppEnd,
+    required this.imageDigestHex,
+  });
+
+  final String fileName;
+  final String version;
+  final int loadSize;
+  final int firmwareSize;
+  final int imageChkA;
+  final int bodySize;
+  final int flashAppEnd;
+  final String imageDigestHex;
 }

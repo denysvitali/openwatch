@@ -16,7 +16,7 @@ import 'codec.dart';
 /// |-------:|-----:|-------------------|------------------------------------|
 /// | 0x0000 |    4 | magic             | `e5c3bd81`                         |
 /// | 0x0004 |    4 | load_size         | bytes bootloader copies to RAM     |
-/// | 0x0008 |    4 | firmware_size     | total on-disk size                 |
+/// | 0x0008 |    4 | firmware_size     | duplicate of `load_size`           |
 /// | 0x000C |    4 | image_chk_a       | 24-bit additive byte sum (high=0)  |
 /// | 0x0010 |   24 | version           | ASCII, e.g. `H59MA_1.00.14_260508`  |
 /// | 0x0030 |   16 | hw_id             | ASCII, e.g. `H59MA_V1.0`           |
@@ -108,8 +108,8 @@ class FirmwareContainer {
     );
 
     // 2. Size sanity: both load_size and firmware_size must be > 0 and
-    //    <= bytes.length. The on-disk file may include a trailing secondary
-    //    signature/padding, so firmware_size != bytes.length in practice.
+    //    <= bytes.length. Observed files store body_size + 0x400 here, while
+    //    the on-disk container is body_size + 0x450.
     final size = bytes.length;
     checks.add(
       VerificationCheck(
@@ -297,9 +297,7 @@ class FirmwareExpectations {
   final int? expectedImageChkA;
 
   /// When `true`, verify `header.imageChkA` matches the live additive
-  /// sum over [body] (corruption detection). Off by default because
-  /// the firmware's exact summed range is unverified — see
-  /// `FIRMWARE_ANALYSIS.md` §"Why 0x0c is additive".
+  /// sum over `container[0x50:]` (corruption detection).
   final bool validateImageChkA;
 
   /// When `true`, verify `flash_app_end == flash_app_start + load_size`.
