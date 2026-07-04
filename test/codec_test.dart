@@ -50,6 +50,23 @@ void main() {
     test('empty payload uses the FF sentinel', () {
       final f = Codec.buildChannelB(OpB.otaStart);
       expect(f, [0xBC, 0x01, 0xFF, 0xFF, 0xFF, 0xFF]);
+      expect(Codec.isChannelBEmptySentinel(f), isTrue);
+      expect(Codec.rxChannelBPayload(f), isEmpty);
+    });
+
+    test('empty sentinel requires a valid Channel-B header', () {
+      expect(
+        Codec.isChannelBEmptySentinel(
+          Uint8List.fromList([0x00, 0x01, 0xFF, 0xFF, 0xFF, 0xFF]),
+        ),
+        isFalse,
+      );
+      expect(
+        Codec.rxChannelBPayload(
+          Uint8List.fromList([0x00, 0x01, 0xFF, 0xFF, 0xFF, 0xFF]),
+        ),
+        isNull,
+      );
     });
 
     test('payload frame carries LE length and CRC16, and round-trips', () {

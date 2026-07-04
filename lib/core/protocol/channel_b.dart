@@ -179,11 +179,7 @@ class ChannelBParser {
 
   void _onFirstFragment(Uint8List chunk) {
     // Empty-payload sentinel: `[BC cmd FF FF FF FF]`.
-    if (chunk.length >= 6 &&
-        chunk[2] == 0xFF &&
-        chunk[3] == 0xFF &&
-        chunk[4] == 0xFF &&
-        chunk[5] == 0xFF) {
+    if (Codec.isChannelBEmptySentinel(chunk)) {
       _emit(chunk[1], Uint8List(0));
       // NO auto-ACK — the firmware does not expect ACKs for unsolicited
       // Channel-B pushes (see [buildAck] docstring). OTA direct commands

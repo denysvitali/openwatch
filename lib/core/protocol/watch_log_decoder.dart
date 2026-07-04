@@ -202,18 +202,11 @@ class WatchLogDecoder {
 
     final cmd = Codec.rxChannelBCmd(bytes);
     final label = _labelForChannelB(cmd);
-    final isEmptySentinel =
-        bytes.length >= 6 &&
-        bytes[2] == 0xff &&
-        bytes[3] == 0xff &&
-        bytes[4] == 0xff &&
-        bytes[5] == 0xff;
-    final payload = isEmptySentinel
-        ? Uint8List(0)
-        : Codec.rxChannelBPayload(bytes);
+    final isEmptySentinel = Codec.isChannelBEmptySentinel(bytes);
+    final payload = Codec.rxChannelBPayload(bytes);
     final declaredLength = bytes[2] | (bytes[3] << 8);
     final declaredCrc = bytes[4] | (bytes[5] << 8);
-    final valid = isEmptySentinel || payload != null;
+    final valid = payload != null;
     final details = <String, Object?>{
       'cmd': _hex(cmd),
       'label': label,
@@ -223,9 +216,9 @@ class WatchLogDecoder {
     };
 
     var title = valid
-        ? 'B ${_hex(cmd)} $label len=${payload!.length}'
+        ? 'B ${_hex(cmd)} $label len=${payload.length}'
         : 'B ${_hex(cmd)} $label CRC/length mismatch';
-    if (valid && payload!.isNotEmpty) {
+    if (valid && payload.isNotEmpty) {
       title = _summarizeChannelB(cmd, payload, details);
     }
 
