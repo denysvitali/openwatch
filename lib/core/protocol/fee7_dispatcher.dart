@@ -58,11 +58,9 @@ class Fee7Dispatcher {
   /// `0x3e` SpO2 read or set.
   Stream<BloodOxygenUpdate> get onBloodOxygen => _bloodOxygen.stream;
 
-  /// HRV setting (`0x39` on the 0xFEE7 service). Mirrors the
-  /// Channel-A path but the wire shape lives in
-  /// `FUN_0082c9da` (see `GHIDRA_DECOMPILATION.md` §8.1). For
-  /// now we surface the same `HrvSetting` shape; specialised
-  /// payload decode can be added when the producer side ships.
+  /// HRV setting (`0x39` on the 0xFEE7 service). Channel-A `0x39`
+  /// is the HRV history reader on H59MA v14; keep this vendor-service
+  /// shape separate until captures prove an equivalent Channel-A setting.
   Stream<HrvSetting> get onHrv => _hrv.stream;
 
   /// `0x48` 'H' handshake — 15-byte device-info payload.

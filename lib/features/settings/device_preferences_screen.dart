@@ -61,7 +61,7 @@ class DevicePreferencesScreen extends ConsumerWidget {
             enabled: ready,
             onTap: () => _pickId(context, 'Wallpaper id', manager.setWallpaper),
           ),
-          if (caps.bloodPressure || caps.hrv || caps.stress || caps.bloodOxygen)
+          if (caps.bloodPressure || caps.stress || caps.bloodOxygen)
             const SectionHeader('Auto-measure'),
           if (caps.bloodOxygen)
             _PreferenceTile(
@@ -86,14 +86,6 @@ class DevicePreferencesScreen extends ConsumerWidget {
                 'Stress auto-measure',
                 manager.setPressureSetting,
               ),
-            ),
-          if (caps.hrv)
-            _PreferenceTile(
-              icon: CupertinoIcons.chart_bar_fill,
-              title: 'HRV auto-measure',
-              subtitle: 'Periodic HRV sampling',
-              enabled: ready,
-              onTap: () => _toggleHrvSetting(context, manager),
             ),
           if (caps.bloodPressure)
             _PreferenceTile(
@@ -291,35 +283,6 @@ class DevicePreferencesScreen extends ConsumerWidget {
     if (context.mounted) {
       _toast(context, '$title ${pick ? 'enabled' : 'disabled'}');
     }
-  }
-
-  Future<void> _toggleHrvSetting(
-    BuildContext context,
-    WatchManager manager,
-  ) async {
-    final pick = await showModalBottomSheet<bool>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.toggle_on),
-              title: const Text('Enable'),
-              onTap: () => Navigator.pop(ctx, true),
-            ),
-            ListTile(
-              leading: const Icon(Icons.toggle_off),
-              title: const Text('Disable'),
-              onTap: () => Navigator.pop(ctx, false),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (pick == null) return;
-    await manager.setHrvSetting(enabled: pick);
-    if (context.mounted) _toast(context, 'HRV auto-measure updated');
   }
 
   Future<void> _pickDndWindow(

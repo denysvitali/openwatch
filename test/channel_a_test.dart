@@ -434,7 +434,7 @@ void main() {
     });
 
     test(
-      'pressureSetting 0x36 decodes 1-bit on/off setting (sub echo + value)',
+      'pressureSetting 0x38 decodes 1-bit on/off setting (sub echo + value)',
       () async {
         final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
@@ -449,7 +449,7 @@ void main() {
     );
 
     test(
-      'pressureSetting 0x36 disabled maps value 0 to enabled=false',
+      'pressureSetting 0x38 disabled maps value 0 to enabled=false',
       () async {
         final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
@@ -592,7 +592,7 @@ void main() {
     });
 
     test(
-      'hrvSetting 0x39 header (pl[2]==0x1E) routes to onHrvHeader',
+      'hrv history 0x39 header (pl[2]==0x1E) routes to onHrvHeader',
       () async {
         final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
@@ -607,7 +607,7 @@ void main() {
       },
     );
 
-    test('hrvSetting 0x39 non-header frame routes to onHrvChunk', () async {
+    test('hrv history 0x39 non-header frame routes to onHrvChunk', () async {
       final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();
@@ -627,7 +627,7 @@ void main() {
       expect(c.payload.length, 13);
     });
 
-    test('hrvSetting 0x39 firmware chunk strips seq byte', () async {
+    test('hrv history 0x39 firmware chunk strips seq byte', () async {
       final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       d.bind();

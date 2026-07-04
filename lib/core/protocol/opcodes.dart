@@ -60,13 +60,29 @@ class OpA {
   /// fragmenter per GHIDRA section 3.21. The 49-byte record is sent
   /// after the header as 4 sequenced payload frames.
   static const int hrv = 0x39;
+
+  /// Legacy APK-era name for `0x38`.
+  ///
+  /// H59MA v14 does not expose a Channel-A HRV auto-measure setting at
+  /// `0x38`; radare2/GHIDRA §3.17 show this opcode is the pressure/stress
+  /// enable bit. Keep the alias only so older code fails at the command
+  /// builder boundary instead of silently changing wire values.
+  @Deprecated(
+    '0x38 is pressureSetting on H59MA v14; HRV setting is unsupported',
+  )
   static const int hrvSetting = 0x38;
 
   /// `PressureReq` (0x37): uses the shared FUN_0082c988 13-byte-chunk
   /// fragmenter per GHIDRA section 3.20. The 49-byte record is sent
   /// after the header as 4 sequenced payload frames.
   static const int pressure = 0x37;
-  static const int pressureSetting = 0x36;
+
+  /// `pressure` / stress enable bit (`0x38`): simple read/write setting.
+  ///
+  /// The earlier APK-derived `0x36` value is not in the H59MA v14 Channel-A
+  /// dispatcher table. `0x38` is verified at body offset `0x6654` and emits
+  /// `[0x38, sub, value]`.
+  static const int pressureSetting = 0x38;
 
   /// `UltraVioletReq` (0x7d): NOT in section 10.2 fragmenter table —
   /// needs live capture. Shares the FUN_0082c988 13-byte-chunk

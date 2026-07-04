@@ -183,17 +183,12 @@ class Codec {
 // ---------------------------------------------------------------------------
 // Cross-channel setting shapes.
 //
-// `HrvSetting` is produced by both the Channel-A `0x39` decoder and the
-// vendor `0xFEE7` `0x39` decoder (see `GHIDRA_DECOMPILATION.md` §8.1). It
-// lives here — not on either dispatcher — so both sides share the same type
-// without one dispatcher having to import the other.
+// `HrvSetting` is currently produced by the vendor `0xFEE7` `0x39` decoder.
+// It lives here — not on the dispatcher — so the shared wire shape can be
+// reused if a future firmware exposes a confirmed Channel-A producer.
 // ---------------------------------------------------------------------------
 
-/// HRV auto-measure setting (`0x39` on both Channel A and 0xFEE7).
-///
-/// Mirrors `Commands.setHrvSetting`'s write layout (enabled flag +
-/// interval in minutes); the watch returns the same shape in the read
-/// response, so both producers emit and consumers expect this struct.
+/// HRV auto-measure setting payload (`0x39` on 0xFEE7).
 class HrvSetting {
   const HrvSetting({required this.enabled, required this.intervalMinutes});
   final bool enabled;

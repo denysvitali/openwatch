@@ -737,16 +737,14 @@ class WatchManager extends ChangeNotifier {
 
   // -- Auto-measure settings -----------------------------------------------
 
+  @Deprecated('H59MA v14 has no Channel-A HRV auto-measure setting command')
   Future<void> setHrvSetting({
     required bool enabled,
     int intervalMinutes = 30,
   }) => _withActionSpan(
     'set_hrv_setting',
-    () => _transport.sendA(
-      Commands.setHrvSetting(
-        enabled: enabled,
-        intervalMinutes: intervalMinutes,
-      ),
+    () async => throw UnsupportedError(
+      'H59MA v14 has no Channel-A HRV auto-measure setting command',
     ),
   );
 

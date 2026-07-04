@@ -212,7 +212,7 @@ Boolean encoding gotchas:
 - Most writes: **`1` = on, `2` = off** (NOT 1/0).
 - A few invert via XOR-1 so the wire byte is the logical-NOT (`0=on,1=off`): **TimeFormat is24/metric**,
   **MusicSwitch playing**.
-- Some health settings use raw `0/1` int-to-byte (BloodOxygen/Pressure/UV/HRV).
+- Some health settings use raw `0/1` int-to-byte (BloodOxygen/Pressure/UV).
 
 ### 3.2 Channel B — large-data / file / OTA (length-prefixed + CRC16)
 
@@ -372,9 +372,8 @@ the generic bitmap below.
 | BpReadConformReq | `0x0e` | — | →watch | `[0x00]`=ok / `[0xFF]`=fail | (none; BP history via `0x0d`) | Ack a BP measurement result. |
 | BpDataRsp (no req) | `0x0d` | — | watch→ | n/a | hdr `[0]=00`{`[1]`yr-2000,`[2]`mo,`[3]`d,`[4]`slotMult,`[5..10]`48-bit presence bitmap}; data `[0]=01`{13B records}; `0xFF`=end | BP history records. |
 | HRVReq | `0x39` | index | →watch | `[index]` | multi-pkt (`[0]=00`{size,range=30}, `[0]=01`{offset days-back + samples}, `0xFF`=end). stride 13B. | Read HRV history for a day index. |
-| HrvSettingReq | `0x38` | 01/02 | →watch | w2:`[02,en]`; w4:`[02,en,(ten?0x0a:0),interval]` | read: `[1]`en,`[2]`tenInterval,`[3]`interval(def 30) | HRV auto-measure config. |
 | PressureReq | `0x37` | index | →watch | `[index]` | multi-pkt (same scheme as HRV). stride 13B. | Read stress history for a day index. |
-| PressureSettingReq | `0x36` | 01/02 | →watch | w:`[02,en(0/1)]` | read: `[1]`enable | Stress auto-measure on/off. |
+| PressureSettingReq | `0x38` | 01/02 | →watch | w:`[02,en(0/1)]` | read: `[1]`enable; response echoes `[0x38,sub,value]` | Stress/pressure auto-measure enable bit. H59MA v14 has no confirmed Channel-A HRV auto-measure setting; the old APK-era `0x38` HRV setting row is stale for this firmware. |
 | UltraVioletReq | `0x7d` | index | →watch | `[index]` | multi-pkt (same scheme). stride 13B. | Read UV-index history for a day index. |
 | UVSettingReq | `0x3e` | 01/02 | →watch | w:`[02,en(0/1)]` | read: `[1]`enable | UV auto-measure on/off. |
 | SugarLipidsSettingReq | `0x3a` | type+act | →watch | r:`[type,01]`; w:`[type,02,en(0/1),valLo,valHi]` | `[1]`act, if read `[0]`type,`[2]`en,`[3..4]`value LE,`[5]`supportUnit | Blood sugar/lipids reference config. (per-request waiter) |

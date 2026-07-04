@@ -140,10 +140,10 @@ class ChannelADispatcher {
   Stream<PressureSettingChunk> get onPressureSettingChunk =>
       _pressureSettingChunk.stream;
 
-  /// Stress auto-measure enabled flag (`0x36`).
+  /// Stress auto-measure enabled flag (`0x38`).
   Stream<PressureReading> get onPressure => _pressure.stream;
 
-  /// HRV config (`0x39`) — header discriminator (`pl[2] == 0x1E`).
+  /// HRV history (`0x39`) — header discriminator (`pl[2] == 0x1E`).
   ///
   /// Per `GHIDRA_DECOMPILATION.md` §3.21 the read response is a
   /// two-phase fragmenter pattern: a single 16-byte header frame
@@ -154,7 +154,7 @@ class ChannelADispatcher {
   /// (`OpA.hrv` 0x39 vs `OpA.pressure` 0x37).
   Stream<HrvSettingHeader> get onHrvHeader => _hrvHeader.stream;
 
-  /// HRV config (`0x39`) — payload chunk after the header.
+  /// HRV history (`0x39`) — payload chunk after the header.
   ///
   /// See [onHrvHeader] for the full two-phase flow. Each chunk
   /// carries up to 13 bytes of the 49-byte HRV record
@@ -580,7 +580,7 @@ class ChannelADispatcher {
     _bpRecord.add(BpRecordChunk(seq: _bpRecordSeq++, payload: pl));
   }
 
-  /// `pressureSetting` (0x36): 1-bit on/off setting (analogous to 0x2c SpO2).
+  /// `pressureSetting` (0x38): 1-bit on/off setting (analogous to 0x2c SpO2).
   ///
   /// Per `FUN_0082ca54` / `GHIDRA_DECOMPILATION.md` §3.17:
   ///   `pl[0]` = sub-opcode echo (0x01 read / 0x02+ write)
@@ -590,7 +590,7 @@ class ChannelADispatcher {
   /// The H59MA pressure sensor (if present) is either enabled or
   /// disabled — not a continuous reading. A host that wants the
   /// actual mmHg / kPa must subscribe to a push channel (likely
-  /// 0x2B-routed event) rather than poll 0x36.
+  /// 0x2B-routed event) rather than poll 0x38.
   void _decodePressure(Uint8List pl) {
     if (pl.length < 2) return;
     _pressure.add(PressureReading(enabled: pl[1] != 0));
@@ -1167,7 +1167,7 @@ class BloodOxygenSetting {
   final bool enabled;
 }
 
-/// Stress auto-measure enabled flag (`0x36`). The H59MA pressure sensor is
+/// Stress auto-measure enabled flag (`0x38`). The H59MA pressure sensor is
 /// either on or off — there is no continuous reading on this
 /// opcode. See `GHIDRA_DECOMPILATION.md` §3.17 / `FUN_0082ca54`.
 /// One chunk of a blood-pressure record (`0x0d`).

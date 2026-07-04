@@ -700,7 +700,7 @@ void main() {
       return records;
     }
 
-    test('0x39 hrvSettings 49-byte record assembles to slotId + 48 '
+    test('0x39 HRV history 49-byte record assembles to slotId + 48 '
         'half-hour samples (GHIDRA §3.21)', () async {
       final t = FakeBleTransport();
       final d = ChannelADispatcher(t);

@@ -586,19 +586,26 @@ class Commands {
   static Uint8List readBloodOxygenSetting() =>
       Codec.buildChannelA(OpA.bloodOxygenSetting, [OpA.mixRead]);
 
-  /// `HrvSettingReq` (0x38) write: HRV auto-measure toggle + interval.
+  /// Unsupported on H59MA v14 Channel A.
+  ///
+  /// The APK-era `HrvSettingReq` mapped to `0x38`, but the v14 firmware
+  /// handler at body offset `0x6654` is the pressure/stress enable bit.
+  /// `0x39` is the HRV history reader, not an enable-setting writer.
+  @Deprecated('H59MA v14 has no Channel-A HRV auto-measure setting command')
   static Uint8List setHrvSetting({
     required bool enabled,
     int intervalMinutes = 30,
-  }) => Codec.buildChannelA(OpA.hrvSetting, [
-    OpA.mixWrite,
-    enabled ? 1 : 0,
-    intervalMinutes & 0xFF,
-  ]);
-  static Uint8List readHrvSetting() =>
-      Codec.buildChannelA(OpA.hrvSetting, [OpA.mixRead]);
+  }) => throw UnsupportedError(
+    'H59MA v14 has no Channel-A HRV auto-measure setting command',
+  );
 
-  /// `PressureSettingReq` (0x36) write: stress (pressure) auto-measure.
+  @Deprecated('H59MA v14 has no Channel-A HRV auto-measure setting command')
+  static Uint8List readHrvSetting() => throw UnsupportedError(
+    'H59MA v14 has no Channel-A HRV auto-measure setting command',
+  );
+
+  /// `PressureSettingReq` / pressure flag (`0x38`) write: stress
+  /// auto-measure enable bit.
   static Uint8List setPressureSetting({required bool enabled}) =>
       Codec.buildChannelA(OpA.pressureSetting, [OpA.mixWrite, enabled ? 1 : 0]);
   static Uint8List readPressureSetting() =>

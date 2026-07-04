@@ -272,7 +272,6 @@ class WatchLogDecoder {
       case OpA.hrv:
         return _summarizeFourChunkSeriesFrame(opcode, payload, details);
       case OpA.pressureSetting:
-      case OpA.hrvSetting:
         if (payload.length >= 2) {
           details['sub'] = _hex(payload[0]);
           details['enabled'] = payload[1] != 0;
@@ -1357,8 +1356,6 @@ String _labelForChannelA(int opcode) {
       return 'pressureEnableSetting';
     case OpA.pressure:
       return 'pressureHistory';
-    case OpA.hrvSetting:
-      return 'hrvEnableSetting';
     case OpA.hrv:
       return 'hrvHistory';
     case OpA.readDetailSport:
