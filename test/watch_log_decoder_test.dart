@@ -7,6 +7,7 @@ import 'package:openwatch/core/protocol/watch_log_decoder.dart';
 
 const _chA = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
 const _chB = 'de5bf729-d711-4e47-af26-65e3012a5dc7';
+const _fee7 = '0000fea2-0000-1000-8000-00805f9b34fb';
 
 void main() {
   group('WatchLogDecoder', () {
@@ -167,6 +168,55 @@ void main() {
       expect(decoded.details['hour'], 14);
       expect(decoded.details['minute'], 25);
     });
+
+    test('summarizes FEE7 status responses from the vendor notify UUID', () {
+      final frame = Codec.buildChannelA(Fee7.statusResponse, [80, 0xab]);
+
+      final decoded = const WatchLogDecoder().decodeHex(
+        frame.map((b) => b.toRadixString(16).padLeft(2, '0')).join('-'),
+        uuid: _fee7,
+      );
+
+      expect(decoded.valid, isTrue);
+      expect(decoded.channel, WatchLogChannel.fee7);
+      expect(decoded.details['label'], 'status');
+      expect(decoded.title, contains('status battery=80%'));
+      expect(decoded.title, contains('stepsLowByte=0xab'));
+      expect(decoded.details['batteryPercent'], 80);
+      expect(decoded.details['stepsLowByte'], 0xab);
+    });
+
+    test(
+      'summarizes high-bit FEE7 OTA and vibration frames as raw opcodes',
+      () {
+        final ota = Codec.buildChannelA(Fee7.otaTrigger, [0, 0, 1]);
+        final vibration = Codec.buildChannelA(Fee7.vibrationPattern, [
+          0x2c,
+          0x01,
+        ]);
+
+        final otaDecoded = const WatchLogDecoder().decodeHex(
+          ota.map((b) => b.toRadixString(16).padLeft(2, '0')).join('-'),
+          uuid: _fee7,
+        );
+        final vibrationDecoded = const WatchLogDecoder().decodeHex(
+          vibration.map((b) => b.toRadixString(16).padLeft(2, '0')).join('-'),
+          uuid: _fee7,
+        );
+
+        expect(otaDecoded.valid, isTrue);
+        expect(otaDecoded.details['opcode'], '0xc3');
+        expect(otaDecoded.details['label'], 'otaTrigger');
+        expect(otaDecoded.details['routesToOta'], isTrue);
+        expect(otaDecoded.title, contains('routesToOta=true'));
+
+        expect(vibrationDecoded.valid, isTrue);
+        expect(vibrationDecoded.details['opcode'], '0xfe');
+        expect(vibrationDecoded.details['label'], 'vibrationPattern');
+        expect(vibrationDecoded.details['durationMinutes'], 300);
+        expect(vibrationDecoded.title, contains('duration=300m'));
+      },
+    );
 
     test('decodes a multi-line log packet across channels', () {
       // A realistic capture: Ch-A battery reply, Ch-A heart-rate setting,

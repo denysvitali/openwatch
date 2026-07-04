@@ -158,13 +158,17 @@ class WatchLogDecoder {
   ) {
     final valid = bytes.length == 16 && Codec.isValidChannelA(bytes);
     final opcode = bytes.isEmpty ? 0 : bytes[0] & 0xff;
+    final payload = bytes.length >= 15
+        ? Uint8List.sublistView(bytes, 1, 15)
+        : Uint8List.fromList(bytes);
     final details = <String, Object?>{
       'opcode': _hex(opcode),
       'label': _labelForFee7(opcode),
-      'payload': bytes.length >= 15
-          ? _hexList(Uint8List.sublistView(bytes, 1, 15))
-          : _hexList(bytes),
+      'payload': _hexList(payload),
     };
+    final title = valid
+        ? _summarizeFee7(opcode, payload, details)
+        : 'FEE7 invalid frame';
     return DecodedLogFrame(
       lineNo: lineNo,
       timestamp: timestamp,
@@ -172,9 +176,7 @@ class WatchLogDecoder {
       channel: WatchLogChannel.fee7,
       bytes: bytes,
       valid: valid,
-      title: valid
-          ? 'FEE7 ${_hex(opcode)} ${_labelForFee7(opcode)}'
-          : 'FEE7 invalid frame',
+      title: title,
       details: details,
     );
   }
@@ -369,6 +371,42 @@ class WatchLogDecoder {
         'time=${hour.toString().padLeft(2, '0')}:'
         '${minute.toString().padLeft(2, '0')} weekMask=0x'
         '${weekMask.toRadixString(16).padLeft(2, '0')}';
+  }
+
+  String _summarizeFee7(
+    int opcode,
+    Uint8List payload,
+    Map<String, Object?> details,
+  ) {
+    switch (opcode) {
+      case Fee7.statusResponse:
+        final battery = payload.isNotEmpty ? payload[0] : 0;
+        final stepsLowByte = payload.length >= 2 ? payload[1] : 0;
+        details.addAll({
+          'batteryPercent': battery,
+          'stepsLowByte': stepsLowByte,
+        });
+        return 'FEE7 ${_hex(opcode)} status battery=$battery% '
+            'stepsLowByte=${_hex(stepsLowByte)}';
+      case Fee7.otaTrigger:
+        final routesToOta = payload.length >= 3 && payload[2] == 1;
+        details['routesToOta'] = routesToOta;
+        return 'FEE7 ${_hex(opcode)} otaTrigger routesToOta=$routesToOta';
+      case Fee7.vibrationPattern:
+        final durationMinutes = payload.length >= 2
+            ? payload[0] | (payload[1] << 8)
+            : null;
+        if (durationMinutes != null) {
+          details['durationMinutes'] = durationMinutes;
+        }
+        return 'FEE7 ${_hex(opcode)} vibration'
+            '${durationMinutes == null ? '' : ' duration=${durationMinutes}m'}';
+      default:
+        if (Fee7.isUnary(opcode)) {
+          return 'FEE7 ${_hex(opcode)} unary';
+        }
+        return 'FEE7 ${_hex(opcode)} ${_labelForFee7(opcode)}';
+    }
   }
 
   String _summarizeHeartRateFrame(
@@ -1116,17 +1154,34 @@ String _labelForChannelB(int cmd) {
 
 String _labelForFee7(int opcode) {
   switch (opcode) {
+    case Fee7.spo2HrUpdate:
+      return 'spo2HrUpdate';
+    case Fee7.capabilityBlock:
+      return 'capabilityBlock';
     case Fee7.handshakeResponse:
       return 'handshake';
+    case Fee7.alertTrigger:
+      return 'alertTrigger';
+    case Fee7.findPhoneEvent:
+      return 'findPhone';
     case Fee7.modeControl:
       return 'modeControl';
+    case Fee7.modeControlCont:
+      return 'modeControlCont';
     case Fee7.statusResponse:
       return 'status';
     case Fee7.bloodOxygenUpdate:
       return 'bloodOxygenUpdate';
     case Fee7.hrv:
       return 'hrv';
+    case Fee7.longResponse:
+      return 'longResponse';
+    case Fee7.otaTrigger:
+      return 'otaTrigger';
+    case Fee7.vibrationPattern:
+      return 'vibrationPattern';
     default:
+      if (Fee7.isUnary(opcode)) return 'unary';
       return 'unknown';
   }
 }
