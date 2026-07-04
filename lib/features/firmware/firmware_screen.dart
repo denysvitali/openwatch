@@ -3,7 +3,6 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/ble/ble_transport.dart';
 import '../../core/protocol/dfu.dart';
 import '../../core/protocol/firmware_container.dart';
 import '../../core/protocol/firmware_version.dart';
@@ -88,8 +87,7 @@ class _FirmwareScreenState extends ConsumerState<FirmwareScreen> {
   }
 
   Future<void> _flash(LocalFirmware fw) async {
-    final ready = ref.read(linkStateProvider).value == LinkState.ready;
-    if (!ready) {
+    if (!ref.read(watchManagerProvider).isReady) {
       _toast('Connect to the watch first.');
       return;
     }
