@@ -806,6 +806,10 @@ class WatchLogDecoder {
         return 'B 0x42 H59 file list records=${summary.declaredCount} '
             'parsed=${summary.records.length} bytes=${summary.recordBytes}'
             '${summary.malformed ? ' malformed' : ''}';
+      case OpB.h59FileMetadata:
+        return _summarizeH59FileMetadata(payload, details);
+      case OpB.h59FileChunk:
+        return _summarizeH59FileChunk(payload, details);
       case OpB.deviceInfoConfig:
         return _summarizeDeviceInfoConfig(payload, details);
     }
@@ -851,6 +855,72 @@ class WatchLogDecoder {
 
     return 'B 0x5a device info sub=${_hex(sub)} '
         'payload=${_compactHex(payload)}';
+  }
+
+  String _summarizeH59FileMetadata(
+    Uint8List payload,
+    Map<String, Object?> details,
+  ) {
+    final status = payload[0] & 0xff;
+    details['fileStatus'] = _hex(status);
+    details['metadataBytes'] = payload.length;
+
+    if (status == 0x00) {
+      if (payload.length < 6) {
+        details['metadataMalformed'] = true;
+        return 'B 0x44 H59 file metadata ok short bytes=${payload.length}';
+      }
+      final chunkCount = payload[1] | (payload[2] << 8);
+      details['chunkCount'] = chunkCount;
+      details['metadataByte3'] = _hex(payload[3]);
+      details['metadataByte4'] = _hex(payload[4]);
+      details['metadataByte5'] = _hex(payload[5]);
+      return 'B 0x44 H59 file metadata ok chunks=$chunkCount';
+    }
+
+    if (status == 0x01) {
+      final selector = payload.length > 1 ? payload[1] & 0xff : null;
+      final recordId = payload.length >= 6 ? Codec.readU32le(payload, 2) : null;
+      details['selector'] = selector == null ? null : _hex(selector);
+      details['recordId'] = recordId == null ? null : _hex32(recordId);
+      details['metadataMalformed'] = payload.length < 6;
+      return 'B 0x44 H59 file metadata not-found '
+          'selector=${selector == null ? 'n/a' : _hex(selector)} '
+          'recordId=${recordId == null ? 'n/a' : _hex32(recordId)}';
+    }
+
+    if (status == 0x02) {
+      final selector = payload.length > 1 ? payload[1] & 0xff : null;
+      details['selector'] = selector == null ? null : _hex(selector);
+      details['metadataMalformed'] = payload.length < 2;
+      return 'B 0x44 H59 file metadata invalid-selector '
+          '${selector == null ? 'n/a' : _hex(selector)}';
+    }
+
+    details['metadataMalformed'] = true;
+    return 'B 0x44 H59 file metadata status=${_hex(status)} '
+        'bytes=${payload.length}';
+  }
+
+  String _summarizeH59FileChunk(
+    Uint8List payload,
+    Map<String, Object?> details,
+  ) {
+    if (payload.length < 2) {
+      details['chunkMalformed'] = true;
+      details['chunkDataBytes'] = 0;
+      return 'B 0x45 H59 file chunk short bytes=${payload.length}';
+    }
+
+    final chunkIndex = payload[0] & 0xff;
+    final reserved = payload[1] & 0xff;
+    final dataBytes = payload.length - 2;
+    details['chunkIndex'] = chunkIndex;
+    details['chunkReserved'] = _hex(reserved);
+    details['chunkDataBytes'] = dataBytes;
+    details['chunkMalformed'] = reserved != 0;
+    return 'B 0x45 H59 file chunk index=$chunkIndex bytes=$dataBytes'
+        '${reserved == 0 ? '' : ' reserved=${_hex(reserved)}'}';
   }
 }
 

@@ -186,6 +186,60 @@ void main() {
       expect(field0['value'], 'aa');
     });
 
+    test('summarizes H59MA file metadata and chunk frames', () {
+      final metadata = Codec.buildChannelB(OpB.h59FileMetadata, [
+        0x00,
+        0x03,
+        0x00,
+        0x04,
+        0x01,
+        0x11,
+      ]);
+      final missing = Codec.buildChannelB(OpB.h59FileMetadata, [
+        0x01,
+        0x07,
+        0x78,
+        0x56,
+        0x34,
+        0x12,
+      ]);
+      final chunk = Codec.buildChannelB(OpB.h59FileChunk, [
+        0x02,
+        0x00,
+        0xAA,
+        0xBB,
+        0xCC,
+      ]);
+
+      final report = const WatchLogDecoder().decodeNrfConnectLog(
+        [
+          _line(_chB, metadata),
+          _line(_chB, missing),
+          _line(_chB, chunk),
+        ].join('\n'),
+      );
+
+      final metadataFrame = report.frames[0];
+      expect(metadataFrame.title, contains('file metadata ok chunks=3'));
+      expect(metadataFrame.details['label'], 'h59FileMetadata');
+      expect(metadataFrame.details['fileStatus'], '0x00');
+      expect(metadataFrame.details['chunkCount'], 3);
+      expect(metadataFrame.details['metadataByte5'], '0x11');
+
+      final missingFrame = report.frames[1];
+      expect(missingFrame.title, contains('file metadata not-found'));
+      expect(missingFrame.details['selector'], '0x07');
+      expect(missingFrame.details['recordId'], '0x12345678');
+
+      final chunkFrame = report.frames[2];
+      expect(chunkFrame.title, contains('file chunk index=2 bytes=3'));
+      expect(chunkFrame.details['label'], 'h59FileChunk');
+      expect(chunkFrame.details['chunkIndex'], 2);
+      expect(chunkFrame.details['chunkReserved'], '0x00');
+      expect(chunkFrame.details['chunkDataBytes'], 3);
+      expect(chunkFrame.details['chunkMalformed'], isFalse);
+    });
+
     test('summarizes Channel B device-info static TLVs', () {
       final frame = Codec.buildChannelB(OpB.deviceInfoConfig, [
         0x03,

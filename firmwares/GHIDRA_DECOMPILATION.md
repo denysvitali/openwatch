@@ -1199,7 +1199,12 @@ field length.
 
 `0x43` and `0x46` ship **no direct response payload** — the
 dispatcher's implicit ack is the only feedback unless the operation
-starts a `0x44` metadata + `0x45` chunk stream.
+starts a `0x44` metadata + `0x45` chunk stream. `FUN_008310c8`
+builds three observed `0x44` forms: success
+`[00, chunkCount u16LE, meta3, 01, 11]`, not-found
+`[01, selector, recordId u32LE]`, and invalid-selector
+`[02, selector]`. Data chunks are one-based
+`[chunkIndex, 00, data...]`, capped at `0x1f4` data bytes.
 
 #### Why cap at 10 files?
 

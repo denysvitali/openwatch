@@ -783,8 +783,9 @@ class Commands {
   /// H59MA v14 firmware-native file operation (`0x43`).
   ///
   /// The firmware forwards at most 16 operation bytes to the file helper, then
-  /// emits `0x44` metadata + `0x45` chunks when a record is found. Payload
-  /// fields remain opaque, so callers pass the raw operation block.
+  /// emits `0x44` metadata + one-based `0x45` chunks with up to `0x1f4` data
+  /// bytes when a record is found. Payload fields remain opaque, so callers
+  /// pass the raw operation block.
   static Uint8List h59FileTableOperation(List<int> operationPayload) =>
       Codec.buildChannelB(
         OpB.h59FileOperation,

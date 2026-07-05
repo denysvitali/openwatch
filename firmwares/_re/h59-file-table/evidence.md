@@ -82,8 +82,17 @@ raw values generically.
 uses byte `0` as a selector and bytes `1..4` as a little-endian record id. When
 the record exists, the watch emits:
 
-- `0x44` metadata, 6-byte payload.
-- `0x45` chunk frames shaped `[chunkIndex, 0x00, data...]`.
+- `0x44` metadata, 6-byte payload:
+  `[0x00, chunkCount u16LE, meta3, 0x01, 0x11]`.
+- `0x45` chunk frames shaped `[chunkIndex1Based, 0x00, data...]`.
 
-The chunk loop caps each chunk's data body at `0x4f4` bytes and sends payload
+The chunk loop caps each chunk's data body at `0x1f4` bytes and sends payload
 length `dataLen + 2`.
+
+Other `0x44` status forms:
+
+- Invalid selector (`selector - 1 >= 0xee`): `[0x02, selector]`.
+- Record id not found: `[0x01, selector, recordId u32LE]`.
+
+The remaining `0x44` metadata byte at offset 3 is copied from source-record
+offset 4, but static analysis does not prove a user-facing meaning.

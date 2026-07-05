@@ -510,7 +510,7 @@ before async handling. The implemented file table/list path is:
 | Cmd | Request | Response | Notes |
 |---|---|---|---|
 | `0x41` | `[cursorOrMinRecordId u32LE]` | `0x42` payload `[count, entries...]`, max 10 entries | Each entry is length-prefixed: `[entryLen, recordType, fieldTLVs...]`. `entryLen` includes the length/type bytes. Field TLVs are `[fieldLen, fieldId, value...]`, and `fieldLen` includes the length/id bytes. Record types `0x04`, `0x07`, `0x08` use field ids `01 02 03 04 05 06 07 08 09 0d 13`; other record types use `01 02 04 07 08 09`. |
-| `0x43` | `[selector, recordId u32LE]` | `0x44` metadata then `0x45` chunks | Found records emit metadata, then chunks shaped `[chunkIndex, 0x00, up to ~500 bytes]`. |
+| `0x43` | `[selector, recordId u32LE]` | `0x44` metadata then `0x45` chunks | Found records emit `0x44` metadata `[00, chunkCount u16LE, meta3, 01, 11]`, then `0x45` chunks shaped `[chunkIndex1Based, 00, up to 0x1f4 bytes]`. Not-found emits `[01, selector, recordId u32LE]`; invalid selector emits `[02, selector]`. |
 | `0x46` | Raw operation payload, same helper family as `0x43` (forwarded up to 16B) | none | Delete sibling of `0x43` per GHIDRA §2.6/§2.11; host should poll `0x41` afterwards to verify the table changed. |
 
 OpenWatch should treat this as an H59MA-specific file-table protocol, separate
@@ -518,8 +518,9 @@ from the APK generic file upload commands above.
 
 OpenWatch implements raw request builders for `0x41`, `0x43`, and `0x46`, and
 its log decoder parses `0x42` records generically into record type, field id,
-length, and raw value bytes. Field meanings remain opaque until live captures
-map record types and field ids.
+length, and raw value bytes, and summarizes `0x44` metadata / `0x45` chunks.
+Field and metadata meanings remain opaque until live captures map record types
+and field ids.
 
 **H59MA v14 device-info/config (`0x5a`).** The firmware handles this as a
 Channel-B command, not an APK generic large-data action:

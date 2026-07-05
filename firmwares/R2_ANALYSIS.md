@@ -492,6 +492,13 @@ Record types `0x04`, `0x07`, and `0x08` use the 11-id field list
 not assign user-facing meanings to those ids, so OpenWatch decodes them as raw
 field ids and value bytes.
 
+`0x43` operation handling at v14 body `0xacc8` emits `0x44` metadata before
+any `0x45` data chunks. Resolved metadata forms are success
+`[00, chunkCount u16LE, meta3, 01, 11]`, not-found
+`[01, selector, recordId u32LE]`, and invalid-selector `[02, selector]`.
+Chunks are one-based `[chunkIndex, 00, data...]` with data capped at `0x1f4`
+bytes.
+
 ---
 
 ## 6. Channel-A Command Dispatch

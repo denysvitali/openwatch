@@ -652,7 +652,10 @@ listed by the earlier radare2 notes:
    with `[count, records...]`, each record is `[recordLen, recordType,
    fieldTLVs...]`, and each field is `[fieldLen, fieldId, value...]` with
    inclusive lengths. Field ids are parsed generically; user-facing meanings
-   remain live-capture work.
+   remain live-capture work. `0x43` success metadata is
+   `[00, chunkCount u16LE, meta3, 01, 11]`, followed by one-based `0x45`
+   chunks `[chunkIndex, 00, <=0x1f4 data bytes]`; not-found and invalid
+   selector use `0x44` status forms `01` and `02`.
 6. **Whether the OTA bootloader validates `image_digest` and `signature_a`** at flash time. Ghidra shows `body.bin` only checks the OTA container magic `0x81bdc3e5` in packet 1 and stages `size - 0x50` bytes. The `0x8721bee2` magic belongs to the config blob.
 7. ~~GATT attribute table record fields.~~ **Resolved for static layout:** H59MA uses Realtek-style service tables with `0x1c` inline attributes, compact `0x1a` entries for 128-bit primary services whose `pValueContext` points to the preceding UUID blob, and callback triples between service tables. See §3 and `firmwares/_re/gatt-table/evidence.md`. Runtime callback side effects remain covered by the per-handler RE sections.
 8. ~~`0xfee7` remaining vendor command semantics.~~ **Corrected by radare2:** the published `0xFEE7` service is real, but it is not the statically-proven entry point for the 16-byte vendor/high opcode dispatcher. Earlier Ghidra names assigned the Channel-A table at `0x1f204` (`0x0082e850`/`0x0082e87a`/`0x0082e8ce`) to FEE7. The actual FEE7 table starts at `0x1f2b8`, registers via `0x0082eb0a`, and uses callbacks `0x0082e9a3`/`0x0082ea4d`/`0x0082eabb`; its write callback emits a generic Realtek service event and does not branch to the 16-byte dispatcher. The high/vendor opcode semantics remain documented as Channel-A-reachable firmware paths; see `firmwares/_re/fee7-gatt/evidence.md` and `firmwares/_re/fee7-high/evidence.md`.
