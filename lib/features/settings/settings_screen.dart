@@ -153,8 +153,8 @@ class SettingsScreen extends ConsumerWidget {
             leading: const Icon(Icons.bloodtype_outlined),
             title: const Text('BP raw bytes'),
             subtitle: const Text(
-              '13-byte BP records, byte-by-byte. '
-              'See PROTOCOL.md §8.5 — needs live capture.',
+              'Compact history bytes for capture correlation. '
+              'See PROTOCOL.md §8.5.',
             ),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => context.push('/bp-debug'),

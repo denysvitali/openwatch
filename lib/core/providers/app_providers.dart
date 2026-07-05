@@ -147,9 +147,8 @@ final historyStoreProvider = FutureProvider<HistoryStore>(
   (ref) => HistoryStore.open(),
 );
 
-/// Sidecar store for the raw 13-byte BP records whose per-byte
-/// layout is on PROTOCOL.md §8.5 as "needs live capture". The BP
-/// debug screen reads this; the regular app surface does not.
+/// Sidecar store for the compact raw BP-history bytes. The BP debug screen
+/// reads this; the regular app surface does not.
 final bpRawStoreProvider = FutureProvider<BpRawStore>(
   (ref) => BpRawStore.open(),
 );

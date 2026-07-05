@@ -9,15 +9,13 @@ import 'app_log.dart';
 import 'history_store.dart';
 import 'history_sync.dart' show BpRecordDay;
 
-/// One row in the sidecar BP-raw store: the 13 raw bytes the watch
-/// emitted for a single slot on a single day, plus the timestamp the
-/// host assigned to that slot (derived from the header's day +
-/// slot-index × slotDuration).
+/// One row in the sidecar BP-raw store: the compact raw byte the watch emitted
+/// for a single slot on a single day, plus the timestamp the host assigned to
+/// that slot (derived from the header's day + slot-index × slotDuration).
 ///
-/// The per-byte meaning is on PROTOCOL.md §8.5 as "needs live
-/// capture" — until a future live-capture session maps the fields,
-/// we keep the bytes intact so the BP debug screen can dump them and
-/// the bug report can quote them.
+/// The byte is the first byte of the firmware's persistent 4-byte BP slot. The
+/// remaining three persistent bytes are not emitted by the `0x0d` history
+/// stream, so systolic/diastolic reconstruction remains capture work.
 @immutable
 class RawBpSlot {
   const RawBpSlot({
@@ -69,15 +67,14 @@ Uint8List _hexToBytes(String hex) {
   return out;
 }
 
-/// Sidecar store for raw 13-byte BP-history records.
+/// Sidecar store for raw BP-history bytes.
 ///
 /// Lives in a sibling `bp_raw/` directory next to `HistoryStore`'s
 /// `history/` directory. The main store only knows about the
 /// `BloodPressureSample` placeholder shape (timestamp + zero
-/// systolic/diastolic). This store captures the *raw* bytes the
-/// firmware emitted so a future live-capture session can immediately
-/// look up "which byte is the systolic value" by reading a dump the
-/// user has already collected.
+/// systolic/diastolic). This store captures the raw compact byte the firmware
+/// emitted for each present slot so future capture work can correlate it with
+/// known readings.
 ///
 /// The store is intentionally minimal: one JSON file per day, written
 /// sequentially through a per-day queue (mirroring HistoryStore's
@@ -106,11 +103,11 @@ class BpRawStore {
 
   File _fileFor(DateOnly day) => File('${_dir.path}/${day.iso}.json');
 
-  /// Persist the 13-byte records for [day]. Existing entries are
+  /// Persist the compact raw BP bytes for [day]. Existing entries are
   /// replaced — the BP record stream is idempotent (a re-sync of the
-  /// same day replays the same 13-byte records), so merge is
-  /// unnecessary and would risk mixing in stale bytes from a prior
-  /// sync whose slot durations differed.
+  /// same day replays the same compact bytes), so merge is unnecessary
+  /// and would risk mixing in stale bytes from a prior sync whose slot
+  /// durations differed.
   Future<void> putDay(DateOnly day, BpRecordDay record) async {
     final dayKey = day.iso;
     final previous = _writeQueue[dayKey] ?? Future<void>.value();
@@ -120,14 +117,16 @@ class BpRawStore {
           'day': day.iso,
           'slotMinutes': record.slotDuration.inMinutes,
           // Schema version is *not* a per-write bump — it identifies
-          // the on-disk layout. Bump only when the field set or
-          // encoding changes.
-          'schema': 1,
+          // the on-disk layout. Schema 2 stores one compact byte per bitmap
+          // slot, not the older 13-byte frame grouping.
+          'schema': 2,
           'slots': [
             for (var i = 0; i < record.slots.length; i++)
               RawBpSlot(
-                timestamp: record.day.midnight.add(record.slotDuration * i),
-                slotIndex: i,
+                timestamp: record.day.midnight.add(
+                  record.slotDuration * record.slotIndexAt(i),
+                ),
+                slotIndex: record.slotIndexAt(i),
                 bytes: record.slots[i],
               ).toJson(),
           ],

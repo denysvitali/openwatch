@@ -575,7 +575,8 @@ class Commands {
       Codec.buildChannelA(OpA.ultraViolet, [dayOffset & 0xFF]);
 
   /// `BpReadConformReq` (0x0e): advance the BP record queue.
-  /// Sub-byte 0 = next record; 0xFF = fail. See [advanceBpRecord].
+  /// Sub-byte 0 = next record; nonzero is a firmware no-op. See
+  /// [advanceBpRecord].
   static Uint8List ackBpRecord({bool ok = true}) =>
       Codec.buildChannelA(OpA.bpReadConform, [ok ? 0x00 : 0xFF]);
 

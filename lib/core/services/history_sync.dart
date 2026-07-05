@@ -122,14 +122,14 @@ class HrvRecord {
 /// the data chunks that followed it (PROTOCOL.md §4.4, GHIDRA §3.19).
 ///
 /// The header frame's first byte is the tag (`0x00`), followed by
-/// `{year-2000, month, day, slotMult, 48-bit presence bitmap}`. Each
-/// set bit in the bitmap marks a slot that has a 13-byte data record
-/// in the subsequent data chunks (`tag=0x01`).
+/// `{year-2000, month, day, intervalMinutes, 48-bit presence bitmap}`. Each
+/// set bit in the bitmap marks a slot that has one compact raw byte in the
+/// subsequent data chunks (`tag=0x01`).
 ///
-/// The 13-byte data record's *byte layout* is not statically
-/// resolvable from the H59MA v14 firmware — it lands on PROTOCOL.md
-/// §8.5 as "needs live capture". The samples we surface here carry
-/// the timestamp derived from the slot index but leave
+/// The emitted byte is the first byte of the firmware's persistent 4-byte BP
+/// slot. The firmware does not expose enough history data to reconstruct both
+/// systolic and diastolic values, so the samples we surface here carry the
+/// timestamp derived from the bitmap slot index but leave
 /// [BloodPressureSample.systolic] / [diastolic] as 0 placeholders.
 @immutable
 class BpRecordDay {
@@ -137,18 +137,27 @@ class BpRecordDay {
     required this.day,
     required this.slotDuration,
     required this.slots,
+    this.slotIndexes = const [],
   });
 
   final DateOnly day;
 
-  /// Slot duration derived from the header's `slotMult`. Observed
-  /// H59MA records use 15-minute units (`slotMult=2` => 30 minutes).
+  /// Slot duration derived from the header's `intervalMinutes`. H59MA v14
+  /// initializes this to `0x3c` (60 minutes).
   final Duration slotDuration;
 
   /// One entry per set bit in the header's 48-bit presence bitmap, in
-  /// ascending slot order. Each entry holds the 13 raw bytes — the
-  /// per-byte meaning is a §8.5 follow-up.
+  /// ascending slot order. Each entry holds the raw compact byte emitted for
+  /// that BP slot.
   final List<Uint8List> slots;
+
+  /// Bitmap slot indexes corresponding to [slots]. Older tests/fixtures that
+  /// construct [BpRecordDay] directly can omit this; callers then fall back to
+  /// ordinal indexes.
+  final List<int> slotIndexes;
+
+  int slotIndexAt(int i) =>
+      slotIndexes.length == slots.length ? slotIndexes[i] : i;
 }
 
 /// A queued inbound Channel-A frame paired with the [DateOnly] day it
@@ -378,7 +387,7 @@ class HistorySync extends ChangeNotifier {
   /// (header + data chunks interleaved on the same seq axis), so we
   /// build our own assembler that:
   ///   * resets when the chunk's first byte is `0x00` (a new header)
-  ///   * appends 13-byte records from `0x01` chunks to the current day
+  ///   * appends compact BP bytes from `0x01` chunks to the current day
   ///   * flushes the current day on `0xFF` end marker, or after
   ///     [fragmentQuietWindow] elapses with no new chunks
   /// Requires the HistorySync to have been constructed with a
@@ -537,10 +546,9 @@ class HistorySync extends ChangeNotifier {
     await loadFromStore();
   }
 
-  /// Wire the sidecar [BpRawStore] used to dump the per-slot 13-byte
-  /// BP records whose field layout is on PROTOCOL.md §8.5 as
-  /// "needs live capture". The store is best-effort: missing it is
-  /// not an error — `_onBpDay` will simply not write the sidecar.
+  /// Wire the sidecar [BpRawStore] used to dump the compact per-slot BP bytes.
+  /// The store is best-effort: missing it is not an error — `_onBpDay` will
+  /// simply not write the sidecar.
   ///
   /// Idempotent; rebinding to a different store discards the
   /// previous binding without re-reading.
@@ -1353,24 +1361,23 @@ class HistorySync extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Persist a `0x0d` BP-history record. The 13-byte per-slot record
-  /// layout is on PROTOCOL.md §8.5 (needs live capture), so we
-  /// surface a placeholder `BloodPressureSample` per set bit in the
-  /// header's 48-bit presence bitmap. The placeholder's timestamp is
-  /// anchored to the day + slot index so downstream consumers see a
-  /// monotonically increasing series; the systolic/diastolic values
-  /// are 0 until the per-byte layout is resolved.
+  /// Persist a `0x0d` BP-history record. The firmware exposes one compact raw
+  /// byte per set bit in the header's 48-bit presence bitmap, so we surface a
+  /// placeholder `BloodPressureSample` for each present slot. The placeholder's
+  /// timestamp is anchored to the day + bitmap slot index so downstream
+  /// consumers see a monotonically increasing series; the systolic/diastolic
+  /// values are 0 because the history stream does not carry both values.
   ///
-  /// The raw 13-byte records themselves are *also* written to the
-  /// sidecar [BpRawStore] (when one is bound) — the BP debug screen
-  /// under Settings → Diagnostics renders those bytes so a future
-  /// live-capture session can map them to fields. The sidecar
-  /// survives across re-syncs because its layout is the wire format,
-  /// not the placeholder sample.
+  /// The raw compact bytes themselves are *also* written to the sidecar
+  /// [BpRawStore] (when one is bound) — the BP debug screen under Settings →
+  /// Diagnostics renders those bytes so future capture work can correlate them
+  /// with known readings.
   void _onBpDay(BpRecordDay record) async {
     final samples = <BloodPressureSample>[];
     for (var i = 0; i < record.slots.length; i++) {
-      final ts = record.day.midnight.add(record.slotDuration * i);
+      final ts = record.day.midnight.add(
+        record.slotDuration * record.slotIndexAt(i),
+      );
       samples.add(
         BloodPressureSample(timestamp: ts, systolic: 0, diastolic: 0),
       );
@@ -1849,7 +1856,7 @@ class HistorySync extends ChangeNotifier {
 /// which is why we can't reuse the generic [FragmentReassembler].
 /// The chunks are tagged internally:
 ///   * `chunk[0] == 0x00` → header (date + 48-bit presence bitmap)
-///   * `chunk[0] == 0x01` → data continuation; pairs of 13B records
+///   * `chunk[0] == 0x01` → data continuation; up to 13 compact BP bytes
 ///   * `chunk[0] == 0xFF` → end marker — flushes the current day
 ///
 /// The reassembler buffers in-progress records and flushes them on
@@ -1878,8 +1885,9 @@ class BpRecordAssembler {
 
   // Per-record accumulation state.
   DateOnly? _day;
-  int _slotDurationMinutes = 30;
+  int _slotDurationMinutes = 60;
   int _nextSlotIndex = 0;
+  final List<int> _slotIndexes = [];
   final List<Uint8List> _slots = [];
 
   /// Assembled records, broadcast so multiple consumers (e.g. UI +
@@ -1903,42 +1911,41 @@ class BpRecordAssembler {
   }
 
   void _beginHeader(Uint8List payload) {
-    // [1]=year-2000, [2]=month, [3]=day, [4]=slotMult,
+    // [1]=year-2000, [2]=month, [3]=day, [4]=intervalMinutes,
     // [5..10]=48-bit presence bitmap (LE).
     if (payload.length < 11) return;
     final year = 2000 + payload[1];
     final month = payload[2];
     final day = payload[3];
-    final slotMult = payload[4];
+    final intervalMinutes = payload[4];
     if (month < 1 || month > 12 || day < 1 || day > 31) return;
     _day = DateOnly(year, month, day);
-    // Observed H59MA encoding: slotMult is a 15-minute unit count
-    // (`2` => 30 minutes). A zero value is invalid on the wire, but
-    // defaulting to the observed cadence preserves timestamps.
-    // We don't pre-decode systolic/diastolic here (PROTOCOL §8.5 —
-    // needs live capture) — surface raw 13B records and let the
-    // consumer pick the field layout once §8.5 is resolved.
-    _slotDurationMinutes = slotMult == 0
-        ? 30
-        : (slotMult * 15).clamp(15, 60).toInt();
+    // H59MA v14 initializes this byte to 0x3c (60 minutes) and uses it as a
+    // minute interval when choosing how many half-hour bitmap positions to
+    // scan. Keep a conservative fallback for malformed captures.
+    _slotDurationMinutes = intervalMinutes == 0
+        ? 60
+        : intervalMinutes.clamp(30, 60).toInt();
     final bitmap = _read48(payload, 5);
+    _slotIndexes.clear();
     _slots.clear();
     _nextSlotIndex = 0;
     for (var slot = 0; slot < 48; slot++) {
       if ((bitmap & (1 << slot)) != 0) {
-        _slots.add(Uint8List(13));
+        _slotIndexes.add(slot);
+        _slots.add(Uint8List(0));
       }
     }
   }
 
   void _appendData(Uint8List payload) {
-    // 13B records back-to-back after the [0]=0x01 tag.
+    // One compact BP byte per present bitmap slot after the [0]=0x01 tag.
     final data = payload.sublist(1);
     var i = 0;
-    while (i + 13 <= data.length && _nextSlotIndex < _slots.length) {
-      _slots[_nextSlotIndex].setRange(0, 13, data.sublist(i, i + 13));
+    while (i < data.length && _nextSlotIndex < _slots.length) {
+      _slots[_nextSlotIndex] = Uint8List.fromList([data[i]]);
       _nextSlotIndex++;
-      i += 13;
+      i++;
     }
   }
 
@@ -1950,10 +1957,12 @@ class BpRecordAssembler {
       BpRecordDay(
         day: day,
         slotDuration: Duration(minutes: _slotDurationMinutes),
+        slotIndexes: List<int>.unmodifiable(_slotIndexes),
         slots: slots,
       ),
     );
     _day = null;
+    _slotIndexes.clear();
     _slots.clear();
     _nextSlotIndex = 0;
   }

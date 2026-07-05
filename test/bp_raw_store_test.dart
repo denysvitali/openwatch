@@ -78,14 +78,15 @@ void main() {
       expect(empty.slotMinutes, 0);
     });
 
-    test('putDay persists and reads raw 13-byte records', () async {
+    test('putDay persists and reads compact raw BP bytes', () async {
       final store = await BpRawStore.openIn(tmp);
       final record = BpRecordDay(
         day: DateOnly(2026, 7, 3),
-        slotDuration: const Duration(minutes: 30),
+        slotDuration: const Duration(minutes: 60),
+        slotIndexes: const [0, 2],
         slots: [
-          Uint8List.fromList(List<int>.generate(13, (i) => i + 1)),
-          Uint8List.fromList(List<int>.generate(13, (i) => 0xf0 - i)),
+          Uint8List.fromList([0x78]),
+          Uint8List.fromList([0x82]),
         ],
       );
       await store.putDay(record.day, record);
@@ -94,16 +95,14 @@ void main() {
       expect(days, [record.day]);
       final rehydrated = await store.readDay(record.day);
       expect(rehydrated.day, record.day);
-      expect(rehydrated.slotMinutes, 30);
+      expect(rehydrated.slotMinutes, 60);
       expect(rehydrated.slots.length, 2);
       expect(rehydrated.slots.first.slotIndex, 0);
-      expect(rehydrated.slots.last.slotIndex, 1);
-      expect(record.slots.first.length, 13);
-      expect(rehydrated.slots.first.bytes.length, 13);
-      for (var i = 0; i < 13; i++) {
-        expect(rehydrated.slots.first.bytes[i], i + 1);
-        expect(rehydrated.slots.last.bytes[i], 0xf0 - i);
-      }
+      expect(rehydrated.slots.last.slotIndex, 2);
+      expect(rehydrated.slots.first.timestamp, DateTime(2026, 7, 3));
+      expect(rehydrated.slots.last.timestamp, DateTime(2026, 7, 3, 2));
+      expect(rehydrated.slots.first.bytes, [0x78]);
+      expect(rehydrated.slots.last.bytes, [0x82]);
     });
   });
 }

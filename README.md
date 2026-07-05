@@ -62,7 +62,7 @@ watch-face designer/upload, firmware fetch-and-store + OTA flow.
 Needs live-capture verification (flagged in `PROTOCOL.md` §8.5): ECG/PPG
 notify opcodes, legacy APK-layer bind (`0x10`) layout, and remaining health
 history field splits. Channel B CRC is resolved as CRC-16/MODBUS from firmware.
-BP raw slots are preserved for capture correlation before field-level decoding.
+BP compact history bytes are preserved for capture correlation.
 
 ## Legal
 

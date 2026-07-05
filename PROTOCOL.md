@@ -375,8 +375,8 @@ the generic bitmap below.
 | ReadPressureReq | `0x14` | — | →watch | `[1..4]`utcStart i32 LE `[5]=00` `[6]=0x32` | **ReadBlePressureRsp**: `[0..3]`ts i32 LE (`0xFFFFFFFF`=end), `[4]`val, `[5]`val2 → BlePressure. ≤50 records. | Read BLE-pressure measured values. |
 | BloodOxygenSettingReq | `0x2c` | 01/02 | →watch | w:`[02, en(0/1)]` | read: `[1]`enable | SpO2 auto-measure on/off. |
 | BpSettingReq | `0x0c` | 01/02 | →watch | w:`[02,en,sH,sM,eH,eM,multiple]` | read: `[1]`en,`[2..5]`window,`[6]`multiple | BP auto-measure window. |
-| BpReadConformReq | `0x0e` | — | →watch | `[0x00]`=ok / `[0xFF]`=fail | (none; BP history via `0x0d`) | Ack a BP measurement result. |
-| BpDataRsp (no req) | `0x0d` | — | watch→ | n/a | hdr `[0]=00`{`[1]`yr-2000,`[2]`mo,`[3]`d,`[4]`slotMult,`[5..10]`48-bit presence bitmap}; `slotMult` is observed as 15-minute units (`2`=30 min); data `[0]=01`{opaque 13B records}; `0xFF`=end | BP history records. OpenWatch preserves raw slots; systolic/diastolic byte mapping remains §8.5 work. |
+| BpReadConformReq | `0x0e` | — | →watch | `[0x00]`=advance/read next; nonzero silently exits | response is BP history via `0x0d` | Advance the BP record cursor and emit the next compact history record. |
+| BpDataRsp (no req) | `0x0d` | — | watch→ | n/a | hdr `[0]=00`{`[1]`yr-2000,`[2]`mo,`[3]`d,`[4]`intervalMinutes,`[5..10]`48-bit presence bitmap,`[11..13]=0`}; data frames `[0]=01` + up to 13 compact one-byte BP values in ascending set-bit order; `[0]=FF`=empty/end | BP history records. H59MA v14 initializes `intervalMinutes=0x3c` (hourly) and stores 24 4-byte persistent slots, but the `0x0d` stream emits only the first byte of each valid slot. OpenWatch preserves those compact bytes; systolic/diastolic reconstruction remains capture work. |
 | HRVReq | `0x39` | index | →watch | `[index]` | multi-pkt (`[0]=00`{size,range=30}, `[0]=01`{offset days-back + samples}, `0xFF`=end). stride 13B. | Read HRV history for a day index. |
 | PressureReq | `0x37` | index | →watch | `[index]` | multi-pkt (same scheme as HRV). stride 13B. | Read stress history for a day index. |
 | PressureSettingReq | `0x38` | 01/02 | →watch | w:`[02,en(0/1)]` | read: `[1]`enable; response echoes `[0x38,sub,value]` | Stress/pressure auto-measure enable bit. H59MA v14 has no confirmed Channel-A HRV auto-measure setting; the old APK-era `0x38` HRV setting row is stale for this firmware. |
@@ -882,15 +882,14 @@ Feedback, Customer-support chat.
   is hiding in that reserved range.
   Resolution path: live BLE capture during a `0x69` type=7 session on real
   hardware.
-- **BP-history raw slot field split** (`0x0d` BpDataRsp) — header/date/bitmap
-  reassembly is implemented, and OpenWatch stores each 13B slot raw in the
-  `bp_raw` sidecar so captures are not lost. Do not decode
-  systolic/diastolic yet: GHIDRA's persistent-history descriptor notes the
-  underlying BP table as keyed records with hourly 4-byte slots (§persistent
-  history descriptors), while the host-visible stream uses tagged `0x00` /
-  `0x01` / `0xFF` frames with opaque 13B records. Resolution path: correlate
-  live `0x0d` frames with known manual/cuff readings and update the raw-slot
-  parser only when the byte mapping is proven.
+- **BP-history compact byte semantics** (`0x0d` BpDataRsp) — static firmware RE
+  now resolves the wire split: the persistent table has 24 hourly 4-byte slots,
+  but the `0x0d` stream emits only the first byte of each valid slot after a
+  `0x01` chunk tag. OpenWatch stores that compact byte per bitmap slot in the
+  `bp_raw` sidecar. Do not synthesize systolic/diastolic history from it; the
+  remaining three persistent bytes are not exposed by this opcode. Resolution
+  path: correlate live `0x0d` bytes with known manual/cuff readings and, if
+  needed, locate another firmware path that exposes the full 4-byte slot.
 - **`@RequiresSignature` method set** — confirm which cloud endpoints sign at runtime.
 - **Legacy `bind` (`0x10` CMD_BIND_SUCCESS)** request layout — **not on H59MA Channel-A.**
   The §10.2 inventory (22 Channel-A handlers) does not list `0x10`; on Channel-B
@@ -960,6 +959,13 @@ Feedback, Customer-support chat.
 >   §3.x handler set (only deferred-ring dispatcher references); fragmenter
 >   table at GHIDRA §10.2 lists `0x37/0x39/0x7a` only. Live capture needed
 >   to confirm `0x7d`'s fragmenter / feature-id byte.
+> - **Channel-A `0x0d` BP-history wire split** — `FUN_00834296` builds a
+>   tagged 14-byte header and compact body frames. Header byte 4 is the interval
+>   in minutes (`0x3c` default = hourly), bytes 5..10 are a 48-bit presence
+>   bitmap, and each body frame starts with `0x01` followed by up to 13 one-byte
+>   values. The persistent table is still 24 hourly 4-byte slots, but this
+>   stream emits only byte 0 of each valid slot; see
+>   `firmwares/_re/bp-history/evidence.md`.
 
 ---
 

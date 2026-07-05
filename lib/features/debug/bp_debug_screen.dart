@@ -7,16 +7,14 @@ import '../../core/providers/app_providers.dart';
 import '../../core/services/bp_raw_store.dart';
 import '../../core/services/history_store.dart' show DateOnly;
 
-/// Debug-only screen that dumps the raw 13-byte BP records the watch
-/// emitted, byte-by-byte, so a future live-capture session can map the
-/// 13 slots in `PROTOCOL.md §8.5` to actual fields.
+/// Debug-only screen that dumps the compact raw BP bytes the watch emitted so
+/// future capture work can correlate them with known readings.
 ///
 /// Each persisted day is a card showing:
 ///   * the day + slot-duration header
 ///   * one row per set bit in the header's 48-bit presence bitmap,
 ///     indexed by slot id with the derived timestamp
-///   * the 13 raw bytes as space-separated hex (`ab cd ef ...`) and
-///     decimal (`[171, 205, 239, ...]`)
+///   * the raw compact byte as hex (`ab`) and decimal (`[171]`)
 ///   * a copy button so a tester can paste a single row into a chat
 ///     without screenshotting
 ///
@@ -214,16 +212,15 @@ class _EmptyState extends StatelessWidget {
             const SizedBox(height: 8),
             const Text(
               'Sync history from the watch to populate the sidecar.\n'
-              'Once at least one BP day is fetched, the 13 raw bytes '
-              'per slot will appear here for byte-level inspection.',
+              'Once at least one BP day is fetched, the raw byte '
+              'per present slot will appear here for inspection.',
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 12),
             const Text(
-              'This screen exists because the 13-byte per-slot BP '
-              'record layout is on PROTOCOL.md §8.5 as '
-              '"needs live capture" — a future BLE capture session '
-              'can use the dumps here to map the bytes to fields.',
+              'This screen exists because the 0x0d history stream emits '
+              'only one byte from each persistent BP slot. A future BLE '
+              'capture session can use the dumps here for correlation.',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 12),
             ),

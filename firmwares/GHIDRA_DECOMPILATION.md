@@ -1632,26 +1632,51 @@ void FUN_0082c0a4() {
   other "config read" opcodes echo the request cmd.
 * `FUN_0082b938` is the shared 14-byte-chunk fragmented
   streamer (see §3.2) used by 0x18 / 0xC7 and others. A
-  BP record is split into a fixed 14 B header + variable B
-  body, so a record larger than 14 B takes 2 notify frames.
-* `FUN_00834296` returns `0xFF` to mean "no record" — the
-  handler then sends nothing (the "no data" path).
+  BP response is split into a fixed 14 B tagged header plus a
+  variable compact body, so more than 13 present slots take
+  multiple body frames.
+* `FUN_00834296` sends an empty/end sentinel by clearing the
+  header and writing `hdr[0] = 0xFF`. The handler still emits
+  that `0x0D` header frame; it is not a silent no-data path.
 
 #### Response layout
 
-For a 14-byte BP record: a single 16-byte notify frame
-`[0x0D, 14 B record data, 0, 0, additive checksum]`.
+Header frame (`FUN_00834296(&hdr, &body)` first argument):
 
-For a longer BP record: two 16-byte notify frames:
 ```
-frame 1: [0x0D, 14 B header..., additive checksum]
-frame 2: [0x0D, N B body...,      additive checksum]
+payload[0]      = 0x00
+payload[1]      = year - 2000
+payload[2]      = month
+payload[3]      = day
+payload[4]      = intervalMinutes       // default 0x3c = hourly
+payload[5..10]  = 48-bit presence bitmap, little-endian
+payload[11..13] = 0
 ```
 
-The two-frame boundary is the same 14-byte split used by
-`0x18 displayClock`'s `FUN_0082b938` (the doc's "Common
-response path" helper), so the host can reuse the same
-14-byte collection logic it already uses for `0x18`.
+Empty/end frame:
+
+```
+payload[0]      = 0xFF
+payload[1..13]  = 0
+```
+
+Body frames (`FUN_00834296(&hdr, &body)` second argument):
+
+```
+payload[0]     = 0x01
+payload[1..13] = up to 13 compact BP bytes, ascending bitmap slot order
+```
+
+The builder inserts the `0x01` body tag whenever `body_len % 14 == 0`, because
+the shared streamer copies exactly 14 payload bytes per frame. The bytes after
+the tag are therefore one compact value per present slot, not 13-byte per-slot
+records.
+
+The persistent BP descriptor (§persistent-history descriptor rings) stores the
+day key plus 24 hourly 4-byte slots. This `0x0D` history response validates the
+slot's first byte (`0x28..0xDC`) and emits only that byte. The remaining three
+persistent bytes are not exposed by this opcode, so the host must not invent
+systolic/diastolic history values from the compact stream.
 
 #### Why the request/response opcode split
 
@@ -1669,10 +1694,10 @@ response path" helper), so the host can reuse the same
 #### Why no ack for the request
 
 The 0x0E handler never emits a 0x0E response — the response
-*is* the 0x0D frame (or its absence when the queue is
-empty). A host that sends `0x0E 0x00` and receives nothing
-within the BLE link timeout should treat the queue as
-exhausted.
+*is* the 0x0D frame. A host that sends `0x0E 0x00` and receives
+`0x0D` with `payload[0] == 0xFF` should treat the queue as
+exhausted; a nonzero 0x0E sub-byte silently exits and sends no
+response.
 
 ### 3.20 Opcode `0x37` pressureSetting (`FUN_0082caa6`)
 
@@ -6362,7 +6387,7 @@ section number* for a given operation.
 | `0x01` | §3.4 | setTime (BCD → RTC, sends `0x2f` MTU ack + 14 B `0x01` ack) |
 | `0x06` | §3.7 | DND read/write (sub 0x01 / 0x02) |
 | `0x08` | §3.15 | findDevice / camera / long-press (sub 0x00 / 0x01 / `0xAB 0xDC`) |
-| `0x0e` | §3.19 | bpReadConfirm (advances BP record index, returns 1/2 frame `0x0d`) |
+| `0x0e` | §3.19 | bpReadConfirm (advances BP record index, returns tagged compact `0x0d` BP frames) |
 | `0x15` | §3.12 | readHeartRate (multi-frame `0x15` response or `0xff15` error) |
 | `0x18` | §3.5 | displayClock (watch-face / clock) |
 | `0x1e` | §3.13 | realTimeHeartRate (sub 0x01 start 60 s, 0x02 stop, 0x03 reset) |
