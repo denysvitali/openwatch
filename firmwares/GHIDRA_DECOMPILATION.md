@@ -2047,7 +2047,7 @@ void channel_a_send_fragmented_response(byte cmd, int payload, uint length) {
 }
 ```
 
-The fragmenter is shared with `0x18 displayClock`, `0xc1 0xFEE7 long`
+The fragmenter is shared with `0x18 displayClock`, `0xc1 0xFEE7 health poll`
 and any handler that needs to send a >14-byte response (e.g. the
 `0x40..0x42` file-list responses and the `0x27/0x3e` sleep records).
 
@@ -6389,7 +6389,7 @@ section number* for a given operation.
 | `0x94` / `0x95` | §8.19 | state-update modes 1 / 3 (self-marker ack) |
 | `0x96` | §8.4 | reset-state (self-marker ack, also resets `DAT_0082caec[3..5]`) |
 | `0xbf` / `0xc0` | §8.17 | vendor memory R/W (raw `memcpy` to / from host-supplied address) |
-| `0xc1` | §8.14 | deferred long-fragmented response (queues async HR read + immediate 1 B ack) |
+| `0xc1` | §8.14 | one-shot health poll (calls async helper, immediately returns one status/result byte) |
 | `0xc5` / `0xc8` / `0xc9` | §8.1 | inline config-byte writes to `DAT_0082caec[3..5]` |
 | `0xcd` | §8.9 | byte-reverse echo / link-sanity test |
 | `0xce` | §8.10 | factory/test sub-commands (sub `0x01`/`0x02`/`' '`/`'!'`/`'"'`) |

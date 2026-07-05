@@ -467,7 +467,7 @@ void main() {
     test(
       'summarizes high-bit FEE7 OTA and vibration frames as raw opcodes',
       () {
-        final ota = Codec.buildChannelA(Fee7.otaTrigger, [0, 0, 1]);
+        final ota = Codec.buildChannelA(Fee7.otaTrigger, [1, 1]);
         final vibration = Codec.buildChannelA(Fee7.vibrationPattern, [
           0x2c,
           0x01,
@@ -484,9 +484,13 @@ void main() {
 
         expect(otaDecoded.valid, isTrue);
         expect(otaDecoded.details['opcode'], '0xc3');
-        expect(otaDecoded.details['label'], 'otaTrigger');
+        expect(otaDecoded.details['label'], 'otaControl');
+        expect(otaDecoded.details['action'], 1);
+        expect(otaDecoded.details['serviceResetRequested'], isTrue);
+        expect(otaDecoded.details['startsDfu'], isTrue);
         expect(otaDecoded.details['routesToOta'], isTrue);
-        expect(otaDecoded.title, contains('routesToOta=true'));
+        expect(otaDecoded.title, contains('otaControl action=1'));
+        expect(otaDecoded.title, contains('reset=true'));
 
         expect(vibrationDecoded.valid, isTrue);
         expect(vibrationDecoded.details['opcode'], '0xfe');

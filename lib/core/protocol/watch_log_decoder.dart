@@ -603,9 +603,19 @@ class WatchLogDecoder {
         return 'FEE7 ${_hex(opcode)} status value=${_hex32(statusValue)} '
             'low=${_hex(statusLowByte)} idle=${statusValue == 0}';
       case Fee7.otaTrigger:
-        final routesToOta = payload.length >= 3 && payload[2] == 1;
-        details['routesToOta'] = routesToOta;
-        return 'FEE7 ${_hex(opcode)} otaTrigger routesToOta=$routesToOta';
+        final action = payload.isNotEmpty ? payload[0] : 0;
+        final serviceResetRequested = payload.length >= 2 && payload[1] == 1;
+        final startsDfu = action == 1;
+        final exitsDfu = action == 2;
+        details.addAll({
+          'action': action,
+          'serviceResetRequested': serviceResetRequested,
+          'startsDfu': startsDfu,
+          'exitsDfu': exitsDfu,
+          'routesToOta': startsDfu,
+        });
+        return 'FEE7 ${_hex(opcode)} otaControl action=$action '
+            'reset=$serviceResetRequested';
       case Fee7.memoryRead:
         details['dataBytes'] = payload.length;
         return 'FEE7 ${_hex(opcode)} memoryRead chunk bytes=${payload.length}';
@@ -1478,7 +1488,7 @@ String _labelForFee7(int opcode) {
     case Fee7.memoryRead:
       return 'memoryRead';
     case Fee7.otaTrigger:
-      return 'otaTrigger';
+      return 'otaControl';
     case Fee7.vibrationPattern:
       return 'vibrationPattern';
     default:

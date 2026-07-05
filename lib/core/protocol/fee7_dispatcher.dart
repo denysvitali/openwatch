@@ -95,7 +95,8 @@ class Fee7Dispatcher {
   /// is assigned by arrival order.
   Stream<MemoryReadChunk> get onMemoryReadChunk => _memoryRead.stream;
 
-  /// `0xc3` OTA trigger; `pl[2]==1` routes to OTA state machine.
+  /// `0xc3` OTA control; `pl[0]` selects DFU state action and `pl[1]==1`
+  /// requests the BLE/service reset helper.
   Stream<OtaTrigger> get onOta => _ota.stream;
 
   /// `0xfe` vibration-pattern request (duration-derived).
@@ -299,9 +300,15 @@ class Fee7Dispatcher {
   }
 
   OtaTrigger _decodeOtaTrigger(Uint8List pl) {
-    // param[2]==1 routes into the OTA state machine (per §8).
-    final routesToOta = pl.length >= 3 && pl[2] == 1;
-    return OtaTrigger(routesToOta: routesToOta, payload: pl);
+    // Firmware `req[1]` selects the OTA state-machine action and `req[2]==1`
+    // calls the BLE/service teardown helper first. `pl` is `req[1..14]`.
+    final action = pl.isNotEmpty ? pl[0] : 0;
+    final serviceResetRequested = pl.length >= 2 && pl[1] == 1;
+    return OtaTrigger(
+      action: action,
+      serviceResetRequested: serviceResetRequested,
+      payload: pl,
+    );
   }
 
   void dispose() {
@@ -476,11 +483,34 @@ class MemoryReadChunk {
   final Uint8List payload;
 }
 
-/// `0xc3` OTA trigger. [routesToOta] is `true` when `payload[2] == 1`,
-/// which the firmware uses to dispatch into the OTA state machine.
+/// `0xc3` OTA control.
+///
+/// H59MA v14 first checks `req[2] == 1` to run the BLE/service reset helper,
+/// then dispatches `req[1] == 1` to `ota_dfu_state_machine(4, 0)` and
+/// `req[1] == 2` to `ota_dfu_state_machine(0, 0)`. Since [payload] is
+/// `req[1..14]`, [action] is `payload[0]` and [serviceResetRequested] is
+/// `payload[1] == 1`.
 class OtaTrigger {
-  const OtaTrigger({required this.routesToOta, required this.payload});
-  final bool routesToOta;
+  const OtaTrigger({
+    required this.action,
+    required this.serviceResetRequested,
+    required this.payload,
+  });
+
+  /// Raw `req[1]` action byte. Known firmware actions are `1` and `2`.
+  final int action;
+
+  /// True when `req[2] == 1`; the firmware runs the BLE/service reset helper
+  /// before applying [action].
+  final bool serviceResetRequested;
+
+  bool get startsDfu => action == 1;
+  bool get exitsDfu => action == 2;
+
+  /// Back-compat alias for older diagnostics. It now means the action byte is
+  /// the firmware's `ota_dfu_state_machine(4, 0)` route.
+  bool get routesToOta => startsDfu;
+
   final Uint8List payload;
 }
 

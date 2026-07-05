@@ -371,7 +371,26 @@ void main() {
       },
     );
 
-    test('routes 0xc3 OTA trigger and detects routesToOta flag', () async {
+    test('routes 0xc3 OTA control action and service reset flag', () async {
+      final host = _StubHost();
+      final svc = Fee7Service.attach(host);
+      final d = Fee7Dispatcher(svc);
+      d.bind();
+
+      final got = d.onOta.first;
+      final frame = Codec.buildChannelA(Fee7.otaTrigger, [0x01, 0x01]);
+      host.inbound.add(frame);
+
+      final o = await got.timeout(const Duration(seconds: 1));
+      expect(o.action, 1);
+      expect(o.startsDfu, isTrue);
+      expect(o.exitsDfu, isFalse);
+      expect(o.serviceResetRequested, isTrue);
+      expect(o.routesToOta, isTrue);
+      await svc.dispose();
+    });
+
+    test('0xc3 ignores payload[2] for OTA routing', () async {
       final host = _StubHost();
       final svc = Fee7Service.attach(host);
       final d = Fee7Dispatcher(svc);
@@ -382,7 +401,29 @@ void main() {
       host.inbound.add(frame);
 
       final o = await got.timeout(const Duration(seconds: 1));
-      expect(o.routesToOta, isTrue);
+      expect(o.action, 0);
+      expect(o.startsDfu, isFalse);
+      expect(o.serviceResetRequested, isFalse);
+      expect(o.routesToOta, isFalse);
+      await svc.dispose();
+    });
+
+    test('0xc3 action 2 is decoded as the DFU exit/reset route', () async {
+      final host = _StubHost();
+      final svc = Fee7Service.attach(host);
+      final d = Fee7Dispatcher(svc);
+      d.bind();
+
+      final got = d.onOta.first;
+      final frame = Codec.buildChannelA(Fee7.otaTrigger, [0x02, 0x00]);
+      host.inbound.add(frame);
+
+      final o = await got.timeout(const Duration(seconds: 1));
+      expect(o.action, 2);
+      expect(o.startsDfu, isFalse);
+      expect(o.exitsDfu, isTrue);
+      expect(o.serviceResetRequested, isFalse);
+      expect(o.routesToOta, isFalse);
       await svc.dispose();
     });
 

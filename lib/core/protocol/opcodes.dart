@@ -293,7 +293,7 @@ class Fee7 {
 
   // Special handling
   static const int longResponse = 0xc1; // One-shot health/status poll
-  static const int otaTrigger = 0xc3; // Routes into OTA state machine
+  static const int otaTrigger = 0xc3; // OTA control: action + service reset
 
   /// Whether [opcode] should be decoded as a `UnaryOpcode` (no payload decode).
   ///
