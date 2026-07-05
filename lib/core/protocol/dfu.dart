@@ -137,17 +137,8 @@ class DfuFlasher {
 }
 
 _OtaRsp? _parseOtaRsp(Uint8List frame) {
-  if (frame.length < 7 || frame[0] != Codec.channelBMagic) return null;
-  if (Codec.isChannelBEmptySentinel(frame)) return null;
-
-  final len = Codec.readU16le(frame, 2);
-  if (len < 1 || frame.length != 6 + len) return null;
-
-  final payload = Uint8List.sublistView(frame, 6, 6 + len);
-  final declaredCrc = Codec.readU16le(frame, 4);
-  final actualCrc = Codec.crc16(payload);
-  if (declaredCrc != actualCrc) return null;
-
+  final payload = Codec.rxChannelBPayload(frame);
+  if (payload == null || payload.isEmpty) return null;
   return _OtaRsp(type: frame[1], status: payload[0]);
 }
 

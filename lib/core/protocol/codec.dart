@@ -97,7 +97,7 @@ class Codec {
   /// True when a Channel-B frame carries the empty-payload sentinel in
   /// `bytes[2..5]` instead of length and CRC fields.
   static bool isChannelBEmptySentinel(Uint8List frame) =>
-      frame.length >= 6 &&
+      frame.length == 6 &&
       frame[0] == channelBMagic &&
       frame[2] == 0xFF &&
       frame[3] == 0xFF &&
@@ -110,7 +110,7 @@ class Codec {
     if (frame.length < 6 || frame[0] != channelBMagic) return null;
     if (isChannelBEmptySentinel(frame)) return Uint8List(0);
     final len = frame[2] | (frame[3] << 8);
-    if (frame.length - 6 < len) return null;
+    if (frame.length != 6 + len) return null;
     final payload = Uint8List.sublistView(frame, 6, 6 + len);
     final crc = frame[4] | (frame[5] << 8);
     if (crc16(payload) != crc) return null;

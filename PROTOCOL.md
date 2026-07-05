@@ -248,6 +248,9 @@ Firmware evidence for Channel B: r2 disassembly of H59MA v13 at body `0x8c54..0x
 reads `crc16LE` from bytes 4/5, and copies payload from byte 6. The CRC helpers at v13
 `0x8d5c..0x8d9a` and v14 `0x8d14..0x8d52` use init `0xFFFF` and lookup tables at v13 `0x2100c` and
 v14 `0x1f3c0`, whose first words match the canonical reflected `0xA001` table.
+OpenWatch's host decoder is stricter than the firmware receiver for watch→host frames: if a
+received Channel-B frame contains bytes beyond the declared payload length, it is treated as
+malformed instead of truncating the extra bytes into a seemingly valid event.
 
 Firmware evidence for Channel-A buckets: v13 body `0x22490` is a one-byte-per-opcode bucket table
 matching the APK-derived command families: `0x01..0x09` and `0x0f..0x20` plain request bucket `0x40`,

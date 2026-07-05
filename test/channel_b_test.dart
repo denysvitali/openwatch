@@ -56,6 +56,44 @@ void main() {
       expect(t.sentA, isEmpty, reason: 'CRC mismatch must not auto-NAK');
     });
 
+    test('single-chunk frame with trailing bytes does not emit', () async {
+      final t = FakeBleTransport();
+      final p = ChannelBParser(t);
+      p.bind();
+      final f = Codec.buildChannelB(0x32, [1, 2, 3]);
+      final malformed = Uint8List.fromList([...f, 0x99]);
+      final got = p.commands.first.timeout(
+        const Duration(milliseconds: 100),
+        onTimeout: () => ChannelBCommand(-1, Uint8List(0)),
+      );
+      t.inB.add(malformed);
+      final c = await got;
+      expect(c.cmd, -1);
+      expect(t.sentA, isEmpty);
+    });
+
+    test('continuation with trailing bytes does not emit', () async {
+      final t = FakeBleTransport();
+      final p = ChannelBParser(t);
+      p.bind();
+      final payload = List<int>.generate(25, (i) => i);
+      final f = Codec.buildChannelB(0x03, payload);
+      final first = Uint8List.sublistView(f, 0, 6 + 14);
+      final second = Uint8List.fromList([
+        ...Uint8List.sublistView(f, 6 + 14),
+        0x99,
+      ]);
+      final got = p.commands.first.timeout(
+        const Duration(milliseconds: 100),
+        onTimeout: () => ChannelBCommand(-1, Uint8List(0)),
+      );
+      t.inB.add(first);
+      t.inB.add(second);
+      final c = await got;
+      expect(c.cmd, -1);
+      expect(t.sentA, isEmpty);
+    });
+
     test('buildAck encodes status byte', () {
       final p = ChannelBParser(FakeBleTransport());
       final ack = p.buildAck(0x01, 0);

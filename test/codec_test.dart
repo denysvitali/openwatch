@@ -84,6 +84,26 @@ void main() {
       f[6] ^= 0xFF;
       expect(Codec.rxChannelBPayload(f), isNull);
     });
+
+    test('declared length must consume the whole frame', () {
+      final f = Codec.buildChannelB(0x32, [1, 2, 3]);
+      final withTrailingByte = Uint8List.fromList([...f, 0x99]);
+      expect(Codec.rxChannelBPayload(withTrailingByte), isNull);
+    });
+
+    test('empty sentinel rejects trailing bytes', () {
+      final f = Uint8List.fromList([
+        0xBC,
+        OpB.otaStart,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0x00,
+      ]);
+      expect(Codec.isChannelBEmptySentinel(f), isFalse);
+      expect(Codec.rxChannelBPayload(f), isNull);
+    });
   });
 
   group('helpers', () {
@@ -95,8 +115,8 @@ void main() {
 
     test('CRC16/MODBUS known vector', () {
       // CRC-16/MODBUS (poly 0xA001 reflected, init 0xFFFF, no final xor):
-      // check("123456789") == 0x4B37. NOTE: the exact device variant is
-      // assumed MODBUS and must be confirmed against a live capture.
+      // check("123456789") == 0x4B37. The firmware-side implementation is
+      // documented in PROTOCOL.md §9 and firmwares/R2_ANALYSIS.md §5.
       expect(Codec.crc16('123456789'.codeUnits), 0x4B37);
     });
   });

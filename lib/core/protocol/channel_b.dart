@@ -28,9 +28,8 @@ final _log = AppLog.instance;
 ///   byte 6..    payload bytes
 /// ```
 ///
-/// Empty-payload sentinel: `bytes[2..5]` = `FF FF FF FF` (no length/CRC). The
-/// firmware treats any value with magic `0xBC` but no declared length as a
-/// complete frame; we do the same.
+/// Empty-payload sentinel: the exact six-byte frame `[BC, cmd, FF, FF, FF, FF]`
+/// carries no length/CRC fields and dispatches immediately.
 class ChannelBParser {
   ChannelBParser(
     WatchLink transport, {
@@ -162,7 +161,19 @@ class ChannelBParser {
       _onChunk(chunk); // re-process as new frame
       return;
     }
-    final take = chunk.length < remaining ? chunk.length : remaining;
+    // The firmware receiver completes on accumulated >= declared length. The
+    // host decoder is intentionally stricter so trailing bytes in captures do
+    // not get truncated into valid events.
+    if (chunk.length > remaining) {
+      _log.warn(
+        'chb',
+        'continuation too long cmd=0x${_currentCmd.toRadixString(16)} '
+            '(len=${chunk.length} remaining=$remaining); discarding',
+      );
+      _reset();
+      return;
+    }
+    final take = chunk.length;
     _buf.setRange(_accumulated, _accumulated + take, chunk);
     _accumulated += take;
     _log.debug(
@@ -196,7 +207,18 @@ class ChannelBParser {
     _declaredCrc = chunk[4] | (chunk[5] << 8);
     _accumulated = 0;
     final payloadBytes = chunk.length - 6;
-    final take = payloadBytes < len ? payloadBytes : len;
+    // See continuation guard above: reject malformed incoming frames rather
+    // than silently dropping bytes beyond the declared payload.
+    if (payloadBytes > len) {
+      _log.warn(
+        'chb',
+        'first fragment too long cmd=0x${_currentCmd.toRadixString(16)} '
+            '(payload=$payloadBytes declared=$len); discarding',
+      );
+      _reset();
+      return;
+    }
+    final take = payloadBytes;
     if (take > 0) {
       _buf.setRange(0, take, chunk.sublist(6, 6 + take));
       _accumulated = take;
