@@ -4164,6 +4164,11 @@ u16 len
 records...
 ```
 
+The firmware's `"wrong signature! Read %8X != Requried %8X"` log is emitted
+by this helper when the first u32 is not `0x8721bee2`; "signature" is a legacy
+debug string for the config-blob magic, not an OTA image signature. See
+`firmwares/_re/config-blob/evidence.md`.
+
 Each record has:
 
 ```
