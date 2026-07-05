@@ -801,11 +801,11 @@ class WatchLogDecoder {
         return 'B 0x2a activity records=${records.length} '
             '${records.map((r) => 'd${r.dayOffset}:steps=${r.steps ?? 'n/a'}').join(', ')}';
       case OpB.h59FileListResponse:
-        final count = payload.isEmpty ? 0 : payload[0] & 0xff;
-        final recordBytes = payload.isEmpty ? 0 : payload.length - 1;
-        details['fileRecordCount'] = count;
-        details['fileRecordBytes'] = recordBytes;
-        return 'B 0x42 H59 file list records=$count bytes=$recordBytes';
+        final summary = _parseH59FileList(payload);
+        details.addAll(summary.toJson());
+        return 'B 0x42 H59 file list records=${summary.declaredCount} '
+            'parsed=${summary.records.length} bytes=${summary.recordBytes}'
+            '${summary.malformed ? ' malformed' : ''}';
       case OpB.deviceInfoConfig:
         return _summarizeDeviceInfoConfig(payload, details);
     }
@@ -1016,6 +1016,77 @@ class ActivityRecordSummary {
     'steps': steps,
     'calories': calories,
     'distanceMeters': distanceMeters,
+  };
+}
+
+class _H59FileListSummary {
+  const _H59FileListSummary({
+    required this.declaredCount,
+    required this.recordBytes,
+    required this.records,
+    required this.trailingBytes,
+    required this.malformed,
+  });
+
+  final int declaredCount;
+  final int recordBytes;
+  final List<_H59FileRecordSummary> records;
+  final int trailingBytes;
+  final bool malformed;
+
+  Map<String, Object?> toJson() => {
+    'fileRecordCount': declaredCount,
+    'fileParsedRecordCount': records.length,
+    'fileRecordBytes': recordBytes,
+    'fileTrailingBytes': trailingBytes,
+    'fileMalformed': malformed,
+    'fileRecords': records.map((r) => r.toJson()).toList(),
+  };
+}
+
+class _H59FileRecordSummary {
+  const _H59FileRecordSummary({
+    required this.index,
+    required this.recordLength,
+    required this.recordType,
+    required this.fields,
+    required this.rawHex,
+    required this.malformed,
+  });
+
+  final int index;
+  final int recordLength;
+  final int? recordType;
+  final List<_H59FileFieldSummary> fields;
+  final String rawHex;
+  final bool malformed;
+
+  Map<String, Object?> toJson() => {
+    'index': index,
+    'length': recordLength,
+    'recordType': recordType == null ? null : _hex(recordType!),
+    'fieldCount': fields.length,
+    'malformed': malformed,
+    'raw': rawHex,
+    'fields': fields.map((f) => f.toJson()).toList(),
+  };
+}
+
+class _H59FileFieldSummary {
+  const _H59FileFieldSummary({
+    required this.fieldLength,
+    required this.fieldId,
+    required this.valueHex,
+  });
+
+  final int fieldLength;
+  final int fieldId;
+  final String valueHex;
+
+  Map<String, Object?> toJson() => {
+    'length': fieldLength,
+    'fieldId': _hex(fieldId),
+    'value': valueHex,
   };
 }
 
@@ -1353,6 +1424,91 @@ List<ActivityRecordSummary> _parseActivitySummary(Uint8List payload) {
     offset += 49;
   }
   return out;
+}
+
+_H59FileListSummary _parseH59FileList(Uint8List payload) {
+  final declaredCount = payload.isEmpty ? 0 : payload[0] & 0xff;
+  final recordBytes = payload.isEmpty ? 0 : payload.length - 1;
+  final records = <_H59FileRecordSummary>[];
+  var offset = payload.isEmpty ? 0 : 1;
+  var malformed = declaredCount > 10;
+
+  for (var index = 0; index < declaredCount; index++) {
+    if (offset >= payload.length) break;
+    final recordStart = offset;
+    final recordLength = payload[offset] & 0xff;
+    var recordMalformed = recordLength < 2;
+    if (recordMalformed) malformed = true;
+
+    var recordEnd = recordStart + (recordMalformed ? 1 : recordLength);
+    if (recordEnd > payload.length) {
+      recordEnd = payload.length;
+      recordMalformed = true;
+      malformed = true;
+    }
+
+    final recordType = recordStart + 1 < recordEnd
+        ? payload[recordStart + 1] & 0xff
+        : null;
+    final fields = <_H59FileFieldSummary>[];
+    var fieldOffset = recordStart + 2;
+
+    while (!recordMalformed && fieldOffset < recordEnd) {
+      final fieldLength = payload[fieldOffset] & 0xff;
+      if (fieldLength < 2 || fieldOffset + 1 >= recordEnd) {
+        recordMalformed = true;
+        malformed = true;
+        break;
+      }
+
+      var fieldEnd = fieldOffset + fieldLength;
+      if (fieldEnd > recordEnd) {
+        fieldEnd = recordEnd;
+        recordMalformed = true;
+        malformed = true;
+      }
+
+      final valueStart = fieldOffset + 2;
+      fields.add(
+        _H59FileFieldSummary(
+          fieldLength: fieldLength,
+          fieldId: payload[fieldOffset + 1] & 0xff,
+          valueHex: _compactHex(
+            Uint8List.sublistView(payload, valueStart, fieldEnd),
+          ),
+        ),
+      );
+      if (recordMalformed) break;
+      fieldOffset += fieldLength;
+    }
+
+    records.add(
+      _H59FileRecordSummary(
+        index: index,
+        recordLength: recordLength,
+        recordType: recordType,
+        fields: fields,
+        rawHex: _compactHex(
+          Uint8List.sublistView(payload, recordStart, recordEnd),
+        ),
+        malformed: recordMalformed,
+      ),
+    );
+
+    offset = recordEnd;
+    if (recordMalformed) break;
+  }
+
+  final trailingBytes = payload.length - offset;
+  if (records.length < declaredCount || trailingBytes > 0) malformed = true;
+
+  return _H59FileListSummary(
+    declaredCount: declaredCount,
+    recordBytes: recordBytes,
+    records: records,
+    trailingBytes: trailingBytes,
+    malformed: malformed,
+  );
 }
 
 _ActivityTotals _parseActivityBody(Uint8List body) {

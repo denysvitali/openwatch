@@ -509,7 +509,7 @@ before async handling. The implemented file table/list path is:
 
 | Cmd | Request | Response | Notes |
 |---|---|---|---|
-| `0x41` | `[cursorOrMinRecordId u32LE]` | `0x42` payload `[count, entries...]`, max 10 entries | Each entry is length-prefixed: `[entryLen, recordType, fieldTLVs...]`. Field TLVs are `[fieldLen, fieldId, value...]`; record types `0x04`, `0x07`, `0x08` use different field sets. |
+| `0x41` | `[cursorOrMinRecordId u32LE]` | `0x42` payload `[count, entries...]`, max 10 entries | Each entry is length-prefixed: `[entryLen, recordType, fieldTLVs...]`. `entryLen` includes the length/type bytes. Field TLVs are `[fieldLen, fieldId, value...]`, and `fieldLen` includes the length/id bytes. Record types `0x04`, `0x07`, `0x08` use field ids `01 02 03 04 05 06 07 08 09 0d 13`; other record types use `01 02 04 07 08 09`. |
 | `0x43` | `[selector, recordId u32LE]` | `0x44` metadata then `0x45` chunks | Found records emit metadata, then chunks shaped `[chunkIndex, 0x00, up to ~500 bytes]`. |
 | `0x46` | Raw operation payload, same helper family as `0x43` (forwarded up to 16B) | none | Delete sibling of `0x43` per GHIDRA §2.6/§2.11; host should poll `0x41` afterwards to verify the table changed. |
 
@@ -517,9 +517,9 @@ OpenWatch should treat this as an H59MA-specific file-table protocol, separate
 from the APK generic file upload commands above.
 
 OpenWatch implements raw request builders for `0x41`, `0x43`, and `0x46`, and
-labels/summarizes `0x42` responses by count and byte length only. The
-per-record TLV payload is kept opaque until live captures map record types and
-field ids.
+its log decoder parses `0x42` records generically into record type, field id,
+length, and raw value bytes. Field meanings remain opaque until live captures
+map record types and field ids.
 
 **H59MA v14 device-info/config (`0x5a`).** The firmware handles this as a
 Channel-B command, not an APK generic large-data action:
@@ -895,13 +895,14 @@ Feedback, Customer-support chat.
 - **`@RequiresSignature` method set** — confirm which cloud endpoints sign at runtime.
 - **Legacy `bind` (`0x10` CMD_BIND_SUCCESS)** request layout — **not on H59MA Channel-A.**
   The §10.2 inventory (22 Channel-A handlers) does not list `0x10`; on Channel-B
-  it falls into the `0x08..0x10` default slot (`NAK code 0`). The actual device-side
-  bind state transition is on `0xFEE7` `0x04` (`fee7_handle_bind_ancs_04`,
-  GHIDRA §8.5 lines 4735/4824; radare2 v14 body offset `0x6032`) and OpenWatch
-  uses that path for notification enable. The Oudmon SDK's `0x10` is a
-  phone-side/app-layer convention that lives in the proprietary APK, not in the
-  firmware — payload reconstruction requires APK-side RE (`jadx`/`Bytecode Viewer`),
-  not the H59MA bin. Live capture is also acceptable.
+  it falls into the `0x08..0x10` default slot (`NAK code 0`). H59MA's firmware
+  notification/bind state transition is the Channel-A vendor-high `0x04`
+  `BindAncsReq` handler (GHIDRA §8.5; radare2 v14 body offset `0x6032`), and
+  OpenWatch sends that Channel-A command for notification enable. The Oudmon
+  SDK's `0x10` is a phone-side/app-layer convention that lives in the
+  proprietary APK, not in the firmware — payload reconstruction requires
+  APK-side RE (`jadx`/`Bytecode Viewer`), not the H59MA bin. Live capture is
+  also acceptable.
 
 > **Resolved (post-FW-RE):**
 > - DFU init payload layout (`[0x01, size32LE, crc16LE, checksum16LE]`) — verified

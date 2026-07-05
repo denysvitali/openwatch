@@ -1130,6 +1130,7 @@ void FUN_008311b8(int sub, void *req_payload) {
             if (FUN_008313ba(state, i, file_buf) == 0) break;
             u16 n = FUN_0083105a(file_buf, rsp + out_offset);
             out_offset += n;
+            rsp[0]++;
         }
         FUN_0082ece0(0x42, rsp, out_offset & 0xffff);
     } else if (sub == 0x43) {
@@ -1174,13 +1175,31 @@ byte  1..N: TLV-encoded file records (TLV0 = bytes 1..N1,
 ```
 
 Each TLV record is the output of `FUN_0083105a` — likely a
-`(tag_byte)(len_byte)(data_bytes...)` triple where `tag`
-identifies the file type (e.g. `0x01` = music, `0x02` =
-watch-face), `len` gives the data length, and `data` carries
-the per-file metadata (filename, size, CRC, etc.).
+length-prefixed record:
 
-`0x42` and `0x46` ship **no response at all** — the dispatcher's
-implicit ack is the only feedback.
+```
+record[0]      = recordLen    // includes recordLen + recordType bytes
+record[1]      = recordType   // source record byte 6
+record[2..end] = fields
+
+field[0]       = fieldLen     // includes fieldLen + fieldId bytes
+field[1]       = fieldId
+field[2..end]  = raw value bytes
+```
+
+radare2 v14 body offsets `0xac5a..0xacc6` verify that
+`FUN_0083105a` initializes each record length to 2, copies
+source byte 6 as `recordType`, then appends fields via
+`FUN_00830fa0`. Record types `0x04`, `0x07`, and `0x08` emit
+field ids `01 02 03 04 05 06 07 08 09 0d 13`; other record
+types emit `01 02 04 07 08 09`. The field formatter initializes
+each field length to 2, writes `fieldId`, copies 1/2/4 raw value
+bytes depending on the id-specific case, and returns the inclusive
+field length.
+
+`0x43` and `0x46` ship **no direct response payload** — the
+dispatcher's implicit ack is the only feedback unless the operation
+starts a `0x44` metadata + `0x45` chunk stream.
 
 #### Why cap at 10 files?
 

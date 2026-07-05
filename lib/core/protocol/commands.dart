@@ -771,7 +771,8 @@ class Commands {
   /// H59MA v14 firmware-native file-table list request (`0x41`).
   ///
   /// `FUN_008311b8` copies these four bytes verbatim into its file-table
-  /// cursor state, emits up to 10 opaque TLV records, and responds on `0x42`.
+  /// cursor state, emits up to 10 length-prefixed TLV records, and responds on
+  /// `0x42`.
   /// The field is probably a paging cursor or minimum record id, but the exact
   /// semantics are not resolved, so the builder only exposes the raw u32.
   static Uint8List h59FileTableList({int cursorOrMinRecordId = 0}) =>

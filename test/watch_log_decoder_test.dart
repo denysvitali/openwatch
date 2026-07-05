@@ -151,13 +151,13 @@ void main() {
       expect(encoded, contains('"distanceMeters":80'));
     });
 
-    test('summarizes H59MA file-table list responses opaquely', () {
+    test('decodes H59MA file-table list response TLVs', () {
       final frame = Codec.buildChannelB(OpB.h59FileListResponse, [
         0x02,
-        // Opaque TLV-like record bytes from FUN_0083105a. The host log
-        // decoder reports the count/size only; field semantics remain RE work.
-        0x01, 0x03, 0xAA, 0xBB, 0xCC,
-        0x02, 0x02, 0x10, 0x20,
+        // FUN_0083105a emits [recordLen, recordType, fieldTLVs...].
+        // Field lengths include the length/id bytes.
+        0x09, 0x04, 0x03, 0x01, 0xAA, 0x04, 0x02, 0xBB, 0xCC,
+        0x05, 0x01, 0x03, 0x07, 0x10,
       ]);
 
       final report = const WatchLogDecoder().decodeNrfConnectLog(
@@ -166,9 +166,24 @@ void main() {
       final decoded = report.frames.single;
       expect(decoded.valid, isTrue);
       expect(decoded.title, contains('H59 file list records=2'));
+      expect(decoded.title, contains('parsed=2'));
       expect(decoded.details['label'], 'h59FileListResponse');
       expect(decoded.details['fileRecordCount'], 2);
-      expect(decoded.details['fileRecordBytes'], 9);
+      expect(decoded.details['fileParsedRecordCount'], 2);
+      expect(decoded.details['fileRecordBytes'], 14);
+      expect(decoded.details['fileMalformed'], isFalse);
+
+      final records = decoded.details['fileRecords']! as List<Object?>;
+      final first = records[0]! as Map<String, Object?>;
+      expect(first['length'], 9);
+      expect(first['recordType'], '0x04');
+      expect(first['fieldCount'], 2);
+
+      final firstFields = first['fields']! as List<Object?>;
+      final field0 = firstFields[0]! as Map<String, Object?>;
+      expect(field0['length'], 3);
+      expect(field0['fieldId'], '0x01');
+      expect(field0['value'], 'aa');
     });
 
     test('summarizes Channel B device-info static TLVs', () {

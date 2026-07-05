@@ -469,6 +469,29 @@ Parser and CRC loops are **logically byte-for-byte identical**; only literal-poo
 
 No opcode-level changes to frame format, magic, length/CRC endianness, continuation accumulation, capacity guard (`0x504`), timeout (`0x7d0`), or CRC algorithm.
 
+### H59MA file-table response (`0x41` -> `0x42`)
+
+The H59MA-specific file table now has instruction-level evidence in
+`firmwares/_re/h59-file-table/evidence.md`. v14 body `0xadb8`
+(`FUN_008311b8`) handles `0x41` by copying the 4-byte request cursor, walking
+up to 10 records via `0xafba`, formatting each record through `0xac5a`, and
+sending response opcode `0x42`.
+
+`0xac5a` proves the `0x42` payload is a generic length-prefixed record list:
+
+```text
+payload[0] = record count
+record     = [recordLen, recordType, fieldTLVs...]
+field      = [fieldLen, fieldId, value...]
+```
+
+Both `recordLen` and `fieldLen` are inclusive of their length/id header bytes.
+Record types `0x04`, `0x07`, and `0x08` use the 11-id field list
+`01 02 03 04 05 06 07 08 09 0d 13`; other record types use
+`01 02 04 07 08 09` (inline bytes at `0xae1c`/`0xae28`). Static analysis does
+not assign user-facing meanings to those ids, so OpenWatch decodes them as raw
+field ids and value bytes.
+
 ---
 
 ## 6. Channel-A Command Dispatch
@@ -577,7 +600,12 @@ The `0x50..0x5a` values are reused as small integer constants here, not live BLE
 
 ### 5. Bottom line
 
-There is **no single firmware routine that takes a 16-byte Channel-A frame, strips bit `0x80`, and indexes an opcode table to dispatch.** The bucket table (`0x22490`, v13-only, unreferenced) and the literal array (`0x21b58`/`0x1ff0c`, used only by a health clamp) are the closest data structures, and neither is the runtime dispatcher. The fixed 16-byte framing, the `data[0] & ~0x80` opcode strip, the additive CRC8, and the `BeanFactory`/`SparseArray` dispatch are all **phone-side**. The Channel-B parser (`0x8c32`/`0x8bea`) remains the only clearly structured protocol routine in the image.
+The v13-only bucket table (`0x22490`, unreferenced) and the literal array
+(`0x21b58`/`0x1ff0c`, used only by a health clamp) are not the runtime
+dispatcher. v14 does contain a firmware Channel-A queued-frame dispatcher at
+`0x0082d2dc` (see `firmwares/GHIDRA_DECOMPILATION.md` §3); it strips/processes
+the queued opcode and calls explicit per-opcode handlers rather than indexing
+the dead bucket table.
 
 ---
 
