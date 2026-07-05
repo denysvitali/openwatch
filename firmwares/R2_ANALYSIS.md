@@ -131,7 +131,7 @@ All offsets are **container** offsets. "C" = constant across both builds, "V" = 
 | `0x1c0` | 4 | (zero) | `0x00000000` | `0x00000000` | C | Leading zeros of digest slot. |
 | `0x1c4` | **32** | **`image_digest`** | `8d50aa22…42178bb1` | `47d3b81a…0d354648` | V | **The real per-build signature/digest.** 32 high-entropy bytes (`0x1c4`–`0x1e3`), consistent with SHA-256; zeros begin at `0x1e4`. |
 | `0x1e4`–`0x227` | 68 | (zero pad) | `00…` | `00…` | C | Reserved. |
-| `0x228` | 4 | `const_228` | `0x0e85d101` | `0x0e85d101` | C | **New field, missing from JSON.** Constant. |
+| `0x228` | 4 | `const_228` | `0x0e85d101` | `0x0e85d101` | C | First word of the linked-runtime tail marker also targeted by `flash_app_end @0x22c`. |
 | `0x22c` | 4 | `flash_app_end` | `0x00847860` | `0x00845c14` | V | Per-build pointer into the loaded image. It maps to a unique `0x0e85d101,0x00000001` marker before the linked runtime tail, not to the physical body end. |
 | `0x230`–`0x32f` | — | (zero) | `00…` | `00…` | C | Reserved. |
 | `0x330` | 16 | `erase_marker` | `ff…ff` | `ff…ff` | C | All-`0xFF`. |
@@ -887,7 +887,7 @@ The table sits in v13's trailing region (`0x21576..0x23440`) which v14 simply do
 
 1. **`image_digest` algorithm** — the 32-byte `0x1c4` field is SHA-256-sized, but no SHA-256 init constants exist in the body (§8 crypto negatives). The runtime OTA body checks only the first container word, strips file offset `0x50`, stages the digest-containing region as raw data, and checks final staged length (`expected_size - 0x50`). Is the digest computed by the build host only (never verified on-device), or verified by ROM/bootloader code outside this OTA slice?
 2. ~~**`0x0C` additive checksum exact formula**~~ — **resolved:** `sum(container[0x50:]) & 0xffffffff` (observed high byte `0x00`) matches both v13 and v14. It is not over `body` or `container[0x60:]`.
-3. **`const_b4 = 0x1201a39e`, `const_228 = 0x0e85d101`, `const_5c = 0x7e6b4cf9`** — fixed across builds; product/SDK/key IDs? The `0x5c` value is the head of the constant GUID, but the role of `b4`/`228` is unknown.
+3. **Header constants** — `const_228 = 0x0e85d101` is now mapped to the `flash_app_end` target marker (`0x0e85d101,0x00000001`) before the linked runtime tail; `const_5c = 0x7e6b4cf9` is the head of the constant GUID. `const_b4 = 0x1201a39e` remains header-only in the available v13/v14 bodies: no body literal hit or xref was found.
 4. **`0xfee7` vendor service** — its `0xfea1`/`0xfec9`/`0xfea2` characteristics point to flash handlers (`0x0082e87b`, `0x0082e8cf`); is this an alternate command/OTA path or a legacy/cloud profile? Handler code lives below the OTA body and was not disassembled.
 5. ~~**`wrong signature! Read %8X != Requried %8X`**~~ — **resolved:** this is `cfg_blob_magic_ok` at v14 body `0x1a324` / absolute `0x00840724`, not an OTA or bootloader signature. It reads the first little-endian u32 of a persistent config blob and compares it with `0x8721bee2`; callers are `cfg_find_item` (`0x00840be0`) and the item-`0x33` reader (`0x0084415c`, base `0x00801400`, length `6`).
 6. **Boot/vector region** — the real Cortex-M vector table, reset handler, and the `BootOnce` dual-bank logic live in flash ≤`0x826400`, outside both OTA bodies. Obtaining a full-flash dump would let us verify the load/verify path end-to-end.
