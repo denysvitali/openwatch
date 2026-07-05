@@ -15,7 +15,8 @@ import 'support/fake_ble_transport.dart';
 ///
 /// where `magic=0xBC`, `len`, `CRC16/MODBUS(payload)`. Defaults:
 /// `subLength=20` (PROTOCOL.md L235), `fragmentTimeout=2000ms`
-/// (channel_b.dart:37), LRU dedup 64 (channel_b.dart:86).
+/// (channel_b.dart:37), max payload `0x504` (firmware `0x50c - 8`),
+/// LRU dedup 64 (channel_b.dart:86).
 ///
 /// Every test below uses a synthetic `inboundB` stream — no real GATT
 /// transport — so the assertions isolate the reassembly state machine.
@@ -97,56 +98,51 @@ void main() {
       },
     );
 
-    test('head-of-line blocking: parser is single-state, so an interleaved '
-        'second-frame first-fragment gets APPENDED to the first frame\'s '
-        'buffer, poisoning the CRC and silencing the emit '
-        '(channel_b.dart:66 — one `_buf`)', () async {
-      // The firmware parser has ONE accumulator. There is no message-id
-      // routing — so anything arriving on the stream mid-reassembly is
-      // appended to whichever frame is currently in `_state == 1`. In
-      // practice this guarantees interleaving is unsafe: the bytes of
-      // the second frame get physically copied into the first frame's
-      // `_buf`, the CRC fails, and the first frame is silently dropped.
-      // After `_reset()` the parser returns to `_state == 0` and any
-      // subsequent non-magic lead byte is dropped with a `WARN`.
-      final t = FakeBleTransport();
-      final p = ChannelBParser(t);
-      p.bind();
-      final emitted = <ChannelBCommand>[];
-      final sub = p.commands.listen(emitted.add);
+    test(
+      'head-of-line blocking: parser is single-state, so an interleaved '
+      'second-frame first-fragment is rejected as an overlong continuation',
+      () async {
+        // The firmware parser has ONE accumulator. There is no message-id
+        // routing, so interleaving is unsafe. OpenWatch's stricter host
+        // decoder rejects an MTU-sized second first-fragment because it
+        // exceeds the bytes remaining in the active frame, then drops the
+        // original tail as a non-magic first fragment after reset.
+        final t = FakeBleTransport();
+        final p = ChannelBParser(t);
+        p.bind();
+        final emitted = <ChannelBCommand>[];
+        final sub = p.commands.listen(emitted.add);
 
-      final a = Codec.buildChannelB(0x03, List<int>.generate(30, (i) => i));
-      final b = Codec.buildChannelB(
-        0x04,
-        List<int>.generate(30, (i) => 0x40 + i),
-      );
+        final a = Codec.buildChannelB(0x03, List<int>.generate(30, (i) => i));
+        final b = Codec.buildChannelB(
+          0x04,
+          List<int>.generate(30, (i) => 0x40 + i),
+        );
 
-      t.inB.add(Uint8List.sublistView(a, 0, 20));
-      // Second frame's first 20 bytes get appended wholesale — the parser
-      // is in `_state == 1`, so the leading 0xBC is just another payload
-      // byte. Crucially the slice exactly matches the remaining 16 bytes
-      // (`30 - 14`), so `_dispatch()` runs and the CRC fails on the
-      // poisoned buffer.
-      t.inB.add(Uint8List.sublistView(b, 0, 20));
-      // This tail of `a` is now arriving AFTER the CRC-fail `_reset`,
-      // so the parser is back in `_state == 0` and the lack of a 0xBC
-      // lead byte triggers "dropping chunk without 0xBC magic".
-      t.inB.add(Uint8List.sublistView(a, 20));
+        t.inB.add(Uint8List.sublistView(a, 0, 20));
+        // Second frame's first 20 bytes arrive while 16 bytes remain in
+        // `a`, so the strict continuation guard rejects the active frame.
+        t.inB.add(Uint8List.sublistView(b, 0, 20));
+        // This tail of `a` is now arriving after `_reset`, so the parser is
+        // back in `_state == 0` and the lack of a 0xBC lead byte triggers
+        // "dropping chunk without 0xBC magic".
+        t.inB.add(Uint8List.sublistView(a, 20));
 
-      final got = p.commands.first.timeout(
-        const Duration(milliseconds: 200),
-        onTimeout: () => ChannelBCommand(-1, Uint8List(0)),
-      );
-      final c = await got;
-      expect(c.cmd, -1, reason: 'interleaved poisoning → CRC fail → no emit');
-      expect(
-        t.sentA,
-        isEmpty,
-        reason: 'firmware never NAKs unsolicited frames',
-      );
-      await sub.cancel();
-      expect(emitted, isEmpty);
-    });
+        final got = p.commands.first.timeout(
+          const Duration(milliseconds: 200),
+          onTimeout: () => ChannelBCommand(-1, Uint8List(0)),
+        );
+        final c = await got;
+        expect(c.cmd, -1, reason: 'interleaved frame must not emit');
+        expect(
+          t.sentA,
+          isEmpty,
+          reason: 'firmware never NAKs unsolicited frames',
+        );
+        await sub.cancel();
+        expect(emitted, isEmpty);
+      },
+    );
 
     test(
       'duplicate chunk (replay storm): same frame pushed 5× emits '
@@ -238,14 +234,13 @@ void main() {
       },
     );
 
-    test('max-size payload spanning 53 chunks reassembles cleanly '
-        '(1040-byte payload under the 0x450=1104-byte firmware buffer, '
-        'channel_b.dart:66)', () async {
+    test('max-size payload spanning 65 chunks reassembles cleanly '
+        '(0x504-byte firmware payload cap)', () async {
       final t = FakeBleTransport();
       final p = ChannelBParser(t);
       p.bind();
 
-      const payloadLen = 1040;
+      const payloadLen = ChannelBParser.maxPayloadLength;
       final payload = List<int>.generate(payloadLen, (i) => i & 0xFF);
       final f = Codec.buildChannelB(0x01, payload);
       const mtu = 20;
@@ -258,8 +253,36 @@ void main() {
       final c = await p.commands.first.timeout(const Duration(seconds: 2));
       expect(c.cmd, 0x01);
       expect(c.payload.length, payloadLen);
-      expect(c.payload, payload, reason: 'no bytes lost across 53 fragments');
+      expect(c.payload, payload, reason: 'no bytes lost across fragments');
     });
+
+    test(
+      'payload above the firmware cap is discarded without throwing',
+      () async {
+        final t = FakeBleTransport();
+        final p = ChannelBParser(t);
+        p.bind();
+
+        final declaredLen = ChannelBParser.maxPayloadLength + 1;
+        final first = Uint8List.fromList([
+          Codec.channelBMagic,
+          0x01,
+          declaredLen & 0xFF,
+          (declaredLen >> 8) & 0xFF,
+          0x00,
+          0x00,
+          ...List<int>.generate(14, (i) => i),
+        ]);
+        final got = p.commands.first.timeout(
+          const Duration(milliseconds: 150),
+          onTimeout: () => ChannelBCommand(-1, Uint8List(0)),
+        );
+        t.inB.add(first);
+        final c = await got;
+        expect(c.cmd, -1);
+        expect(t.sentA, isEmpty);
+      },
+    );
 
     test(
       'reassembly timeout race: a chunk arriving before the '

@@ -231,6 +231,8 @@ Boolean encoding gotchas:
 - `byte[4..5]` = **CRC16 of payload only** (`CRC16.calcCrc16`), uint16 LE.
 - `byte[6..]` = payload.
 - **Empty payload** ⇒ `bytes[2..5]` = `FF FF FF FF` (sentinel; len/crc omitted).
+- H59MA caps declared payload length at `0x504` bytes (`0x50c` reassembly state buffer minus the
+  8-byte header/accumulator block); OpenWatch mirrors that cap for incoming watch→host frames.
 - Whole frame wrapped in `BleDataBean(data, subLength)` → `BleThreadManager` → `BleConsumer` slices into
   `subLength`-byte no-response writes to `de5bf72a`. `subLength` = `JPackageManager` length (default 20).
 - RX (`onReceivedData` on `de5bf729`): `byte[0]` must == `0xBC`; `byte[1]` = cmd; first packet

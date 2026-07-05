@@ -75,10 +75,18 @@ class Codec {
   // ---------------------------------------------------------------------------
 
   static const int channelBMagic = 0xBC;
+  static const int channelBMaxPayloadLength = 0x504;
 
   /// Builds an unsliced Channel-B frame. Empty payload uses the
   /// `FF FF FF FF` sentinel in place of the length+CRC fields.
   static Uint8List buildChannelB(int cmd, [List<int> payload = const []]) {
+    if (payload.length > channelBMaxPayloadLength) {
+      throw ArgumentError.value(
+        payload.length,
+        'payload.length',
+        'Channel-B payload exceeds 0x${channelBMaxPayloadLength.toRadixString(16)} bytes',
+      );
+    }
     final b = BytesBuilder();
     b.addByte(channelBMagic);
     b.addByte(cmd & 0xFF);
@@ -110,6 +118,7 @@ class Codec {
     if (frame.length < 6 || frame[0] != channelBMagic) return null;
     if (isChannelBEmptySentinel(frame)) return Uint8List(0);
     final len = frame[2] | (frame[3] << 8);
+    if (len > channelBMaxPayloadLength) return null;
     if (frame.length != 6 + len) return null;
     final payload = Uint8List.sublistView(frame, 6, 6 + len);
     final crc = frame[4] | (frame[5] << 8);

@@ -104,6 +104,22 @@ void main() {
       expect(Codec.isChannelBEmptySentinel(f), isFalse);
       expect(Codec.rxChannelBPayload(f), isNull);
     });
+
+    test('payload above firmware cap is rejected', () {
+      final payload = List<int>.filled(Codec.channelBMaxPayloadLength + 1, 0);
+      expect(() => Codec.buildChannelB(0x32, payload), throwsArgumentError);
+
+      final declaredLen = Codec.channelBMaxPayloadLength + 1;
+      final f = Uint8List.fromList([
+        0xBC,
+        0x32,
+        declaredLen & 0xFF,
+        (declaredLen >> 8) & 0xFF,
+        0x00,
+        0x00,
+      ]);
+      expect(Codec.rxChannelBPayload(f), isNull);
+    });
   });
 
   group('helpers', () {

@@ -13,10 +13,11 @@ final _log = AppLog.instance;
 ///
 /// Mirrors `FUN_0082efea` (parser), `FUN_0082eee6` (dispatcher), `FUN_0082f114`
 /// (CRC-16/MODBUS), `FUN_0082ee00` (ACK/NAK sender), and `FUN_0082f098`
-/// (fragment timeout) from the H59MA v14 firmware. The firmware's reassembly
-/// buffer is a fixed 0x450-byte area at `DAT_0082f0f0`; we keep the same
-/// semantics in a Dart state machine so the host never has to know about
-/// fragment boundaries — it only sees fully-received commands.
+/// (fragment timeout) from the H59MA v14 firmware. The firmware caps the
+/// declared payload length at `0x504` bytes (`0x50c` state buffer minus the
+/// 8-byte header/accumulator block); we keep the same bounded state machine so
+/// the host never has to know about fragment boundaries — it only sees
+/// fully-received commands.
 ///
 /// Wire format (each chunk is a BLE write-without-response slice):
 ///
@@ -64,8 +65,10 @@ class ChannelBParser {
   /// `1` = accumulating continuation, `2` = complete & queued for dispatch).
   int _state = 0;
 
-  /// Mirrors firmware buffer size `0x450` at `DAT_0082f0f0`.
-  final Uint8List _buf = Uint8List(0x450);
+  /// Mirrors the firmware's declared-payload cap: `0x50c - 8 = 0x504`.
+  static const int maxPayloadLength = Codec.channelBMaxPayloadLength;
+
+  final Uint8List _buf = Uint8List(maxPayloadLength);
   int _expectedLength = 0;
   int _accumulated = 0;
   int _currentCmd = 0;
@@ -206,6 +209,15 @@ class ChannelBParser {
     _expectedLength = len;
     _declaredCrc = chunk[4] | (chunk[5] << 8);
     _accumulated = 0;
+    if (len > maxPayloadLength) {
+      _log.warn(
+        'chb',
+        'payload too large cmd=0x${_currentCmd.toRadixString(16)} '
+            '(len=$len max=$maxPayloadLength); discarding',
+      );
+      _reset();
+      return;
+    }
     final payloadBytes = chunk.length - 6;
     // See continuation guard above: reject malformed incoming frames rather
     // than silently dropping bytes beyond the declared payload.
