@@ -47,7 +47,7 @@ class Fee7Dispatcher {
   late final _long = _ctrl<LongResponse>();
   late final _memoryRead = _ctrl<MemoryReadChunk>();
   late final _ota = _ctrl<OtaTrigger>();
-  late final _vibration = _ctrl<VibrationPattern>();
+  late final _syntheticSleep = _ctrl<SyntheticSleepRequest>();
   late final _unary = _ctrl<UnaryOpcode>();
   late final _unknown = _ctrl<UnaryOpcode>();
   int _memoryReadSeq = 0;
@@ -99,8 +99,14 @@ class Fee7Dispatcher {
   /// requests the BLE/service reset helper.
   Stream<OtaTrigger> get onOta => _ota.stream;
 
-  /// `0xfe` vibration-pattern request (duration-derived).
-  Stream<VibrationPattern> get onVibration => _vibration.stream;
+  /// `0xfe` synthetic sleep-history request. The payload starts with a
+  /// u16LE duration in minutes; the firmware clamps it to 900 minutes.
+  Stream<SyntheticSleepRequest> get onSyntheticSleep => _syntheticSleep.stream;
+
+  @Deprecated(
+    'Use onSyntheticSleep; 0xfe synthesizes sleep history, not vibration.',
+  )
+  Stream<SyntheticSleepRequest> get onVibration => onSyntheticSleep;
 
   /// Catch-all unary opcodes that the firmware echoes/acks as the opcode
   /// alone: `0x90`, `0x91`, `0x92..0x96`, `0x9e`, `0x9f`, `0xa0`, `0xbf`,
@@ -179,11 +185,11 @@ class Fee7Dispatcher {
         // Echo back as a unary opcode; firmware simply emits `[opcode]`.
         final u = UnaryOpcode(opcode, payload: pl);
         _unary.add(u);
-      case Fee7.vibrationPattern:
-        // 0xfe has structured decoding and is surfaced on onVibration only;
-        // isUnary() deliberately excludes it so it is NOT also emitted on
-        // onUnary.
-        _vibration.add(VibrationPattern(opcode: opcode, payload: pl));
+      case Fee7.syntheticSleep:
+        // 0xfe has structured decoding and is surfaced on onSyntheticSleep
+        // only; isUnary() deliberately excludes it so it is NOT also emitted
+        // on onUnary.
+        _syntheticSleep.add(SyntheticSleepRequest(opcode: opcode, payload: pl));
       default:
         if (Fee7.isUnary(opcode)) {
           _unary.add(UnaryOpcode(opcode, payload: pl));
@@ -514,13 +520,30 @@ class OtaTrigger {
   final Uint8List payload;
 }
 
-/// `0xfe` vibration-pattern request. The firmware derives the pattern from
-/// a duration argument.
-class VibrationPattern {
-  const VibrationPattern({required this.opcode, required this.payload});
+/// `0xfe` synthetic sleep-history request.
+///
+/// H59MA v14 reads `req[1..2]` as u16LE minutes, calls the sleep-history
+/// generator, clamps the duration to 900 minutes internally, and returns
+/// without a response frame.
+class SyntheticSleepRequest {
+  const SyntheticSleepRequest({required this.opcode, required this.payload});
   final int opcode;
   final Uint8List payload;
+
+  int? get durationMinutes =>
+      payload.length >= 2 ? payload[0] | (payload[1] << 8) : null;
+
+  int? get clampedDurationMinutes {
+    final minutes = durationMinutes;
+    if (minutes == null) return null;
+    return minutes > 900 ? 900 : minutes;
+  }
 }
+
+@Deprecated(
+  'Use SyntheticSleepRequest; 0xfe synthesizes sleep history, not vibration.',
+)
+typedef VibrationPattern = SyntheticSleepRequest;
 
 /// Shared empty `Uint8List` used as the default for optional `payload`
 /// parameters on the typed records above. Cannot be `const` because

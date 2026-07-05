@@ -619,14 +619,14 @@ class WatchLogDecoder {
       case Fee7.memoryRead:
         details['dataBytes'] = payload.length;
         return 'FEE7 ${_hex(opcode)} memoryRead chunk bytes=${payload.length}';
-      case Fee7.vibrationPattern:
+      case Fee7.syntheticSleep:
         final durationMinutes = payload.length >= 2
             ? payload[0] | (payload[1] << 8)
             : null;
         if (durationMinutes != null) {
           details['durationMinutes'] = durationMinutes;
         }
-        return 'FEE7 ${_hex(opcode)} vibration'
+        return 'FEE7 ${_hex(opcode)} syntheticSleep'
             '${durationMinutes == null ? '' : ' duration=${durationMinutes}m'}';
       default:
         if (Fee7.isUnary(opcode)) {
@@ -1489,8 +1489,8 @@ String _labelForFee7(int opcode) {
       return 'memoryRead';
     case Fee7.otaTrigger:
       return 'otaControl';
-    case Fee7.vibrationPattern:
-      return 'vibrationPattern';
+    case Fee7.syntheticSleep:
+      return 'syntheticSleep';
     default:
       if (Fee7.isUnary(opcode)) return 'unary';
       return 'unknown';

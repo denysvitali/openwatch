@@ -650,7 +650,7 @@ listed by the earlier radare2 notes:
    Remaining work is payload semantics for opaque/no-op handlers, not command acceptance.
 6. **Whether the OTA bootloader validates `image_digest` and `signature_a`** at flash time. Ghidra shows `body.bin` only checks the OTA container magic `0x81bdc3e5` in packet 1 and stages `size - 0x50` bytes. The `0x8721bee2` magic belongs to the config blob.
 7. ~~GATT attribute table record fields.~~ **Resolved for static layout:** H59MA uses Realtek-style service tables with `0x1c` inline attributes, compact `0x1a` entries for 128-bit primary services whose `pValueContext` points to the preceding UUID blob, and callback triples between service tables. See §3 and `firmwares/_re/gatt-table/evidence.md`. Runtime callback side effects remain covered by the per-handler RE sections.
-8. **`0xfee7` remaining vendor command semantics** — Ghidra confirms the service is an active second 16-byte command channel, and the `0x97..0xa0` high switch is now mapped in `firmwares/GHIDRA_DECOMPILATION.md` §8.1. Raw memory read/write (`0xbf`/`0xc0`) are resolved in §8.17 and rechecked with radare2 at v14 body offsets `0x5694` / `0x570c` plus the shared streamer at `0x5538`. `0xc1` health poll and `0xc3` OTA-control byte indexes are also statically resolved at offsets `0x64ce` / `0x64e0`; remaining work is live runtime-impact verification for the OTA-control side effects.
+8. ~~`0xfee7` remaining vendor command semantics.~~ **Resolved for static firmware routing:** Ghidra confirms the service is an active second 16-byte command channel, and the `0x97..0xa0` high switch is now mapped in `firmwares/GHIDRA_DECOMPILATION.md` §8.1. Raw memory read/write (`0xbf`/`0xc0`) are resolved in §8.17 and rechecked with radare2 at v14 body offsets `0x5694` / `0x570c` plus the shared streamer at `0x5538`. `0xc1` health poll and `0xc3` OTA-control byte indexes are also statically resolved at offsets `0x64ce` / `0x64e0`. A 2026-07-05 radare2 pass also verifies `0xfe` as a fire-and-forget synthetic sleep-history generator, not vibration; see `firmwares/_re/fee7-high/evidence.md`. Remaining work is live runtime-impact verification for the dangerous memory and OTA-control side effects.
 
 ---
 
@@ -701,6 +701,7 @@ python3 firmwares/_re/ble-hunt/scan.py
 | `firmwares/_re/diff/` | `fwtool_compare.txt`, large identical/divergent regions, `v{13,14}_{real,natural_strings,real_only}.txt`, `strings_only_in_v{13,14}.txt`, `feature_words_v14.txt`, `regions_collapsed.txt` |
 | `firmwares/_re/channel-b-dispatch/evidence.md` | radare2 evidence for Channel-B first-stage routing and the corrected low-command switch table shape |
 | `firmwares/_re/gatt-table/evidence.md` | radare2 evidence for Realtek-style GATT record fields, 128-bit service UUID pointers, and service callback triples |
+| `firmwares/_re/fee7-high/evidence.md` | radare2 evidence for high FEE7 routing, raw memory commands, OTA control, health poll, and the corrected `0xfe` synthetic sleep-history command |
 | `firmwares/RE_FIRMWARE.md` | superseded by this document (initial RE notes; many field-level errors) |
 | `firmwares/R2_ANALYSIS.md` | superseded by this document (r2 deep-dive; itself corrects RE_FIRMWARE.md) |
 | `PROTOCOL.md` | APK-derived protocol spec that this firmware corroborates |

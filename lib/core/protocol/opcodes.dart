@@ -289,7 +289,11 @@ class Fee7 {
   static const int unaryC9 = 0xc9;
   static const int unaryCd = 0xcd;
   static const int unaryCe = 0xce; // factory/test sub-commands
-  static const int vibrationPattern = 0xfe; // FUN_00844214
+  static const int syntheticSleep = 0xfe; // Synthetic sleep-history record
+  @Deprecated(
+    'Use syntheticSleep; 0xfe synthesizes sleep history, not vibration.',
+  )
+  static const int vibrationPattern = syntheticSleep;
 
   // Special handling
   static const int longResponse = 0xc1; // One-shot health/status poll
@@ -297,8 +301,8 @@ class Fee7 {
 
   /// Whether [opcode] should be decoded as a `UnaryOpcode` (no payload decode).
   ///
-  /// Note: [vibrationPattern] (0xfe) is excluded — it has structured decoding
-  /// and is surfaced on its own `onVibration` stream. The stateful vendor
+  /// Note: [syntheticSleep] (0xfe) is excluded — it has structured decoding
+  /// and is surfaced on its own `onSyntheticSleep` stream. The stateful vendor
   /// probe range `0x97..0x9c` is also excluded; it falls through to the
   /// unknown stream until a dedicated decoder is added.
   static bool isUnary(int opcode) {

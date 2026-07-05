@@ -458,23 +458,25 @@ void main() {
       await svc.dispose();
     });
 
-    test('routes 0xfe vibration pattern ONLY to onVibration', () async {
+    test('routes 0xfe synthetic sleep ONLY to onSyntheticSleep', () async {
       final host = _StubHost();
       final svc = Fee7Service.attach(host);
       final d = Fee7Dispatcher(svc);
       d.bind();
 
-      final vibEvents = <VibrationPattern>[];
+      final sleepEvents = <SyntheticSleepRequest>[];
       final unaryEvents = <UnaryOpcode>[];
-      final vibSub = d.onVibration.listen(vibEvents.add);
+      final sleepSub = d.onSyntheticSleep.listen(sleepEvents.add);
       final unarySub = d.onUnary.listen(unaryEvents.add);
-      final frame = Codec.buildChannelA(Fee7.vibrationPattern, [0x64]);
+      final frame = Codec.buildChannelA(Fee7.syntheticSleep, [0x2c, 0x01]);
       host.inbound.add(frame);
       await Future<void>.delayed(const Duration(milliseconds: 50));
-      await vibSub.cancel();
+      await sleepSub.cancel();
       await unarySub.cancel();
 
-      expect(vibEvents, hasLength(1));
+      expect(sleepEvents, hasLength(1));
+      expect(sleepEvents.single.durationMinutes, 300);
+      expect(sleepEvents.single.clampedDurationMinutes, 300);
       expect(unaryEvents, isEmpty); // 0xfe must NOT double-emit on onUnary
       await svc.dispose();
     });

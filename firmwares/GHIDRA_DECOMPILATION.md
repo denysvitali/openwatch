@@ -6407,7 +6407,7 @@ section number* for a given operation.
 | `0xc5` / `0xc8` / `0xc9` | §8.1 | inline config-byte writes to `DAT_0082caec[3..5]` |
 | `0xcd` | §8.9 | byte-reverse echo / link-sanity test |
 | `0xce` | §8.10 | factory/test sub-commands (sub `0x01`/`0x02`/`' '`/`'!'`/`'"'`) |
-| `0xfe` | §8.13 | vibration pattern from duration (fire-and-forget, no response) |
+| `0xfe` | §8.13 | synthetic sleep-history record from duration (fire-and-forget, no response) |
 
 #### ANCS (§4) — 3 callbacks
 

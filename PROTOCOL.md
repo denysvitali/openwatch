@@ -451,6 +451,7 @@ Channel-A error flag.
 | VendorMemRead | `0xc0` | both | `[addr u32BE, len u32BE]`; zero len defaults to `0x10`, max `0x200` | shared fragmented streamer: each frame is `[0xc0, up to 14 copied bytes, cksum]` | Raw arbitrary-address read, verified at v14 body offset `0x570c`; the shared streamer at `0x5538` adds no wire sequence byte, so host tooling assigns arrival-order sequence numbers. |
 | HealthPoll | `0xc1` | both | bare opcode | one data byte at `frame[1]` | Calls the one-shot health helper then sends `DAT_0082caf0` through the shared streamer with length `1`; verified at v14 body offset `0x64ce`. |
 | OtaControl | `0xc3` | both | `[action, serviceResetFlag]` where action `1`→`ota_dfu_state_machine(4,0)`, action `2`→`ota_dfu_state_machine(0,0)`, `serviceResetFlag==1` runs BLE/service reset first | state-machine side effects | Verified at v14 body offset `0x64e0`: the firmware reads absolute `req[1]`/`req[2]`, i.e. payload indexes `0`/`1` after stripping the opcode. |
+| SyntheticSleep | `0xfe` | →watch | `[durationMinutes u16LE]`; firmware clamps to `900` | none | Generates and commits a synthetic sleep-history record. Verified at v14 body offset `0x635e`: dispatcher loads `req[1..2]`, calls `0x1de14`, and returns without a response. This was previously misidentified as a vibration-pattern request. |
 
 ### 4.6 Channel-A status responses (no request class found here)
 

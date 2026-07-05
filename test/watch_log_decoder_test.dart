@@ -465,10 +465,10 @@ void main() {
     });
 
     test(
-      'summarizes high-bit FEE7 OTA and vibration frames as raw opcodes',
+      'summarizes high-bit FEE7 OTA and synthetic sleep frames as raw opcodes',
       () {
         final ota = Codec.buildChannelA(Fee7.otaTrigger, [1, 1]);
-        final vibration = Codec.buildChannelA(Fee7.vibrationPattern, [
+        final syntheticSleep = Codec.buildChannelA(Fee7.syntheticSleep, [
           0x2c,
           0x01,
         ]);
@@ -477,8 +477,10 @@ void main() {
           ota.map((b) => b.toRadixString(16).padLeft(2, '0')).join('-'),
           uuid: _fee7,
         );
-        final vibrationDecoded = const WatchLogDecoder().decodeHex(
-          vibration.map((b) => b.toRadixString(16).padLeft(2, '0')).join('-'),
+        final syntheticSleepDecoded = const WatchLogDecoder().decodeHex(
+          syntheticSleep
+              .map((b) => b.toRadixString(16).padLeft(2, '0'))
+              .join('-'),
           uuid: _fee7,
         );
 
@@ -492,11 +494,11 @@ void main() {
         expect(otaDecoded.title, contains('otaControl action=1'));
         expect(otaDecoded.title, contains('reset=true'));
 
-        expect(vibrationDecoded.valid, isTrue);
-        expect(vibrationDecoded.details['opcode'], '0xfe');
-        expect(vibrationDecoded.details['label'], 'vibrationPattern');
-        expect(vibrationDecoded.details['durationMinutes'], 300);
-        expect(vibrationDecoded.title, contains('duration=300m'));
+        expect(syntheticSleepDecoded.valid, isTrue);
+        expect(syntheticSleepDecoded.details['opcode'], '0xfe');
+        expect(syntheticSleepDecoded.details['label'], 'syntheticSleep');
+        expect(syntheticSleepDecoded.details['durationMinutes'], 300);
+        expect(syntheticSleepDecoded.title, contains('duration=300m'));
       },
     );
 
