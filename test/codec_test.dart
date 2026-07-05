@@ -296,6 +296,18 @@ void main() {
       },
     );
 
+    test('readH59SleepSummary uses Channel-B 0x11 without clamping offset', () {
+      final f = Commands.readH59SleepSummary(dayOffset: 10);
+      expect(Codec.rxChannelBCmd(f), OpB.h59SleepSummary);
+      expect(Codec.rxChannelBPayload(f), [0x0a]);
+    });
+
+    test('readH59SleepDetail uses Channel-B 0x12 without clamping offset', () {
+      final f = Commands.readH59SleepDetail(dayOffset: 10);
+      expect(Codec.rxChannelBCmd(f), OpB.h59SleepDetail);
+      expect(Codec.rxChannelBPayload(f), [0x0a]);
+    });
+
     test('readActivitySummary uses Channel-B 0x2a and clamps day offset', () {
       final f = Commands.readActivitySummary(dayOffset: 9);
       expect(Codec.rxChannelBCmd(f), OpB.activitySummary);

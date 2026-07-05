@@ -188,6 +188,8 @@ class OpB {
   static const int customWatchFace = 0x3a;
 
   // LargeData actions (PROTOCOL.md §4.7)
+  static const int h59SleepSummary = 0x11; // H59MA 100B sleep summary
+  static const int h59SleepDetail = 0x12; // H59MA 288B sleep detail
   static const int sleepNew = 0x27; // new sleep protocol (night) — Ch B
   static const int activitySummary =
       0x2a; // v14 activity/sport summary — see GHIDRA §2.8

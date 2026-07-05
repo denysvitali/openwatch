@@ -763,6 +763,20 @@ class WatchLogDecoder {
     Map<String, Object?> details,
   ) {
     switch (cmd) {
+      case OpB.h59SleepSummary:
+        final dayOffset = payload[0] & 0xff;
+        final bodyBytes = payload.length - 1;
+        details['dayOffset'] = dayOffset;
+        details['summaryBytes'] = bodyBytes;
+        return 'B 0x11 H59 sleep summary dayOffset=$dayOffset '
+            'bytes=$bodyBytes';
+      case OpB.h59SleepDetail:
+        final dayOffset = payload[0] & 0xff;
+        final bodyBytes = payload.length - 1;
+        details['dayOffset'] = dayOffset;
+        details['detailBytes'] = bodyBytes;
+        return 'B 0x12 H59 sleep detail dayOffset=$dayOffset '
+            'bytes=$bodyBytes';
       case OpB.sleepNew:
         final summary = _parseSleep(
           payload,
@@ -1462,6 +1476,10 @@ String _labelForChannelA(int opcode) {
 
 String _labelForChannelB(int cmd) {
   switch (cmd) {
+    case OpB.h59SleepSummary:
+      return 'h59SleepSummary';
+    case OpB.h59SleepDetail:
+      return 'h59SleepDetail';
     case OpB.sleepNew:
       return 'sleepNew/night';
     case OpB.activitySummary:

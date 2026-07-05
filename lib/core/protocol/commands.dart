@@ -238,6 +238,22 @@ class Commands {
   static Uint8List readSleepLunchProtocol({int dayOffset = 0}) =>
       Codec.buildChannelB(OpB.sleepLunchNew, [_clamp(dayOffset, 0, 6), 0x01]);
 
+  /// H59MA v14 sleep summary (Channel-B `0x11`) for a given day offset.
+  ///
+  /// The firmware-confirmed response shape is `[dayOffset][100B summary]`.
+  /// The body remains opaque; this builder only exposes the stable request.
+  /// No day-offset clamp has been found for this path.
+  static Uint8List readH59SleepSummary({int dayOffset = 0}) =>
+      Codec.buildChannelB(OpB.h59SleepSummary, [dayOffset & 0xFF]);
+
+  /// H59MA v14 sleep detail (Channel-B `0x12`) for a given day offset.
+  ///
+  /// The firmware-confirmed response shape is `[dayOffset][288B detail]`;
+  /// compact NAKs may be returned for no-data/error cases. The body remains
+  /// opaque until captures map the detail bytes.
+  static Uint8List readH59SleepDetail({int dayOffset = 0}) =>
+      Codec.buildChannelB(OpB.h59SleepDetail, [dayOffset & 0xFF]);
+
   /// Activity / sport summary (Channel-B `0x2a`) for today through
   /// [dayOffset]. The firmware clamps the offset to `2` and returns
   /// 49-byte entries (`dayOffset` + 48-byte body) for each day with data;
@@ -819,15 +835,59 @@ class Commands {
   /// Maximum lengths per id (per `GHIDRA_DECOMPILATION.md` §2.7):
   /// `1` 0x18 (name prefix), `2` 6 (BLE addr), `3` 0x14, `4` 0x10,
   /// `5` 0x10, `6` 0x08, `7` 1 (name-format control byte). The writer
-  /// does not visibly clamp — callers must enforce.
+  /// does not visibly clamp, so reject invalid writes before they reach the
+  /// watch.
   static Uint8List deviceInfoWrite(List<({int id, List<int> data})> entries) {
+    if (entries.length > 0xFF) {
+      throw ArgumentError.value(
+        entries.length,
+        'entries.length',
+        'must fit in one byte',
+      );
+    }
+
     final body = <int>[0x02, entries.length & 0xFF];
     for (final e in entries) {
+      final max = _deviceInfoTlvMaxLength(e.id);
+      if (max == null) {
+        throw ArgumentError.value(
+          e.id,
+          'id',
+          'must be a writable device-info TLV id 1..7',
+        );
+      }
+      if (e.data.length > max) {
+        throw ArgumentError.value(
+          e.data.length,
+          'data.length',
+          'exceeds max $max for device-info TLV id ${e.id}',
+        );
+      }
       body.add(e.id & 0xFF);
       body.add(e.data.length & 0xFF);
       body.addAll(e.data);
     }
     return Codec.buildChannelB(OpB.deviceInfoConfig, body);
+  }
+
+  static int? _deviceInfoTlvMaxLength(int id) {
+    switch (id) {
+      case 1:
+        return 0x18;
+      case 2:
+        return 6;
+      case 3:
+        return 0x14;
+      case 4:
+      case 5:
+        return 0x10;
+      case 6:
+        return 0x08;
+      case 7:
+        return 1;
+      default:
+        return null;
+    }
   }
 
   /// `DeviceInfoConfig` sub-cmd `0x04`: clear blob0 device-info / config

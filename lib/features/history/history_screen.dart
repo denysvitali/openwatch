@@ -967,9 +967,7 @@ class _DayDetailPage extends StatelessWidget {
                 ),
                 _MetricPill(
                   icon: CupertinoIcons.waveform_path_ecg,
-                  label: displayDay.bloodPressure.isEmpty
-                      ? '-'
-                      : _formatBp(displayDay.bloodPressure.last),
+                  label: _bpPillLabel(displayDay.bloodPressure),
                   tint: const Color(0xFFFF3B30),
                 ),
               ],
@@ -1136,6 +1134,35 @@ String _formatDayHeader(DateOnly d) {
 
 String _formatBp(BloodPressureSample sample) =>
     '${sample.systolic}/${sample.diastolic}';
+
+bool _isRawBpSlot(BloodPressureSample sample) =>
+    sample.systolic == 0 && sample.diastolic == 0;
+
+BloodPressureSample? _latestDecodedBp(List<BloodPressureSample> samples) {
+  for (final sample in samples.reversed) {
+    if (!_isRawBpSlot(sample)) return sample;
+  }
+  return null;
+}
+
+String _bpPillLabel(List<BloodPressureSample> samples) {
+  if (samples.isEmpty) return '-';
+  final decoded = _latestDecodedBp(samples);
+  if (decoded != null) return _formatBp(decoded);
+  return '${samples.length} BP ${samples.length == 1 ? 'slot' : 'slots'}';
+}
+
+String _bpMetricDetail(List<BloodPressureSample> samples) {
+  final decoded = _latestDecodedBp(samples);
+  if (decoded != null) return DateFormat.jm().format(decoded.timestamp);
+  return 'Raw compact BP history';
+}
+
+String _bpMetricValue(List<BloodPressureSample> samples) {
+  final decoded = _latestDecodedBp(samples);
+  if (decoded != null) return '${_formatBp(decoded)} mmHg';
+  return '${samples.length} raw ${samples.length == 1 ? 'slot' : 'slots'}';
+}
 
 String _sleepSummary(DailyHistory day) {
   if (day.sleep.isEmpty) return '-';
@@ -1357,8 +1384,8 @@ class _MetricValueList extends StatelessWidget {
         _MetricValueRow(
           icon: CupertinoIcons.waveform_path_ecg,
           title: 'Blood pressure',
-          detail: DateFormat.jm().format(day.bloodPressure.last.timestamp),
-          value: '${_formatBp(day.bloodPressure.last)} mmHg',
+          detail: _bpMetricDetail(day.bloodPressure),
+          value: _bpMetricValue(day.bloodPressure),
           tint: const Color(0xFFFF3B30),
         ),
     ];

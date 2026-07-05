@@ -210,6 +210,33 @@ void main() {
       expect(p[8], 0x02); // next TLV data
     });
 
+    test('deviceInfoWrite rejects unknown TLV ids', () {
+      expect(
+        () => Commands.deviceInfoWrite([(id: 8, data: Uint8List(0))]),
+        throwsArgumentError,
+      );
+    });
+
+    test('deviceInfoWrite rejects TLVs longer than firmware slot limits', () {
+      expect(
+        () => Commands.deviceInfoWrite([(id: 1, data: Uint8List(0x19))]),
+        throwsArgumentError,
+      );
+      expect(
+        () => Commands.deviceInfoWrite([(id: 7, data: Uint8List(2))]),
+        throwsArgumentError,
+      );
+    });
+
+    test('deviceInfoWrite rejects entry counts that do not fit on wire', () {
+      expect(
+        () => Commands.deviceInfoWrite([
+          for (var i = 0; i < 0x100; i++) (id: 7, data: Uint8List(0)),
+        ]),
+        throwsArgumentError,
+      );
+    });
+
     test('deviceInfoClear wraps [0x5a, 0x04] in Channel-B framing', () {
       final frame = Commands.deviceInfoClear();
       expect(frame[0], Codec.channelBMagic);

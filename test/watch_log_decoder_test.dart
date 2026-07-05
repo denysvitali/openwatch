@@ -94,6 +94,44 @@ void main() {
       expect(report.frames.single.details['segmentCount'], greaterThan(0));
     });
 
+    test('summarizes H59MA sleep summary frames opaquely', () {
+      final frame = Codec.buildChannelB(OpB.h59SleepSummary, [
+        0x02,
+        ...List<int>.generate(100, (i) => i & 0xff),
+      ]);
+
+      final report = const WatchLogDecoder().decodeNrfConnectLog(
+        _line(_chB, frame),
+      );
+      final decoded = report.frames.single;
+
+      expect(decoded.valid, isTrue);
+      expect(decoded.title, contains('H59 sleep summary dayOffset=2'));
+      expect(decoded.title, contains('bytes=100'));
+      expect(decoded.details['label'], 'h59SleepSummary');
+      expect(decoded.details['dayOffset'], 2);
+      expect(decoded.details['summaryBytes'], 100);
+    });
+
+    test('summarizes H59MA sleep detail frames opaquely', () {
+      final frame = Codec.buildChannelB(OpB.h59SleepDetail, [
+        0x01,
+        ...List<int>.generate(288, (i) => i & 0xff),
+      ]);
+
+      final report = const WatchLogDecoder().decodeNrfConnectLog(
+        _line(_chB, frame),
+      );
+      final decoded = report.frames.single;
+
+      expect(decoded.valid, isTrue);
+      expect(decoded.title, contains('H59 sleep detail dayOffset=1'));
+      expect(decoded.title, contains('bytes=288'));
+      expect(decoded.details['label'], 'h59SleepDetail');
+      expect(decoded.details['dayOffset'], 1);
+      expect(decoded.details['detailBytes'], 288);
+    });
+
     test('summarizes Channel B activity records and supports JSON output', () {
       final body = List<int>.filled(48, 0);
       body[2] = 100;

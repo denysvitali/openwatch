@@ -143,6 +143,31 @@ void main() {
       expect(out, contains('# total=6h20m'));
     });
 
+    test('labels zero/zero BP history placeholders as raw compact slots', () {
+      final day0 = DateTime(2020, 6, 23);
+      final day = DailyHistory(
+        day: const DateOnly(2020, 6, 23),
+        bloodPressure: [
+          BloodPressureSample(
+            timestamp: day0.add(const Duration(hours: 8)),
+            systolic: 0,
+            diastolic: 0,
+          ),
+          BloodPressureSample(
+            timestamp: day0.add(const Duration(hours: 9)),
+            systolic: 118,
+            diastolic: 76,
+          ),
+        ],
+      );
+
+      final out = HistoryDebugExport.formatDay(day);
+
+      expect(out, contains('08:00 raw-compact-slot'));
+      expect(out, contains('09:00 118/76'));
+      expect(out, isNot(contains('08:00 0/0')));
+    });
+
     test('context fields show up in the header when supplied', () {
       final day = DailyHistory(day: DateOnly(2026, 6, 23));
       final out = HistoryDebugExport.formatDay(

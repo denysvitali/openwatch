@@ -136,7 +136,10 @@ class HistoryDebugExport {
       return;
     }
     for (final s in samples) {
-      b.writeln('${_clock(s.timestamp)} ${s.systolic}/${s.diastolic}');
+      final value = _isRawBpSlot(s)
+          ? 'raw-compact-slot'
+          : '${s.systolic}/${s.diastolic}';
+      b.writeln('${_clock(s.timestamp)} $value');
     }
     b.writeln();
   }
@@ -165,6 +168,9 @@ class HistoryDebugExport {
   static String _clock(DateTime t) =>
       '${t.hour.toString().padLeft(2, '0')}:'
       '${t.minute.toString().padLeft(2, '0')}';
+
+  static bool _isRawBpSlot(BloodPressureSample sample) =>
+      sample.systolic == 0 && sample.diastolic == 0;
 
   static String _dur(Duration d) {
     final h = d.inHours;
