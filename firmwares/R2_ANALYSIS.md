@@ -885,7 +885,7 @@ The table sits in v13's trailing region (`0x21576..0x23440`) which v14 simply do
 
 ## 10. Open Questions
 
-1. **`image_digest` algorithm** — the 32-byte `0x1c4` field is SHA-256-sized, but no SHA-256 init constants exist in the body (§8 crypto negatives). Is the digest computed by the build host only (never verified on-device), or verified by ROM/bootloader code outside this OTA slice?
+1. **`image_digest` algorithm** — the 32-byte `0x1c4` field is SHA-256-sized, but no SHA-256 init constants exist in the body (§8 crypto negatives). The runtime OTA body checks only the first container word, strips file offset `0x50`, stages the digest-containing region as raw data, and checks final staged length (`expected_size - 0x50`). Is the digest computed by the build host only (never verified on-device), or verified by ROM/bootloader code outside this OTA slice?
 2. ~~**`0x0C` additive checksum exact formula**~~ — **resolved:** `sum(container[0x50:]) & 0xffffffff` (observed high byte `0x00`) matches both v13 and v14. It is not over `body` or `container[0x60:]`.
 3. **`const_b4 = 0x1201a39e`, `const_228 = 0x0e85d101`, `const_5c = 0x7e6b4cf9`** — fixed across builds; product/SDK/key IDs? The `0x5c` value is the head of the constant GUID, but the role of `b4`/`228` is unknown.
 4. **`0xfee7` vendor service** — its `0xfea1`/`0xfec9`/`0xfea2` characteristics point to flash handlers (`0x0082e87b`, `0x0082e8cf`); is this an alternate command/OTA path or a legacy/cloud profile? Handler code lives below the OTA body and was not disassembled.

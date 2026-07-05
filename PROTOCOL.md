@@ -612,8 +612,8 @@ H59MA v14 firmware details from Ghidra:
 
 - OTA init accepts a 9-byte payload: `[type, size u32LE, crc16 u16LE, checksum u16LE]`, with `type == 0x01` or `0x04`.
 - OTA data packets are `[u16LE 1-based packetIndex] + raw bytes`; unlike generic file pockets, the data is not zlib-compressed.
-- Packet 1 includes the 0x50-byte firmware container header. The firmware checks the first word against bytes `e5 c3 bd 81` (little-endian `0x81bdc3e5`) and then writes only `size - 0x50` bytes to OTA staging flash at `0x0084e000`.
-- `0x00840724` is **not** OTA validation; it checks persistent config-blob magic `0x8721bee2`. The 32-byte `image_digest @0x1c4` is not validated in `body.bin`.
+- Packet 1 includes the firmware container prefix. The runtime OTA body checks the first word against bytes `e5 c3 bd 81` (little-endian `0x81bdc3e5`) and then stages file bytes from offset `0x50` onward at `0x0084e000`. This strips the transport/header prefix, not the full `0x450` on-disk header.
+- `0x00840724` is **not** OTA validation; it checks persistent config-blob magic `0x8721bee2`. The 32-byte `image_digest @0x1c4` is staged as raw image data after the `0x50` strip, but is not parsed or validated in `body.bin` (see `firmwares/_re/ota-container/evidence.md`).
 
 ### 5.5 Health-data prefetch
 
@@ -1153,4 +1153,4 @@ layout. Key take-aways relevant to protocol work:
 | `0x10` | `version_string` | e.g. `H59MA_1.00.13_251230` |
 | `0x58` | `body_size` | exact body length |
 | `0x6c` | `flash_app_start` | `0x00826400` (both builds) |
-| `0x1c4` | `image_digest` | 32-byte per-build digest/signature field; algorithm and bootloader validation are still unresolved, and `body.bin` does not validate it. |
+| `0x1c4` | `image_digest` | 32-byte per-build digest/signature field. The runtime OTA body stages this region but does not parse or validate it; algorithm and bootloader/apply-path validation remain unresolved. |

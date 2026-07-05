@@ -648,7 +648,7 @@ the slot is reusable.
 |---|---|---|
 | `0x01` | `ota_cmd_start_ack` (table offset 0x5f) | OTA start ack — calls state callback `(1, 0)` |
 | `0x02` | `ota_cmd_init_metadata` (table offset 0x63) | OTA init — expects 9-byte payload, sub-cmd `0x01`/`0x04`; stores image size and metadata; sets OTA state to `2` |
-| `0x03` | `ota_cmd_write_data_packet` (table offset 0x69) | OTA data packet — reassembles image, validates first 0x50 bytes, writes to flash |
+| `0x03` | `ota_cmd_write_data_packet` (table offset 0x69) | OTA data packet — validates the first container word, strips file offset `0x50`, writes staged image bytes to flash |
 | `0x04` | `ota_cmd_check_complete` (table offset 0x6d) | OTA check — validates state `3` and accumulated size matches expected |
 | `0x05` | `ota_cmd_end_reboot` (table offset 0x71) | OTA end — finalizes, resets sensors/BLE, reboots after delays |
 | `0x06` | — | falls into the table's default `0x2e` slot — NAK with code 0 |
@@ -3992,17 +3992,19 @@ Channel-A `0x72` path.
 | `0x0082f160` | `ota_start_write_flag_timer` | Starts a one-shot timer (used during reboot/OTA) |
 | `0x0082f1a4` | `ota_cmd_start_ack` | OTA start ack |
 | `0x0082f1b6` | `ota_cmd_init_metadata` | OTA init — parses 9-byte metadata and stores expected image size/check fields |
-| `0x0082f240` | `ota_cmd_write_data_packet` | OTA data — validates sequence/header, skips the first 0x50-byte container header, writes image data to staging flash |
+| `0x0082f240` | `ota_cmd_write_data_packet` | OTA data — validates sequence/header, strips file offset `0x50`, writes image data to staging flash |
 | `0x0082f378` | `ota_cmd_check_complete` | OTA check — validates completion and size |
 | `0x0082f3b4` | `ota_cmd_end_reboot` | OTA end — reboots/applies device image |
 | `0x0082f410` | `ota_cmd_sub_ack` | OTA sub-ack |
 | `0x00840724` | `cfg_blob_magic_ok` | **Not OTA.** Persistent config-blob magic check for `0x8721bee2`; kept here only because older notes misidentified it as OTA validation. |
 
-The OTA data path checks the first word of the OTA container header against
+The OTA data path checks the first word of the OTA container prefix against
 `ota_container_magic` (`0x0082f47c`, bytes `e5 c3 bd 81`, little-endian
-`0x81bdc3e5`). The separate `0x8721bee2` magic belongs to the persistent
-config blob, not the OTA image. The 32-byte `image_digest @0x1c4` still is not
-validated in `body.bin`; bootloader-side validation remains unresolved.
+`0x81bdc3e5`) and then stages file bytes from offset `0x50` onward. The
+separate `0x8721bee2` magic belongs to the persistent config blob, not the OTA
+image. The 32-byte `image_digest @0x1c4` is staged as raw image data after the
+`0x50` strip, but is not parsed or validated in `body.bin`; bootloader-side
+validation remains unresolved. See `firmwares/_re/ota-container/evidence.md`.
 
 ### 5.1 OTA/DFU state machine (`FUN_0082fe52`)
 
@@ -4135,16 +4137,18 @@ returns error 2; any other sub-cmd returns error 1.
 #### `ota_cmd_write_data_packet`
 
 Payload is `[u16LE 1-based packet_index] + raw bytes`. The first packet carries
-the 0x50-byte container header. The writer:
+the container prefix. The writer:
 
 1. Requires OTA state `2` or `3`.
 2. Requires packet index to increment by 1.
 3. Rejects data payloads larger than `0x600` bytes.
-4. On packet 1, checks word 0 of the 0x50-byte header against
-   `ota_container_magic` (`0x81bdc3e5`) and optionally compares the container
-   hardware string against current/default `H59MA_V1.0`.
-5. Writes only bytes after the 0x50-byte header to `ota_staging_flash_base`
-   (`0x0084e000` in this image), erasing 4 KiB pages as needed.
+4. On packet 1, checks word 0 of the container prefix against
+   `ota_container_magic` (`0x81bdc3e5`) and optionally compares the hardware
+   string from the first 0x50 bytes against current/default `H59MA_V1.0`.
+5. Writes only bytes after file offset `0x50` to `ota_staging_flash_base`
+   (`0x0084e000` in this image), erasing 4 KiB pages as needed. This staged
+   region includes the `image_digest @0x1c4` as raw data, but this runtime body
+   does not compute or compare that digest.
 
 `ota_cmd_check_complete` later requires `written_bytes == expected_size - 0x50`
 before moving state to `4`.
@@ -4269,9 +4273,10 @@ sector config item `0x33` can remain stale until a later MAC-update path runs.
 
 The 32-byte OTA digest algorithm referenced in §10.2 is
 **not** in the firmware body. `body.bin` checks the 4-byte OTA container magic
-at `ota_container_magic` and writes the staged image, but does not validate the
-32-byte `image_digest @0x1c4`. Digest validation, if present, is presumably
-bootloader-side.
+at `ota_container_magic`, stages bytes from file offset `0x50` onward, and
+checks final staged length. It stages the 32-byte `image_digest @0x1c4` as raw
+image data but does not validate it. Digest validation, if present, is
+presumably bootloader-side.
 
 ---
 
@@ -6355,7 +6360,7 @@ Two of the three originally-open questions have been resolved, and the OTA
 digest question is narrowed:
 
 1. ~~Recover the exact meaning of opcode `0x2b` mixture container fields.~~ **Resolved** — see §3.1. The 16-byte `mixture_state_t` is now fully decoded; remaining unknowns are semantic (BCD field interpretation, period-data byte meanings).
-2. **Identify the 32-byte `image_digest` algorithm used for OTA and the container header digest at `0x1c4`.** Still open for the bootloader image. `body.bin` validates only the first OTA container word (`ota_container_magic` = little-endian `0x81bdc3e5`) and writes `expected_size - 0x50` bytes to the OTA staging area. The separate `0x8721bee2` magic belongs to the config blob (§5.3), not OTA.
+2. **Identify the 32-byte `image_digest` algorithm used for OTA and the container header digest at `0x1c4`.** Still open for the bootloader image. `body.bin` validates only the first OTA container word (`ota_container_magic` = little-endian `0x81bdc3e5`), stages bytes from file offset `0x50` onward, and checks `written_bytes == expected_size - 0x50`. The digest region is staged as raw data but not validated by this body path. The separate `0x8721bee2` magic belongs to the config blob (§5.3), not OTA.
 3. ~~Determine whether the `0xFEE7` vendor service has any active protocol role in the firmware.~~ **Resolved** — see §8; it implements a second 16-byte command channel.
 
 ### 10.0 What's in this doc (final tally)
