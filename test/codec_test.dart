@@ -226,6 +226,33 @@ void main() {
       expect(f[1], 0x00);
     });
 
+    test('setBpSetting encodes interval minutes, not SDK multiple', () {
+      final f = Commands.setBpSetting(
+        enabled: true,
+        startHour: 6,
+        startMinute: 30,
+        endHour: 23,
+        endMinute: 0,
+        intervalMinutes: 60,
+      );
+      expect(f[0], OpA.bpSetting);
+      expect(f.sublist(1, 8), [OpA.mixWrite, 1, 6, 30, 23, 0, 60]);
+    });
+
+    test('setBpSetting rejects intervals the firmware NAKs', () {
+      expect(
+        () => Commands.setBpSetting(
+          enabled: true,
+          startHour: 0,
+          startMinute: 0,
+          endHour: 23,
+          endMinute: 0,
+          intervalMinutes: 45,
+        ),
+        throwsArgumentError,
+      );
+    });
+
     test(
       'readDetailSport encodes v14 segment request with 0x0F sub-opcode',
       () {

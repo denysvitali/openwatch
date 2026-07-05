@@ -118,6 +118,100 @@ The persistent descriptor remains 24 hourly 4-byte BP slots at record offset
 slot. The remaining three bytes are not available to the host through this
 opcode.
 
+## `0x0c` BP Setting Interval
+
+Command:
+
+```sh
+pd 75 @ 0x5cde
+```
+
+The shared FEE7/Channel-A wrapper branches on the first payload byte. `sub=1`
+calls the read builder, stamps `payload[0]=1`, and sends seven bytes. `sub=2`
+calls the write validator and passes its return value to the ACK helper; a
+nonzero return therefore becomes an `opcode | 0x80` error ACK.
+
+```text
+0x00005ce4  0178       ldrb r1, [r0]
+0x00005ce6  0129       cmp r1, 1
+0x00005cea  0229       cmp r1, 2
+0x00005cee  08f08ff8   bl 0xde10
+0x00005cf2  0146       mov r1, r0
+0x00005cf4  2078       ldrb r0, [r4]
+0x00005cf6  fff746fc   bl 0x5586
+0x00005cfe  08f069f8   bl 0xddd4
+0x00005d02  0120       movs r0, 1
+0x00005d06  0870       strb r0, [r1]
+0x00005d0a  0722       movs r2, 7
+0x00005d0c  fff714fc   bl 0x5538
+```
+
+Command:
+
+```sh
+pd 70 @ 0xddd4
+```
+
+The read builder copies the stored enable byte and interval byte, then divides
+the stored start/end minute counts by 60 to return hour/minute pairs.
+
+```text
+0x0000dddc  0178       ldrb r1, [r0]
+0x0000ddde  6170       strb r1, [r4, 1]
+0x0000dde0  4078       ldrb r0, [r0, 1]
+0x0000dde2  a071       strb r0, [r4, 6]
+0x0000dde6  688c       ldrh r0, [r5, 0x22]
+0x0000dde8  3c21       movs r1, 0x3c
+0x0000ddee  a070       strb r0, [r4, 2]
+0x0000ddf8  e170       strb r1, [r4, 3]
+0x0000de02  2071       strb r0, [r4, 4]
+0x0000de0c  6171       strb r1, [r4, 5]
+```
+
+Command:
+
+```sh
+pd 58 @ 0xde10
+```
+
+The write path treats payload byte 6 as minutes. It rejects zero and values
+with a nonzero remainder modulo 30, then stores enable, interval, and
+`hour * 60 + minute` start/end windows.
+
+```text
+0x0000de14  8079       ldrb r0, [r0, 6]
+0x0000de16  0028       cmp r0, 0
+0x0000de1a  1e21       movs r1, 0x1e
+0x0000de1c  09f0cdfe   bl 0x17bba
+0x0000de20  0029       cmp r1, 0
+0x0000de24  0120       movs r0, 1
+0x0000de2c  0170       strb r1, [r0]
+0x0000de30  4170       strb r1, [r0, 1]
+0x0000de36  4843       muls r0, r1, r0
+0x0000de42  4184       strh r1, [r0, 0x22]
+0x0000de46  5143       muls r1, r2, r1
+0x0000de4c  8184       strh r1, [r0, 0x24]
+```
+
+Command:
+
+```sh
+pd 50 @ 0xe078
+```
+
+Init defaults confirm the interval is `0x3c` minutes: enable `1`, start `0`,
+end `0x0564` minutes (`23:00`), interval `0x3c`.
+
+```text
+0x0000e08c  0121       movs r1, 1
+0x0000e08e  0170       strb r1, [r0]
+0x0000e096  4a84       strh r2, [r1, 0x22]
+0x0000e098  0a4a       ldr r2, [0x0000e0c4] ; 0x564
+0x0000e09a  8a84       strh r2, [r1, 0x24]
+0x0000e09c  3c21       movs r1, 0x3c
+0x0000e09e  4170       strb r1, [r0, 1]
+```
+
 ## Presence Bitmap And Empty Sentinel
 
 The builder ORs a 48-bit presence bitmap as valid values are appended, then

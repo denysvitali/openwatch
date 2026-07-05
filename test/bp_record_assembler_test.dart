@@ -103,6 +103,44 @@ void main() {
       },
     );
 
+    test('preserves valid intervals above the hourly default', () async {
+      final chunks = StreamController<BpRecordChunk>.broadcast();
+      final assembler = BpRecordAssembler(
+        chunks: chunks.stream,
+        clock: () => DateTime(2026, 7, 4, 12),
+        quietWindow: const Duration(seconds: 1),
+      );
+      addTearDown(() async {
+        await assembler.dispose();
+        await chunks.close();
+      });
+
+      final emitted = assembler.assembled.first;
+
+      chunks.add(
+        BpRecordChunk(
+          seq: 0,
+          payload: Uint8List.fromList([
+            0x00,
+            26,
+            7,
+            4,
+            90,
+            0x01,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+          ]),
+        ),
+      );
+      chunks.add(BpRecordChunk(seq: 1, payload: Uint8List.fromList([0xff])));
+
+      final day = await emitted;
+      expect(day.slotDuration, const Duration(minutes: 90));
+    });
+
     test(
       'continues compact bytes across tagged 14-byte stream chunks',
       () async {

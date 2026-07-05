@@ -1920,12 +1920,12 @@ class BpRecordAssembler {
     final intervalMinutes = payload[4];
     if (month < 1 || month > 12 || day < 1 || day > 31) return;
     _day = DateOnly(year, month, day);
-    // H59MA v14 initializes this byte to 0x3c (60 minutes) and uses it as a
-    // minute interval when choosing how many half-hour bitmap positions to
-    // scan. Keep a conservative fallback for malformed captures.
-    _slotDurationMinutes = intervalMinutes == 0
+    // H59MA v14 initializes this byte to 0x3c (60 minutes) and the setting
+    // writer accepts any nonzero one-byte multiple of 30. Keep a conservative
+    // fallback for malformed captures.
+    _slotDurationMinutes = intervalMinutes == 0 || intervalMinutes % 30 != 0
         ? 60
-        : intervalMinutes.clamp(30, 60).toInt();
+        : intervalMinutes;
     final bitmap = _read48(payload, 5);
     _slotIndexes.clear();
     _slots.clear();

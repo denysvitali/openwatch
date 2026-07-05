@@ -1263,6 +1263,7 @@ like "+2" in decompiled pointer arithmetic, but handlers receive the copied
 | `0x01` | `setTime` | `0x0082bb4e` | Converts BCD date/time fields, updates RTC, sends `0x2f` packet-length notify, then a 14-byte `0x01` ack — see §3.4. |
 | `0x06` | `dnd` | `0x0082d298` | Sub-opcode `0x01` reads DND state, `0x02` sets it — see §3.7. |
 | `0x08` | *(special)* | `0x00827516`, `0x008275b6`, `0x00827ba6`, `0x008280fe` | Camera/find-device/long-press branch — see §3.15. |
+| `0x0c` | `bpSetting` | `0x0082c0de` | Sub `0x01` reads BP auto-measure config, `0x02` writes it with interval-minute validation — see §3.18.1. |
 | `0x0e` | `bpReadConform` | `0x0082cb28` | If sub-byte `0` → `FUN_00834410()` + `FUN_0082c0a4()` — see §3.19. |
 | `0x15` | `readHeartRate` | `0x0082cf48` | Reads heart-rate record by index; returns `0x15` multi-frame data or `0xff15` error — see §3.12. |
 | `0x18` | `displayClock` | `0x0082ccb6` | Sets watch-face / clock display — see §3.5. |
@@ -1560,6 +1561,53 @@ write is visible in this helper.
   a frame-receipt: the host can use the unmodified bytes
   4..14 in the response as confirmation that the same
   payload arrived intact, without a separate echo frame.
+
+### 3.18.1 Opcode `0x0c` bpSetting (`FUN_0082c0de` / `FUN_008341d4` / `FUN_00834210`)
+
+This FEE7/Channel-A shared handler is a normal mixture read/write setting.
+`sub == 1` reads the BP auto-measure config, `sub == 2` validates and stores a
+new config, and any other sub-value returns without a response.
+
+#### Request and response layout
+
+Read request:
+
+```
+payload[0] = 0x01
+```
+
+Read response (`FUN_008341d4` fills bytes 1..6; wrapper writes byte 0):
+
+```
+payload[0] = 0x01
+payload[1] = enabled
+payload[2] = startMinutes / 60
+payload[3] = startMinutes % 60
+payload[4] = endMinutes / 60
+payload[5] = endMinutes % 60
+payload[6] = intervalMinutes
+```
+
+Write request:
+
+```
+payload[0] = 0x02
+payload[1] = enabled
+payload[2] = startHour
+payload[3] = startMinute
+payload[4] = endHour
+payload[5] = endMinute
+payload[6] = intervalMinutes
+```
+
+`FUN_00834210` rejects `payload[6] == 0` and any value not divisible by 30.
+The wrapper passes that return value to the generic ACK helper, so invalid
+writes return the opcode with the Channel-A high-bit error flag set.
+
+Defaults are applied during BP-history module init when the config enable byte
+is still `0xff`: enabled `1`, start `00:00`, end `23:00` (`0x0564` minutes),
+and interval `0x3c` (60 minutes). This byte is minutes, not the legacy
+APK/SDK "multiple" field name.
 
 ### 3.19 Opcode `0x0e` bpReadConform (BP record index advance) (`FUN_0082cb28`)
 

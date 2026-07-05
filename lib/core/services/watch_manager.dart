@@ -789,7 +789,7 @@ class WatchManager extends ChangeNotifier {
     required int startMinute,
     required int endHour,
     required int endMinute,
-    int multiple = 1,
+    int intervalMinutes = 60,
   }) => _withActionSpan(
     'set_bp_setting',
     () => _transport.sendA(
@@ -799,7 +799,7 @@ class WatchManager extends ChangeNotifier {
         startMinute: startMinute,
         endHour: endHour,
         endMinute: endMinute,
-        multiple: multiple,
+        intervalMinutes: intervalMinutes,
       ),
     ),
   );

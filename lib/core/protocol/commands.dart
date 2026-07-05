@@ -631,24 +631,29 @@ class Commands {
   // ---------------------------------------------------------------------------
 
   /// `BpSettingReq` (0x0c) write: configure the BP auto-measure window
-  /// and "multiple" (samples per window). [multiple] must be `1`, `2`,
-  /// or `3` per the legacy Oudmon SDK.
+  /// and measurement interval. H59MA v14 accepts only a nonzero
+  /// `intervalMinutes` byte divisible by 30; invalid values return
+  /// an `opcode | 0x80` error ACK.
   static Uint8List setBpSetting({
     required bool enabled,
     required int startHour,
     required int startMinute,
     required int endHour,
     required int endMinute,
-    int multiple = 1,
-  }) => Codec.buildChannelA(OpA.bpSetting, [
-    OpA.mixWrite,
-    enabled ? 1 : 0,
-    _clamp(startHour, 0, 23),
-    _clamp(startMinute, 0, 59),
-    _clamp(endHour, 0, 23),
-    _clamp(endMinute, 0, 59),
-    _clamp(multiple, 1, 3),
-  ]);
+    int intervalMinutes = 60,
+  }) {
+    final interval = _bpIntervalMinutes(intervalMinutes);
+    return Codec.buildChannelA(OpA.bpSetting, [
+      OpA.mixWrite,
+      enabled ? 1 : 0,
+      _clamp(startHour, 0, 23),
+      _clamp(startMinute, 0, 59),
+      _clamp(endHour, 0, 23),
+      _clamp(endMinute, 0, 59),
+      interval,
+    ]);
+  }
+
   static Uint8List readBpSetting() =>
       Codec.buildChannelA(OpA.bpSetting, [OpA.mixRead]);
 
@@ -880,6 +885,17 @@ class Commands {
   static int _clamp(int value, int min, int max) {
     if (value < min) return min;
     if (value > max) return max;
+    return value;
+  }
+
+  static int _bpIntervalMinutes(int value) {
+    if (value <= 0 || value > 0xFF || value % 30 != 0) {
+      throw ArgumentError.value(
+        value,
+        'intervalMinutes',
+        'must be a nonzero multiple of 30 minutes that fits in one byte',
+      );
+    }
     return value;
   }
 }

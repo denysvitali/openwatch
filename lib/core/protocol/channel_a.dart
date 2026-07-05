@@ -114,10 +114,10 @@ class ChannelADispatcher {
   /// SpO2 setting (`0x2c`).
   Stream<BloodOxygenSetting> get onBloodOxygen => _bloodOxygen.stream;
 
-  /// Blood-pressure record chunk (`0x0d`). The firmware emits a
-  /// fragmented BP record (header always first, body optional
-  /// if record > 14 B) via `FUN_0082b938` after a `0x0e`
-  /// `sub=0` advance. See `GHIDRA_DECOMPILATION.md` §3.19.
+  /// Blood-pressure record chunk (`0x0d`). The firmware emits tagged
+  /// fragments after a `0x0e sub=0` advance: `payload[0] == 0x00`
+  /// for the day header, `0x01` for compact data bytes, and `0xFF`
+  /// for empty/end. See `GHIDRA_DECOMPILATION.md` §3.19.
   Stream<BpRecordChunk> get onBpRecord => _bpRecord.stream;
 
   /// Stress history (`0x37`) — header discriminator (`pl[3] == 0x1E`).
@@ -1173,14 +1173,11 @@ class BloodOxygenSetting {
 /// One chunk of a blood-pressure record (`0x0d`).
 ///
 /// Per `GHIDRA_DECOMPILATION.md` §3.19 the record is fragmented
-/// via `FUN_0082b938`: the first chunk is always the 14-byte
-/// header, followed by an optional body chunk when the record
-/// is larger than 14 B. The decoder cannot tell header from body
-/// from a single frame — the discriminator is the *position*
-/// within an advance sequence (host issued `0x0e sub=0`, first
-/// frame = header, optional second frame = body). The dispatcher
-/// exposes a monotonic [seq] so consumers can reset on each
-/// advance request.
+/// via `FUN_0082b938` into internally tagged payloads:
+/// `payload[0] == 0x00` is the day header, `0x01` carries up to
+/// 13 compact BP bytes, and `0xFF` marks empty/end. The dispatcher
+/// exposes a monotonic [seq] for observability, but consumers
+/// should use the tag byte rather than frame position.
 class BpRecordChunk {
   const BpRecordChunk({required this.seq, required this.payload});
   final int seq;
