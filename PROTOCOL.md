@@ -1154,3 +1154,4 @@ layout. Key take-aways relevant to protocol work:
 | `0x58` | `body_size` | exact body length |
 | `0x6c` | `flash_app_start` | `0x00826400` (both builds) |
 | `0x1c4` | `image_digest` | 32-byte per-build digest/signature field. The runtime OTA body stages this region but does not parse or validate it; algorithm and bootloader/apply-path validation remain unresolved. |
+| `0x22c` | `flash_app_end` | Per-build pointer into the loaded image (`0x00847860` v13, `0x00845c14` v14). It maps to a unique `0x0e85d101,0x00000001` marker before the linked runtime tail, not to the physical end of `body.bin`; bootloader use remains unresolved. |

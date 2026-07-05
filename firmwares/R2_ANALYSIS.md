@@ -132,7 +132,7 @@ All offsets are **container** offsets. "C" = constant across both builds, "V" = 
 | `0x1c4` | **32** | **`image_digest`** | `8d50aa22…42178bb1` | `47d3b81a…0d354648` | V | **The real per-build signature/digest.** 32 high-entropy bytes (`0x1c4`–`0x1e3`), consistent with SHA-256; zeros begin at `0x1e4`. |
 | `0x1e4`–`0x227` | 68 | (zero pad) | `00…` | `00…` | C | Reserved. |
 | `0x228` | 4 | `const_228` | `0x0e85d101` | `0x0e85d101` | C | **New field, missing from JSON.** Constant. |
-| `0x22c` | 4 | `flash_app_end` | `0x00847860` | `0x00845c14` | V | App region end pointer. **New field.** |
+| `0x22c` | 4 | `flash_app_end` | `0x00847860` | `0x00845c14` | V | Per-build pointer into the loaded image. It maps to a unique `0x0e85d101,0x00000001` marker before the linked runtime tail, not to the physical body end. |
 | `0x230`–`0x32f` | — | (zero) | `00…` | `00…` | C | Reserved. |
 | `0x330` | 16 | `erase_marker` | `ff…ff` | `ff…ff` | C | All-`0xFF`. |
 | `0x340`–`0x43f` | — | (zero) | `00…` | `00…` | C | Reserved. |
@@ -891,4 +891,4 @@ The table sits in v13's trailing region (`0x21576..0x23440`) which v14 simply do
 4. **`0xfee7` vendor service** — its `0xfea1`/`0xfec9`/`0xfea2` characteristics point to flash handlers (`0x0082e87b`, `0x0082e8cf`); is this an alternate command/OTA path or a legacy/cloud profile? Handler code lives below the OTA body and was not disassembled.
 5. **`wrong signature! Read %8X != Requried %8X`** — gated by a 32-bit magic compare, not a crypto signature. What magic value, and where is the comparison performed (likely the excluded bootloader region)?
 6. **Boot/vector region** — the real Cortex-M vector table, reset handler, and the `BootOnce` dual-bank logic live in flash ≤`0x826400`, outside both OTA bodies. Obtaining a full-flash dump would let us verify the load/verify path end-to-end.
-7. **`flash_app_end @0x22c`** (`0x00847860` v13 / `0x00845c14` v14) is below the computed body end (`0x849840` / `0x8479fc`) by `0x1fe0` / `0x1de8`, and is not `flash_app_start + load_size`. Does this field bound a bootloader-defined writable app slot rather than the image, and what occupies the excluded tail?
+7. **`flash_app_end @0x22c` bootloader use** — the pointer target is now mapped: v13 body `0x21460` / v14 body `0x1f814`, the unique `0x0e85d101,0x00000001` marker immediately before allocator/runtime string and pointer tables (`malloc`, `calloc`, `realloc`, etc.). The runtime body has no direct xrefs to the pointer value or marker. Whether the bootloader/apply path enforces this boundary still requires a full lower-flash dump.
