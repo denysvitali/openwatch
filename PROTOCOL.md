@@ -539,9 +539,10 @@ name-format control. The decompiled writer clears fixed-size destinations but
 does not visibly clamp the supplied length before copy, so host code should
 enforce these maxima.
 
-OpenWatch parses the `0x01` writable config TLVs and the `0x03` static version
-TLVs; other subcommands remain command builders/status-only until captures show
-additional response bodies.
+OpenWatch builds all four firmware subcommands. It parses the response-bearing
+`0x01` writable-config TLVs and `0x03` static-version TLVs; `0x02` writes,
+`0x04` clears, and default/generic status frames remain no-payload/status-only
+paths unless live captures show additional response bodies.
 
 ### 4.9 Channel-B OTA (DfuHandle)
 
