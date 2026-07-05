@@ -18,7 +18,7 @@ class Commands {
     false,
   ];
 
-  /// FEE7 `0x04` copies exactly 12 bytes from request offset 3 into the
+  /// Bind `0x04` copies exactly 12 bytes from request offset 3 into the
   /// phone-identity slot (`body.bin` v14 offset `0x9b4c`).
   static const int _bindAncsModelBytes = 12;
 
@@ -316,10 +316,10 @@ class Commands {
 
   /// `BindAncsReq` (0x04): register the phone identity for ANCS parsing.
   ///
-  /// H59MA v14 handles this on the vendor `0xFEE7` service. The firmware
-  /// reads byte 1 as the bind state, treats byte 2 as a non-zero selector
-  /// (the APK uses an Android-version bucket), and copies 12 bytes from
-  /// byte 3 as the phone model.
+  /// H59MA v14 reads byte 1 as the bind state, treats byte 2 as a non-zero
+  /// selector (the APK uses an Android-version bucket), and copies 12 bytes
+  /// from byte 3 as the phone model. Send over Channel A; radare2 shows the
+  /// published FEE7 write callback does not reach the 16-byte dispatcher.
   static Uint8List bindAncs(String model, {int verBucket = 0x0a}) {
     final bytes = utf8Clamp(model, _bindAncsModelBytes);
     return Codec.buildChannelA(OpA.bindAncs, [

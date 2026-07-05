@@ -61,9 +61,9 @@ class BleTransport implements WatchLink {
   BluetoothCharacteristic? _notifyA;
   BluetoothCharacteristic? _writeB;
   BluetoothCharacteristic? _notifyB;
-  // Probe-only: vendor fee7 service + Device Name char. Currently logged at
-  // connect time; reserved for future alternate OTA/command paths (see
-  // `firmwares/R2_ANALYSIS.md` §7).
+  // Probe-only: vendor fee7 service + Device Name char. Static H59MA v14
+  // routing does not wire FEE7 writes to the 16-byte command dispatcher, but
+  // captures may still include notify frames worth decoding.
   BluetoothCharacteristic? _fee7Write;
   BluetoothCharacteristic? _fee7Read;
   BluetoothCharacteristic? _fee7Notify;
@@ -447,15 +447,17 @@ class BleTransport implements WatchLink {
   }
 
   // ---------------------------------------------------------------------------
-  // Vendor 0xFEE7 command channel (parallel 16-byte command path)
+  // Vendor 0xFEE7 probe/notify surface.
   // ---------------------------------------------------------------------------
 
   /// Whether the vendor `0xFEE7` write characteristic was discovered.
   @override
   bool get hasFee7Write => _fee7Write != null;
 
-  /// Sends a 16-byte frame on the vendor `0xFEE7` service. The frame is
+  /// Sends a raw 16-byte frame on the vendor `0xFEE7` service. The frame is
   /// expected to be already checksummed (use [Codec.buildChannelA]).
+  /// Normal app commands should use Channel A; this is for live-capture/probe
+  /// work.
   ///
   /// Throws if the device did not advertise the `0xFEE7` write characteristic.
   @override

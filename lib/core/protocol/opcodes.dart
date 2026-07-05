@@ -221,14 +221,13 @@ class OpB {
   static const int rspLowBattery = 6;
 }
 
-/// Opcodes handled by the vendor `0xFEE7` GATT service write handler
-/// (`FUN_0082c944` in H59MA v14, see `GHIDRA_DECOMPILATION.md` §8).
+/// Opcodes decoded from vendor/high 16-byte frames.
 ///
 /// Wire format is identical to Channel A: a fixed 16-byte frame whose last
 /// byte is the additive 8-bit checksum of bytes `0..14`. Several opcodes
 /// overlap with Channel A (e.g. `0x48`, `0x50`, `0x51`, `0x69`, `0x6a`,
-/// `0x3c`, `0x3e`) — the device treats the two GATT services as parallel
-/// command surfaces.
+/// `0x3c`, `0x3e`). Static H59MA v14 routing proves the dispatcher is reached
+/// from Channel A; FEE7 notify frames are decoded for observability only.
 class Fee7 {
   Fee7._();
 

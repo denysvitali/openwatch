@@ -671,18 +671,22 @@ Service-declaration record (`0x2800` at v13 `0x20c76`):
 ...      05 00 c7 5d 2a 01 ...                             # 0x05 tag + ChanB write UUID 72a
 ```
 
-The `0x05` byte preceding each 128-bit UUID is the "128-bit UUID" type indicator (vs inline 16-bit). The trailing `0x0084xxxx` words are flash pointers into the value/handler region. v14 fee7 service decl:
+The `0x05` byte preceding each 128-bit UUID is the "128-bit UUID" type indicator (vs inline 16-bit). The trailing `0x0084xxxx` words are flash pointers into the value/handler region.
+
+The words immediately before the v14 `0xfee7` service declaration are the
+**Channel-A callback block**, not FEE7 handlers:
 
 ```text
 s 0x1f2b0; pxw 0x20  v14/body.bin
-0x1f2b0  0x0082e87b 0x0082e8cf 0x28000802 0x0000fee7   # two value ptrs, 0x2800 decl, fee7 UUID
+0x1f2b0  0x0082e87b 0x0082e8cf 0x28000802 0x0000fee7   # Ch-A write/CCCD callbacks, then fee7 svc decl
+0x1f3b0  0x00000011 0x0082e9a3 0x0082ea4d 0x0082eabb   # true fee7 callbacks
 ```
 
 ### Two-channel transport (confirmed) + a third surface
 
 - **Channel A** `6e40fff0` — write `6e400002` + notify `6e400003` (+CCCD): fixed-length command channel (Nordic-UART-derived `6e40xxxx` range).
 - **Channel B** `de5bf728` — write `de5bf72a` + notify `de5bf729` (+CCCD): large-data / file / OTA channel (matches the `0xbc`-magic fragmented parser, §5).
-- **`0xfee7` (NEW)** — write `0xfea1`, read `0xfec9`, notify `0xfea2` (both notifies CCCD-backed), plus a Device Name `0x2a00` value: the standard Chinese-vendor "fee7" cloud/OTA profile, present in both bodies but absent from the prior notes — worth tracing for an alternate command/OTA path.
+- **`0xfee7` (NEW)** — write `0xfea1`, read `0xfec9`, notify `0xfea2` (both notifies CCCD-backed), plus a Device Name `0x2a00` value: the standard Chinese-vendor "fee7" profile, present in both bodies but absent from the prior notes. A 2026-07-05 radare2 pass shows the true FEE7 registration uses table `0x1f2b8` and callback block `0x1f3b2`; its write callback wraps a generic Realtek service event and does **not** call the 16-byte opcode dispatcher. See `firmwares/_re/fee7-gatt/evidence.md`.
 
 ---
 
@@ -888,7 +892,7 @@ The table sits in v13's trailing region (`0x21576..0x23440`) which v14 simply do
 1. **`image_digest` algorithm** — the 32-byte `0x1c4` field is SHA-256-sized, but no SHA-256 init constants exist in the body (§8 crypto negatives). The runtime OTA body checks only the first container word, strips file offset `0x50`, stages the digest-containing region as raw data, and checks final staged length (`expected_size - 0x50`). Is the digest computed by the build host only (never verified on-device), or verified by ROM/bootloader code outside this OTA slice?
 2. ~~**`0x0C` additive checksum exact formula**~~ — **resolved:** `sum(container[0x50:]) & 0xffffffff` (observed high byte `0x00`) matches both v13 and v14. It is not over `body` or `container[0x60:]`.
 3. **Header constants** — `const_228 = 0x0e85d101` is now mapped to the `flash_app_end` target marker (`0x0e85d101,0x00000001`) before the linked runtime tail; `const_5c = 0x7e6b4cf9` is the head of the constant GUID. `const_b4 = 0x1201a39e` remains header-only in the available v13/v14 bodies: no body literal hit or xref was found.
-4. **`0xfee7` vendor service** — its `0xfea1`/`0xfec9`/`0xfea2` characteristics point to flash handlers (`0x0082e87b`, `0x0082e8cf`); is this an alternate command/OTA path or a legacy/cloud profile? Handler code lives below the OTA body and was not disassembled.
+4. ~~**`0xfee7` vendor service active command path**~~ — **resolved for static routing:** `0x0082e87b`/`0x0082e8cf` are Channel-A callbacks immediately before the FEE7 table. The true FEE7 callbacks are `0x0082e9a3`/`0x0082ea4d`/`0x0082eabb`; FEE7 write events go through the common service-event callback and do not branch to the 16-byte dispatcher. Live captures are still useful to determine whether any host uses the profile for opaque side effects.
 5. ~~**`wrong signature! Read %8X != Requried %8X`**~~ — **resolved:** this is `cfg_blob_magic_ok` at v14 body `0x1a324` / absolute `0x00840724`, not an OTA or bootloader signature. It reads the first little-endian u32 of a persistent config blob and compares it with `0x8721bee2`; callers are `cfg_find_item` (`0x00840be0`) and the item-`0x33` reader (`0x0084415c`, base `0x00801400`, length `6`).
 6. **Boot/vector region** — the real Cortex-M vector table, reset handler, and the `BootOnce` dual-bank logic live in flash ≤`0x826400`, outside both OTA bodies. Obtaining a full-flash dump would let us verify the load/verify path end-to-end.
 7. **`flash_app_end @0x22c` bootloader use** — the pointer target is now mapped: v13 body `0x21460` / v14 body `0x1f814`, the unique `0x0e85d101,0x00000001` marker immediately before allocator/runtime string and pointer tables (`malloc`, `calloc`, `realloc`, etc.). The runtime body has no direct xrefs to the pointer value or marker. Whether the bootloader/apply path enforces this boundary still requires a full lower-flash dump.

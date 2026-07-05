@@ -202,7 +202,7 @@ class DeviceCapabilities {
   static bool _temperature200Celsius(Uint8List pl) =>
       pl.length > 0x0a && _bit(pl[0x0a], 1);
 
-  /// H59MA firmware routes Channel-A/FEE7 `0x3c` to a fixed capability block
+  /// H59MA firmware routes Channel-A/vendor-high `0x3c` to a fixed capability block
   /// instead of the APK-era `DeviceSupportFunctionRsp` bitmap. The block uses
   /// opaque product feature IDs, so match only the static layouts observed in
   /// H59MA v13 live captures and the v14 Ghidra notes before mapping it to the

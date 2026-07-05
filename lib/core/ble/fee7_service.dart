@@ -11,15 +11,15 @@ import 'ble_transport.dart';
 
 final _log = AppLog.instance;
 
-/// Thin wrapper around the vendor `0xFEE7` GATT service that exposes a
-/// forward-only 16-byte command channel parallel to Channel A
-/// (see `GHIDRA_DECOMPILATION.md` §8 and `firmwares/R2_ANALYSIS.md` §7).
+/// Thin wrapper around the vendor `0xFEE7` GATT service's notify/write
+/// characteristics.
 ///
 /// Wire format is identical to Channel A: a fixed 16-byte frame whose last
 /// byte is the additive 8-bit checksum of bytes `0..14` (use
-/// [Codec.buildChannelA] to construct frames). Unlike Channel A, the fee7
-/// service does not gate writes on a "link ready" handshake; the device's
-/// GATT write handler is always live once the characteristic is discovered.
+/// [Codec.buildChannelA] to construct frames). Static H59MA v14 routing shows
+/// the published FEE7 write callback packages generic Realtek service events
+/// and does not branch to the 16-byte opcode dispatcher; app flows should
+/// prefer Channel A unless live captures prove a specific FEE7 write contract.
 ///
 /// The class is intentionally narrow — it only validates frame shape and
 /// funnels traffic through the transport's existing `_fee7Write` /
@@ -71,7 +71,11 @@ class Fee7Service {
   /// Whether the underlying transport has a usable `0xFEE7` write char.
   bool get isAvailable => _transport.hasFee7Write;
 
-  /// Send a 16-byte frame to the device.
+  /// Send a raw 16-byte frame to the FEE7 write characteristic.
+  ///
+  /// This is intended for live-capture/probe tooling. Normal app commands use
+  /// Channel A because the firmware's FEE7 write callback is not statically
+  /// wired to the 16-byte command dispatcher.
   ///
   /// The frame MUST:
   ///   * be exactly 16 bytes;

@@ -7,25 +7,27 @@ import 'support/fake_ble_transport.dart';
 
 void main() {
   group('WatchManager.enableNotifications', () {
-    test('sends bind over FEE7 when the vendor service is available', () async {
-      final t = FakeBleTransport();
-      final mgr = WatchManager(t, autoSyncTime: false);
-      addTearDown(mgr.dispose);
-      await Future<void>.delayed(const Duration(milliseconds: 20));
+    test(
+      'sends bind over Channel A when the vendor service is available',
+      () async {
+        final t = FakeBleTransport();
+        final mgr = WatchManager(t, autoSyncTime: false);
+        addTearDown(mgr.dispose);
+        await Future<void>.delayed(const Duration(milliseconds: 20));
 
-      final sentABefore = t.sentA.length;
-      final sentFee7Before = t.sentFee7.length;
-      await mgr.enableNotifications('ABCDEFGHIJKLMNO');
+        final sentABefore = t.sentA.length;
+        final sentFee7Before = t.sentFee7.length;
+        await mgr.enableNotifications('ABCDEFGHIJKLMNO');
 
-      final fee7Frames = t.sentFee7.skip(sentFee7Before).toList();
-      expect(fee7Frames, hasLength(1));
-      expect(Codec.rxOpcode(fee7Frames.single), Fee7.bindAncs);
-      expect(fee7Frames.single.sublist(3, 15), 'ABCDEFGHIJKL'.codeUnits);
+        expect(t.sentFee7.skip(sentFee7Before), isEmpty);
 
-      final channelAFrames = t.sentA.skip(sentABefore).toList();
-      expect(channelAFrames, hasLength(1));
-      expect(Codec.rxOpcode(channelAFrames.single), OpA.setAncs);
-    });
+        final channelAFrames = t.sentA.skip(sentABefore).toList();
+        expect(channelAFrames, hasLength(2));
+        expect(Codec.rxOpcode(channelAFrames[0]), OpA.bindAncs);
+        expect(channelAFrames[0].sublist(3, 15), 'ABCDEFGHIJKL'.codeUnits);
+        expect(Codec.rxOpcode(channelAFrames[1]), OpA.setAncs);
+      },
+    );
 
     test('falls back to Channel A bind when FEE7 is unavailable', () async {
       final t = FakeBleTransport()..hasFee7Write = false;

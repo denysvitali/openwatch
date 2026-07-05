@@ -14,16 +14,16 @@ output:
 
 | Address | New name | Role |
 |---|---|---|
-| `0x0082d2dc` | `channel_a_dispatch_queued_frame` | Drains the deferred 16-byte Channel-A/FEE7 command ring. |
-| `0x0082c944` | `fee7_dispatch_vendor_command` | Active `0xFEE7` 16-byte vendor dispatcher. |
+| `0x0082d2dc` | `channel_a_dispatch_queued_frame` | Drains the deferred 16-byte Channel-A/vendor-high command ring. |
+| `0x0082c944` | `vendor_high_dispatch_command` | Channel-A-reachable 16-byte vendor/high dispatcher; earlier notes mislabeled its GATT entry as FEE7. |
 | `0x0082efea` | `channel_b_parse_reassembly_frame` | Parses and reassembles Channel-B `0xBC` frames. |
 | `0x0082eee6` | `channel_b_dispatch_complete_frame` | Verifies CRC and routes complete Channel-B frames. |
 | `0x0082ece0` | `channel_b_queue_notify_frame` | Builds and MTU-slices Channel-B notify frames. |
 | `0x0082ee00` | `channel_b_send_nak` | Builds compact Channel-B NAK/error packets. |
 | `0x0082f114` | `crc16_modbus_update` | CRC-16/MODBUS helper using the reflected `0xA001` table. |
-| `0x0082ebdc` | `channel_a_queue_notify_frame` | Queues a 16-byte Channel-A/FEE7 notify frame. |
+| `0x0082ebdc` | `channel_a_queue_notify_frame` | Queues a 16-byte Channel-A/vendor-high notify frame. |
 | `0x0082b0c4` | `checksum8_additive` | Additive byte-sum helper used for 16-byte command responses. |
-| `0x0082b938` | `channel_a_send_fragmented_response` | Sends long Channel-A/FEE7 payloads as 14-byte chunks. |
+| `0x0082b938` | `channel_a_send_fragmented_response` | Sends long Channel-A/vendor-high payloads as 14-byte chunks. |
 | `0x0082be64` | `enqueue_deferred_command_frame` | Copies incoming 16-byte requests into the deferred command ring. |
 | `0x0082ba94` | `fee7_vendor_memory_write` | Security-sensitive host-addressed memory write. |
 | `0x0082bb0c` | `fee7_vendor_memory_read` | Security-sensitive host-addressed memory read. |
@@ -202,7 +202,8 @@ soft-float runtime, and GPIO/AON/NVIC names:
 | `0x00827516` / `0x0082757e` / `0x008275b6` | `find_device_start_alert_sequence` / `find_device_transition_ack_or_button` / `find_device_cancel_ble_reinit_timer` | Find-device start, transition, and cancel/reinit paths. |
 | `0x00839ac4` / `0x00839e4e` / `0x0083a116` | `ancs_get_app_attr` / `ancs_add_client` / `ancs_client_cb` | ANCS control-point app-attribute requestor, client registration, and lifecycle callback. |
 | `0x00839fee` / `0x0083a036` | `ancs_parse_notification_source` / `app_parse_notification_source_data` | ANCS Notification Source parser and Data Source follow-up request builder. |
-| `0x0082e850` / `0x0082e87a` / `0x0082e8ce` / `0x0082e8ec` | `fee7_gatt_read_handler`, `fee7_gatt_write_handler`, `fee7_gatt_cccd_log_handler`, `fee7_register_gatt_service` | Active `0xFEE7` GATT service registration and attribute handlers. |
+| `0x0082e850` / `0x0082e87a` / `0x0082e8ce` / `0x0082e8ec` | `channel_a_gatt_read_handler`, `channel_a_gatt_write_handler`, `channel_a_gatt_cccd_log_handler`, `channel_a_register_gatt_service` | Corrected by radare2: these handlers belong to the Channel-A `6e40fff0` service table at body `0x1f204`, not the `0xFEE7` table. |
+| `0x0082e9a2` / `0x0082ea4c` / `0x0082eaba` / `0x0082eb0a` | `fee7_gatt_read_handler`, `fee7_gatt_write_handler`, `fee7_gatt_cccd_handler`, `fee7_register_gatt_service` | True `0xFEE7` GATT table registration and handlers; the write callback packages Realtek service events and does not call the 16-byte dispatcher. |
 | `0x0082c8ce` / `0x0082c8e0` / `0x00830462` | `fee7_health_one_shot_result_poll_c1`, `fee7_ota_control_c3`, `fee7_noop_c4` | Raw FEE7 inline branches for health result poll, OTA/BLE control, and no-op command. |
 | `0x0082c918` / `0x0082c90a` / `0x0082c926` | `fee7_store_runtime_flag_c5/c8/c9` | Runtime flag writes into `DAT_0082caec[3..5]`. |
 | `0x00844214` | `fee7_generate_synthetic_sleep_record` | Fire-and-forget `0xfe` path that synthesizes and commits a sleep-history record from a host duration. |
@@ -4674,22 +4675,38 @@ service, not a user-initiated command.
 
 ---
 
-## 8. Vendor `0xFEE7` GATT Service — Active Protocol Role
+## 8. Vendor/High 16-Byte Dispatcher — Channel-A Entry Point
 
-The `0xFEE7` vendor service is **not** table decoration. It is registered during BLE initialization (`ble_services_init` -> `fee7_register_gatt_service`) using an attribute table at base `0x00845604` (size `0xa8`). Three handler pointers are active in the GATT records:
+**Correction, 2026-07-05:** this section originally identified the
+`0x0082e850`/`0x0082e87a`/`0x0082e8ce` callback triple as the `0xFEE7` GATT
+service. radare2 table/register evidence shows that triple belongs to Channel A
+(`6e40fff0`) at body table `0x1f204`. The true FEE7 table starts at body
+`0x1f2b8`, registers through `0x0082eb0a`, and has callbacks
+`0x0082e9a2`/`0x0082ea4c`/`0x0082eaba`; its write callback packages a generic
+Realtek service event and does not call the dispatcher below. See
+`firmwares/_re/fee7-gatt/evidence.md`.
+
+The vendor/high opcode dispatcher below is still real firmware code, but its
+statically-proven GATT entry point is the Channel-A write callback at
+`0x0082e87a`, which calls it for 16-byte writes.
+
+The Channel-A service is registered during BLE initialization
+(`ble_services_init` -> `channel_a_register_gatt_service`) using an attribute
+table at base `0x00845604` (size `0xa8`). Three handler pointers are active in
+the GATT records:
 
 | Handler | Address | Role |
 |---|---|---|
-| `fee7_gatt_read_handler` | `0x0082e850` | Read handler — returns a runtime buffer pointed to by `DAT_0082e934` (length stored at `buffer[-2] - 1`) for GATT event `7`. |
-| `fee7_gatt_write_handler` | `0x0082e87a` | Write handler — GATT event `2` routes to `fee7_dispatch_vendor_command`. |
-| `fee7_gatt_cccd_log_handler` | `0x0082e8ce` | CCCD/log handler — only emits debug traces. |
+| `channel_a_gatt_read_handler` | `0x0082e850` | Read handler — returns a runtime buffer pointed to by `DAT_0082e934` (length stored at `buffer[-2] - 1`) for GATT event `7`. |
+| `channel_a_gatt_write_handler` | `0x0082e87a` | Write handler — GATT event `2` routes to `fee7_dispatch_vendor_command` / the vendor-high dispatcher. |
+| `channel_a_gatt_cccd_log_handler` | `0x0082e8ce` | CCCD/log handler — only emits debug traces. |
 
-The write handler is the protocol entry point.
+The Channel-A write handler is the protocol entry point.
 
-### 8.1 0xFEE7 dispatcher (`fee7_dispatch_vendor_command`)
+### 8.1 Vendor/high dispatcher (`fee7_dispatch_vendor_command`)
 
-The actual opcode table for the 0xFEE7 service. The function is
-called from `fee7_gatt_write_handler` with
+The actual opcode table for this high/vendor path. The function is
+called from `channel_a_gatt_write_handler` with
 `(frame_ptr, frame_length)`.
 
 #### Top-level guards
@@ -4978,7 +4995,7 @@ Unrecognized opcodes fall through to `fee7_send_vendor_nak`.
 
 ### Take-away
 
-The `0xFEE7` service carries a parallel 16-byte command channel that overlaps some Channel-A opcodes (e.g. `0x48`, `0x50`, `0x51`, `0x69`, `0x6a`, `0x3c`, `0x3e`) and adds vendor-specific commands (`0x90`–`0x9f`, `0xce`, `0xfe`). The OpenWatch host code should treat it as a second command path rather than a passive discovery UUID.
+This dispatcher carries a vendor/high 16-byte command set that overlaps some Channel-A opcodes (e.g. `0x48`, `0x50`, `0x51`, `0x69`, `0x6a`, `0x3c`, `0x3e`) and adds vendor-specific commands (`0x90`–`0x9f`, `0xce`, `0xfe`). The statically-proven GATT entry point is Channel A, not the published `0xFEE7` write characteristic; OpenWatch should not prefer FEE7 writes without live-capture evidence.
 
 ### 8.2 0x48 `'H'` today-sport totals (`fee7_send_today_sport_totals`)
 
@@ -6366,7 +6383,7 @@ digest question is narrowed:
 
 1. ~~Recover the exact meaning of opcode `0x2b` mixture container fields.~~ **Resolved** — see §3.1. The 16-byte `mixture_state_t` is now fully decoded; remaining unknowns are semantic (BCD field interpretation, period-data byte meanings).
 2. **Identify the 32-byte `image_digest` algorithm used for OTA and the container header digest at `0x1c4`.** Still open for the bootloader image. `body.bin` validates only the first OTA container word (`ota_container_magic` = little-endian `0x81bdc3e5`), stages bytes from file offset `0x50` onward, and checks `written_bytes == expected_size - 0x50`. The digest region is staged as raw data but not validated by this body path. The separate `0x8721bee2` magic belongs to the config blob (§5.3), not OTA.
-3. ~~Determine whether the `0xFEE7` vendor service has any active protocol role in the firmware.~~ **Resolved** — see §8; it implements a second 16-byte command channel.
+3. ~~Determine whether the `0xFEE7` vendor service has any active protocol role in the firmware.~~ **Corrected by radare2** — see §8 and `firmwares/_re/fee7-gatt/evidence.md`; the service is registered, but static routing does not connect its write callback to the 16-byte dispatcher.
 
 ### 10.0 What's in this doc (final tally)
 

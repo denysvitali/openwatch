@@ -26,12 +26,9 @@ class WatchManager extends ChangeNotifier {
     _inboundSub = _transport.inboundA.listen(_onFrame);
     _hub = ProtocolHub(_transport);
     _hub.ancs.events.listen(_onAncsEvent);
-    // Battery push on the vendor 0xFEE7 channel: H59MA v14 emits a
-    // 'a' status response (0x61) whenever the battery state changes,
-    // plus a one-shot 'H' handshake (0x48) at link-up that carries the
-    // same percent + a charge flag. Both streams are optional — only
-    // available when the watch advertises 0xFEE7 — so null-check
-    // before subscribing.
+    // Optional 0xFEE7 notify frames seen in watch logs can mirror battery-like
+    // state, but static H59MA v14 routing does not connect FEE7 writes to the
+    // 16-byte command dispatcher. Treat this as passive observability only.
     final fee7 = _hub.fee7;
     if (fee7 != null) {
       _fee7BatterySub = fee7.onBattery.listen(_onFee7Battery);
@@ -212,8 +209,7 @@ class WatchManager extends ChangeNotifier {
       // Fire-and-forget for the periodic stats — but wait briefly so the
       // initial replies land before we declare "ready" to the UI.
       final fresh = DateTime.now();
-      final initialReplyOpcodes = {OpA.todaySport};
-      if (!_hub.hasFee7) initialReplyOpcodes.add(OpA.battery);
+      final initialReplyOpcodes = {OpA.todaySport, OpA.battery};
       await Future.wait([
         refreshSteps(),
         refreshBattery(),
@@ -469,13 +465,10 @@ class WatchManager extends ChangeNotifier {
     () => _transport.sendA(Commands.readTodaySport()),
   );
 
-  Future<void> refreshBattery() => _withActionSpan('refresh_battery', () {
-    final fee7 = _hub.fee7Service;
-    if (fee7 != null) {
-      return fee7.sendCommand(Codec.buildChannelA(Fee7.battery));
-    }
-    return _transport.sendA(Commands.readBattery());
-  });
+  Future<void> refreshBattery() => _withActionSpan(
+    'refresh_battery',
+    () => _transport.sendA(Commands.readBattery()),
+  );
 
   /// Waits until the [BleTransport] has received a frame for each opcode in
   /// [opcodes], or [timeout] elapses. Used during the handshake to avoid
@@ -615,12 +608,7 @@ class WatchManager extends ChangeNotifier {
   Future<void> enableNotifications(String phoneModel) =>
       _withActionSpan('enable_notifications', () async {
         final bind = Commands.bindAncs(phoneModel);
-        final fee7 = _hub.fee7Service;
-        if (fee7 != null) {
-          await fee7.sendCommand(bind);
-        } else {
-          await _transport.sendA(bind);
-        }
+        await _transport.sendA(bind);
         await _transport.sendA(Commands.enableAncs());
         _hub.enableAncs(name: 'phone:$phoneModel');
       });

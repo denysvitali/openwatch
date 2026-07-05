@@ -9,14 +9,14 @@ import 'opcodes.dart';
 
 final _log = AppLog.instance;
 
-/// Opcode-aware decoder + dispatcher for the vendor `0xFEE7` 16-byte command
-/// channel (H59MA v14 `FUN_0082c944`, see `GHIDRA_DECOMPILATION.md` §8).
+/// Opcode-aware decoder + dispatcher for 16-byte frames observed on the vendor
+/// `0xFEE7` notify surface.
 ///
-/// Mirrors the shape of [ChannelADispatcher]: decode is a pure function over
-/// a single 16-byte frame; consumers wire [bind] to a [Fee7Service] and
-/// listen on the typed `on*` streams they care about. Frames whose opcode
-/// the app does not specifically decode are still forwarded on [unknown] as
-/// a [UnaryOpcode], matching the firmware's `FUN_0082bcba` fallthrough.
+/// Mirrors the shape of [ChannelADispatcher]: decode is a pure function over a
+/// single 16-byte frame; consumers wire [bind] to a [Fee7Service] and listen on
+/// the typed `on*` streams they care about. Static H59MA v14 routing does not
+/// prove that FEE7 writes reach the firmware opcode dispatcher, so this class
+/// is passive receive/log decoding unless live captures prove otherwise.
 class Fee7Dispatcher {
   Fee7Dispatcher(this._service);
 

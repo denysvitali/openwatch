@@ -26,9 +26,9 @@ final _log = AppLog.instance;
 ///   * [AncsClient] — mirrors `ancs_add_client` / `ancs_client_cb` /
 ///     `app_parse_notification_source_data` so the host tracks the firmware's
 ///     internal ANCS state.
-///   * [Fee7Service] + [Fee7Dispatcher] — vendor `0xFEE7` parallel channel
-///     (SpO2, status, find-phone, vibration, OTA triggers; see
-///     `GHIDRA_DECOMPILATION.md` §8).
+///   * [Fee7Service] + [Fee7Dispatcher] — optional vendor `0xFEE7`
+///     notify/probe surface. Static H59MA v14 routing does not wire FEE7
+///     writes to the 16-byte dispatcher, so normal commands stay on Channel A.
 ///
 /// Streams surface every typed event; consumers pick the ones they care
 /// about. The hub itself only logs at info level — keep heavy work in the

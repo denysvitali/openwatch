@@ -54,7 +54,7 @@ the same connection (see §2). The cloud layer is a separate HTTPS/JSON + WebSoc
 | `00002A27-…` | READ Hardware Revision | — | `CHAR_HW_REVISION`. First handshake read. |
 | `00002A26-…` | READ Firmware Revision | — | `CHAR_FIRMWARE_REVISION`. Second read (+200 ms); completion → `setReady(true)`. |
 | `00002A23-…` | READ System ID | — | DevInfo. |
-| `0000FEE7-…` | SERVICE Vendor "fee7" | — | Chinese-vendor profile. `fea1` write + CCCD, `fec9` read, `fea2` notify + CCCD, plus `2a00` Device Name. Firmware implements this as an active second 16-byte command channel; OpenWatch treats it as optional. See `firmwares/GHIDRA_DECOMPILATION.md` §8. |
+| `0000FEE7-…` | SERVICE Vendor "fee7" | — | Chinese-vendor profile. `fea1` write + CCCD, `fec9` read, `fea2` notify + CCCD, plus `2a00` Device Name. Static H59MA v14 routing shows its write callback reports generic Realtek service events and does not call the 16-byte opcode dispatcher; OpenWatch treats it as an optional probe/notify surface only. See `firmwares/_re/fee7-gatt/evidence.md`. |
 | `00002A28-…` | — | — | **Phantom.** Bytes at v13 `0x20faf` / v14 `0x1f363` look like `0x2a28` but are a `0x2803` char-decl followed by value-UUID `0x2a00` (Device Name, inside the `0xFEE7` service). The firmware does **not** declare a SW Revision characteristic. |
 
 H59MA firmware stores the BLE UUIDs as little-endian table data and confirms both logical channels
@@ -384,7 +384,7 @@ the generic bitmap below.
 | UVSettingReq | `0x3e` | 01/02 | →watch | w:`[02,en(0/1)]` | read: `[1]`enable | UV auto-measure on/off. |
 | SugarLipidsSettingReq | `0x3a` | type+act | →watch | r:`[type,01]`; w:`[type,02,en(0/1),valLo,valHi]` | `[1]`act, if read `[0]`type,`[2]`en,`[3..4]`value LE,`[5]`supportUnit | Blood sugar/lipids reference config. (per-request waiter) |
 | MenstruationReq | `0x2b` | 01/02 | →watch | w(11B):`[02,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10]` | **MenstruationDataRsp** 16B (per GHIDRA §3.1/§3.1.1, `FUN_0082b078` lazy-init + `FUN_0082af28` read-memcpy): `[0]`sentinel (`0xCA`=present; lazy-init zeroes; quirk — `rsp[0]` is overwritten with `start_date_bcd[0]` on read, so host must re-stamp `rsp[0]=0x2B`), `[1]`startDate-yr BCD, `[2]`cycleLenDays BCD, `[3]`startDate-day BCD, `[4..5]`=`currentDay − record[4]` (u16 LE on write, low byte only returned), `[6..7]`=`currentMonth − record[6]` (u16 LE on write, low byte only returned), `[8..12]`=5B opaque `periodData` (semantics not RE-resolvable), `[13..15]`=padding (always zero on write/read-back). Decode via `MixtureState.tryParse`. | Menstrual-cycle config. |
-| HealthEcgRsp (notify) | **needs live capture** | — | watch→ | n/a (session under `0x69` type=7) | Statically unresolvable in H59MA v14 — §10.2 unified inventory (GHIDRA §10.2 lines 6322–6396) enumerates every FEE7 opcode statically resolved and none match the `[status,ecgInterval,ppgInterval]` shape. §8.5 per-mode start dispatch (lines 5228–5236) has no mode-0x07 (ECG) entry — falls into HR-mode-1 fallback (`health_post_start_measure_event(1)`). Do not infer a payload layout from §8.5 fallback semantics. | ECG status during ECG session. Listener opcode not statically resolvable. |
+| HealthEcgRsp (notify) | **needs live capture** | — | watch→ | n/a (session under `0x69` type=7) | Statically unresolvable in H59MA v14 — §10.2 unified inventory (GHIDRA §10.2 lines 6322–6396) enumerates every vendor/high opcode statically resolved and none match the `[status,ecgInterval,ppgInterval]` shape. §8.5 per-mode start dispatch (lines 5228–5236) has no mode-0x07 (ECG) entry — falls into HR-mode-1 fallback (`health_post_start_measure_event(1)`). Do not infer a payload layout from §8.5 fallback semantics. | ECG status during ECG session. Listener opcode not statically resolvable. |
 | PpgDataRspCmd (notify) | **needs live capture** | — | watch→ | n/a (ECG/PPG session) | Statically unresolvable in H59MA v14 — the only PPG-related handler is §3.10 `0x2c` SpO2 (an enable-bit + auto-measure cadence), NOT a real-time stream from a `0x69` type=7 session. Do not infer a payload layout. | Raw PPG + HR stream. Listener opcode unresolved. |
 
 **StartHeartRate type enum:** HEARTRATE=1, BLOODPRESSURE=2, BLOODOXYGEN=3, FATIGUE=4, HEALTHCHECK=5,
@@ -419,11 +419,11 @@ REALTIMEHEARTRATE=6, ECG=7, PRESSURE=8, BLOOD_SUGAR=9, HRV=0xa, BODY_TEMPERATURE
 | AppSport (notify) | `0x77` | — | watch→ | n/a | `b0`=gpsStatus; if==6 ts=`bytesToInt(b[2..6])` LE | Watch requests phone GPS-sport sync. |
 | AppGps (notify) | `0x74` | — | watch→ | n/a | same as AppSport | Watch GPS sync notify. |
 
-### 4.5 Notifications / weather / Muslim (Channel A + FEE7 bind)
+### 4.5 Notifications / weather / Muslim (Channel A)
 
 | Name | Opcode | Sub | Dir | Request | Response | Meaning |
 |---|---|---|---|---|---|---|
-| BindAncsReq | `0x04` | `0x02` | →watch | FEE7-native on H59MA v14: `[02, verBucket, UTF-8 MODEL≤12B]` (APK uses `verBucket`: 0x0a SDK29/30, 0x09 SDK28, 0x08 SDK26/27, else 0). Firmware stores a 12-byte model slot from request offset 3. | one-byte ACK `[0x04]` | Register phone identity for ANCS attribute parsing. OpenWatch sends this over FEE7 when available; Channel-A frame fallback is retained for older transports. |
+| BindAncsReq | `0x04` | `0x02` | →watch | Channel-A frame `[02, verBucket, UTF-8 MODEL≤12B]` (APK uses `verBucket`: 0x0a SDK29/30, 0x09 SDK28, 0x08 SDK26/27, else 0). Firmware stores a 12-byte model slot from request offset 3. Earlier docs called this FEE7-native, but radare2 now shows the FEE7 write callback does not reach the 16-byte dispatcher. | one-byte ACK `[0x04]` | Register phone identity for ANCS attribute parsing. OpenWatch sends this over Channel A. |
 | SetANCSReq | `0x60` | — | →watch | `[FF,9F,FF,FF]` | **ReadANCSRsp**: `pl[0..1]`=stateMask u16 LE | Subscribe ANCS categories (near-all). |
 | SetMessagePushReq | `0x61` | — | →watch | empty | **ReadMessagePushRsp**: deviceSupport1/2/3 = ints @off 2/4/6 | Query message-push capability. |
 | PushMsgUintReq | `0x72` | — | →watch | `[type, argB, argC, content…]` | **PhoneNotifyRsp** (push): `action=pl[0]&0xff`; isReject ⇔ action==1 | Push a notification to watch. |
@@ -438,9 +438,11 @@ REALTIMEHEARTRATE=6, ECG=7, PRESSURE=8, BLOOD_SUGAR=9, HRV=0xa, BODY_TEMPERATURE
 
 #### FEE7 battery / status side channel
 
-The optional `0xFEE7` service uses the same 16-byte additive-checksum frame as
-Channel A, but its opcode namespace is independent and the high bit is not a
-Channel-A error flag.
+The optional `0xFEE7` notify stream can carry 16-byte additive-checksum frames
+in watch logs, and OpenWatch decodes them for observability. Static H59MA v14
+routing does **not** prove that host writes to `fea1` enter this dispatcher; the
+statically-proven entry point for the opcode table below is Channel A. Do not
+prefer FEE7 writes for app flows without live-capture evidence.
 
 | Name | Opcode | Dir | Request | Response | Notes |
 |---|---:|---|---|---|---|
