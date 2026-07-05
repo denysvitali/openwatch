@@ -137,26 +137,11 @@ void main() {
       expect(session.errorMessage, contains('0x42'));
     });
 
-    test('Channel-B NAK code 0 (FUN_0082ee00) does NOT alias rspOk', () {
-      // Per GHIDRA §2.0, a NAK frame is
-      //   [0xBC][count_lo=1][count_hi=0][error_code][cmd][crc_lo][crc_hi]
-      // The OTA state's `acceptRsp` is called with rspType/cmd and
-      // status/error_code. A NAK with error_code=0 (default-slot NAK)
-      // would look identical to a successful RSP from the state
-      // machine's perspective. This test pins that gap: callers must
-      // distinguish NAK frames BEFORE handing them to acceptRsp.
-      //
-      // For now, acceptRsp(rspType: X, status: 0) returns true for any
-      // type — including hypothetical NAK types. The audit recommends
-      // adding a dedicated `rspNak` opcode class and a third
-      // acceptRsp branch to refuse NAK frames regardless of status.
+    test('unknown RSP type transitions to error even with zero status', () {
       session.phase = OtaPhase.data;
-      // NAK type placeholder (not currently in OpB enum). Simulate a
-      // caller passing an unknown type with status=0.
-      expect(sm.acceptRsp(rspType: 0xFE, status: 0), isTrue);
-      // … so the current behaviour silently accepts it. This is the
-      // gap the audit flags.
-      expect(session.phase, OtaPhase.data);
+      expect(sm.acceptRsp(rspType: 0xFE, status: 0), isFalse);
+      expect(session.phase, OtaPhase.error);
+      expect(session.errorMessage, contains('unexpected response type'));
     });
 
     test('connection drop mid-stream: phase frozen, no auto-rollback', () {

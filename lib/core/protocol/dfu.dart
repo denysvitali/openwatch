@@ -80,11 +80,39 @@ class DfuFlasher {
   Completer<int>? _rspWaiter;
 
   void _onRx(Uint8List frame) {
-    if (frame.length < 7 || frame[0] != Codec.channelBMagic) return;
-    final type = frame[1];
-    final status = frame[6];
     final waiter = _rspWaiter;
     if (waiter == null || waiter.isCompleted) return;
+    if (frame.isEmpty || frame[0] != Codec.channelBMagic) return;
+
+    final nak = _parseChannelBNak(frame);
+    if (nak != null) {
+      waiter.completeError(
+        DfuException(
+          'Device NAK: cmd=0x${nak.cmd.toRadixString(16)} '
+          'code=0x${nak.errorCode.toRadixString(16)}',
+        ),
+      );
+      return;
+    }
+
+    final rsp = _parseOtaRsp(frame);
+    if (rsp == null) {
+      waiter.completeError(const DfuException('Malformed OTA response frame'));
+      return;
+    }
+
+    final type = rsp.type;
+    final status = rsp.status;
+    if (!_isKnownOtaRspType(type)) {
+      waiter.completeError(
+        DfuException(
+          'Unexpected OTA response: type=0x${type.toRadixString(16)} '
+          'status=0x${status.toRadixString(16)}',
+        ),
+      );
+      return;
+    }
+
     if (type == OpB.rspLowBattery) {
       waiter.completeError(
         const DfuException('Device refused OTA: battery too low'),
@@ -106,6 +134,50 @@ class DfuFlasher {
 
   Future<void> _send(int cmd, [List<int> payload = const []]) =>
       _transport.sendB(Codec.buildChannelB(cmd, payload));
+}
+
+_OtaRsp? _parseOtaRsp(Uint8List frame) {
+  if (frame.length < 7 || frame[0] != Codec.channelBMagic) return null;
+  if (Codec.isChannelBEmptySentinel(frame)) return null;
+
+  final len = Codec.readU16le(frame, 2);
+  if (len < 1 || frame.length != 6 + len) return null;
+
+  final payload = Uint8List.sublistView(frame, 6, 6 + len);
+  final declaredCrc = Codec.readU16le(frame, 4);
+  final actualCrc = Codec.crc16(payload);
+  if (declaredCrc != actualCrc) return null;
+
+  return _OtaRsp(type: frame[1], status: payload[0]);
+}
+
+_ChannelBNak? _parseChannelBNak(Uint8List frame) {
+  if (frame.length != 7 || frame[0] != Codec.channelBMagic) return null;
+  final frameCount = frame[1] | (frame[2] << 8);
+  if (frameCount != 1) return null;
+
+  final errorCode = frame[3];
+  final cmd = frame[4];
+  final declaredCrc = Codec.readU16le(frame, 5);
+  final actualCrc = Codec.crc16(Uint8List.fromList([errorCode, cmd]));
+  if (declaredCrc != actualCrc) return null;
+
+  return _ChannelBNak(errorCode: errorCode, cmd: cmd);
+}
+
+bool _isKnownOtaRspType(int type) =>
+    type >= OpB.rspOk && type <= OpB.rspLowBattery;
+
+class _OtaRsp {
+  const _OtaRsp({required this.type, required this.status});
+  final int type;
+  final int status;
+}
+
+class _ChannelBNak {
+  const _ChannelBNak({required this.errorCode, required this.cmd});
+  final int errorCode;
+  final int cmd;
 }
 
 class DfuException implements Exception {

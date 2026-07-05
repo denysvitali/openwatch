@@ -532,6 +532,7 @@ additional response bodies.
 | check/verify | `0x04` | →watch | empty | RSP_CMD_FORMAT(4)/status | Request device-side verification. |
 | end/release | `0x05` | →watch | empty | RSP_INNER(5) possible | End session, release GATT callback (reboot/apply). |
 | RX status frame | — | watch→ | n/a | `checkTheData`: len≥6, `[0]==0xBC`, `u16LE@2==len-6`, `CRC16(payload[6..])==u16LE@4`; `[1]`=RSP type, `[6]`=status | Unified OTA response. `onActionResult(type,status)`; type==3 && status==0 ⇒ next pocket / 100% done. |
+| Compact NAK | — | watch→ | n/a | `[BC,01,00,error_code,cmd,crc16(error_code,cmd)]` | Packet-level Channel-B NAK from `FUN_0082ee00`; this is **not** a valid OTA RSP and must be rejected before reading `[6]` as status. |
 
 **RSP type constants** (`byte[1]`): `RSP_OK=0`, `RSP_DATA_SIZE=1`, `RSP_DATA_CONTENT=2`,
 `RSP_CMD_STATUS=3`, `RSP_CMD_FORMAT=4`, `RSP_INNER=5`, `RSP_LOW_BATTERY=6` (device refuses OTA).
@@ -887,6 +888,8 @@ Feedback, Customer-support chat.
 >   against `lib/core/protocol/dfu.dart`.
 > - `RSP_LOW_BATTERY` (type 6) — handled as a hard error on every awaited DFU step
 >   (not just init) in `DfuFlasher._onRx`.
+> - Compact Channel-B NAK (`FUN_0082ee00`) — detected before OTA status parsing;
+>   malformed RSP length/CRC is rejected before any progress step advances.
 > - 12 MB size cap (`0xBB8000`) — pre-flight guard present in `DfuFlasher.flash`.
 > - Channel-A OTA switch opcode (`0x0f`) — emitted via `Commands.switchToOta()`
 >   before the Channel-B flow.

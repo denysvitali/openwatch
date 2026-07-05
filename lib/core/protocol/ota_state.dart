@@ -121,6 +121,12 @@ class OtaStateMachine {
   /// acceptance checks (rspOk = `0`, rspLowBattery = `6`, anything else is a
   /// hard error).
   bool acceptRsp({required int rspType, required int status}) {
+    if (rspType < OpB.rspOk || rspType > OpB.rspLowBattery) {
+      session.errorMessage =
+          'unexpected response type: 0x${rspType.toRadixString(16)}';
+      session.phase = OtaPhase.error;
+      return false;
+    }
     if (rspType == OpB.rspLowBattery) {
       session.errorMessage = 'battery too low';
       session.phase = OtaPhase.error;

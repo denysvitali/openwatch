@@ -24,19 +24,22 @@ class _StubTransport extends FakeBleTransport {
   /// first byte is the Channel-B magic (`0xBC`); `type` is byte[1]
   /// (rspOk=0, rspLowBattery=6, etc.) and `status` is byte[6].
   void injectRsp(int type, {int status = 0}) {
-    // Empty-payload sentinel — the flasher only reads byte[1] (type) and
-    // byte[6] (status), so length-7 is enough: [BC][type][len=1][crc][status][pad][pad]
-    final frame = Uint8List(7);
-    frame[0] = Codec.channelBMagic;
-    frame[1] = type & 0xFF;
-    frame[2] = 0x01; // payload length = 1 (status byte)
-    frame[3] = 0x00;
-    // CRC over payload byte (just `status`); we'll let the flasher ignore
-    // the parser-layer CRC — the OTA flasher does its own validation
-    // directly on the frame, so any 7-byte frame with 0xBC magic reaches
-    // _onRx.
-    frame[6] = status & 0xFF;
-    inB.add(frame);
+    inB.add(Codec.buildChannelB(type, [status & 0xFF]));
+  }
+
+  /// Inject a compact Channel-B NAK from firmware helper `FUN_0082ee00`.
+  void injectNak({required int cmd, int errorCode = 0}) {
+    final crc = Codec.crc16(Uint8List.fromList([errorCode & 0xFF, cmd & 0xFF]));
+    inB.add(
+      Uint8List.fromList([
+        Codec.channelBMagic,
+        0x01,
+        0x00,
+        errorCode & 0xFF,
+        cmd & 0xFF,
+        ...Codec.u16le(crc),
+      ]),
+    );
   }
 }
 
@@ -524,37 +527,77 @@ void main() {
       await expectTask;
     });
 
-    test('Channel-B NAK code 0 (FUN_0082ee00) surfaces as device error', () {
-      // Per GHIDRA_DECOMPILATION.md §2.0, a NAK frame is
-      //   [0xBC][count=1][error_code][cmd][crc_lo][crc_hi]
-      // — 7 bytes with error_code at byte[3], NOT byte[6].
-      // The OTA flasher currently reads `frame[6]` as status, so a
-      // firmware-issued NAK (error_code at byte[3], 0x00 length-sentinel)
-      // would be misinterpreted. This test pins the current behaviour:
-      // a NAK where byte[6]=0 looks like rspOk type=NAK. We document
-      // the gap so the audit report can flag it.
+    test('malformed OTA response frame surfaces as DfuException', () async {
       final t = _StubTransport();
       final flasher = DfuFlasher(t);
       final fw = _fakeFirmware(1024);
-      final stream = flasher.flash(fw);
-      // We cannot actually trigger this through the flasher because
-      // the parser never reassembles a frame with length=0xFFFF. The
-      // flasher subscribes to `inboundB` (raw notify chunks), so the
-      // NAK arrives as 7 raw bytes. The flasher only consumes the
-      // status byte at frame[6]; in a real NAK that byte is the high
-      // byte of the CRC. We assert the current behaviour: the NAK is
-      // silently ignored (the flasher's status-byte read returns 0,
-      // so the rsp looks like rspOk), and the stream stays open.
-      //
-      // This test is informational — it documents the gap rather than
-      // asserting a fix. See the audit report.
-      expect(stream, isNotNull); // smoke test that the flasher is constructible
-      final sub = stream.listen((_) {}); // keep the single subscription alive
-      addTearDown(() async {
-        await sub.cancel();
-        await t.inB.close();
-      });
+      final watch = _watch(flasher.flash(fw));
+      await watch.waitForCount(1).timeout(const Duration(seconds: 1));
+      await Future<void>.delayed(const Duration(milliseconds: 600));
+      await watch
+          .waitForCount(2)
+          .timeout(const Duration(seconds: 1)); // "Starting session"
+      await _waitForSendB(t);
+
+      final expectTask = expectLater(
+        watch.done.timeout(const Duration(seconds: 12)),
+        throwsA(
+          isA<DfuException>().having(
+            (e) => e.message,
+            'message',
+            contains('Malformed OTA response'),
+          ),
+        ),
+      );
+      // Valid length and status, bad CRC.
+      t.inB.add(
+        Uint8List.fromList([
+          Codec.channelBMagic,
+          OpB.rspOk,
+          0x01,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+        ]),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      await expectTask;
     });
+
+    test(
+      'Channel-B NAK code 0 (FUN_0082ee00) surfaces as device error',
+      () async {
+        // Per GHIDRA_DECOMPILATION.md §2.0, a NAK frame is
+        //   [0xBC][count_lo=1][count_hi=0][error_code][cmd][crc_lo][crc_hi]
+        // — 7 bytes with error_code at byte[3], NOT byte[6]. The flasher
+        // must reject it before trying to read a normal OTA status byte.
+        final t = _StubTransport();
+        final flasher = DfuFlasher(t);
+        final fw = _fakeFirmware(1024);
+        final watch = _watch(flasher.flash(fw));
+        await watch.waitForCount(1).timeout(const Duration(seconds: 1));
+        await Future<void>.delayed(const Duration(milliseconds: 600));
+        await watch
+            .waitForCount(2)
+            .timeout(const Duration(seconds: 1)); // "Starting session"
+        await _waitForSendB(t);
+
+        final expectTask = expectLater(
+          watch.done.timeout(const Duration(seconds: 12)),
+          throwsA(
+            isA<DfuException>().having(
+              (e) => e.message,
+              'message',
+              allOf(contains('Device NAK'), contains('cmd=0x1')),
+            ),
+          ),
+        );
+        t.injectNak(cmd: OpB.otaStart);
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        await expectTask;
+      },
+    );
   });
 
   group('DfuFlasher connection drop', () {
