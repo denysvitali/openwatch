@@ -220,7 +220,18 @@ Total: **4 services / 11 chars / 4 CCCDs** in both builds (the prior `RE_FIRMWAR
 
 ### Attribute-record structure
 
-Fixed `0x1c` (28)-byte records, half-word aligned. Each declared characteristic = two records (a `0x2803` decl + the value record) = `0x38` bytes between consecutive value-UUID offsets.
+The GATT region is four Realtek-style service tables, not one uninterrupted
+fixed-stride array. The field names match public Realtek `T_ATTRIB_APPL`
+examples (`wFlags`, `bTypeValue`, `bValueLen`, `pValueContext`,
+`wPermissions`); H59MA's byte layout is verified below and in
+`firmwares/_re/gatt-table/evidence.md`.
+
+Most attributes use a `0x1c` (28-byte), half-word-aligned inline form. In that
+form the ATT UUID begins at record `+0x04`, `bValueLen` is at `+0x14`,
+`pValueContext` is the 32-bit word at `+0x16`, and the final permission word is
+at `+0x1a`. Each declared characteristic still occupies two records (a
+`0x2803` declaration and the value record) = `0x38` bytes between consecutive
+value-UUID offsets.
 
 ```text
 r2 -2 -q -a arm -b 16 -e asm.cpu=cortex -e scr.color=0 -c 'px 28 @ 0x20c72' _re/v13/body.bin
@@ -231,15 +242,24 @@ r2 -2 -q -a arm -b 16 -e asm.cpu=cortex -e scr.color=0 -c 'px 28 @ 0x20c72' _re/
 0x00020c92  02 00 03 28 ...                              # next record: 0x2803 char-decl
 ```
 
-128-bit UUIDs use a 16-byte inline form prefixed by a `0x05` type tag (the `0x05` byte is "128-bit UUID" indicator vs inline 16-bit). Value pointers in the table point into the body itself: e.g. v13 ChanB svc-decl has a value-ptr to `0x0084717c`.
+128-bit characteristic values use the same `0x1c` inline record with a
+`0x0005` flag/type word and the 16 UUID bytes at `+0x04`. 128-bit primary
+services are the special case: the 16-byte UUID blob is stored immediately
+before a compact `0x1a` service entry, and that entry's `pValueContext` points
+back to the UUID blob. Example: v14 Channel-B service UUID bytes at `0x1f130`
+are followed by a service entry at `0x1f140`; its pointer word is
+`0x00845530`, which converts to body offset `0x1f130`
+(`0x00845530 - 0x00826400`).
 
-Channel-A service record (v13 `0x20e40`):
+Channel-A service UUID blob plus compact service entry (v13):
 
 ```text
 0x00020e40  9e ca dc 24 0e e5 a9 e0 93 f3 a3 b5 f0 ff 40 6e
             ^^^^^^^^^^^^^^^^ 16-byte LE UUID = 6e40fff0-b5a3-f393-e0a9-e50e24dcca9e (reversed)
 0x00020e50  00 08 00 28 00 00 00 00 00 00 00 00 00 00 00 00
-            ^^^^^^^^^^^ 0x2800 PRIMARY SERVICE DECL
+            ^^^^^^^^^^^ compact 128-bit primary service entry: 0x2800
+0x00020e60  00 00 10 00 40 72 84 00 01 00
+                        ^^^^^^^^^^^ pointer to UUID blob (0x00847240)
 ```
 
 Channel-A notify char record (v13 `0x20ec2`):
@@ -250,10 +270,24 @@ Channel-A notify char record (v13 `0x20ec2`):
             16-byte LE UUID for 6e400003 (LE u16 = 03 00)
 0x00020ed2  00 00 00 00 00 00 00 01 00 00 12 00
                               ^^^^^^^^^^^^
-                              perm 0x12 (NOTIFY) + CCCD follows
+                              final word 0x0100; CCCD follows
 ```
 
-The `0x05` tag for 128-bit UUIDs is visible just before each UUID in the record stream.
+Service tables end with a callback block (read/write/CCCD update in Realtek
+examples) before the next service table starts. The blocks between services
+include a leading 2-byte pad; the final fee7 block starts immediately after
+the last CCCD record. v14 examples:
+
+```text
+DevInfo callbacks @0x1f122: 0000 6fe5 8200 0000 0000 0000 0000
+ChanB   callbacks @0x1f1e6: 0000 29e7 8200 53e7 8200 b9e7 8200
+ChanA   callbacks @0x1f2aa: 0000 51e8 8200 7be8 8200 cfe8 8200
+fee7    callbacks @0x1f3b2: a3e9 8200 4dea 8200 bbea 8200
+```
+
+The first DevInfo callback block only has a read callback populated; write and
+CCCD callbacks are null, as expected for read-only Device Information
+characteristics.
 
 ---
 
@@ -615,7 +649,7 @@ listed by the earlier radare2 notes:
    The compare cascade handles sleep `0x11/0x12/0x27`, activity `0x2a`, alarm `0x2c`, file table `0x41/0x43/0x46`, no-op placeholders `0x13/0x29/0x3b/0x47/0x4b`, device-info/config `0x5a`, and explicit NAK-code-2 commands `0x21..0x24`; unknown commands NAK with code `0`.
    Remaining work is payload semantics for opaque/no-op handlers, not command acceptance.
 6. **Whether the OTA bootloader validates `image_digest` and `signature_a`** at flash time. Ghidra shows `body.bin` only checks the OTA container magic `0x81bdc3e5` in packet 1 and stages `size - 0x50` bytes. The `0x8721bee2` magic belongs to the config blob.
-7. **GATT attribute table is laid out in fixed 28-byte records** — but the precise record fields (perm byte, value-handle byte, flash-value-pointer semantics) need a runnable emulator to confirm.
+7. ~~GATT attribute table record fields.~~ **Resolved for static layout:** H59MA uses Realtek-style service tables with `0x1c` inline attributes, compact `0x1a` entries for 128-bit primary services whose `pValueContext` points to the preceding UUID blob, and callback triples between service tables. See §3 and `firmwares/_re/gatt-table/evidence.md`. Runtime callback side effects remain covered by the per-handler RE sections.
 8. **`0xfee7` remaining vendor command semantics** — Ghidra confirms the service is an active second 16-byte command channel, and the `0x97..0xa0` high switch is now mapped in `firmwares/GHIDRA_DECOMPILATION.md` §8.1. Raw memory read/write (`0xbf`/`0xc0`) are resolved in §8.17 and rechecked with radare2 at v14 body offsets `0x5694` / `0x570c` plus the shared streamer at `0x5538`. `0xc1` health poll and `0xc3` OTA-control byte indexes are also statically resolved at offsets `0x64ce` / `0x64e0`; remaining work is live runtime-impact verification for the OTA-control side effects.
 
 ---
@@ -666,6 +700,7 @@ python3 firmwares/_re/ble-hunt/scan.py
 | `firmwares/_re/strings-mining/` | `findings.txt` + per-category grep files (`ota.txt`, `cmd_proto.txt`, `paths.txt`, `hex_uuid.txt`, `watchface.txt`, `vendors.txt`, `ble.txt`, `uuids.txt`, `mac_hex.txt`, `ble_full.txt`, `vendors_full.txt`, `paths2.txt`, `commands.txt`) |
 | `firmwares/_re/diff/` | `fwtool_compare.txt`, large identical/divergent regions, `v{13,14}_{real,natural_strings,real_only}.txt`, `strings_only_in_v{13,14}.txt`, `feature_words_v14.txt`, `regions_collapsed.txt` |
 | `firmwares/_re/channel-b-dispatch/evidence.md` | radare2 evidence for Channel-B first-stage routing and the corrected low-command switch table shape |
+| `firmwares/_re/gatt-table/evidence.md` | radare2 evidence for Realtek-style GATT record fields, 128-bit service UUID pointers, and service callback triples |
 | `firmwares/RE_FIRMWARE.md` | superseded by this document (initial RE notes; many field-level errors) |
 | `firmwares/R2_ANALYSIS.md` | superseded by this document (r2 deep-dive; itself corrects RE_FIRMWARE.md) |
 | `PROTOCOL.md` | APK-derived protocol spec that this firmware corroborates |

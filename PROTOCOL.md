@@ -60,7 +60,8 @@ the same connection (see §2). The cloud layer is a separate HTTPS/JSON + WebSoc
 H59MA firmware stores the BLE UUIDs as little-endian table data and confirms both logical channels
 plus the vendor `0xFEE7` service. Body offsets below are for the relevant **UUID bytes** (the
 preceding attribute-table offset in `RE_FIRMWARE.md` differs by a few bytes — see
-`firmwares/R2_ANALYSIS.md` §7 for the corrected table).
+`firmwares/R2_ANALYSIS.md` §7 for the corrected table). `firmwares/FIRMWARE_ANALYSIS.md`
+§3 documents the underlying Realtek-style attribute record layout.
 
 | UUID | v13 body offset | v14 body offset |
 |---|---:|---:|
