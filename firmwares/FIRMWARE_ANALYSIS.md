@@ -612,7 +612,7 @@ listed by the earlier radare2 notes:
 5. **Channel B sub-cmd bytes that the watch accepts beyond `PROTOCOL.md` §3.2** (R2 lists `0x06`, `0x20`, and `0x25..0x82`; the spec covers a subset).
 6. **Whether the OTA bootloader validates `image_digest` and `signature_a`** at flash time. Ghidra shows `body.bin` only checks the OTA container magic `0x81bdc3e5` in packet 1 and stages `size - 0x50` bytes. The `0x8721bee2` magic belongs to the config blob.
 7. **GATT attribute table is laid out in fixed 28-byte records** — but the precise record fields (perm byte, value-handle byte, flash-value-pointer semantics) need a runnable emulator to confirm.
-8. **`0xfee7` remaining vendor command semantics** — Ghidra confirms the service is an active second 16-byte command channel, and the `0x97..0xa0` high switch is now mapped in `firmwares/GHIDRA_DECOMPILATION.md` §8.1. Several inline handlers still need deeper semantic naming, especially raw memory read/write (`0xbf`/`0xc0`) and OTA hooks (`0xc1`/`0xc3`).
+8. **`0xfee7` remaining vendor command semantics** — Ghidra confirms the service is an active second 16-byte command channel, and the `0x97..0xa0` high switch is now mapped in `firmwares/GHIDRA_DECOMPILATION.md` §8.1. Raw memory read/write (`0xbf`/`0xc0`) are resolved in §8.17 and rechecked with radare2 at v14 body offsets `0x5694` / `0x570c` plus the shared streamer at `0x5538`. Remaining work is runtime-impact verification for OTA/control hooks such as `0xc1`/`0xc3`.
 
 ---
 

@@ -278,8 +278,11 @@ class Fee7 {
   static const int unary9e = 0x9e; // FUN_00827cc8
   static const int unary9f = 0x9f; // FUN_00827b16
   static const int statusFrame = 0xa0; // FUN_00827d1a
-  static const int unaryBf = 0xbf;
-  static const int unaryC0 = 0xc0;
+  static const int memoryWrite = 0xbf; // Raw host-addressed memory write
+  static const int memoryRead = 0xc0; // Raw host-addressed memory read stream
+  static const int unaryBf = memoryWrite;
+  @Deprecated('Use memoryRead; 0xc0 emits fragmented memory-read chunks.')
+  static const int unaryC0 = memoryRead;
   static const int unaryC4 = 0xc4;
   static const int unaryC5 = 0xc5;
   static const int unaryC8 = 0xc8;
@@ -289,7 +292,7 @@ class Fee7 {
   static const int vibrationPattern = 0xfe; // FUN_00844214
 
   // Special handling
-  static const int longResponse = 0xc1; // Fragmented long reply
+  static const int longResponse = 0xc1; // One-shot health/status poll
   static const int otaTrigger = 0xc3; // Routes into OTA state machine
 
   /// Whether [opcode] should be decoded as a `UnaryOpcode` (no payload decode).
@@ -307,8 +310,7 @@ class Fee7 {
       case unary9e:
       case unary9f:
       case statusFrame:
-      case unaryBf:
-      case unaryC0:
+      case memoryWrite:
       case unaryC4:
       case unaryC5:
       case unaryC8:

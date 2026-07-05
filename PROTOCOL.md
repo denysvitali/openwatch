@@ -446,6 +446,8 @@ Channel-A error flag.
 | BatteryStatus | `0x03` | both | bare opcode | `[percent, chargingFlag]` | Direct battery response. Verified in H59MA v14 at body offset `0x587e`: byte 1 is the percent helper result, byte 2 is non-zero when the charge-state helper is non-zero. |
 | Fee7Handshake | `0x48` (`'H'`) | both | bare opcode | 15-byte frame: hw version bytes, fw version bytes, battery counter `% 100`, status u16 | First vendor-side info block; OpenWatch decodes battery/status from this when present. |
 | LiveStatus | `0x61` (`'a'`) | both | bare opcode | active: `statusValue u32LE`; idle: all-zero ACK | Reads `DAT_0082bfd4 + 0x2c` at body offset `0x5ae6`. The low byte mirrors the live status source used for battery-like updates, but hosts should keep the full u32 for diagnostics. |
+| VendorMemWrite | `0xbf` | both | `[addr u32BE, len, bytes...]`, len clamps to `8` | self-marker ACK `[0xbf,0...,0xbf]` | Raw arbitrary-address write, verified at v14 body offset `0x5694`. OpenWatch must not call this outside explicit developer/debug tooling. |
+| VendorMemRead | `0xc0` | both | `[addr u32BE, len u32BE]`; zero len defaults to `0x10`, max `0x200` | shared fragmented streamer: each frame is `[0xc0, up to 14 copied bytes, cksum]` | Raw arbitrary-address read, verified at v14 body offset `0x570c`; the shared streamer at `0x5538` adds no wire sequence byte, so host tooling assigns arrival-order sequence numbers. |
 
 ### 4.6 Channel-A status responses (no request class found here)
 

@@ -45,10 +45,12 @@ class Fee7Dispatcher {
   late final _mode = _ctrl<ModeControl>();
   late final _modeCont = _ctrl<ModeControlCont>();
   late final _long = _ctrl<LongResponse>();
+  late final _memoryRead = _ctrl<MemoryReadChunk>();
   late final _ota = _ctrl<OtaTrigger>();
   late final _vibration = _ctrl<VibrationPattern>();
   late final _unary = _ctrl<UnaryOpcode>();
   late final _unknown = _ctrl<UnaryOpcode>();
+  int _memoryReadSeq = 0;
 
   /// `0x36` SpO2/HR read or set; `pl[0]` selects read vs set.
   Stream<SpO2HrUpdate> get onSpO2Hr => _spo2Hr.stream;
@@ -85,8 +87,13 @@ class Fee7Dispatcher {
   /// `0x6a` 'j' continuation of `0x69` mode control.
   Stream<ModeControlCont> get onModeControlCont => _modeCont.stream;
 
-  /// `0xc1` long/fragmented response.
+  /// `0xc1` one-shot health/status response.
   Stream<LongResponse> get onLongResponse => _long.stream;
+
+  /// `0xc0` raw memory-read streamer chunks. The firmware's shared
+  /// fragmented streamer carries no wire sequence byte, so [MemoryReadChunk.seq]
+  /// is assigned by arrival order.
+  Stream<MemoryReadChunk> get onMemoryReadChunk => _memoryRead.stream;
 
   /// `0xc3` OTA trigger; `pl[2]==1` routes to OTA state machine.
   Stream<OtaTrigger> get onOta => _ota.stream;
@@ -96,7 +103,7 @@ class Fee7Dispatcher {
 
   /// Catch-all unary opcodes that the firmware echoes/acks as the opcode
   /// alone: `0x90`, `0x91`, `0x92..0x96`, `0x9e`, `0x9f`, `0xa0`, `0xbf`,
-  /// `0xc0`, `0xc4`, `0xc5`, `0xc8`, `0xc9`, `0xcd`, `0xce`, `0xfe`.
+  /// `0xc4`, `0xc5`, `0xc8`, `0xc9`, `0xcd`, `0xce`.
   Stream<UnaryOpcode> get onUnary => _unary.stream;
 
   /// Unrecognized opcodes (still surfaced as [UnaryOpcode] so observability
@@ -157,6 +164,13 @@ class Fee7Dispatcher {
         _modeCont.add(_decodeModeControlCont(pl));
       case Fee7.longResponse:
         _long.add(LongResponse(opcode: opcode, payload: pl));
+      case Fee7.memoryRead:
+        _memoryRead.add(
+          MemoryReadChunk(
+            seq: _memoryReadSeq++,
+            payload: Uint8List.fromList(pl),
+          ),
+        );
       case Fee7.otaTrigger:
         _ota.add(_decodeOtaTrigger(pl));
       case Fee7.echoBase:
@@ -443,11 +457,22 @@ class ModeControlCont {
   final Uint8List payload;
 }
 
-/// `0xc1` long/fragmented response — surfaced raw for reassembly by the
-/// caller.
+/// `0xc1` one-shot health/status response.
 class LongResponse {
   const LongResponse({required this.opcode, required this.payload});
   final int opcode;
+  final Uint8List payload;
+}
+
+/// One chunk from `0xc0` raw memory read.
+///
+/// H59MA v14 builds each response with the shared `FUN_0082b938` streamer:
+/// byte 0 is `0xc0`, bytes 1..14 are consecutive bytes copied from the
+/// requested address, and byte 15 is the additive checksum. The streamer does
+/// not include a wire sequence byte, so [seq] is assigned locally.
+class MemoryReadChunk {
+  const MemoryReadChunk({required this.seq, required this.payload});
+  final int seq;
   final Uint8List payload;
 }
 

@@ -386,6 +386,37 @@ void main() {
       await svc.dispose();
     });
 
+    test('routes 0xc0 memory-read fragments outside unary stream', () async {
+      final host = _StubHost();
+      final svc = Fee7Service.attach(host);
+      final d = Fee7Dispatcher(svc);
+      d.bind();
+
+      final chunks = <MemoryReadChunk>[];
+      final unaryEvents = <UnaryOpcode>[];
+      final chunkSub = d.onMemoryReadChunk.listen(chunks.add);
+      final unarySub = d.onUnary.listen(unaryEvents.add);
+
+      host.inbound.add(
+        Codec.buildChannelA(Fee7.memoryRead, List<int>.generate(14, (i) => i)),
+      );
+      host.inbound.add(
+        Codec.buildChannelA(
+          Fee7.memoryRead,
+          List<int>.generate(14, (i) => 0x80 + i),
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(Fee7.isUnary(Fee7.memoryRead), isFalse);
+      expect(chunks.map((c) => c.seq), [0, 1]);
+      expect(chunks.first.payload, List<int>.generate(14, (i) => i));
+      expect(unaryEvents, isEmpty);
+      await chunkSub.cancel();
+      await unarySub.cancel();
+      await svc.dispose();
+    });
+
     test('routes 0xfe vibration pattern ONLY to onVibration', () async {
       final host = _StubHost();
       final svc = Fee7Service.attach(host);

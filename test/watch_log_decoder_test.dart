@@ -496,6 +496,24 @@ void main() {
       },
     );
 
+    test('summarizes FEE7 memory-read chunks as raw data frames', () {
+      final frame = Codec.buildChannelA(
+        Fee7.memoryRead,
+        List<int>.generate(14, (i) => 0x20 + i),
+      );
+
+      final decoded = const WatchLogDecoder().decodeHex(
+        frame.map((b) => b.toRadixString(16).padLeft(2, '0')).join('-'),
+        uuid: _fee7,
+      );
+
+      expect(decoded.valid, isTrue);
+      expect(decoded.details['opcode'], '0xc0');
+      expect(decoded.details['label'], 'memoryRead');
+      expect(decoded.details['dataBytes'], 14);
+      expect(decoded.title, contains('memoryRead chunk bytes=14'));
+    });
+
     test('decodes a multi-line log packet across channels', () {
       // A realistic capture: Ch-A battery reply, Ch-A heart-rate setting,
       // Ch-B nap sleep. All three frames stitched into one log blob.

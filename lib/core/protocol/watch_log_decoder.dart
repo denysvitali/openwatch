@@ -606,6 +606,9 @@ class WatchLogDecoder {
         final routesToOta = payload.length >= 3 && payload[2] == 1;
         details['routesToOta'] = routesToOta;
         return 'FEE7 ${_hex(opcode)} otaTrigger routesToOta=$routesToOta';
+      case Fee7.memoryRead:
+        details['dataBytes'] = payload.length;
+        return 'FEE7 ${_hex(opcode)} memoryRead chunk bytes=${payload.length}';
       case Fee7.vibrationPattern:
         final durationMinutes = payload.length >= 2
             ? payload[0] | (payload[1] << 8)
@@ -1469,7 +1472,11 @@ String _labelForFee7(int opcode) {
     case Fee7.hrv:
       return 'hrv';
     case Fee7.longResponse:
-      return 'longResponse';
+      return 'healthPoll';
+    case Fee7.memoryWrite:
+      return 'memoryWrite';
+    case Fee7.memoryRead:
+      return 'memoryRead';
     case Fee7.otaTrigger:
       return 'otaTrigger';
     case Fee7.vibrationPattern:
