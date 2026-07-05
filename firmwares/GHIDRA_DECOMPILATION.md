@@ -3534,9 +3534,10 @@ are issued at high rate.
 
 The `0xc5/0xc8/0xc9 config-byte writes` (§8.1) and the
 self-marker handlers (`0x60`, `0x90`, `0x93`, `0x94`,
-`0x95`, `0x96`) are *not* routed through `FUN_0082be64` —
-they run inline in the dispatcher because their work is
-short-lived (a single config-byte write or an immediate
+`0x95`, `0x96`, `0x98`, `0x9a`, `0x9c`, `0xbf`) are *not*
+routed through `FUN_0082be64` — they run inline in the
+dispatcher because their work is short-lived (a single
+config-byte write, raw-memory write ACK, or immediate
 self-marker ack) and don't need async dispatch.
 
 Like `0xc6` (see §3.14), the `0x08` opcode is *special-cased inline*
@@ -4650,7 +4651,7 @@ and marks the Channel-B receive side busy.
 | `0x93` | Firmware version + build-date string | `fee7_send_fw_version_build_info_93` | see §8.18 |
 | `0x94` | Set vendor test state `1` and restart 1000 ms timer | `fee7_start_test_mode_94` | see §8.19 |
 | `0x95` | Set vendor test state `3` and restart 1000 ms timer | `fee7_start_test_mode_95` | see §8.19 |
-| `0x96` | Sends `[0x96,0,0,0x96,…]`, sets vendor test state `4`, restarts timer | `fee7_start_test_mode_96` — see §8.4 |
+| `0x96` | Sends self-marker ACK `[0x96,0...,0x96]`, sets vendor test state `4`, restarts timer | `fee7_start_test_mode_96` — see §8.4 |
 | `0x97..0xa0` | High-range `switch8` at `fee7_high_switch_default_index` / `fee7_high_switch8_table` | Per-entry thunk — detailed below |
 | `0xbf` | Vendor memory write (host→watch, arbitrary addr, max 8 bytes) | `fee7_vendor_memory_write` | see §8.17 |
 | `0xc0` | Vendor memory read (watch→host, max 0x200 bytes fragmented) | `fee7_vendor_memory_read` | see §8.17 |
@@ -4784,12 +4785,12 @@ also points to the vendor-NAK path.
 | Opcode | Handler | Notes |
 |---|---|---|
 | `0x97` | `fee7_noop_97` | No response. |
-| `0x98` | `fee7_set_session_mode1_ack_98` | Sets session mode `1` via `fee7_set_session_mode_ack_98_9a`, commits blob0 if changed, sends `[0x98]`. |
+| `0x98` | `fee7_set_session_mode1_ack_98` | Sets session mode `1` via `fee7_set_session_mode_ack_98_9a`, commits blob0 if changed, sends self-marker ACK `[0x98,0...,0x98]`. |
 | `0x99` | `fee7_noop_99` | No response. |
-| `0x9a` | `fee7_set_session_mode2_ack_9a` | Sets session mode `2`, commits blob0 if changed, sends `[0x9a]`. |
+| `0x9a` | `fee7_set_session_mode2_ack_9a` | Sets session mode `2`, commits blob0 if changed, sends self-marker ACK `[0x9a,0...,0x9a]`. |
 | `0x9b` | `fee7_send_session_mode_status_9b` | Sends `[0x9b, state_byte]`; `state_byte` is `0x88` in mode `2`, otherwise `0x77`. |
-| `0x9c` | `fee7_stop_factory_test_9c` | Sends `[0x9c,0,0,0x9c]`, stops factory-test timer, clears related state, and calls the `0x08` cancel path. |
-| `0x9d` | Default → Vendor NAK | |
+| `0x9c` | `fee7_stop_factory_test_9c` | Sends self-marker ACK `[0x9c,0...,0x9c]`, stops factory-test timer, clears related state, and calls the `0x08` cancel path. |
+| `0x9d` | Dispatcher return | No response. |
 | `0x9e` | `fee7_send_model_name_9e` | Sends custom blob0 string at `DAT_00827e8c + 0x7a` when enabled, otherwise literal `"H59MA_V1.0"`. |
 | `0x9f` | `fee7_noop_9f` | No response. |
 | `0xa0` | `fee7_send_status_frame_a0` | Multi-byte status frame built from battery/sensor/session state and fields from `DAT_00827e8c`. |
@@ -4860,14 +4861,14 @@ entries decoded from the two `switch8` tables:
 | `0x93` | `fee7_send_fw_version_build_info_93` | Firmware version + build-date string — see §8.18 |
 | `0x94` | `fee7_start_test_mode_94` | Set vendor test state 1 and restart timer — see §8.19 |
 | `0x95` | `fee7_start_test_mode_95` | Set vendor test state 3 and restart timer — see §8.19 |
-| `0x96` | `fee7_start_test_mode_96` | Sends `[0x96,0,0,0x96,...]`, sets state 4, restarts timer — see §8.4 |
+| `0x96` | `fee7_start_test_mode_96` | Sends self-marker ACK `[0x96,0...,0x96]`, sets state 4, restarts timer — see §8.4 |
 | `0x97` | `fee7_noop_97` | No response |
-| `0x98` | `fee7_set_session_mode1_ack_98` | Sets state to `1`, sends `[0x98]` |
+| `0x98` | `fee7_set_session_mode1_ack_98` | Sets state to `1`, sends self-marker ACK `[0x98,0...,0x98]` |
 | `0x99` | `fee7_noop_99` | No response |
-| `0x9a` | `fee7_set_session_mode2_ack_9a` | Sets state to `2`, sends `[0x9a]` |
+| `0x9a` | `fee7_set_session_mode2_ack_9a` | Sets state to `2`, sends self-marker ACK `[0x9a,0...,0x9a]` |
 | `0x9b` | `fee7_send_session_mode_status_9b` | Sends `[0x9b, state_byte]` |
-| `0x9c` | `fee7_stop_factory_test_9c` | Sends `[0x9c,0,0,0x9c]`, stops timer / power-off related |
-| `0x9d` | — | Vendor NAK (default slot) |
+| `0x9c` | `fee7_stop_factory_test_9c` | Sends self-marker ACK `[0x9c,0...,0x9c]`, stops timer / power-off related |
+| `0x9d` | — | Dispatcher return; no response |
 | `0x9e` | `fee7_send_model_name_9e` | Conditional 10-byte copy from `DAT_00827e8c + 0x7a` or `"H59MA_V1.0"` |
 | `0x9f` | `fee7_noop_9f` | No response |
 | `0xa0` | `fee7_send_status_frame_a0` | Multi-byte status frame builder |
@@ -5334,9 +5335,7 @@ for the second `0x90` marker.
 ```c
 void fee7_send_test_ack_90() {
     rsp[0]  = 0x90;            // cmd
-    rsp[12] = 0x90;            // byte 12 (high byte of u32 at offset 12)
-    rsp[15] = 0;               // (byte 15 of u32 at offset 12 → 0x90 from
-                               //  the high byte; see note below)
+    rsp[15] = 0x90;            // self-marker
     FUN_0082ebdc(rsp);
 }
 ```
@@ -6461,10 +6460,9 @@ opcode would have to read each top-level section (§2 / §3 /
 
 The §10.2 table intentionally **omits** opcodes that are
 not actively used on the H59MA v14 (e.g. §2's reserved
-sub-cmds, §3's switch8 default-slot handlers, §8's
-0x97-0x9F reserved range). The 0x9D silent-drop (§8.20) and
-the 0x97-0x9F default-slot (§8.20) opcodes are noted in
-their respective syntheses but not repeated in §10.2.
+sub-cmds and §3's switch8 default-slot handlers). The §8.20
+high-range no-response placeholders and session/model/status
+handlers are noted in their synthesis but not repeated in §10.2.
 
 #### Cross-cutting synthesis index
 
@@ -6478,7 +6476,7 @@ handlers are documented in the 15+ synthesis sections:
 * §5.1 — OTA state machine
 * §6.1 / §6.2 — power-management helpers
 * §7.1 / §7.2 — sensor dispatchers
-* §8.20 — 0x97-0x9F reserved-opcode range
+* §8.20 — 0x97-0xA0 high-range session/status handlers
 * §8.21 — self-marker opcode pattern
 * §8.22 — cross-section wire-format
 * §9.1 — DAT state-buffer map
@@ -6864,7 +6862,7 @@ interpretation.
 void fee7_send_fw_version_build_info_93() {
     // header frame [0x93, 0, ..., 0, 0x93]
     rsp[0]  = 0x93;
-    rsp[12] = 0x93;            // self-marker pattern (like 0x90/0x96/0x60)
+    rsp[15] = 0x93;            // self-marker pattern (like 0x90/0x96/0x60)
     FUN_0082ebdc(rsp);
 
     // build the 14-byte payload from two strings
@@ -6923,9 +6921,8 @@ The handler sends **two frames back-to-back**:
 ```
 byte  0: 0x93                (cmd)
 byte  1..11: 0
-byte 12: 0x93                (self-marker)
-byte 13..14: 0
-byte 15: additive checksum
+byte 12..14: 0
+byte 15: 0x93                (self-marker)
 ```
 
 2. **Version+date frame** (16 B):
@@ -6946,37 +6943,35 @@ padding byte).
 
 Like `0x90` self-marker (§8.6), `0x96` reset-state (§8.4),
 and `0x60` status-field write (§8.16), the `0x93` handler
-uses a **self-marker at bytes 0 + 12** (not 0 + 15). This
-is the *fourth* handler in the table to bypass the additive
-checksum:
+first sends a **header self-marker at bytes 0 + 15**. The
+second version/date frame is a normal data frame with an
+additive checksum. This is the *fourth* handler family in the
+table to send a self-marker ACK:
 
 * `0x90` — marker at bytes 0 + 15
 * `0x96` — marker at bytes 0 + 15
 * `0x60` — marker at bytes 0 + 15
-* `0x93` — marker at bytes 0 + 12
+* `0x93` — header marker at bytes 0 + 15, then a checksumed string frame
 
-The off-by-3 difference (12 vs 15) is deliberate: `0x93`
-ships a 14-byte payload in bytes 1..14 of the *second* frame,
-so byte 15 is reserved for the checksum and the "second
-copy of the marker" goes into byte 12 (the high byte of the
-last u16 of the version+date string).
+The header frame is only an exchange marker. The version/date
+payload is carried by the following checksumed frame.
 
 #### Why two frames?
 
 The handler first sends a **header frame** (with the marker
-at byte 12) so the host SDK can quickly detect the start of a
+at byte 15) so the host SDK can quickly detect the start of a
 `0x93` exchange *before* waiting for the slower version+date
 frame. This is a vendor pattern: a quick "watch is about to
 send a long string" tick, then the actual string. The host
 SDK should:
 
-1. Read the header frame, expect `byte 0 == 0x93 && byte 12
+1. Read the header frame, expect `byte 0 == 0x93 && byte 15
    == 0x93`.
 2. Read the next frame, parse the string from bytes 1..14.
 
-If the host SDK tries to merge both frames into one, the byte
-12 marker in the header would be mis-parsed as part of the
-string (because the header *also* has byte 0 = 0x93).
+If the host SDK tries to merge both frames into one, the
+header would be mis-parsed as an empty string frame because
+the header *also* has byte 0 = 0x93.
 
 #### Pair with `0x48 'H'` handshake (§8.2)
 
@@ -7015,7 +7010,7 @@ a 3-state machine controlled by `DAT_00827e88[0]`:
 ```c
 void fee7_start_test_mode_94() {
     rsp[0]  = 0x94;
-    rsp[12] = 0x94;                  // self-marker pattern
+    rsp[15] = 0x94;                  // self-marker pattern
     FUN_0082ebdc(rsp);
     *DAT_00827e88 = 1;               // state = 1
     FUN_00827b1a();                  // drain worker
@@ -7027,7 +7022,7 @@ void fee7_start_test_mode_94() {
 ```c
 void fee7_start_test_mode_95() {
     rsp[0]  = 0x95;
-    rsp[12] = 0x95;
+    rsp[15] = 0x95;
     FUN_0082ebdc(rsp);
     DAT_00827e88[1] = 0;             // clear secondary flag
     *DAT_00827e88 = 3;               // state = 3
@@ -7038,7 +7033,7 @@ void fee7_start_test_mode_95() {
 #### Behavior common to all three
 
 Each handler ships the same **self-marker response** (cmd
-at byte 0, the same cmd at byte 12, zero elsewhere) — the
+at byte 0, the same cmd at byte 15, zero elsewhere) — the
 **5th and 6th handler in the table** to use this pattern
 (after `0x90`, `0x96`, `0x60`, `0x93`). All three then:
 
@@ -7098,148 +7093,86 @@ runs the test loop.
 
 #### Self-marker pattern (5th and 6th occurrences)
 
-`0x94` and `0x95` use the same `rsp[0] = cmd; rsp[12] = cmd;
-FUN_0082ebdc(rsp)` shape as `0x93` (§8.18). The full set of
-self-marker handlers in the table is now:
+`0x94` and `0x95` use the same `rsp[0] = cmd; rsp[15] = cmd;
+FUN_0082ebdc(rsp)` shape as the `0x93` header (§8.18). The
+full set of self-marker handlers in the table is now:
 
 * `0x60` — bytes 0 + 15 (§8.16)
 * `0x90` — bytes 0 + 15 (§8.6)
-* `0x93` — bytes 0 + 12 (§8.18)
-* `0x94` — bytes 0 + 12 (this section)
-* `0x95` — bytes 0 + 12 (this section)
+* `0x93` — bytes 0 + 15 (§8.18 header frame)
+* `0x94` — bytes 0 + 15 (this section)
+* `0x95` — bytes 0 + 15 (this section)
 * `0x96` — bytes 0 + 15 (§8.4)
 
-The bytes 0 + 12 vs bytes 0 + 15 split matches the
-byte-length of the second-frame payload (handlers that ship
-a payload in bytes 1..14 of the second frame put the marker
-at byte 12; handlers that ship no payload put it at byte 15).
+Every verified self-marker ACK in this group writes the
+second marker at byte 15. `0x93` is the special two-frame
+case: the header uses the byte-15 marker, and the following
+version/date payload frame uses the normal additive checksum.
 
-### 8.20 0x97-0x9f reserved-opcode range summary
+### 8.20 0x97-0xa0 high-range session/status summary
 
-The "reserved for future use" tail of the 0xFEE7 dispatcher
-opcode table. The high-range switch8 at `0x82c6e0` (§8.1)
-*appears* to dispatch 10 opcodes (0x97..0xA0), but in practice
-the switch8 entries all route to **two fallback handlers**
-(per-byte default slot + the `0x9D` short-circuit):
+The high-range switch8 at `0x82c6e0` (§8.1) dispatches ten
+opcodes (`0x97..0xA0`). A later radare2 pass corrected the
+earlier default-slot interpretation: the range contains a mix
+of no-response placeholders and real session/model/status
+handlers. The same switch-table byte sequence appears in v13
+body offset `0x6382` and v14 body offset `0x62e0`; raw evidence
+is in `firmwares/_re/fee7-high/evidence.md`.
 
-```
-0x82c6e0:  0a           ← switch8 count = 10 (opcodes 0x97..0xA0)
-0x82c6e1:  cb cf d3 d7 db df 37 e3 eb   ← 9 per-case offsets
-0x82c6ea:  00 00 23 01 22              ← padding + default-slot thunk address
-```
+| Opcode | v14 target | Callee | Behavior |
+|---:|---:|---:|---|
+| `0x97` | `0x6476` | `0x17a4` | Return only; no response. |
+| `0x98` | `0x647e` | `0x17e6` -> `0x17b8` | Set high-range session mode `1`; self-marker ACK `[0x98, 0..., 0x98]`. |
+| `0x99` | `0x6486` | `0x17ea` | Return only; no response. |
+| `0x9a` | `0x648e` | `0x17ec` -> `0x17b8` | Set high-range session mode `2`; self-marker ACK `[0x9a, 0..., 0x9a]`. |
+| `0x9b` | `0x6496` | `0x17f0` | Send `[0x9b, state_byte, ..., checksum]`; `state_byte` is `0x88` for mode `2`, else `0x77`. |
+| `0x9c` | `0x649e` | `0x181e` | Self-marker ACK, stop factory-test timer, clear related state, call shared cancel path. |
+| `0x9d` | `0x6352` | — | Dispatcher return; no response. |
+| `0x9e` | `0x64a6` | `0x18c8` | Send ASCII model string, default `"H59MA_V1.0"` unless blob0 custom-name flag is enabled. |
+| `0x9f` | `0x64b6` | `0x1716` | Return only; no response. |
+| `0xa0` | `0x64ae` | `0x191a` | Send opaque high-status frame; bytes 1..9 are populated from runtime helpers and persistent state. |
 
-(The `00 00 23 01 22` tail is the half-word address of the
-default-slot thunk at `0x82c6ea + (0x0123 << 1)` — i.e.
-`0x82c6ea + 0x246 = 0x82c930`.)
+#### Cross-reference: ECG/PPG open question
 
-Each per-case offset is a half-word count × 2 from `0x82c6e1`.
-For opcodes 0x97..0xA0 the targets are:
-
-| Opcode | Offset | Target |
-|---:|---:|---|
-| `0x97` | `0xcb` | `0x82c877` (default-slot area) |
-| `0x98` | `0xcf` | `0x82c87f` |
-| `0x99` | `0xd3` | `0x82c887` |
-| `0x9A` | `0xd7` | `0x82c88f` |
-| `0x9B` | `0xdb` | `0x82c897` |
-| `0x9C` | `0xdf` | `0x82c89f` |
-| `0x9D` | `0x37` | `0x82c74f` (**DIFFERENT — exit early**) |
-| `0x9E` | `0xe3` | `0x82c8a7` |
-| `0x9F` | `0xeb` | `0x82c8b7` |
-| `0xA0` | (default) | `0x82c930` |
-
-8 of the 9 per-case entries route to a sequence of NOP
-instructions at addresses `0x82c877..0x82c8b7` (one per
-opcode). The NOPs are not "no-op" in the sense of doing
-nothing — they fall through to the same dispatcher
-default-slot logic that calls `FUN_0082bcba` (the vendor NAK
-from §8.1). The `0x9D` entry is the lone exception — its
-offset `0x37` points to a different function that exits the
-dispatcher *before* the default-slot branch, so `0x9D` ships
-**no response at all** (a clean vendor NOP rather than the
-default vendor NAK).
-
-#### Why all 0x97-0x9F / 0xA0 opcodes default-slot
-
-The 0xFEE7 dispatcher (§8.1) was built with a **forward-
-compatible opcode range**: the firmware allocates entries
-0x97..0xA0 in the switch8 table but only one (0x9D) actually
-points to a non-default handler. The other 8 entries are
-NOP-slots that fall through to the default-slot vendor-NAK
-branch.
-
-The intent is presumably for *future firmware revisions* to
-populate the NOP-slots with vendor-specific handlers without
-needing to expand the switch8 table. A host that wants to
-*use* 0x97..0x9F / 0xA0 today would get a vendor-NAK back
-(§8.1) — the opcode is reserved but unimplemented.
-
-#### 0x9D as the lone non-default
-
-The `0x9D` case (offset `0x37`) routes to a handler that
-*exits the dispatcher early* — it doesn't call
-`FUN_0082bcba` (the vendor NAK) and doesn't send a response.
-This makes 0x9D the only "reserved and silently dropped"
-opcode in the range. A host that sends `0x9D` gets *nothing*
-back — no ack, no NAK. The host SDK must time-out the
-request and treat it as "not implemented" rather than as
-"rejected".
-
-#### Cross-reference: §3 table
-
-The §3 Channel-A table lists `0x97..0x9f` as "(handler)" with
-no detail — that handler is exactly the **default-slot
-vendor-NAK** from §8.1. The §3 dispatcher (`channel_a_dispatch_queued_frame`)
-does *not* have the `0x97..0x9F` range routed (the §3 table
-falls into `FUN_0082ce0c` / `FUN_0082cede` / etc. for opcodes
-in that range), so the 0xFEE7 §8.1 dispatcher is the
-*only* path that recognises 0x97..0x9F.
-
-#### Why this synthesis section exists
-
-The 0x97-0x9F range is the *last* un-decompiled 0xFEE7
-opcode range. Most of the listed handlers are not "missing"
-in the sense of being unknown — they're *deliberately* default-
-slot (reserved for future use). This section captures that
-state so a host SDK that wants to know "is 0x97 implemented
-on H59MA v14?" can answer "no, all of 0x97..0x9F + 0xA0
-return vendor NAK except 0x9D which is silently dropped".
+This corrected high-range map is also a negative result for
+the ECG/PPG notify-opcode search. The implemented responses in
+this range are session ACK/status, model string, and a compact
+opaque status frame; none match the documented
+`[status, ecgInterval, ppgInterval]` or `[rate, ppgValue]`
+shapes. ECG/PPG listener opcodes therefore remain live-capture
+work rather than hidden `0x97..0xA0` FEE7 handlers.
 
 ### 8.21 Self-marker opcode pattern synthesis
 
-Six 0xFEE7 opcodes use a **self-marker response** (write the
+Ten 0xFEE7 opcodes use a **self-marker response** (write the
 cmd byte twice — once at the standard byte 0, once at a
-non-standard second position — instead of the additive
-checksum). The pattern was discovered piecemeal across
-§8.4 / §8.6 / §8.16 / §8.18 / §8.19; this section pulls the
-threads together.
+non-standard byte 15 position — instead of routing through a
+payload checksum builder). The pattern was discovered piecemeal
+across §8.4 / §8.6 / §8.16 / §8.18 / §8.19 / §8.20; this
+section pulls the threads together.
 
 #### The full self-marker list
 
-| Opcode | § | Marker offset | Payload in second frame? | Rationale |
+| Opcode | § | Marker offset | Payload frame? | Rationale |
 |---|---|---:|---|---|
 | `0x60` | §8.16 | byte 15 | no | 1-byte ack with no payload — marker at byte 15 |
 | `0x90` | §8.6 | byte 15 | no | echo with no payload — marker at byte 15 |
-| `0x93` | §8.18 | byte 12 | yes (14 B version+date string) | version string fills bytes 1..14 — marker at byte 12 |
-| `0x94` | §8.19 | byte 12 | no | state-update mode 1 ack with no payload — marker at byte 12 |
-| `0x95` | §8.19 | byte 12 | no | state-update mode 3 ack with no payload — marker at byte 12 |
+| `0x93` | §8.18 | byte 15 | yes, second frame | header ACK at byte 15, then a checksumed version/date string frame |
+| `0x94` | §8.19 | byte 15 | no | state-update mode 1 ack with no payload — marker at byte 15 |
+| `0x95` | §8.19 | byte 15 | no | state-update mode 3 ack with no payload — marker at byte 15 |
 | `0x96` | §8.4 | byte 15 | no | reset-state ack with no payload — marker at byte 15 |
+| `0x98` | §8.20 | byte 15 | no | set high-range session mode 1; marker at byte 15 |
+| `0x9a` | §8.20 | byte 15 | no | set high-range session mode 2; marker at byte 15 |
+| `0x9c` | §8.20 | byte 15 | no | factory-test stop ack; marker at byte 15 |
+| `0xbf` | §8.17 | byte 15 | no | raw memory-write ack; marker at byte 15 |
 
-#### The byte 12 vs byte 15 rule
+#### The byte 15 rule
 
-The marker offset is determined by **whether the second
-frame carries a payload**:
-* **Byte 15** (handlers with no payload) — the marker
-  replaces the checksum at byte 15.
-* **Byte 12** (handlers with a 14-byte payload) — the
-  payload fills bytes 1..14, so the marker goes at byte 12
-  (the highest byte of the last u16 of the payload).
-
-The 0x93 case is the only one that ships a payload AND uses
-the self-marker pattern — the 14-byte ASCII payload
-overlaps with where a checksum would normally sit, so the
-marker moves up to byte 12. All other self-marker handlers
-ship empty bodies and use byte 15.
+Every verified self-marker ACK writes the second marker at
+byte 15. `0x93` is the only two-frame member of the group: its
+first frame is an empty byte-15 self-marker ACK, and its second
+frame carries the version/date ASCII payload with a normal
+additive checksum.
 
 #### Why bypass the checksum at all?
 
@@ -7255,45 +7188,41 @@ with a **second copy of the cmd byte**. The rationale:
   self-identification check: `byte 0 == cmd && byte X == cmd`
   confirms the response came from this opcode without
   needing to compute or compare checksums.
-* For `0x93`, the payload IS the body — the marker at byte
-  12 acts as a "last byte before checksum" sentinel so the
-  host knows where the version+date string ends.
+* For `0x93`, the marker ACK is only the first frame; the
+  following version/date frame uses the normal additive
+  checksum and should be parsed separately.
 
 #### Host SDK recipe
 
 The host SDK that consumes a self-marker response should:
 
-1. **Verify the marker pair** (`byte 0 == byte 15 == cmd` for
-   no-payload handlers; `byte 0 == cmd && byte 12 == cmd`
-   for `0x93`).
-2. **Skip the additive checksum check** — the byte-15 / byte-12
-   value is *not* the additive sum of bytes 0..14. The
-   additive checksum would be wrong (because the marker
-   byte was written instead of the checksum) and verifying
-   it would falsely reject a valid response.
+1. **Verify the marker pair** (`byte 0 == byte 15 == cmd`).
+2. **Validate it as a marker ACK, not as a data frame** — byte 15 was
+   written as the opcode marker. For empty ACKs this often equals the
+   additive sum by construction, but the firmware did not route through
+   the checksumed payload builder.
 3. **Treat the response as opaque** — the body between
    byte 1 and the marker byte (if any) is the meaningful
    payload; everything else is zero-padded.
 
-A naive host SDK that just verifies `byte 15 == additive_sum
-(bytes 0..14)` will reject every self-marker response as
-malformed. The dedicated self-marker handler checks must be
-added to the SDK's per-opcode response validator.
+A host SDK should keep dedicated self-marker checks in its
+per-opcode response validator so these ACKs are not mistaken
+for ordinary payload-bearing frames.
 
-#### Why six handlers?
+#### Why these handlers?
 
 The H59MA firmware uses the self-marker pattern for
 **state-transition / config-write / status-push commands** —
 the kinds of opcodes where the host cares more about
 *whether the command was accepted* than about the body
-content. The six self-marker handlers all fall into this
+content. The self-marker handlers all fall into this
 category:
 
-* `0x60` / `0x90` / `0x94` / `0x95` / `0x96` — pure state
-  transitions ("set / start / ack / reset").
-* `0x93` — single-shot config read with a self-identifying
-  payload (the firmware is "identifying itself" to the
-  host via the cmd+cmd marker pair).
+* `0x60` / `0x90` / `0x94` / `0x95` / `0x96` / `0x98` /
+  `0x9a` / `0x9c` / `0xbf` — state transitions, config writes,
+  or raw write ACKs with no payload body.
+* `0x93` — two-frame config read: self-marker header, then
+  checksumed version/date payload.
 
 The opposite case — *data-rich* opcodes like `0x37 pressureSetting`
 (§3.20) or `0x7a muslim` (§3.11) — uses the **standard
@@ -7305,7 +7234,7 @@ content and the checksum catches transmission errors.
 Channel-A opcodes do *not* use the self-marker pattern. The
 §3 dispatcher (`channel_a_dispatch_queued_frame`) always emits the standard
 additive checksum. The self-marker pattern is a **0xFEE7-
-only** convention, used by 6 of the ~50 documented 0xFEE7
+only** convention, used by 10 of the ~50 documented 0xFEE7
 opcodes (the rest use the standard checksum).
 
 This makes the self-marker pattern a *signal* — a host SDK
@@ -7316,9 +7245,9 @@ and can use a simpler validator path.
 #### Why this synthesis section exists
 
 The self-marker pattern was discovered piecemeal across
-§8.4 / §8.6 / §8.16 / §8.18 / §8.19 — five separate
-handler sections that each note the `byte 0 == byte 15` /
-`byte 0 == byte 12` pattern in isolation. Without a synthesis
+§8.4 / §8.6 / §8.16 / §8.17 / §8.18 / §8.19 / §8.20 — several
+handler sections that each note the `byte 0 == byte 15`
+pattern in isolation. Without a synthesis
 section, a host SDK author reading the doc would have to
 combine those notes themselves to understand the *common*
 pattern. This section pulls the threads together so the
@@ -7478,8 +7407,7 @@ A host SDK that wants to talk to the H59MA v14 firmware:
 4. Verify:
    - For standard-checksum handlers: byte 15 ==
      `FUN_0082b0c4(bytes 0..14)` mod 256.
-   - For §8 self-marker handlers: byte 0 == byte 15 == cmd
-     (or byte 0 == byte 12 == cmd for `0x93`).
+   - For §8 self-marker handlers: byte 0 == byte 15 == cmd.
    - For §3 fragmented responses: `rsp[1] == 1..N` sequence
      numbers and `rsp[15] == checksum` per frame.
 5. Parse the payload per the per-section handler spec.

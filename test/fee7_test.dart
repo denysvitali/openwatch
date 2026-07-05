@@ -204,6 +204,158 @@ void main() {
       await svc.dispose();
     });
 
+    test('does not classify 0x92 no-response placeholder as unary', () async {
+      final host = _StubHost();
+      final svc = Fee7Service.attach(host);
+      final d = Fee7Dispatcher(svc);
+      d.bind();
+
+      final unaryEvents = <UnaryOpcode>[];
+      final unknownEvents = <UnaryOpcode>[];
+      final unarySub = d.onUnary.listen(unaryEvents.add);
+      final unknownSub = d.unknown.listen(unknownEvents.add);
+      host.inbound.add(Codec.buildChannelA(Fee7.highNoop92));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await unarySub.cancel();
+      await unknownSub.cancel();
+
+      expect(Fee7.isUnary(Fee7.highNoop92), isFalse);
+      expect(unaryEvents, isEmpty);
+      expect(unknownEvents.single.opcode, Fee7.highNoop92);
+      await svc.dispose();
+    });
+
+    test('routes 0x93 firmware build info outside unary stream', () async {
+      final host = _StubHost();
+      final svc = Fee7Service.attach(host);
+      final d = Fee7Dispatcher(svc);
+      d.bind();
+
+      final buildEvents = <FirmwareBuildInfoFrame>[];
+      final unaryEvents = <UnaryOpcode>[];
+      final buildSub = d.onFirmwareBuildInfo.listen(buildEvents.add);
+      final unarySub = d.onUnary.listen(unaryEvents.add);
+      host.inbound.add(
+        Codec.buildChannelA(Fee7.firmwareBuildInfo, '1.00.14_260508'.codeUnits),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await buildSub.cancel();
+      await unarySub.cancel();
+
+      expect(buildEvents, hasLength(1));
+      expect(buildEvents.single.versionBuild, '1.00.14_260508');
+      expect(buildEvents.single.isHeaderAck, isFalse);
+      expect(unaryEvents, isEmpty);
+      await svc.dispose();
+    });
+
+    test('routes 0x98 and 0x9a high-range session mode ACKs', () async {
+      final host = _StubHost();
+      final svc = Fee7Service.attach(host);
+      final d = Fee7Dispatcher(svc);
+      d.bind();
+
+      final got = <SessionModeAck>[];
+      final sub = d.onSessionModeAck.listen(got.add);
+      host.inbound.add(Codec.buildChannelA(Fee7.sessionMode1Ack));
+      host.inbound.add(Codec.buildChannelA(Fee7.sessionMode2Ack));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await sub.cancel();
+
+      expect(got.map((e) => e.opcode), [0x98, 0x9a]);
+      expect(got.map((e) => e.mode), [1, 2]);
+      await svc.dispose();
+    });
+
+    test('routes 0x9b high-range session mode status', () async {
+      final host = _StubHost();
+      final svc = Fee7Service.attach(host);
+      final d = Fee7Dispatcher(svc);
+      d.bind();
+
+      final got = d.onSessionModeStatus.first;
+      host.inbound.add(Codec.buildChannelA(Fee7.sessionModeStatus, [0x88]));
+
+      final status = await got.timeout(const Duration(seconds: 1));
+      expect(status.stateByte, 0x88);
+      expect(status.isMode2, isTrue);
+      await svc.dispose();
+    });
+
+    test('routes 0x9c factory-stop ACK', () async {
+      final host = _StubHost();
+      final svc = Fee7Service.attach(host);
+      final d = Fee7Dispatcher(svc);
+      d.bind();
+
+      final got = d.onFactoryStop.first;
+      host.inbound.add(Codec.buildChannelA(Fee7.factoryStop));
+
+      final ack = await got.timeout(const Duration(seconds: 1));
+      expect(ack.payload.every((b) => b == 0), isTrue);
+      await svc.dispose();
+    });
+
+    test('routes 0x9e model name outside unary stream', () async {
+      final host = _StubHost();
+      final svc = Fee7Service.attach(host);
+      final d = Fee7Dispatcher(svc);
+      d.bind();
+
+      final modelEvents = <ModelNameResponse>[];
+      final unaryEvents = <UnaryOpcode>[];
+      final modelSub = d.onModelName.listen(modelEvents.add);
+      final unarySub = d.onUnary.listen(unaryEvents.add);
+      host.inbound.add(
+        Codec.buildChannelA(Fee7.modelName, 'H59MA_V1.0'.codeUnits),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await modelSub.cancel();
+      await unarySub.cancel();
+
+      expect(modelEvents, hasLength(1));
+      expect(modelEvents.single.modelName, 'H59MA_V1.0');
+      expect(unaryEvents, isEmpty);
+      await svc.dispose();
+    });
+
+    test('routes 0xa0 high-range status frame outside unary stream', () async {
+      final host = _StubHost();
+      final svc = Fee7Service.attach(host);
+      final d = Fee7Dispatcher(svc);
+      d.bind();
+
+      final statusEvents = <HighStatusFrame>[];
+      final unaryEvents = <UnaryOpcode>[];
+      final statusSub = d.onHighStatusFrame.listen(statusEvents.add);
+      final unarySub = d.onUnary.listen(unaryEvents.add);
+      host.inbound.add(
+        Codec.buildChannelA(Fee7.highStatusFrame, [
+          0x01,
+          0x23,
+          0x21,
+          0x04,
+          0x12,
+          0x34,
+          0x07,
+          0x56,
+          0x78,
+        ]),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await statusSub.cancel();
+      await unarySub.cancel();
+
+      expect(statusEvents, hasLength(1));
+      expect(statusEvents.single.field0, 0x01);
+      expect(statusEvents.single.marker23, isTrue);
+      expect(statusEvents.single.marker21, isTrue);
+      expect(statusEvents.single.word45, 0x1234);
+      expect(statusEvents.single.word78, 0x5678);
+      expect(unaryEvents, isEmpty);
+      await svc.dispose();
+    });
+
     test('routes 0x36 SpO2/HR update', () async {
       final host = _StubHost();
       final svc = Fee7Service.attach(host);

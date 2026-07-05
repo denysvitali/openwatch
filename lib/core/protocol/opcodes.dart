@@ -266,18 +266,34 @@ class Fee7 {
   static const int echoBase = 0x90; // FUN_00827ad2
   static const int echoBase2 = 0x91; // FUN_00827aee
 
-  // Range 0x92..0x96 — vendor unary echoes / probes (one handler each).
-  static const int unaryRangeStart = 0x92;
-  static const int unaryRangeEnd = 0x96;
+  // 0x92..0x96 vendor probes / state updates.
+  static const int highNoop92 = 0x92; // No response
+  static const int firmwareBuildInfo = 0x93; // Version/build string
+  static const int stateUpdateMode1 = 0x94; // Self-marker + mode 1
+  static const int stateUpdateMode3 = 0x95; // Self-marker + mode 3
+  static const int resetState = 0x96; // Self-marker + mode 4 reset
+  static const int unaryRangeStart = highNoop92;
+  static const int unaryRangeEnd = resetState;
 
-  // 0x97..0x9c are stateful vendor probes (not simple unary echoes).
-  static const int probeRangeStart = 0x97;
-  static const int probeRangeEnd = 0x9c;
+  // High-range vendor session/status handlers.
+  static const int highNoop97 = 0x97; // No response
+  static const int sessionMode1Ack = 0x98; // Sets session mode 1, self-marker
+  static const int highNoop99 = 0x99; // No response
+  static const int sessionMode2Ack = 0x9a; // Sets session mode 2, self-marker
+  static const int sessionModeStatus = 0x9b; // [stateByte]
+  static const int factoryStop = 0x9c; // Self-marker + factory-test cleanup
+  static const int highNoop9d = 0x9d; // No response / default return
+  static const int modelName = 0x9e; // ASCII model string response
+  static const int highNoop9f = 0x9f; // No response
+  static const int highStatusFrame = 0xa0; // Opaque multi-byte status frame
 
   // Out-of-range unary opcodes handled as standalone cases.
-  static const int unary9e = 0x9e; // FUN_00827cc8
-  static const int unary9f = 0x9f; // FUN_00827b16
-  static const int statusFrame = 0xa0; // FUN_00827d1a
+  @Deprecated('Use modelName; 0x9e returns an ASCII model-name frame.')
+  static const int unary9e = modelName;
+  @Deprecated('Use highNoop9f; 0x9f does not emit a unary response.')
+  static const int unary9f = highNoop9f;
+  @Deprecated('Use highStatusFrame; 0xa0 returns a structured status frame.')
+  static const int statusFrame = highStatusFrame;
   static const int memoryWrite = 0xbf; // Raw host-addressed memory write
   static const int memoryRead = 0xc0; // Raw host-addressed memory read stream
   static const int unaryBf = memoryWrite;
@@ -301,19 +317,17 @@ class Fee7 {
 
   /// Whether [opcode] should be decoded as a `UnaryOpcode` (no payload decode).
   ///
-  /// Note: [syntheticSleep] (0xfe) is excluded — it has structured decoding
-  /// and is surfaced on its own `onSyntheticSleep` stream. The stateful vendor
-  /// probe range `0x97..0x9c` is also excluded; it falls through to the
-  /// unknown stream until a dedicated decoder is added.
+  /// Note: [highNoop92] (0x92) is a no-response placeholder, while
+  /// [firmwareBuildInfo] (0x93), [syntheticSleep] (0xfe), and the high-range
+  /// session/status frames (`0x98`, `0x9a`, `0x9b`, `0x9c`, `0x9e`, `0xa0`)
+  /// have structured decoding and are surfaced on their own streams.
   static bool isUnary(int opcode) {
-    if (opcode >= unaryRangeStart && opcode <= unaryRangeEnd) return true;
-    if (opcode >= probeRangeStart && opcode <= probeRangeEnd) return false;
     switch (opcode) {
       case echoBase:
       case echoBase2:
-      case unary9e:
-      case unary9f:
-      case statusFrame:
+      case stateUpdateMode1:
+      case stateUpdateMode3:
+      case resetState:
       case memoryWrite:
       case unaryC4:
       case unaryC5:

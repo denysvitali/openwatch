@@ -447,6 +447,13 @@ Channel-A error flag.
 | BatteryStatus | `0x03` | both | bare opcode | `[percent, chargingFlag]` | Direct battery response. Verified in H59MA v14 at body offset `0x587e`: byte 1 is the percent helper result, byte 2 is non-zero when the charge-state helper is non-zero. |
 | Fee7Handshake | `0x48` (`'H'`) | both | bare opcode | 15-byte frame: hw version bytes, fw version bytes, battery counter `% 100`, status u16 | First vendor-side info block; OpenWatch decodes battery/status from this when present. |
 | LiveStatus | `0x61` (`'a'`) | both | bare opcode | active: `statusValue u32LE`; idle: all-zero ACK | Reads `DAT_0082bfd4 + 0x2c` at body offset `0x5ae6`. The low byte mirrors the live status source used for battery-like updates, but hosts should keep the full u32 for diagnostics. |
+| FirmwareBuildInfo | `0x93` | both | bare opcode | two frames: header self-marker `[0x93,0...,0x93]`, then ASCII version/build string in `frame[1..14]` plus checksum | Returns a printable build string such as `"1.00.14_260508"`, using blob0 overrides when enabled. Verified at v14 body offset `0x184a`. |
+| HighNoResponse | `0x97` / `0x99` / `0x9d` / `0x9f` | →watch | bare opcode | none | High-range reserved/session slots that return without queuing a frame in H59MA v14. Verified at v14 body offsets `0x6476`, `0x6486`, `0x6352`, and `0x64b6`. |
+| SessionMode1 / SessionMode2 | `0x98` / `0x9a` | both | bare opcode | self-marker ACK `[opcode, 0..., opcode]` | Stores high-range session mode `1` or `2`, commits blob0 if changed, then ACKs. Verified at v14 body offsets `0x647e` / `0x648e` and callee `0x17b8`. |
+| SessionModeStatus | `0x9b` | both | bare opcode | `[stateByte]`, `0x88` when mode `2`, otherwise `0x77` | Reads the stored high-range session mode and returns one status byte; verified at v14 body offset `0x6496` and callee `0x17f0`. |
+| FactoryStop | `0x9c` | both | bare opcode | self-marker ACK `[0x9c, 0..., 0x9c]` | Stops factory-test timer, clears related state, and calls the shared cancel path; verified at v14 body offset `0x649e` and callee `0x181e`. |
+| ModelName | `0x9e` | both | bare opcode | ASCII model string in `frame[1..]`, NUL padded; default `"H59MA_V1.0"` | Uses a custom blob0 string when enabled, otherwise the built-in model literal; verified at v14 body offset `0x64a6` and callee `0x18c8`. |
+| HighStatus | `0xa0` | both | bare opcode | 9 populated status bytes in `frame[1..9]` plus checksum | Opaque high-range status frame assembled from runtime helpers and persistent state; verified at v14 body offset `0x64ae` and callee `0x191a`. OpenWatch preserves stable byte fields without assigning user-facing semantics yet. |
 | VendorMemWrite | `0xbf` | both | `[addr u32BE, len, bytes...]`, len clamps to `8` | self-marker ACK `[0xbf,0...,0xbf]` | Raw arbitrary-address write, verified at v14 body offset `0x5694`. OpenWatch must not call this outside explicit developer/debug tooling. |
 | VendorMemRead | `0xc0` | both | `[addr u32BE, len u32BE]`; zero len defaults to `0x10`, max `0x200` | shared fragmented streamer: each frame is `[0xc0, up to 14 copied bytes, cksum]` | Raw arbitrary-address read, verified at v14 body offset `0x570c`; the shared streamer at `0x5538` adds no wire sequence byte, so host tooling assigns arrival-order sequence numbers. |
 | HealthPoll | `0xc1` | both | bare opcode | one data byte at `frame[1]` | Calls the one-shot health helper then sends `DAT_0082caf0` through the shared streamer with length `1`; verified at v14 body offset `0x64ce`. |
@@ -869,9 +876,10 @@ Feedback, Customer-support chat.
   one-shot health-result handler returns ONE byte from `DAT_0082caf0`, incompatible
   with the documented shapes. SpO2 = PPG is on §3.10 `0x2c` (enable-bit +
   auto-measure), NOT routed through `0x69` type=7. Static cross-check: the v13
-  and v14 high-range FEE7 switch bytes match, and §8.20 shows `0x97..0x9F`
-  are default-slot vendor-NAK entries except `0x9D` (silent drop), so no
-  vendor-private ECG/PPG notify opcode is hiding in that reserved range.
+  and v14 high-range FEE7 switch bytes match, and §8.20 maps `0x97..0xA0`
+  to no-response slots plus session/model/status responses; none match the
+  documented ECG/PPG payload shapes, so no vendor-private ECG/PPG notify opcode
+  is hiding in that reserved range.
   Resolution path: live BLE capture during a `0x69` type=7 session on real
   hardware.
 - **BP-history raw slot field split** (`0x0d` BpDataRsp) — header/date/bitmap

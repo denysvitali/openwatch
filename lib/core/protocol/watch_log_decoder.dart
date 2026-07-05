@@ -616,6 +616,40 @@ class WatchLogDecoder {
         });
         return 'FEE7 ${_hex(opcode)} otaControl action=$action '
             'reset=$serviceResetRequested';
+      case Fee7.firmwareBuildInfo:
+        final versionBuild = _trimNulAscii(payload);
+        final headerAck = versionBuild.isEmpty && payload.every((b) => b == 0);
+        details.addAll({
+          'versionBuild': versionBuild.isEmpty ? null : versionBuild,
+          'headerAck': headerAck,
+        });
+        return headerAck
+            ? 'FEE7 ${_hex(opcode)} firmwareBuildInfo header'
+            : 'FEE7 ${_hex(opcode)} firmwareBuildInfo "$versionBuild"';
+      case Fee7.sessionMode1Ack:
+      case Fee7.sessionMode2Ack:
+        final mode = opcode == Fee7.sessionMode1Ack ? 1 : 2;
+        details['mode'] = mode;
+        return 'FEE7 ${_hex(opcode)} sessionModeAck mode=$mode';
+      case Fee7.sessionModeStatus:
+        final stateByte = payload.isNotEmpty ? payload[0] : null;
+        details.addAll({'stateByte': stateByte, 'isMode2': stateByte == 0x88});
+        return 'FEE7 ${_hex(opcode)} sessionModeStatus'
+            '${stateByte == null ? '' : ' state=${_hex(stateByte)}'}';
+      case Fee7.factoryStop:
+        return 'FEE7 ${_hex(opcode)} factoryStop';
+      case Fee7.modelName:
+        final modelName = _trimNulAscii(payload);
+        details['modelName'] = modelName;
+        return 'FEE7 ${_hex(opcode)} modelName "$modelName"';
+      case Fee7.highStatusFrame:
+        details.addAll({
+          'dataBytes': payload.length,
+          'field0': payload.isNotEmpty ? payload[0] : null,
+          'marker23': payload.length >= 2 ? payload[1] == 0x23 : null,
+          'marker21': payload.length >= 3 ? payload[2] == 0x21 : null,
+        });
+        return 'FEE7 ${_hex(opcode)} highStatus bytes=${payload.length}';
       case Fee7.memoryRead:
         details['dataBytes'] = payload.length;
         return 'FEE7 ${_hex(opcode)} memoryRead chunk bytes=${payload.length}';
@@ -1489,6 +1523,19 @@ String _labelForFee7(int opcode) {
       return 'memoryRead';
     case Fee7.otaTrigger:
       return 'otaControl';
+    case Fee7.firmwareBuildInfo:
+      return 'firmwareBuildInfo';
+    case Fee7.sessionMode1Ack:
+    case Fee7.sessionMode2Ack:
+      return 'sessionModeAck';
+    case Fee7.sessionModeStatus:
+      return 'sessionModeStatus';
+    case Fee7.factoryStop:
+      return 'factoryStop';
+    case Fee7.modelName:
+      return 'modelName';
+    case Fee7.highStatusFrame:
+      return 'highStatus';
     case Fee7.syntheticSleep:
       return 'syntheticSleep';
     default:
@@ -1501,6 +1548,12 @@ String _hex(int v) => '0x${(v & 0xff).toRadixString(16).padLeft(2, '0')}';
 
 String _hex32(int v) =>
     '0x${(v & 0xffffffff).toRadixString(16).padLeft(8, '0')}';
+
+String _trimNulAscii(Uint8List bytes) {
+  final end = bytes.indexOf(0);
+  final slice = end == -1 ? bytes : Uint8List.sublistView(bytes, 0, end);
+  return ascii.decode(slice, allowInvalid: true);
+}
 
 String _compactHex(Iterable<int> bytes) =>
     bytes.map((b) => (b & 0xff).toRadixString(16).padLeft(2, '0')).join('-');

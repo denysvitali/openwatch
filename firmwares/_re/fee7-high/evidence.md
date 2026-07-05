@@ -65,6 +65,148 @@ The resolved target block at `0x6476` shows the compact handlers for
 0x000064e0  a078       ldrb r0, [r4, 2]
 ```
 
+The same high-range switch table byte sequence appears in both builds:
+
+```text
+v13: body offset 0x6382
+v14: body offset 0x62e0
+```
+
+Resolved v14 target/callee map:
+
+| Opcode | Target | Callee | Static behavior |
+|---:|---:|---:|---|
+| `0x97` | `0x6476` | `0x17a4` | Return only; no response. |
+| `0x98` | `0x647e` | `0x17e6` → `0x17b8` | Store high-range session mode `1`; self-marker ACK. |
+| `0x99` | `0x6486` | `0x17ea` | Return only; no response. |
+| `0x9a` | `0x648e` | `0x17ec` → `0x17b8` | Store high-range session mode `2`; self-marker ACK. |
+| `0x9b` | `0x6496` | `0x17f0` | One-byte session-mode status (`0x88` for mode 2, else `0x77`) plus checksum. |
+| `0x9c` | `0x649e` | `0x181e` | Self-marker ACK, factory-test timer cleanup, cancel helper. |
+| `0x9d` | `0x6352` | — | Dispatcher return; no response. |
+| `0x9e` | `0x64a6` | `0x18c8` | ASCII model-name response, default `"H59MA_V1.0"`. |
+| `0x9f` | `0x64b6` | `0x1716` | Return only; no response. |
+| `0xa0` | `0x64ae` | `0x191a` | Opaque high-status frame populated in bytes 1..9 plus checksum. |
+
+The old "default vendor NAK except 0x9d" interpretation is incorrect for
+H59MA v14. The target block calls real handlers for `0x98`, `0x9a`, `0x9b`,
+`0x9c`, `0x9e`, and `0xa0`.
+
+## High-Range Response Shapes
+
+Command:
+
+```sh
+r2 ... -c 'pd 45 @ 0x17b8; pd 30 @ 0x17f0; pd 35 @ 0x181e' \
+  firmwares/_re/v14/body.bin
+r2 ... -c 'pd 50 @ 0x18c8; pd 70 @ 0x191a' firmwares/_re/v14/body.bin
+```
+
+`0x98` / `0x9a` update the stored mode then send a self-marker frame:
+
+```text
+0x000017bc  9828       cmp r0, 0x98
+0x000017c6  0120       movs r0, 1
+0x000017ca  0220       movs r0, 2
+0x000017cc  fff7ebff   bl 0x17a6
+0x000017dc  0470       strb r4, [r0]
+0x000017de  c473       strb r4, [r0, 0xf]
+0x000017e0  06f0fcff   bl 0x87dc
+```
+
+`0x9b` returns one session-mode status byte and a checksum:
+
+```text
+0x000017fc  9b20       movs r0, 0x9b
+0x00001802  fff748ff   bl 0x1696
+0x00001808  4870       strb r0, [r1, 1]
+0x0000180e  03f059fa   bl 0x4cc4
+0x00001818  06f0e0ff   bl 0x87dc
+```
+
+`0x9c` sends a self-marker frame, then stops factory-test state:
+
+```text
+0x0000182a  9c20       movs r0, 0x9c
+0x0000182e  0870       strb r0, [r1]
+0x00001830  c873       strb r0, [r1, 0xf]
+0x00001834  06f0d2ff   bl 0x87dc
+0x0000183c  02f008f8   bl 0x3850
+0x00001840  0ff058ff   bl 0x116f4
+0x00001844  fff767fc   bl 0x1116
+```
+
+`0x9e` copies either the built-in model string or a custom blob0 string:
+
+```text
+0x000018d4  9e20       movs r0, 0x9e
+0x000018ec  6ea1       adr r1, 0x1b8 ; "H59MA_V1.0"
+0x000018f0  17f4aaf5   bl 0xff819448
+0x00001908  6048       ldr r0, [0x00001a8c]
+0x0000190a  7a30       adds r0, 0x7a
+0x00001918  eae7       b 0x18f0
+```
+
+`0xa0` fills bytes 1..9 from helper results and persistent state. The layout is
+stable, but most fields remain opaque pending live captures:
+
+```text
+0x0000192c  a020       movs r0, 0xa0
+0x00001938  4870       strb r0, [r1, 1]
+0x0000194a  8170       strb r1, [r0, 2]
+0x0000195c  d170       strb r1, [r2, 3]
+0x00001964  1071       strb r0, [r2, 4]
+0x00001968  5071       strb r0, [r2, 5]
+0x0000196c  9471       strb r4, [r2, 6]
+0x00001970  d071       strb r0, [r2, 7]
+0x0000197a  1172       strb r1, [r2, 8]
+0x0000197c  5072       strb r0, [r2, 9]
+0x00001982  03f09ff9   bl 0x4cc4
+0x0000198c  06f026ff   bl 0x87dc
+```
+
+## Adjacent `0x93` / `0x94` / `0x95` Self-Marker Offsets
+
+Command:
+
+```sh
+r2 ... -c 'pd 70 @ 0x172e; pd 70 @ 0x1754; pd 110 @ 0x184a' \
+  firmwares/_re/v14/body.bin
+```
+
+The older notes described `0x93`, `0x94`, and `0x95` as byte-12 self-marker
+responses. The Thumb stores show byte 15 (`[frame, 0xf]`) instead.
+
+`0x94` and `0x95` write the opcode at byte 0 and byte 15 before queuing:
+
+```text
+0x0000173a  9420       movs r0, 0x94
+0x0000173e  0870       strb r0, [r1]
+0x00001740  c873       strb r0, [r1, 0xf]
+0x00001744  07f04af8   bl 0x87dc
+...
+0x0000175e  9520       movs r0, 0x95
+0x00001764  0870       strb r0, [r1]
+0x00001766  c873       strb r0, [r1, 0xf]
+0x0000176a  07f037f8   bl 0x87dc
+```
+
+`0x93` first sends an empty header frame whose frame base is `sp + 0x14`;
+`strb` through `sp + 0x20 + 3` is therefore frame byte 15. The following
+version/build string frame computes the normal additive checksum:
+
+```text
+0x00001858  9320       movs r0, 0x93
+0x0000185c  0875       strb r0, [r1, 0x14]
+0x0000185e  08a9       add r1, sp, 0x20
+0x00001860  c870       strb r0, [r1, 3]
+0x00001864  06f0baff   bl 0x87dc
+...
+0x00001898  0e22       movs r2, 0xe
+0x0000189e  17f4d3f5   bl 0xff819448
+0x000018a6  03f00dfa   bl 0x4cc4
+0x000018b0  06f094ff   bl 0x87dc
+```
+
 ## Raw Memory Commands
 
 Command:

@@ -502,6 +502,63 @@ void main() {
       },
     );
 
+    test('summarizes high-range FEE7 session and model/status frames', () {
+      final build = Codec.buildChannelA(
+        Fee7.firmwareBuildInfo,
+        '1.00.14_260508'.codeUnits,
+      );
+      final session = Codec.buildChannelA(Fee7.sessionModeStatus, [0x88]);
+      final model = Codec.buildChannelA(Fee7.modelName, 'H59MA_V1.0'.codeUnits);
+      final highStatus = Codec.buildChannelA(Fee7.highStatusFrame, [
+        0x01,
+        0x23,
+        0x21,
+        0x04,
+        0x12,
+        0x34,
+        0x07,
+        0x56,
+        0x78,
+      ]);
+
+      final buildDecoded = const WatchLogDecoder().decodeHex(
+        build.map((b) => b.toRadixString(16).padLeft(2, '0')).join('-'),
+        uuid: _fee7,
+      );
+      final sessionDecoded = const WatchLogDecoder().decodeHex(
+        session.map((b) => b.toRadixString(16).padLeft(2, '0')).join('-'),
+        uuid: _fee7,
+      );
+      final modelDecoded = const WatchLogDecoder().decodeHex(
+        model.map((b) => b.toRadixString(16).padLeft(2, '0')).join('-'),
+        uuid: _fee7,
+      );
+      final highStatusDecoded = const WatchLogDecoder().decodeHex(
+        highStatus.map((b) => b.toRadixString(16).padLeft(2, '0')).join('-'),
+        uuid: _fee7,
+      );
+
+      expect(buildDecoded.details['label'], 'firmwareBuildInfo');
+      expect(buildDecoded.details['versionBuild'], '1.00.14_260508');
+      expect(buildDecoded.details['headerAck'], isFalse);
+      expect(buildDecoded.title, contains('firmwareBuildInfo'));
+
+      expect(sessionDecoded.details['label'], 'sessionModeStatus');
+      expect(sessionDecoded.details['stateByte'], 0x88);
+      expect(sessionDecoded.details['isMode2'], isTrue);
+      expect(sessionDecoded.title, contains('state=0x88'));
+
+      expect(modelDecoded.details['label'], 'modelName');
+      expect(modelDecoded.details['modelName'], 'H59MA_V1.0');
+      expect(modelDecoded.title, contains('modelName "H59MA_V1.0"'));
+
+      expect(highStatusDecoded.details['label'], 'highStatus');
+      expect(highStatusDecoded.details['dataBytes'], 14);
+      expect(highStatusDecoded.details['marker23'], isTrue);
+      expect(highStatusDecoded.details['marker21'], isTrue);
+      expect(highStatusDecoded.title, contains('highStatus bytes=14'));
+    });
+
     test('summarizes FEE7 memory-read chunks as raw data frames', () {
       final frame = Codec.buildChannelA(
         Fee7.memoryRead,

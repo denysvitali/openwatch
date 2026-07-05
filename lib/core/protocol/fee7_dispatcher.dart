@@ -47,7 +47,13 @@ class Fee7Dispatcher {
   late final _long = _ctrl<LongResponse>();
   late final _memoryRead = _ctrl<MemoryReadChunk>();
   late final _ota = _ctrl<OtaTrigger>();
+  late final _firmwareBuildInfo = _ctrl<FirmwareBuildInfoFrame>();
   late final _syntheticSleep = _ctrl<SyntheticSleepRequest>();
+  late final _sessionModeAck = _ctrl<SessionModeAck>();
+  late final _sessionModeStatus = _ctrl<SessionModeStatus>();
+  late final _factoryStop = _ctrl<FactoryStopAck>();
+  late final _modelName = _ctrl<ModelNameResponse>();
+  late final _highStatus = _ctrl<HighStatusFrame>();
   late final _unary = _ctrl<UnaryOpcode>();
   late final _unknown = _ctrl<UnaryOpcode>();
   int _memoryReadSeq = 0;
@@ -99,9 +105,32 @@ class Fee7Dispatcher {
   /// requests the BLE/service reset helper.
   Stream<OtaTrigger> get onOta => _ota.stream;
 
+  /// `0x93` firmware version + build-date response. The firmware emits a
+  /// header ACK frame and then a string frame.
+  Stream<FirmwareBuildInfoFrame> get onFirmwareBuildInfo =>
+      _firmwareBuildInfo.stream;
+
   /// `0xfe` synthetic sleep-history request. The payload starts with a
   /// u16LE duration in minutes; the firmware clamps it to 900 minutes.
   Stream<SyntheticSleepRequest> get onSyntheticSleep => _syntheticSleep.stream;
+
+  /// `0x98` / `0x9a` high-range session-mode ACKs.
+  Stream<SessionModeAck> get onSessionModeAck => _sessionModeAck.stream;
+
+  /// `0x9b` high-range session-mode status byte (`0x88` for mode 2,
+  /// otherwise `0x77` in H59MA v14).
+  Stream<SessionModeStatus> get onSessionModeStatus =>
+      _sessionModeStatus.stream;
+
+  /// `0x9c` factory-test stop ACK.
+  Stream<FactoryStopAck> get onFactoryStop => _factoryStop.stream;
+
+  /// `0x9e` model-name response.
+  Stream<ModelNameResponse> get onModelName => _modelName.stream;
+
+  /// `0xa0` high-range status frame. Fields beyond the obvious marker bytes
+  /// remain opaque diagnostics until live captures map them to user metrics.
+  Stream<HighStatusFrame> get onHighStatusFrame => _highStatus.stream;
 
   @Deprecated(
     'Use onSyntheticSleep; 0xfe synthesizes sleep history, not vibration.',
@@ -109,8 +138,8 @@ class Fee7Dispatcher {
   Stream<SyntheticSleepRequest> get onVibration => onSyntheticSleep;
 
   /// Catch-all unary opcodes that the firmware echoes/acks as the opcode
-  /// alone: `0x90`, `0x91`, `0x92..0x96`, `0x9e`, `0x9f`, `0xa0`, `0xbf`,
-  /// `0xc4`, `0xc5`, `0xc8`, `0xc9`, `0xcd`, `0xce`.
+  /// alone: `0x90`, `0x91`, `0x94..0x96`, `0xbf`, `0xc4`,
+  /// `0xc5`, `0xc8`, `0xc9`, `0xcd`, `0xce`.
   Stream<UnaryOpcode> get onUnary => _unary.stream;
 
   /// Unrecognized opcodes (still surfaced as [UnaryOpcode] so observability
@@ -180,6 +209,30 @@ class Fee7Dispatcher {
         );
       case Fee7.otaTrigger:
         _ota.add(_decodeOtaTrigger(pl));
+      case Fee7.firmwareBuildInfo:
+        _firmwareBuildInfo.add(_decodeFirmwareBuildInfo(pl));
+      case Fee7.sessionMode1Ack:
+      case Fee7.sessionMode2Ack:
+        _sessionModeAck.add(
+          SessionModeAck(
+            opcode: opcode,
+            mode: opcode == Fee7.sessionMode1Ack ? 1 : 2,
+            payload: pl,
+          ),
+        );
+      case Fee7.sessionModeStatus:
+        _sessionModeStatus.add(
+          SessionModeStatus(
+            stateByte: pl.isNotEmpty ? pl[0] : null,
+            payload: pl,
+          ),
+        );
+      case Fee7.factoryStop:
+        _factoryStop.add(FactoryStopAck(payload: pl));
+      case Fee7.modelName:
+        _modelName.add(_decodeModelName(pl));
+      case Fee7.highStatusFrame:
+        _highStatus.add(HighStatusFrame(payload: pl));
       case Fee7.echoBase:
       case Fee7.echoBase2:
         // Echo back as a unary opcode; firmware simply emits `[opcode]`.
@@ -303,6 +356,14 @@ class Fee7Dispatcher {
   ModeControlCont _decodeModeControlCont(Uint8List pl) {
     final step = pl.isNotEmpty ? pl[0] : 0;
     return ModeControlCont(step: step, payload: pl);
+  }
+
+  ModelNameResponse _decodeModelName(Uint8List pl) {
+    return ModelNameResponse(modelName: _trimNulAscii(pl), payload: pl);
+  }
+
+  FirmwareBuildInfoFrame _decodeFirmwareBuildInfo(Uint8List pl) {
+    return FirmwareBuildInfoFrame(versionBuild: _trimNulAscii(pl), payload: pl);
   }
 
   OtaTrigger _decodeOtaTrigger(Uint8List pl) {
@@ -520,6 +581,86 @@ class OtaTrigger {
   final Uint8List payload;
 }
 
+/// `0x93` firmware version + build-date frame.
+///
+/// H59MA v14 sends an empty self-marker header frame first, followed by a
+/// checksumed string frame such as `"1.00.14_260508"` in bytes 1..14.
+class FirmwareBuildInfoFrame {
+  const FirmwareBuildInfoFrame({
+    required this.versionBuild,
+    required this.payload,
+  });
+
+  final String versionBuild;
+  final Uint8List payload;
+
+  bool get isHeaderAck => versionBuild.isEmpty && payload.every((b) => b == 0);
+}
+
+/// `0x98` / `0x9a` high-range session-mode ACK.
+///
+/// The firmware updates the session mode (`1` for `0x98`, `2` for `0x9a`) and
+/// returns a self-marker frame with the opcode at byte 0 and byte 15.
+class SessionModeAck {
+  const SessionModeAck({
+    required this.opcode,
+    required this.mode,
+    required this.payload,
+  });
+
+  final int opcode;
+  final int mode;
+  final Uint8List payload;
+}
+
+/// `0x9b` high-range session-mode status response.
+class SessionModeStatus {
+  const SessionModeStatus({required this.stateByte, required this.payload});
+
+  /// `0x88` when the stored high-range session mode is `2`; `0x77` otherwise.
+  final int? stateByte;
+
+  bool get isMode2 => stateByte == 0x88;
+
+  final Uint8List payload;
+}
+
+/// `0x9c` factory-test stop ACK.
+///
+/// H59MA v14 sends a self-marker frame, stops the factory-test timer, clears
+/// related state, and calls the shared cancel path.
+class FactoryStopAck {
+  const FactoryStopAck({required this.payload});
+  final Uint8List payload;
+}
+
+/// `0x9e` high-range model-name response.
+class ModelNameResponse {
+  const ModelNameResponse({required this.modelName, required this.payload});
+  final String modelName;
+  final Uint8List payload;
+}
+
+/// `0xa0` high-range status frame.
+///
+/// The firmware fills frame bytes 1..9 from runtime helpers and persistent
+/// state. The byte-level layout is stable, but most fields remain opaque until
+/// captures map them to user-facing metrics.
+class HighStatusFrame {
+  const HighStatusFrame({required this.payload});
+  final Uint8List payload;
+
+  int? get field0 => payload.isNotEmpty ? payload[0] : null;
+  bool? get marker23 => payload.length >= 2 ? payload[1] == 0x23 : null;
+  bool? get marker21 => payload.length >= 3 ? payload[2] == 0x21 : null;
+  int? get field3 => payload.length >= 4 ? payload[3] : null;
+  int? get word45 =>
+      payload.length >= 6 ? (payload[4] << 8) | payload[5] : null;
+  int? get field6 => payload.length >= 7 ? payload[6] : null;
+  int? get word78 =>
+      payload.length >= 9 ? (payload[7] << 8) | payload[8] : null;
+}
+
 /// `0xfe` synthetic sleep-history request.
 ///
 /// H59MA v14 reads `req[1..2]` as u16LE minutes, calls the sleep-history
@@ -544,6 +685,12 @@ class SyntheticSleepRequest {
   'Use SyntheticSleepRequest; 0xfe synthesizes sleep history, not vibration.',
 )
 typedef VibrationPattern = SyntheticSleepRequest;
+
+String _trimNulAscii(Uint8List bytes) {
+  final end = bytes.indexOf(0);
+  final slice = end == -1 ? bytes : Uint8List.sublistView(bytes, 0, end);
+  return String.fromCharCodes(slice);
+}
 
 /// Shared empty `Uint8List` used as the default for optional `payload`
 /// parameters on the typed records above. Cannot be `const` because
