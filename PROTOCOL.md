@@ -1060,16 +1060,22 @@ surface in the firmware. Both builds implement the same state machine.
 
 The v14 dispatcher groups are now exact:
 
-- Direct `ota_dfu_state_machine(1, 0)` route: `0x01`, `0x02`, `0x21`,
-  `0x31`, `0x35`, `0x36`, `0x61`.
-- Bypass/no async store: `0x10`, `0x46`.
+- Pre-store `ota_dfu_state_machine(1, 0)` callback, then async store: `0x01`,
+  `0x02`, `0x21`, `0x31`, `0x35`, `0x36`, `0x61`.
+- Bypass/no async store: `0x10`, `0x46` branch straight to the
+  cleanup/state-reset helper.
 - Async store: all other valid CRC frames call `channel_b_store_async_command`
-  and are later drained by `channel_b_async_command_processor`.
+  directly and are later drained by `channel_b_async_command_processor`.
 
 The async processor then handles OTA low commands `0x01..0x07`, sleep
 `0x11/0x12/0x27`, activity `0x2a`, alarm `0x2c`, file table `0x41/0x43/0x46`,
 placeholders `0x47/0x4b`, and device-info/config `0x5a`; unrecognised commands
 fall through to `channel_b_send_nak(cmd, 0)`.
+
+radare2 confirms the low OTA-command switch table is identical in v13/v14:
+max explicit index `0x08`, entries `2e 5f 63 69 6d 71 2e 75 2e`; therefore
+`0x08..0x10` clamp to the same default NAK slot instead of occupying separate
+switch entries.
 
 ### 9.4 CRC-16/MODBUS verification
 

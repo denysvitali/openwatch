@@ -1,0 +1,135 @@
+# Channel-B Dispatcher radare2 Evidence
+
+Date: 2026-07-05
+
+Scope: H59MA v13/v14 OTA bodies at `firmwares/_re/v13/body.bin` and
+`firmwares/_re/v14/body.bin`. Offsets are body offsets.
+
+Tooling:
+
+```sh
+r2 -2 -q -a arm -b 16 -e asm.cpu=cortex -e scr.color=0 \
+  -c '<cmd>' firmwares/_re/v14/body.bin
+```
+
+## First-Stage Dispatcher
+
+Commands:
+
+```sh
+r2 ... -c 'pd 120 @ 0x8ae6' firmwares/_re/v14/body.bin
+r2 ... -c 'pd 120 @ 0x8b2e' firmwares/_re/v13/body.bin
+```
+
+Result:
+
+- v14 `0x8ae6..0x8b4e` and v13 `0x8b2e..0x8b96` are the same decision tree.
+- The dispatcher computes CRC-16/MODBUS over `payload` (`bl 0x8d14` v14,
+  `bl 0x8d5c` v13), compares it with the stored CRC field, and calls the
+  compact NAK sender with status `2` on mismatch.
+- Pre-store `ota_dfu_state_machine(1, 0)` callback, then async-store route:
+  `0x01`, `0x02`, `0x21`, `0x31`, `0x35`, `0x36`, `0x61`.
+- Bypass/no async-store route: `0x10`, `0x46`; both branch to the cleanup /
+  state-reset helper at v14 `0x8abe`.
+- Every other valid-CRC command calls the async store (`0x90fa` v14,
+  `0x9142` v13) directly with `(cmd, payload_ptr, length)`.
+
+Key v14 compare sequence:
+
+```text
+0x00008b08  cmp r0, 0x31
+0x00008b0e  cmp r0, 1
+0x00008b12  cmp r0, 2
+0x00008b16  cmp r0, 0x10
+0x00008b1a  cmp r0, 0x21
+0x00008b20  cmp r0, 0x35
+0x00008b24  cmp r0, 0x36
+0x00008b28  cmp r0, 0x46
+0x00008b2c  cmp r0, 0x61
+```
+
+## Async Worker
+
+Commands:
+
+```sh
+r2 ... -c 'pd 220 @ 0x980c' firmwares/_re/v14/body.bin
+r2 ... -c 'pd 220 @ 0x9854' firmwares/_re/v13/body.bin
+```
+
+Result:
+
+- v14 `0x980c..0x9932` and v13 `0x9854..0x997a` drain the async command
+  state (`cmd` at `+1`, payload pointer at `+4`, length at `+0xc`).
+- Low commands `0x00..0x10` enter a compiler-generated Thumb switch helper.
+- Commands `0x11..0x5a` use a plain compare cascade.
+- On exit, both versions clear the async command byte (`strb 0, [state+1]`).
+
+Confirmed compare-cascade commands:
+
+| Command | Routing |
+|---:|---|
+| `0x11` | sleep summary |
+| `0x12` | detailed sleep |
+| `0x13` | no-op / skipped |
+| `0x21..0x24` | NAK status `2` |
+| `0x27` | sleep records |
+| `0x29`, `0x3b` | no-op / skipped |
+| `0x2a` | activity summary |
+| `0x2c` | alarm read/write |
+| `0x41`, `0x43`, `0x46` | file table / file command handler |
+| `0x47`, `0x4b` | no-op placeholder handlers |
+| `0x5a` | device-info/config TLV handler |
+| other | NAK status `0` |
+
+Note: the async worker has a `0x46` file-command branch, but the first-stage
+complete-frame dispatcher branches parsed `0x46` frames around the async-store
+call. The handler entry is still documented because it exists in the worker
+and can be reached if another firmware path seeds the async state with `cmd =
+0x46`.
+
+## Low-Command Switch Shape
+
+Commands:
+
+```sh
+r2 ... -c 'px 0x0c @ 0x982e' firmwares/_re/v14/body.bin
+r2 ... -c 'px 0x0c @ 0x9876' firmwares/_re/v13/body.bin
+```
+
+Both builds dump the same bytes:
+
+```text
+08 2e 5f 63 69 6d 71 2e 75 2e
+```
+
+The switch helper at `0x1a1fc` reads the byte at `lr - 1` as the maximum
+explicit index, then clamps any command greater than or equal to that value to
+the last branch-entry byte:
+
+```text
+0x0001a200  subs r4, r4, 1
+0x0001a202  ldrb r5, [r4]      ; max explicit index = 0x08
+0x0001a206  cmp  r3, r5
+0x0001a208  bhs  0x1a20c       ; keep r5 (default index) when cmd >= 8
+0x0001a20a  mov  r5, r3        ; else use cmd as index
+0x0001a20c  ldrb r3, [r4, r5]  ; branch-entry byte
+```
+
+Interpretation:
+
+| Command | Branch byte | Meaning |
+|---:|---:|---|
+| `0x00` | `0x2e` | default NAK status `0` |
+| `0x01` | `0x5f` | OTA start ack |
+| `0x02` | `0x63` | OTA init metadata |
+| `0x03` | `0x69` | OTA data packet |
+| `0x04` | `0x6d` | OTA check complete |
+| `0x05` | `0x71` | OTA end/reboot |
+| `0x06` | `0x2e` | default NAK status `0` |
+| `0x07` | `0x75` | OTA sub-ack |
+| `0x08..0x10` | `0x2e` | clamped default NAK status `0` |
+
+Earlier notes over-read the bytes after the 9 branch entries (`21 28 ...`) as
+additional switch entries. They are the next compare-cascade instruction
+(`cmp r0, 0x21`), not part of the table.

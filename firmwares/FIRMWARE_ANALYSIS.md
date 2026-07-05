@@ -609,7 +609,11 @@ listed by the earlier radare2 notes:
 2. ~~Algorithm behind the `image_chk_a @0x0c` additive byte-sum.~~ **Resolved:** it is `sum(container[0x50:]) & 0xffffffff` for both v13 and v14.
 3. ~~Exact Channel A dispatch path — phone-side vs watch-side.~~ **Resolved by Ghidra:** v14 drains an internal 16-byte queued-frame ring in `channel_a_dispatch_queued_frame` (`0x0082d2dc`). The phone-side SDK still owns wire framing and response correlation.
 4. ~~Channel A additive 8-bit checksum algorithm.~~ **Resolved by Ghidra:** `checksum8_additive` (`0x0082b0c4`) sums caller-specified bytes; Channel-A/FEE7 responses use bytes `0..14`.
-5. **Channel B sub-cmd bytes that the watch accepts beyond `PROTOCOL.md` §3.2** (R2 lists `0x06`, `0x20`, and `0x25..0x82`; the spec covers a subset).
+5. ~~Channel B sub-cmd bytes that the watch accepts beyond `PROTOCOL.md` §3.2.~~ **Resolved for static firmware routing:** a 2026-07-05 radare2 pass verifies the first-stage v13/v14 dispatcher groups and the second-stage async switch/cascade (`firmwares/_re/channel-b-dispatch/evidence.md`).
+   `0x01`, `0x02`, `0x21`, `0x31`, `0x35`, `0x36`, and `0x61` call the OTA-state callback before falling through to async storage; `0x10`/`0x46` bypass async storage through the cleanup helper; every other valid-CRC frame enters the async worker directly.
+   The low OTA switch has max explicit index `0x08`, so `0x08..0x10` clamp to the default NAK path.
+   The compare cascade handles sleep `0x11/0x12/0x27`, activity `0x2a`, alarm `0x2c`, file table `0x41/0x43/0x46`, no-op placeholders `0x13/0x29/0x3b/0x47/0x4b`, device-info/config `0x5a`, and explicit NAK-code-2 commands `0x21..0x24`; unknown commands NAK with code `0`.
+   Remaining work is payload semantics for opaque/no-op handlers, not command acceptance.
 6. **Whether the OTA bootloader validates `image_digest` and `signature_a`** at flash time. Ghidra shows `body.bin` only checks the OTA container magic `0x81bdc3e5` in packet 1 and stages `size - 0x50` bytes. The `0x8721bee2` magic belongs to the config blob.
 7. **GATT attribute table is laid out in fixed 28-byte records** — but the precise record fields (perm byte, value-handle byte, flash-value-pointer semantics) need a runnable emulator to confirm.
 8. **`0xfee7` remaining vendor command semantics** — Ghidra confirms the service is an active second 16-byte command channel, and the `0x97..0xa0` high switch is now mapped in `firmwares/GHIDRA_DECOMPILATION.md` §8.1. Raw memory read/write (`0xbf`/`0xc0`) are resolved in §8.17 and rechecked with radare2 at v14 body offsets `0x5694` / `0x570c` plus the shared streamer at `0x5538`. `0xc1` health poll and `0xc3` OTA-control byte indexes are also statically resolved at offsets `0x64ce` / `0x64e0`; remaining work is live runtime-impact verification for the OTA-control side effects.
@@ -661,6 +665,7 @@ python3 firmwares/_re/ble-hunt/scan.py
 | `firmwares/_re/protocol-validate/` | 15 files: CRC table reconstruction (`01..06_crc_*`), opcode audit (`07`), Thumb cmp (`08`), dispatch inspection (`09..11`), string hunt (`12`), bc-frame counts (`13`), spec-vs-binary comparison (`14`), summary (`15`) |
 | `firmwares/_re/strings-mining/` | `findings.txt` + per-category grep files (`ota.txt`, `cmd_proto.txt`, `paths.txt`, `hex_uuid.txt`, `watchface.txt`, `vendors.txt`, `ble.txt`, `uuids.txt`, `mac_hex.txt`, `ble_full.txt`, `vendors_full.txt`, `paths2.txt`, `commands.txt`) |
 | `firmwares/_re/diff/` | `fwtool_compare.txt`, large identical/divergent regions, `v{13,14}_{real,natural_strings,real_only}.txt`, `strings_only_in_v{13,14}.txt`, `feature_words_v14.txt`, `regions_collapsed.txt` |
+| `firmwares/_re/channel-b-dispatch/evidence.md` | radare2 evidence for Channel-B first-stage routing and the corrected low-command switch table shape |
 | `firmwares/RE_FIRMWARE.md` | superseded by this document (initial RE notes; many field-level errors) |
 | `firmwares/R2_ANALYSIS.md` | superseded by this document (r2 deep-dive; itself corrects RE_FIRMWARE.md) |
 | `PROTOCOL.md` | APK-derived protocol spec that this firmware corroborates |

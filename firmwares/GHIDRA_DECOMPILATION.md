@@ -615,20 +615,34 @@ for `FUN_0082fc0c` which consumes it.
 
 1. Computes CRC over assembled payload with `crc16_modbus_update`.
 2. If CRC mismatch → sends NAK (`channel_b_send_nak(cmd, 2)`).
-3. Direct routes for OTA commands:
-   - `0x01`, `0x02`, `0x21`, `0x31`, `0x35`, `0x36`, `0x61` → `FUN_0082fe52(1, 0)`
-   - `0x10`, `0x46` → skip (handled elsewhere / no direct dispatch)
-4. All other commands → `channel_b_store_async_command(cmd, payload, length)` for asynchronous consumption.
+3. Pre-store OTA callback for `0x01`, `0x02`, `0x21`, `0x31`, `0x35`,
+   `0x36`, `0x61`: calls `FUN_0082fe52(1, 0)`, then falls through to
+   `channel_b_store_async_command(cmd, payload, length)`.
+4. `0x10` and `0x46` branch around the async-store call and go straight to the
+   cleanup/state-reset helper (`FUN_0082eebe` / body `0x8abe`).
+5. Every other valid-CRC command calls
+   `channel_b_store_async_command(cmd, payload, length)` for asynchronous
+   consumption.
 
 ### Async processor (`channel_b_async_command_processor`)
 
 Consumes the state saved by `channel_b_store_async_command` (`cmd` at offset `+1`, payload ptr at `+4`, length at `+0xc`).
 
-The dispatch is a hybrid: low cmds `0x00..0x10` go through a switch8
-table at `0x82fc2f` (base, `0x12` entries: `0x2e, 0x5f, 0x63, 0x69, 0x6d,
-0x71, 0x2e, 0x75, 0x2e..0x2e`); cmds `0x11..0x5a` use a cascade of
-`cmp/beq` branches. On exit the handler clears `state[+1]` so the slot
-is reusable.
+The dispatch is a hybrid: low cmds `0x00..0x10` go through the compiler's
+Thumb `switch8` helper, then cmds `0x11..0x5a` use a cascade of `cmp/beq`
+branches. The switch helper metadata is:
+
+```text
+v14 body 0x982e: 08 2e 5f 63 69 6d 71 2e 75 2e
+v13 body 0x9876: 08 2e 5f 63 69 6d 71 2e 75 2e
+```
+
+The first byte (`0x08`) is the max explicit index; the following 9 bytes are
+branch-offset entries for `0x00..0x07` plus the clamped default entry for
+`>=0x08`. Earlier notes over-read the following `cmp` cascade bytes as switch
+entries, but the behavioral table below is unchanged: commands `0x08..0x10`
+all clamp to the default NAK slot. On exit the handler clears `state[+1]` so
+the slot is reusable.
 
 | Cmd | Handler | Notes |
 |---|---|---|
