@@ -56,8 +56,9 @@ flutter test
 
 Working: device scan/connect, handshake, time sync, capability detection,
 find-device, today's steps/calories, live heart-rate, notification enable,
-factory reset, offline-first cloud toggle, local history sync UI, custom
-watch-face designer/upload, firmware fetch-and-store + OTA flow.
+factory reset, offline-first cloud toggle, local history sync UI, firmware
+fetch-and-store + OTA flow. APK-era Channel-B custom watch-face upload is
+documented as unsupported on H59MA v14 (`0x3a` returns compact NAK code `0`).
 
 Open verification gaps (flagged in `PROTOCOL.md` §8.5): ECG/PPG notify
 opcodes, BP compact-byte-to-cuff correlation, and the exact

@@ -40,7 +40,7 @@ Platforms: Android (primary, signed release APK via CI), iOS, macOS, Linux, Wind
 
 ## Current status
 
-Working: device scan/connect, handshake, time sync, capability detection, find-device, today's steps/calories, live heart-rate, notification enable, factory reset, offline-first cloud toggle, local history sync UI, custom watch-face designer/upload, firmware fetch-and-store + OTA flow.
+Working: device scan/connect, handshake, time sync, capability detection, find-device, today's steps/calories, live heart-rate, notification enable, factory reset, offline-first cloud toggle, local history sync UI, firmware fetch-and-store + OTA flow. APK-era Channel-B custom watch-face upload is documented as unsupported on H59MA v14 (`0x3a` returns compact NAK code `0`).
 
 Open verification gaps (flagged in `PROTOCOL.md` §8.5): ECG/PPG notify opcodes, BP compact-byte-to-cuff correlation, and the exact `@RequiresSignature` cloud endpoint set. Channel B CRC is resolved as CRC-16/MODBUS from firmware. Legacy APK-layer bind (`0x10`) is documented as not implemented on H59MA Channel-A; OpenWatch uses Channel-A `0x04` bind.
 
@@ -64,7 +64,7 @@ lib/
 
 Two logical GATT channels on one connection:
 - **Channel A** (`6e40fff0`) — 16-byte command frames `[opcode][sub..14][checksum]` with an additive 8-bit sum; write-with-response, opcode-correlated responses, gated behind a handshake (read HW/FW revision → `ready`).
-- **Channel B** (`de5bf728`) — `0xBC`-magic, length-prefixed, CRC-16/MODBUS-protected large payloads sliced into MTU-sized chunks; used for OTA, files, and custom watch faces.
+- **Channel B** (`de5bf728`) — `0xBC`-magic, length-prefixed, CRC-16/MODBUS-protected large payloads sliced into MTU-sized chunks; used for OTA, H59 file-table operations, sleep/activity data, and alarms. APK-era custom watch-face `0x3a` is not implemented on H59MA v14.
 - **Vendor `0xFEE7`** (optional) — passive/probe 16-byte notify surface; battery/status side-channel, lipids duplicate, session/test, memory, OTA-control, and synthetic-sleep opcodes. Static H59MA v14 routing does not wire FEE7 writes to normal app flows. See `GHIDRA_DECOMPILATION.md` §8.
 
 `PROTOCOL.md` is the single source of truth for opcodes, encodings, and CRC variants. Do not invent fields — if a value isn't documented there, treat it as "needs live capture" (the §8.5 list calls out ECG/PPG notify opcodes, BP compact-byte semantics, signed cloud endpoints, and legacy `0x10` bind non-support).
