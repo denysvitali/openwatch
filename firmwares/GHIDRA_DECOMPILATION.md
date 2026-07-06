@@ -1303,7 +1303,7 @@ like "+2" in decompiled pointer arithmetic, but handlers receive the copied
 | `0x2b` | `menstruation` (mixture container) | `0x0082ba54` | Sub `0x01`/`0x02` read/write mixture data; cycle-phase detector + notification sender — see §3.1. |
 | `0x2c` | `bloodOxygenSetting` | `0x0082d1c2` | Sub `0x01` reads SpO2 setting, `0x02` writes it — see §3.10. |
 | `0x37` | `pressureHistory` | `0x0082caa6` | Reads pressure/stress history records; uses `FUN_008344fe` — see §3.20. |
-| `0x38` | `pressure` | `0x0082ca54` | Sub `0x01` reads pressure value, else sets pressure unit — see §3.17. |
+| `0x38` | `pressureSetting` | `0x0082ca54` | Sub `0x01` reads the pressure/stress enable bit, else writes it — see §3.17. |
 | `0x39` | `hrvHistory` | `0x0082c9da` | Reads HRV history records; uses `FUN_0083468e` — see §3.21. |
 | `0x3a` | `sugarLipidsSetting` | `0x0082cc1e` | Sub `0x03`/`0x04` read/write sugar/lipids settings — see §3.22. |
 | `0x3b` | `uvSetting` / `touchControl` | `0x0082cbc8` | Read/write UV/touch config byte at `DAT_0082cfe8 + 8` — see §3.18. |

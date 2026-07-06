@@ -1097,7 +1097,7 @@ Documented v14 dispatcher targets include:
 | `0x2b` | `0x0082ba54` | menstruation mixture container |
 | `0x2c` | `0x0082d1c2` | SpO2 setting |
 | `0x37`/`0x39` | `0x0082caa6` / `0x0082c9da` | pressure/stress and HRV history records |
-| `0x38` | `0x0082ca54` | pressure value/unit bit |
+| `0x38` | `0x0082ca54` | pressure/stress enable bit |
 | `0x3a`/`0x3b` | `0x0082cc1e` / `0x0082cbc8` | sugar/lipids and UV/touch settings |
 | `0x43` | `0x0082d034` | detailed sport records |
 | `0x72` | `0x00829e92` | Unicode notification text |
