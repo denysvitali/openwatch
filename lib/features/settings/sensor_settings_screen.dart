@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/providers/app_providers.dart';
 import '../../core/services/watch_manager.dart';
-import '../widgets/section_header.dart';
+import '../widgets/health_widgets.dart';
 
 /// Wristband sensor settings: HR auto-measure interval, enable toggle,
 /// and optional low/high alarm thresholds.
@@ -21,6 +21,7 @@ class SensorSettingsScreen extends ConsumerWidget {
     final ready = manager.isReady;
     final caps = manager.capabilities;
     final hrSupported = caps.heart;
+    final theme = Theme.of(context);
 
     return Scaffold(
       appBar: AppBar(
@@ -36,103 +37,118 @@ class SensorSettingsScreen extends ConsumerWidget {
         ],
       ),
       body: ListView(
+        padding: const EdgeInsets.only(bottom: 32),
         children: [
           if (!hrSupported)
-            const ListTile(
-              leading: Icon(Icons.info_outline, color: Colors.orange),
-              title: Text('Heart rate not supported on this device'),
-            ),
-          const SectionHeader('Heart rate'),
-          SwitchListTile(
-            secondary: const Icon(Icons.favorite),
-            title: const Text('Auto-measure'),
-            subtitle: const Text('Periodic background readings'),
-            value: settings.hrAutoMeasureEnabled,
-            onChanged: settingsNotifier.setHrAutoMeasure,
-          ),
-          ListTile(
-            leading: const Icon(Icons.timer),
-            title: const Text('Measurement interval'),
-            subtitle: Text('${settings.hrIntervalMinutes} minutes'),
-            enabled: settings.hrAutoMeasureEnabled,
-            trailing: SizedBox(
-              width: 180,
-              child: Slider(
-                value: settings.hrIntervalMinutes.toDouble(),
-                min: 1,
-                max: 60,
-                divisions: 59,
-                label: '${settings.hrIntervalMinutes} min',
-                onChanged: settings.hrAutoMeasureEnabled
-                    ? (v) => settingsNotifier.setHrInterval(v.round())
-                    : null,
-              ),
-            ),
-          ),
-          const SectionHeader('Alarm thresholds'),
-          ListTile(
-            leading: const Icon(Icons.trending_down),
-            title: const Text('Low HR alarm'),
-            subtitle: const Text('0 = disabled'),
-            trailing: SizedBox(
-              width: 80,
-              child: TextFormField(
-                initialValue: settings.hrLowAlarm.toString(),
-                keyboardType: TextInputType.number,
-                textAlign: TextAlign.center,
-                decoration: const InputDecoration(
-                  suffixText: 'bpm',
-                  isDense: true,
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+              child: HealthCard(
+                icon: Icons.info_outline,
+                metricColor: theme.colorScheme.error,
+                caption: 'Heart rate not supported on this device',
+                trailing: StatusPill(
+                  icon: Icons.error_outline,
+                  label: 'Unsupported',
+                  color: theme.colorScheme.error,
                 ),
-                onFieldSubmitted: (v) {
-                  final parsed = int.tryParse(v);
-                  if (parsed != null && parsed >= 0 && parsed <= 255) {
-                    settingsNotifier.setHrLowAlarm(parsed);
-                  }
-                },
+              ),
+            ),
+          const HealthSectionHeader(title:'Heart rate'),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 18),
+            child: Card(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  HealthListTile(
+                    title: 'Auto-measure',
+                    subtitle: 'Periodic background readings',
+                    leadingIcon: Icons.favorite,
+                    leadingColor: theme.colorScheme.error,
+                    trailing: Switch(
+                      value: settings.hrAutoMeasureEnabled,
+                      onChanged: settingsNotifier.setHrAutoMeasure,
+                    ),
+                    onTap: () => settingsNotifier.setHrAutoMeasure(!settings.hrAutoMeasureEnabled),
+                  ),
+                  HealthListTile(
+                    title: 'Measurement interval',
+                    subtitle: '${settings.hrIntervalMinutes} minutes',
+                    leadingIcon: Icons.timer,
+                    leadingColor: theme.colorScheme.primary,
+                    trailing: SizedBox(
+                      width: 180,
+                      child: Slider(
+                        value: settings.hrIntervalMinutes.toDouble(),
+                        min: 1,
+                        max: 60,
+                        divisions: 59,
+                        label: '${settings.hrIntervalMinutes} min',
+                        onChanged: settings.hrAutoMeasureEnabled
+                            ? (v) => settingsNotifier.setHrInterval(v.round())
+                            : null,
+                      ),
+                    ),
+                    onTap: null,
+                  ),
+                ],
               ),
             ),
           ),
-          ListTile(
-            leading: const Icon(Icons.trending_up),
-            title: const Text('High HR alarm'),
-            subtitle: const Text('0 = disabled'),
-            trailing: SizedBox(
-              width: 80,
-              child: TextFormField(
-                initialValue: settings.hrHighAlarm.toString(),
-                keyboardType: TextInputType.number,
-                textAlign: TextAlign.center,
-                decoration: const InputDecoration(
-                  suffixText: 'bpm',
-                  isDense: true,
-                ),
-                onFieldSubmitted: (v) {
-                  final parsed = int.tryParse(v);
-                  if (parsed != null && parsed >= 0 && parsed <= 255) {
-                    settingsNotifier.setHrHighAlarm(parsed);
-                  }
-                },
+          const HealthSectionHeader(title:'Alarm thresholds'),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 18),
+            child: Card(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _AlarmFieldTile(
+                    title: 'Low HR alarm',
+                    subtitle: '0 = disabled',
+                    icon: Icons.trending_down,
+                    value: settings.hrLowAlarm,
+                    onSubmitted: settingsNotifier.setHrLowAlarm,
+                  ),
+                  _AlarmFieldTile(
+                    title: 'High HR alarm',
+                    subtitle: '0 = disabled',
+                    icon: Icons.trending_up,
+                    value: settings.hrHighAlarm,
+                    onSubmitted: settingsNotifier.setHrHighAlarm,
+                    showDivider: false,
+                  ),
+                ],
               ),
             ),
           ),
-          const Divider(),
-          ListTile(
-            leading: Icon(
-              Icons.watch,
-              color: ready && hrSupported ? Colors.green : Colors.grey,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 24, 18, 0),
+            child: PrimaryHealthButton(
+              label: 'Apply to device now',
+              icon: Icons.watch,
+              onPressed: (ready && hrSupported)
+                  ? () => _applyToDevice(context, ref, manager)
+                  : null,
             ),
-            title: const Text('Apply to device now'),
-            subtitle: Text(
-              ready
-                  ? (hrSupported
-                        ? 'Push current settings to the watch'
-                        : 'HR not supported on this device')
-                  : 'Connect a watch first',
-            ),
-            enabled: ready && hrSupported,
-            onTap: () => _applyToDevice(context, ref, manager),
           ),
+          if (!ready)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 12, 18, 0),
+              child: StatusPill(
+                icon: Icons.bluetooth_disabled,
+                label: 'Connect a watch first',
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            )
+          else if (!hrSupported)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 12, 18, 0),
+              child: StatusPill(
+                icon: Icons.error_outline,
+                label: 'HR not supported on this device',
+                color: theme.colorScheme.error,
+              ),
+            ),
         ],
       ),
     );
@@ -163,5 +179,54 @@ class SensorSettingsScreen extends ConsumerWidget {
         ).showSnackBar(SnackBar(content: Text('Failed to apply: $e')));
       }
     }
+  }
+}
+
+class _AlarmFieldTile extends StatelessWidget {
+  const _AlarmFieldTile({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.value,
+    required this.onSubmitted,
+    this.showDivider = true,
+  });
+
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final int value;
+  final ValueChanged<int> onSubmitted;
+  final bool showDivider;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return HealthListTile(
+      title: title,
+      subtitle: subtitle,
+      leadingIcon: icon,
+      leadingColor: theme.colorScheme.primary,
+      trailing: SizedBox(
+        width: 80,
+        child: TextFormField(
+          initialValue: value.toString(),
+          keyboardType: TextInputType.number,
+          textAlign: TextAlign.center,
+          decoration: const InputDecoration(
+            suffixText: 'bpm',
+            isDense: true,
+          ),
+          onFieldSubmitted: (v) {
+            final parsed = int.tryParse(v);
+            if (parsed != null && parsed >= 0 && parsed <= 255) {
+              onSubmitted(parsed);
+            }
+          },
+        ),
+      ),
+      onTap: null,
+      showDivider: showDivider,
+    );
   }
 }
