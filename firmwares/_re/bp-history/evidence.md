@@ -118,6 +118,47 @@ The persistent descriptor remains 24 hourly 4-byte BP slots at record offset
 slot. The remaining three bytes are not available to the host through this
 opcode.
 
+## FEE7 `0x0d` Uses The Same Compact Sender
+
+The FEE7 low-range dispatcher also has a `0x0d` BP-history entry, but it does
+not expose a fuller 4-byte slot. Its inline switch helper at `0x1a1fc` reads
+the count byte at `lr - 1` and then selects `tableBase + 2 * table[opcode]`.
+For the FEE7 low switch call at `0x6218`, the count byte is `0x27` at
+`0x621c`, the table base is `0x621d`, and case `0x0d` has byte `0xef`:
+
+```text
+0x0000621c  27 99 23 b6 cb cf 99 23 99 23 99 c0 99 e3 ef ...
+                                     case 0x0d ---------^^
+
+target = 0x621d + 2 * 0xef = 0x63fb  (Thumb bit set -> body 0x63fa)
+```
+
+The target prepares the recent-day BP cursor and then calls the same `0x5ca4`
+sender used by Channel-A `0x0e`:
+
+```text
+0x000063fa  bl 0xde52   ; prepare recent BP days
+0x000063fe  bl 0x5ca4   ; build/send compact 0x0d chunks
+```
+
+The relevant radare2 xrefs in v14 are:
+
+```text
+axt 0x5ca4
+0x00005cd8  bl 0x5ca4   ; Channel-A wrapper after 0xde52
+0x000063fe  bl 0x5ca4   ; FEE7 0x0d branch
+0x00006734  bl 0x5ca4   ; sub==0 wrapper after 0xe010
+
+axt 0xde96
+0x00005cac  bl 0xde96   ; only the compact sender calls the BP builder
+```
+
+The BP descriptor pointer `0x00845ae4` appears as the literal at `0xe0b0`,
+which is loaded by `0xde52`/`0xde96`. A byte search for the little-endian word
+(`e4 5a 84 00`) found no other literal. Static firmware RE therefore found no
+alternate host-visible path that emits the remaining three bytes from each
+4-byte BP slot; the FEE7 path converges on the same compact `0x0d` stream.
+
 ## `0x0c` BP Setting Interval
 
 Command:

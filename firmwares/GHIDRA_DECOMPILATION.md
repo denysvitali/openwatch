@@ -4883,7 +4883,7 @@ NAK.
 | `0x0a` | `fee7_handle_time_format_0a` | Time/unit-format read/set. |
 | `0x0b` | Vendor NAK | |
 | `0x0c` | `fee7_handle_bp_setting_0c` | BP setting read/write. |
-| `0x0d` | `bp_history_prepare_recent_days` + `bp_history_send_next_chunks` | Read BP records. |
+| `0x0d` | `bp_history_prepare_recent_days` + `bp_history_send_next_chunks` | Read BP records through the same compact `0x0d` sender as Channel-A `0x0e`; no full 4-byte slot exposure. |
 | `0x0e` | Deferred | Channel-A `bpReadConform` |
 | `0x0f` | Vendor NAK | |
 | `0x10` | `fee7_handle_short_alert_10` | Starts short alert pattern and ACKs `0x10`. |
@@ -4968,7 +4968,7 @@ entries decoded from the two `switch8` tables:
 | `0x04` | `fee7_handle_bind_ancs_04` | ANCS bind |
 | `0x0a` | `fee7_handle_time_format_0a` | Time-format read/set |
 | `0x0c` | `fee7_handle_bp_setting_0c` | BP setting |
-| `0x0d` | `bp_history_prepare_recent_days` + `bp_history_send_next_chunks` | Read BP records |
+| `0x0d` | `bp_history_prepare_recent_days` + `bp_history_send_next_chunks` | Read BP records via same compact sender as Channel-A `0x0e` |
 | `0x10` | `fee7_handle_short_alert_10` | Vibration / display trigger |
 | `0x14` | — | Explicit no-op (early `pop {r4,pc}`) |
 | `0x16` | `fee7_handle_heart_rate_setting_16` | Heart-rate setting |

@@ -966,10 +966,12 @@ Feedback, Customer-support chat.
   now resolves the wire split: the persistent table has 24 hourly 4-byte slots,
   but the `0x0d` stream emits only the first byte of each valid slot after a
   `0x01` chunk tag. OpenWatch stores that compact byte per bitmap slot in the
-  `bp_raw` sidecar. Do not synthesize systolic/diastolic history from it; the
-  remaining three persistent bytes are not exposed by this opcode. Resolution
-  path: correlate live `0x0d` bytes with known manual/cuff readings and, if
-  needed, locate another firmware path that exposes the full 4-byte slot.
+  `bp_raw` sidecar. Do not synthesize systolic/diastolic history from it. The
+  FEE7 `0x0d` branch and the `sub==0` wrapper both converge on the same compact
+  sender (`0x5ca4` → `0xde96`), and the BP descriptor pointer literal has no
+  other v14 hits, so static RE found no host-visible full-slot path for the
+  remaining three persistent bytes. Resolution path: correlate live `0x0d`
+  compact bytes with known manual/cuff readings.
 - **`@RequiresSignature` method set** — confirm which cloud endpoints sign at runtime.
 - **Legacy `bind` (`0x10` CMD_BIND_SUCCESS)** request layout — **not on H59MA Channel-A.**
   The §10.2 inventory (22 Channel-A handlers) does not list `0x10`; on Channel-B
