@@ -27,19 +27,10 @@ class _StubTransport extends FakeBleTransport {
     inB.add(Codec.buildChannelB(type, [status & 0xFF]));
   }
 
-  /// Inject a compact Channel-B NAK from firmware helper `FUN_0082ee00`.
+  /// Inject the one-byte Channel-B error/status frame emitted by
+  /// firmware helper `FUN_0082ee00`.
   void injectNak({required int cmd, int errorCode = 0}) {
-    final crc = Codec.crc16(Uint8List.fromList([errorCode & 0xFF, cmd & 0xFF]));
-    inB.add(
-      Uint8List.fromList([
-        Codec.channelBMagic,
-        0x01,
-        0x00,
-        errorCode & 0xFF,
-        cmd & 0xFF,
-        ...Codec.u16le(crc),
-      ]),
-    );
+    inB.add(Codec.buildChannelB(cmd, [errorCode & 0xFF]));
   }
 }
 
@@ -566,12 +557,12 @@ void main() {
     });
 
     test(
-      'Channel-B NAK code 0 (FUN_0082ee00) surfaces as device error',
+      'Channel-B NAK/status code (FUN_0082ee00) surfaces as device error',
       () async {
-        // Per GHIDRA_DECOMPILATION.md §2.0, a NAK frame is
-        //   [0xBC][count_lo=1][count_hi=0][error_code][cmd][crc_lo][crc_hi]
-        // — 7 bytes with error_code at byte[3], NOT byte[6]. The flasher
-        // must reject it before trying to read a normal OTA status byte.
+        // Per GHIDRA_DECOMPILATION.md §2.0, the helper emits a normal
+        // Channel-B frame for the original cmd with a one-byte error payload.
+        // For OTA responses that means the existing nonzero-status path must
+        // stop progress.
         final t = _StubTransport();
         final flasher = DfuFlasher(t);
         final fw = _fakeFirmware(1024);
@@ -589,11 +580,11 @@ void main() {
             isA<DfuException>().having(
               (e) => e.message,
               'message',
-              allOf(contains('Device NAK'), contains('cmd=0x1')),
+              allOf(contains('Device error'), contains('status=2')),
             ),
           ),
         );
-        t.injectNak(cmd: OpB.otaStart);
+        t.injectNak(cmd: OpB.otaStart, errorCode: 2);
         await Future<void>.delayed(const Duration(milliseconds: 10));
         await expectTask;
       },
