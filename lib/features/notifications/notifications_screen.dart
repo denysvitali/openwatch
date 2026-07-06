@@ -1,33 +1,74 @@
 import 'package:flutter/material.dart';
 
+import '../widgets/health_widgets.dart';
+
 /// App-notification relay config (ANCS-style push to the watch).
+///
+/// Currently a placeholder: the watch protocol supports push messages but the
+/// companion-side enablement toggles are not yet wired, so all switches are
+/// disabled.
 class NotificationsScreen extends StatelessWidget {
   const NotificationsScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Alerts')),
+      appBar: AppBar(title: const Text('Notifications')),
       body: ListView(
-        children: const [
-          SwitchListTile(
-            value: false,
-            onChanged: null,
-            secondary: Icon(Icons.call),
-            title: Text('Incoming calls'),
+        children: [
+          const HealthSectionHeader(title: 'Push to watch'),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 18),
+            child: HealthCard(
+              icon: Icons.info_outline,
+              metricColor: colorScheme.primary,
+              title: 'Notification relay',
+              caption:
+                  'Forward calls, messages, and app alerts to the watch. '
+                  'This feature requires companion-side support and is not yet enabled.',
+              trailing: StatusPill(
+                icon: Icons.pending,
+                label: 'Coming soon',
+                color: colorScheme.tertiary,
+              ),
+            ),
           ),
-          SwitchListTile(
-            value: false,
-            onChanged: null,
-            secondary: Icon(Icons.sms),
-            title: Text('Messages'),
+          const HealthSectionHeader(title: 'Categories'),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 18),
+            child: Card(
+              child: Column(
+                children: [
+                  HealthListTile(
+                    leadingIcon: Icons.call,
+                    leadingColor: colorScheme.secondary,
+                    title: 'Incoming calls',
+                    subtitle: 'Ring and caller ID on the watch',
+                    trailing: const Switch(value: false, onChanged: null),
+                  ),
+                  HealthListTile(
+                    leadingIcon: Icons.sms,
+                    leadingColor: colorScheme.primary,
+                    title: 'Messages',
+                    subtitle: 'SMS and messaging apps',
+                    trailing: const Switch(value: false, onChanged: null),
+                  ),
+                  HealthListTile(
+                    leadingIcon: Icons.apps,
+                    leadingColor: colorScheme.tertiary,
+                    title: 'App notifications',
+                    subtitle: 'Other app alerts',
+                    trailing: const Switch(value: false, onChanged: null),
+                    showDivider: false,
+                  ),
+                ],
+              ),
+            ),
           ),
-          SwitchListTile(
-            value: false,
-            onChanged: null,
-            secondary: Icon(Icons.apps),
-            title: Text('App notifications'),
-          ),
+          const SizedBox(height: 24),
         ],
       ),
     );
