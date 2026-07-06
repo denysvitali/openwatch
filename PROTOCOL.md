@@ -976,8 +976,9 @@ Feedback, Customer-support chat.
 - **`@RequiresSignature` method set** — confirm which cloud endpoints sign at runtime.
 - **Legacy `bind` (`0x10` CMD_BIND_SUCCESS)** request layout — **not on H59MA Channel-A.**
   The §10.2 inventory (22 Channel-A handlers) does not list `0x10`; on Channel-B
-  it falls into the `0x08..0x10` default slot (`NAK code 0`). H59MA's firmware
-  notification/bind state transition is the Channel-A vendor-high `0x04`
+  the first-stage dispatcher branches around async storage and runs only the
+  cleanup/state-reset helper, so ordinary wire frames get no protocol response.
+  H59MA's firmware notification/bind state transition is the Channel-A vendor-high `0x04`
   `BindAncsReq` handler (GHIDRA §8.5; radare2 v14 body offset `0x6032`), and
   OpenWatch sends that Channel-A command for notification enable. The Oudmon
   SDK's `0x10` is a phone-side/app-layer convention that lives in the
@@ -1179,8 +1180,9 @@ commands fall through to `channel_b_send_nak(cmd, 0)`.
 
 radare2 confirms the low OTA-command switch table is identical in v13/v14:
 max explicit index `0x08`, entries `2e 5f 63 69 6d 71 2e 75 2e`; therefore
-`0x08..0x10` clamp to the same default NAK slot instead of occupying separate
-switch entries.
+`0x08..0x0f` clamp to the same default NAK slot instead of occupying separate
+switch entries. A normal wire-level `0x10` frame does not reach this async
+switch because the first-stage dispatcher routes it to cleanup/bypass.
 
 ### 9.4 CRC-16/MODBUS verification
 

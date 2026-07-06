@@ -640,9 +640,10 @@ v13 body 0x9876: 08 2e 5f 63 69 6d 71 2e 75 2e
 The first byte (`0x08`) is the max explicit index; the following 9 bytes are
 branch-offset entries for `0x00..0x07` plus the clamped default entry for
 `>=0x08`. Earlier notes over-read the following `cmp` cascade bytes as switch
-entries, but the behavioral table below is unchanged: commands `0x08..0x10`
-all clamp to the default NAK slot. On exit the handler clears `state[+1]` so
-the slot is reusable.
+entries. In the async worker, commands `0x08..0x0f` clamp to the default NAK
+slot; a normal wire-level `0x10` frame is intercepted earlier by the
+first-stage cleanup/bypass route and does not reach this switch. On exit the
+handler clears `state[+1]` so the slot is reusable.
 
 | Cmd | Handler | Notes |
 |---|---|---|
@@ -653,7 +654,8 @@ the slot is reusable.
 | `0x05` | `ota_cmd_end_reboot` (table offset 0x71) | OTA end — finalizes, resets sensors/BLE, reboots after delays |
 | `0x06` | — | falls into the table's default `0x2e` slot — NAK with code 0 |
 | `0x07` | `ota_cmd_sub_ack` (table offset 0x75) | OTA sub-ack — calls state callback `(7, 0)` |
-| `0x08..0x10` | — | default slot — NAK with code 0 |
+| `0x08..0x0f` | — | default slot — NAK with code 0 |
+| `0x10` | — | first-stage cleanup/bypass; ordinary wire frames do not reach the async worker |
 | `0x11` | `channel_b_send_sleep_summary(payload[0])` | Read sleep summary — see §2.1 |
 | `0x12` | `channel_b_send_detailed_sleep()` | Read detailed sleep data — see §2.2 |
 | `0x13` | — | no-op (skipped) |

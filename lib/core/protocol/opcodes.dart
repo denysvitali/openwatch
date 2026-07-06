@@ -208,6 +208,8 @@ class OpB {
   static const int h59FileDelete = h59CleanupBypass46;
 
   // LargeData actions (PROTOCOL.md §4.7)
+  static const int h59CleanupBypass10 =
+      0x10; // H59MA first-stage cleanup/bypass; no async store
   static const int h59SleepSummary = 0x11; // H59MA 100B sleep summary
   static const int h59SleepDetail = 0x12; // H59MA 288B sleep detail
   static const int h59Noop13 = 0x13; // H59MA Channel-B placeholder; no reply

@@ -280,15 +280,21 @@ void main() {
       }
     });
 
-    test('labels H59MA Channel-B cleanup bypass 0x46', () {
-      final frame = Codec.buildChannelB(OpB.h59CleanupBypass46, [0x5A]);
+    test('labels H59MA Channel-B cleanup bypass commands', () {
+      final frames = [
+        Codec.buildChannelB(OpB.h59CleanupBypass10, [0x5A]),
+        Codec.buildChannelB(OpB.h59CleanupBypass46, [0x5A]),
+      ];
 
       final report = const WatchLogDecoder().decodeNrfConnectLog(
-        _line(_chB, frame),
+        frames.map((f) => _line(_chB, f)).join('\n'),
       );
 
-      expect(report.frames.single.title, contains('h59CleanupBypass46'));
-      expect(report.frames.single.details['label'], 'h59CleanupBypass46');
+      expect(report.frames, hasLength(2));
+      expect(report.frames[0].title, contains('h59CleanupBypass10'));
+      expect(report.frames[0].details['label'], 'h59CleanupBypass10');
+      expect(report.frames[1].title, contains('h59CleanupBypass46'));
+      expect(report.frames[1].details['label'], 'h59CleanupBypass46');
     });
 
     test('labels H59MA Channel-B explicit rejects', () {

@@ -1813,6 +1813,8 @@ String _labelForChannelB(int cmd) {
   switch (cmd) {
     case OpB.apkMusicSendUnsupported:
       return 'apkMusicSendUnsupported';
+    case OpB.h59CleanupBypass10:
+      return 'h59CleanupBypass10';
     case OpB.h59SleepSummary:
       return 'h59SleepSummary';
     case OpB.h59SleepDetail:
