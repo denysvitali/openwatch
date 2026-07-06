@@ -626,7 +626,7 @@ paths unless live captures show additional response bodies.
 
 ---
 
-## 5. Big-data / file / watch-face / OTA flows
+## 5. Big-data / file / OTA flows and APK-era watch-face provenance
 
 ### 5.1 Pocketing (file send)
 
@@ -643,7 +643,7 @@ H59MA v14 has no async-worker branch for `0x3a`; valid-CRC frames fall through
 to compact NAK code `0`. OpenWatch marks the `0x3a` read/write builders
 unsupported instead of sending this action.
 
-### 5.3 Generic file/watch-face upload
+### 5.3 Generic APK file/watch-face upload
 
 This is an APK-era recipe, not an H59MA v14 protocol flow. Do not use it for
 H59MA firmware. Use OTA `0x01..0x05` for firmware images and the H59MA

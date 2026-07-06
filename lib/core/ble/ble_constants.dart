@@ -8,8 +8,9 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 /// * **Channel A** — command channel. Fixed 16-byte frames, write-with-response.
 ///   Carries every settings/health/notification command.
 /// * **Channel B** — large-data/file/OTA channel. `0xBC`-magic length-prefixed
-///   frames, write-without-response, sliced into MTU-sized chunks. Carries
-///   watch-face upload, file transfer and firmware (DFU) flashing.
+///   frames, write-without-response, sliced into MTU-sized chunks. Carries OTA,
+///   H59 file-table operations, sleep/activity data, and alarms. APK-era
+///   custom watch-face upload is not implemented by H59MA v14.
 class BleUuids {
   BleUuids._();
 

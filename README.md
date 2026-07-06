@@ -35,8 +35,10 @@ Two logical GATT channels on one connection. **Channel A** (`6e40fff0`) carries
 fixed 16-byte commands with an additive 8-bit checksum, write-with-response,
 opcode-correlated responses, gated behind a handshake (read FW/HW revision →
 ready). **Channel B** (`de5bf728`) carries `0xBC`-magic, length-prefixed,
-CRC16-protected large data sliced into MTU chunks — used for watch faces, files
-and firmware OTA. See `PROTOCOL.md` for every opcode.
+CRC16-protected large data sliced into MTU chunks — used for OTA, H59
+file-table operations, sleep/activity data, and alarms. APK-era watch-face
+upload is documented as unsupported on H59MA v14. See `PROTOCOL.md` for every
+opcode.
 
 ## Development
 
