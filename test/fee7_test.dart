@@ -388,14 +388,14 @@ void main() {
       await svc.dispose();
     });
 
-    test('routes 0x3e blood-oxygen update', () async {
+    test('routes 0x3e lipids update', () async {
       final host = _StubHost();
       final svc = Fee7Service.attach(host);
       final d = Fee7Dispatcher(svc);
       d.bind();
 
-      final got = d.onBloodOxygen.first;
-      final frame = Codec.buildChannelA(Fee7.bloodOxygenUpdate, [0x02]);
+      final got = d.onLipids.first;
+      final frame = Codec.buildChannelA(Fee7.lipidsUpdate, [0x02]);
       host.inbound.add(frame);
 
       final s = await got.timeout(const Duration(seconds: 1));

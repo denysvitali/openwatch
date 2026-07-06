@@ -35,7 +35,7 @@ class Fee7Dispatcher {
   // Typed opcode streams.
   late final _spo2Hr = _ctrl<SpO2HrUpdate>();
   late final _capability = _ctrl<CapabilityBlock>();
-  late final _bloodOxygen = _ctrl<BloodOxygenUpdate>();
+  late final _lipids = _ctrl<LipidsUpdate>();
   late final _hrv = _ctrl<HrvSetting>();
   late final _handshake = _ctrl<HandshakeResponse>();
   late final _battery = _ctrl<Fee7BatteryResponse>();
@@ -64,8 +64,12 @@ class Fee7Dispatcher {
   /// `0x3c` capability block — fixed bytes reported by the device.
   Stream<CapabilityBlock> get onCapabilityBlock => _capability.stream;
 
-  /// `0x3e` SpO2 read or set.
-  Stream<BloodOxygenUpdate> get onBloodOxygen => _bloodOxygen.stream;
+  /// `0x3e` lipids read or set. This is the FEE7 duplicate of
+  /// Channel-A `0x3a sub 0x04`, not SpO2.
+  Stream<LipidsUpdate> get onLipids => _lipids.stream;
+
+  @Deprecated('FEE7 0x3e is lipids, not blood oxygen; use onLipids')
+  Stream<BloodOxygenUpdate> get onBloodOxygen => _lipids.stream;
 
   /// HRV setting (`0x39` on the 0xFEE7 service). Channel-A `0x39`
   /// is the HRV history reader on H59MA v14; keep this vendor-service
@@ -173,8 +177,8 @@ class Fee7Dispatcher {
         _spo2Hr.add(_decodeSpO2Hr(pl));
       case Fee7.capabilityBlock:
         _capability.add(_decodeCapabilityBlock(frame));
-      case Fee7.bloodOxygenUpdate:
-        _bloodOxygen.add(_decodeBloodOxygenUpdate(pl));
+      case Fee7.lipidsUpdate:
+        _lipids.add(_decodeLipidsUpdate(pl));
       case Fee7.hrv:
         // Reuse the Channel-A HrvSetting shape until the fee7
         // producer-side payload details are pinned down.
@@ -275,9 +279,9 @@ class Fee7Dispatcher {
     return CapabilityBlock(fixed: fixed, tail: tail);
   }
 
-  BloodOxygenUpdate _decodeBloodOxygenUpdate(Uint8List pl) {
+  LipidsUpdate _decodeLipidsUpdate(Uint8List pl) {
     final sub = pl.isNotEmpty ? pl[0] : 0;
-    return BloodOxygenUpdate(sub: sub, payload: pl);
+    return LipidsUpdate(sub: sub, payload: pl);
   }
 
   HandshakeResponse _decodeHandshakeResponse(Uint8List frame, Uint8List pl) {
@@ -415,12 +419,15 @@ class CapabilityBlock {
   final Uint8List tail;
 }
 
-/// `0x3e` SpO2 read/set.
-class BloodOxygenUpdate {
-  const BloodOxygenUpdate({required this.sub, required this.payload});
+/// `0x3e` lipids read/set.
+class LipidsUpdate {
+  const LipidsUpdate({required this.sub, required this.payload});
   final int sub;
   final Uint8List payload;
 }
+
+@Deprecated('FEE7 0x3e is lipids, not blood oxygen; use LipidsUpdate')
+typedef BloodOxygenUpdate = LipidsUpdate;
 
 /// `0x48` 'H' handshake response — 15-byte device-info payload.
 ///

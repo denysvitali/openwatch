@@ -1857,8 +1857,8 @@ String _labelForFee7(int opcode) {
       return 'modeControlCont';
     case Fee7.statusResponse:
       return 'status';
-    case Fee7.bloodOxygenUpdate:
-      return 'bloodOxygenUpdate';
+    case Fee7.lipidsUpdate:
+      return 'lipidsUpdate';
     case Fee7.hrv:
       return 'hrv';
     case Fee7.longResponse:

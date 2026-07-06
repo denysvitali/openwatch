@@ -254,7 +254,10 @@ class Fee7 {
   static const int spo2HrUpdate = 0x36; // SpO2/HR read or set
   static const int hrv = 0x39; // HRV read/set (FUN_0082c9da)
   static const int capabilityBlock = 0x3c; // Returns fixed device-cap block
-  static const int bloodOxygenUpdate = 0x3e; // SpO2 read/set
+  static const int lipidsUpdate = 0x3e; // Lipids read/set (bit 7)
+
+  @Deprecated('FEE7 0x3e is lipids, not blood oxygen; use lipidsUpdate')
+  static const int bloodOxygenUpdate = lipidsUpdate;
 
   // Device info / handshake
   static const int handshakeResponse = 0x48; // 'H' — 15-byte info block
