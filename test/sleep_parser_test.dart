@@ -738,8 +738,8 @@ void main() {
     final anchor = DateTime(2026, 6, 20);
 
     test('parses a single nap block identically to the night shape', () {
-      // Lunch/nap payload has NO dayOffset prefix (only 0x27 does,
-      // see PROTOCOL.md §4.4). It is just `u16 BE endMin + pairs`.
+      // Older lunch/nap payload has NO dayOffset prefix (only older 0x27
+      // does, see PROTOCOL.md §4.4). It is just `u16 BE endMin + pairs`.
       final pl = Uint8List.fromList([
         0x03, 0x0C, // endMin BE 780 (13:00)
         0x01, 0x3C, // light 60 min
@@ -752,8 +752,8 @@ void main() {
 
     test('lunch (0x3e) payload has NO dayOffset prefix (regression)', () {
       // Pre-fix, the night parser's heuristic accidentally
-      // applied to lunch too. The lunch wire format is just
-      // `(endMin, pairs…)` from byte 0 — no leading dayOffset.
+      // applied to lunch too. The older lunch wire format is just
+      // `(endMin, pairs...)` from byte 0 — no leading dayOffset.
       // If a leading byte were eaten as dayOffset here, we'd
       // read 0x42 0x03 as endMin = 0x4203 = 16899 > 1439 and
       // bail out, returning [].
@@ -764,6 +764,23 @@ void main() {
       final segs = SleepParser.parseLunchSleepSegments(pl, anchor: anchor);
       expect(segs, hasLength(1));
       expect(segs.single.start, DateTime(2026, 6, 20, 12, 0));
+    });
+
+    test('parses H59MA count-prefixed nap record list with day deltas', () {
+      final pl = Uint8List.fromList([
+        0x01, // record count
+        0x01, // dayDelta: yesterday
+        0x06, // blockLen: start/end u16LE + one pair
+        0xD0, 0x02, // startMin LE 720 (12:00)
+        0x0C, 0x03, // endMin LE 780 (13:00)
+        0x01, 0x3C, // light 60 min
+      ]);
+
+      final segs = SleepParser.parseLunchSleepSegments(pl, anchor: anchor);
+      expect(segs, hasLength(1));
+      expect(segs.single.stage, SleepStage.light);
+      expect(segs.single.duration.inMinutes, 60);
+      expect(segs.single.start, DateTime(2026, 6, 19, 12, 0));
     });
 
     // -------------------------------------------------------------------------

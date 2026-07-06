@@ -855,13 +855,15 @@ class HistorySync extends ChangeNotifier {
           }
         }
 
-        // Sleep for the most recent N days. The new protocol emits a day
-        // offset per request, so we fire-and-await each missing offset. Delta
-        // sync skips past days we already have; today is always re-fetched
-        // because the wake-up-day response can contain sessions that began
-        // the previous calendar day. Sleep buckets are cleared only when a
-        // replacement response is actually decoded; a missed or malformed
-        // reply must not erase the user's previously-stored night.
+        // Sleep for the most recent N days. The new protocol's first request
+        // byte is the maximum day offset, not a single day selector. One
+        // request returns record-list entries for each available day from
+        // `maxOffset` back to today. Delta sync skips past days we already
+        // have; today is always re-fetched because the wake-up-day response
+        // can contain sessions that began the previous calendar day. Sleep
+        // buckets are cleared only when a replacement response is actually
+        // decoded; a missed or malformed reply must not erase the user's
+        // previously-stored night.
         //
         // NOTE: per GHIDRA_DECOMPILATION.md §2.3, direct host requests use
         // opcode 0x27. `payload[1] == 1` selects the nap pass, causing the
@@ -877,24 +879,28 @@ class HistorySync extends ChangeNotifier {
         );
         if (sleepToFetch.isNotEmpty) {
           final sleepOffsets = sleepToFetch.toList()..sort();
+          const sleepMaxDayOffset = 6;
+          final requestedMaxSleepOffset = sleepOffsets.last;
+          final maxSleepOffset = requestedMaxSleepOffset > sleepMaxDayOffset
+              ? sleepMaxDayOffset
+              : requestedMaxSleepOffset;
           AppLog.instance.debug(
             'history',
-            'sleep: 0x27 recordType=1 for day offsets $sleepOffsets',
+            'sleep: 0x27 recordType=1 maxOffset=$maxSleepOffset '
+                'for needed offsets $sleepOffsets',
           );
-          for (final d in sleepOffsets) {
-            // Attribute inbound 0x27/0x3e pushes to the requested day so
-            // payloads that omit an offset still resolve correctly
-            // (PROTOCOL.md §4.4 footnote).
-            _currentSyncDay = todayD.addDays(-d);
-            try {
-              await transport.sendB(
-                Commands.readSleepLunchProtocol(dayOffset: d),
-              );
-              await _drainRx(drainDuration);
-              await Future<void>.delayed(postCommandDelay);
-            } finally {
-              _currentSyncDay = null;
-            }
+          // Attribute legacy no-prefix payloads to the oldest requested day.
+          // H59MA record-list responses carry per-record day deltas and are
+          // decoded against today instead.
+          _currentSyncDay = todayD.addDays(-maxSleepOffset);
+          try {
+            await transport.sendB(
+              Commands.readSleepLunchProtocol(dayOffset: maxSleepOffset),
+            );
+            await _drainRx(drainDuration);
+            await Future<void>.delayed(postCommandDelay);
+          } finally {
+            _currentSyncDay = null;
           }
         }
       } else {
@@ -1646,10 +1652,11 @@ class HistorySync extends ChangeNotifier {
   /// Only the night-sleep opcode (`0x27`) carries a `dayOffset` prefix
   /// (PROTOCOL.md §4.4: first payload byte = dayOffset, 0 = today,
   /// 1 = yesterday, …). The lunch/nap opcode (`0x3e`) does **not** have this
-  /// prefix — its first byte is the high byte of the BE `endMinuteOfDay`.
-  /// Some older firmware revisions omit the prefix entirely; in that case
-  /// we default to the current sync day (the one we just polled) so the
-  /// data still lands in the correct file.
+  /// prefix in the older chained shape — its first byte is the high byte of
+  /// the BE `endMinuteOfDay`. H59MA record-list payloads carry per-record day
+  /// deltas and bypass this helper. Some older firmware revisions omit the
+  /// prefix entirely; in that case we default to the current sync day (the one
+  /// we just polled) so the data still lands in the correct file.
   DateOnly _dayFromSleepPayload(Uint8List payload, {required bool isNight}) {
     final today = DateOnly.today();
     if (isNight && payload.isNotEmpty && payload[0] <= 31) {
@@ -1782,7 +1789,10 @@ class HistorySync extends ChangeNotifier {
       attributes: {'sync.sleep.kind': 'lunch'},
     );
     try {
-      final wakeDay = _dayFromSleepPayload(payload, isNight: false);
+      final isH59maRecordList = SleepParser.isH59maNightRecordPayload(payload);
+      final wakeDay = isH59maRecordList
+          ? DateOnly.today()
+          : _dayFromSleepPayload(payload, isNight: false);
       final anchor = wakeDay.midnight;
       final added = SleepParser.parseLunchSleepSegments(
         payload,

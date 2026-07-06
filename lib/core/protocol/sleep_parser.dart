@@ -38,15 +38,15 @@ class SleepSegment {
 ///     `stageByte` is the Oudmon stage id; the mapping is documented
 ///     in [stageFor] below. Stages are emitted as [SleepStage]; pair
 ///     durations are minutes.
-///   * H59MA v13/v14 also emits a record-list shape on `0x27`:
+///   * H59MA v13/v14 also emits a record-list shape on `0x27` and `0x3e`:
 ///     `[recordCount, record...]`, where each record is
 ///     `[dayDelta, blockLen, startMinLE, endMinLE, (stage,durMin)*]`.
 ///     `blockLen` includes the 4 start/end bytes plus the pair bytes.
-///     This is the shape seen in live `H59MA_1.00.13_251230` captures
-///     and matches the firmware's count-prefixed record writer.
-///   * Ch-B `[BC,3e,len,crc,payload]`
+///     This is the shape seen in live `H59MA_1.00.13_251230` captures and
+///     matches the firmware's count-prefixed night/nap record writer.
+///   * Older Ch-B `[BC,3e,len,crc,payload]`
 ///     Lunch/nap payload **does not** carry the dayOffset prefix (only
-///     `0x27` does). It is just the alternating shape: u16 **BE**
+///     older `0x27` does). It is just the alternating shape: u16 **BE**
 ///     end-minute-of-day followed by (stage, durMin) pairs. We treat
 ///     it identically to the night shape for display purposes.
 ///   * Empty payload (the [OpB] byte is set but the body is empty)
@@ -97,8 +97,11 @@ class SleepParser {
   /// [parseLunchSleepSegments].
   static int stageFor(int typeByte) => typeByte & 0xFF;
 
-  /// Returns true when [pl] matches the H59MA `0x27` record-list shape:
+  /// Returns true when [pl] matches the H59MA sleep record-list shape:
   /// `[count, dayDelta, blockLen, startMinLE, endMinLE, pairs...]`.
+  ///
+  /// The historical method name says "Night", but the firmware uses the
+  /// same record-list writer for the `0x3e` nap response.
   static bool isH59maNightRecordPayload(Uint8List pl) {
     if (pl.isEmpty) return false;
     final count = pl[0] & 0xFF;
@@ -164,12 +167,12 @@ class SleepParser {
       return const [];
     }
     if (isH59maNightRecordPayload(pl)) {
-      return _parseH59maNightRecords(pl, anchor: anchor);
+      return _parseH59maRecords(pl, anchor: anchor);
     }
     return _parseChained(pl.sublist(1), anchor: anchor, source: 'night');
   }
 
-  static List<SleepSegment> _parseH59maNightRecords(
+  static List<SleepSegment> _parseH59maRecords(
     Uint8List pl, {
     required DateTime anchor,
   }) {
@@ -206,23 +209,28 @@ class SleepParser {
     return out;
   }
 
-  /// Parses a `0x3e` lunch/nap-sleep payload. Same wire shape as the
-  /// night variant; the only difference is the channel-B cmd id.
+  /// Parses a `0x3e` lunch/nap-sleep payload.
+  ///
+  /// H59MA record-list payloads are decoded like `0x27`; older captures fall
+  /// back to the no-prefix chained shape.
   static List<SleepSegment> parseLunchSleepSegments(
     Uint8List pl, {
     required DateTime anchor,
-  }) => _parseChained(pl, anchor: anchor, source: 'lunch');
+  }) {
+    if (isH59maNightRecordPayload(pl)) {
+      return _parseH59maRecords(pl, anchor: anchor);
+    }
+    return _parseChained(pl, anchor: anchor, source: 'lunch');
+  }
 
   /// Walks [pl] as a sequence of chained day blocks; each block is
   /// `u16 BE endMin` + `(stageByte, durMin)*`.
   ///
   /// For the older night frame (`0x27`) the very first byte of [pl] is the
   /// `dayOffset` prefix from `PROTOCOL.md` §4.4 and is unconditionally
-  /// skipped before this helper is called. The lunch frame (`0x3e`) has
-  /// **no** dayOffset prefix, so the caller (`parseNightSleepSegments`)
-  /// must NOT strip the leading byte — `parseLunchSleepSegments`
-  /// therefore just delegates here with the byte still in place
-  /// (its payload is a pure endMin+pairs blob).
+  /// skipped before this helper is called. The older lunch frame (`0x3e`) has
+  /// **no** dayOffset prefix, so `parseLunchSleepSegments` passes the byte
+  /// still in place after ruling out the H59MA record-list shape.
   static List<SleepSegment> _parseChained(
     Uint8List pl, {
     required DateTime anchor,

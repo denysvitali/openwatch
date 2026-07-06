@@ -488,9 +488,12 @@ dispatcher; static routing is command-specific.
 | APK LargeData action inventory | varies | both | `byte1`=action; `payload[0]`=01/02 | APK `respMap[action]`; H59MA v14 see below | APK names: `0x20` Location, `0x27` NewSleep, `0x28` ManualHeartRate, `0x29` Contacts_New, `0x2a` Blood_Oxygen, `0x2c` Alarm, `0x2d` Contact, `0x2e` BT_MAC, `0x2f` E_CARD/QrCode, `0x3a` Custom_WatchFace, `0x3e` NewSleep_Lunch, `0x47` Blood_Sugar, `0x48` GPS_Navigation, `0x49` Manual_Oxygen, `0x4a` AVATAR_Device(nickname), `0x4c` SMS_QUICK, `0x5f` Interval_Blood_Oxygen, `0x75` Interval_Heart_Rate. |
 
 H59MA v14 note: direct host requests use `0x27` for both night and nap sleep.
-`payload[1] == 1` makes the firmware emit a `0x3e` nap/lunch response before
-the normal `0x27` night response. A direct host request with command `0x3e`
-has no async-worker branch and returns compact NAK code `0`.
+`payload[0]` is a maximum day offset, so one `[maxDayOffset, 0x01]` request
+covers all available records from that offset through today; hosts should not
+loop one `0x27` request per offset. `payload[1] == 1` makes the firmware emit
+a `0x3e` nap/lunch response before the normal `0x27` night response. A direct
+host request with command `0x3e` has no async-worker branch and returns compact
+NAK code `0`.
 
 H59MA v14 static routing for the APK action ids above:
 

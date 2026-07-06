@@ -298,7 +298,7 @@ void main() {
             yesterday: DailyHistory(
               day: yesterday,
               // Past day already has a sleep segment — the
-              // 0x27 poll for that dayOffset must NOT go on the wire.
+              // 0x27 max-offset batch must NOT include that past day.
               // Today is always re-fetched.
               sleep: [
                 SleepSegment(
@@ -493,20 +493,17 @@ void main() {
               (f) => f.isNotEmpty && Codec.rxChannelBCmd(f) == OpB.sleepNew,
             )
             .toList();
-        // Stress + HRV still go per-dayOffset on Channel-A. Sleep also polls
-        // every needed offset with 0x27; each request can produce both night
-        // and nap responses.
+        // Stress + HRV still go per-dayOffset on Channel-A. Sleep uses one
+        // 0x27 max-offset batch; the response can carry both night and nap
+        // records for every available day in the requested range.
         expect(stressReads, hasLength(2));
         expect(hrvReads, hasLength(2));
         expect(
           nightReads,
-          hasLength(2),
+          hasLength(1),
           reason: 'today and the empty past sleep day must both be polled',
         );
-        expect(
-          [for (final frame in nightReads) Codec.rxChannelBPayload(frame)![0]],
-          [0, 1],
-        );
+        expect(Codec.rxChannelBPayload(nightReads.single), [0x01, 0x01]);
         sync.dispose();
         d.dispose();
       },
@@ -622,18 +619,11 @@ void main() {
             .toList();
         expect(
           nightReads,
-          hasLength(2),
+          hasLength(1),
           reason:
               'past day with synced sleep but no segments must be re-polled',
         );
-        expect(
-          [for (final frame in nightReads) Codec.rxChannelBPayload(frame)![0]],
-          [0, 1],
-        );
-        expect(
-          [for (final frame in nightReads) Codec.rxChannelBPayload(frame)![1]],
-          [1, 1],
-        );
+        expect(Codec.rxChannelBPayload(nightReads.single), [0x01, 0x01]);
         // 0x3e is a response opcode; hosts request naps via 0x27 recordType=1.
         final lunchReads = t.sentB
             .where(
@@ -715,13 +705,10 @@ void main() {
         expect(hrvReads, hasLength(2));
         expect(
           nightReads,
-          hasLength(2),
-          reason: 'force must bypass the sleep skip rule for every offset',
+          hasLength(1),
+          reason: 'force must set the sleep batch to the highest offset',
         );
-        expect(
-          [for (final frame in nightReads) Codec.rxChannelBPayload(frame)![0]],
-          [0, 1],
-        );
+        expect(Codec.rxChannelBPayload(nightReads.single), [0x01, 0x01]);
         expect(lunchReads, isEmpty);
         sync.dispose();
         d.dispose();
@@ -1594,6 +1581,7 @@ void main() {
         expect([
           for (final frame in sleepRequests) Codec.rxChannelBPayload(frame)![1],
         ], everyElement(1));
+        expect(Codec.rxChannelBPayload(sleepRequests.single), [0x00, 0x01]);
         // 0x3e sleepLunchNew must NOT be sent directly; it is emitted by the
         // firmware from the 0x27 recordType=1 request per GHIDRA §2.3.
         expect(
@@ -2107,32 +2095,34 @@ void main() {
       d.dispose();
     });
 
-    test('sleep sends one 0x27 read for each needed day offset', () async {
-      final t = FakeBleTransport();
-      final d = ChannelADispatcher(t);
-      final bParser = ChannelBParser(t);
-      d.bind();
-      final sync = _testSync(t, d, bParser: bParser);
-      await sync.syncAll(daysBack: 7);
+    test(
+      'sleep sends one 0x27 read at clamped max needed day offset',
+      () async {
+        final t = FakeBleTransport();
+        final d = ChannelADispatcher(t);
+        final bParser = ChannelBParser(t);
+        d.bind();
+        final sync = _testSync(t, d, bParser: bParser);
+        await sync.syncAll(daysBack: 10);
 
-      final nightReads = t.sentB
-          .where((f) => f.isNotEmpty && Codec.rxChannelBCmd(f) == OpB.sleepNew)
-          .toList();
-      expect(
-        nightReads,
-        hasLength(7),
-        reason: 'sleep must poll each missing day offset',
-      );
-      // Use the Channel-B payload helper, not `rxPayload` (Channel-A
-      // 16-byte helper).
-      final offsets = [
-        for (final frame in nightReads) Codec.rxChannelBPayload(frame)![0],
-      ];
-      expect(offsets, [0, 1, 2, 3, 4, 5, 6]);
+        final nightReads = t.sentB
+            .where(
+              (f) => f.isNotEmpty && Codec.rxChannelBCmd(f) == OpB.sleepNew,
+            )
+            .toList();
+        expect(
+          nightReads,
+          hasLength(1),
+          reason: 'sleep must poll the clamped maximum missing offset once',
+        );
+        // Use the Channel-B payload helper, not `rxPayload` (Channel-A
+        // 16-byte helper).
+        expect(Codec.rxChannelBPayload(nightReads.single), [0x06, 0x01]);
 
-      sync.dispose();
-      d.dispose();
-    });
+        sync.dispose();
+        d.dispose();
+      },
+    );
 
     test('H59MA record-list covering only today does NOT lock yesterday+ as '
         'sleep-synced (regression: Thursday/Friday data loss)', () async {

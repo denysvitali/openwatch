@@ -279,7 +279,7 @@ void main() {
     });
 
     test(
-      'readSleepNewProtocol clamps dayOffset to 0..6 per PROTOCOL.md §4.4',
+      'readSleepNewProtocol clamps maxDayOffset to 0..6 per PROTOCOL.md §4.4',
       () {
         final f = Commands.readSleepNewProtocol(dayOffset: 10);
         expect(Codec.rxChannelBCmd(f), OpB.sleepNew);
@@ -288,7 +288,7 @@ void main() {
     );
 
     test(
-      'readSleepLunchProtocol uses 0x27 recordType=1 and clamps dayOffset',
+      'readSleepLunchProtocol uses 0x27 recordType=1 and clamps maxDayOffset',
       () {
         final f = Commands.readSleepLunchProtocol(dayOffset: 99);
         expect(Codec.rxChannelBCmd(f), OpB.sleepNew);

@@ -707,13 +707,16 @@ Uses the requested day-offset byte at `*(channel_b_async_state_ptr_primary + 4)`
 
 #### 2.3 Sleep records (`channel_b_send_sleep_records`)
 
-Inputs: `param_1` (clamped to 6) = day offset; `param_2` = record-type
-filter. The nap pass is gated by `param_2 == 1`; the night pass always runs:
+Inputs: `param_1` (clamped to 6) = maximum day offset; `param_2` =
+record-type filter. The handler computes `base_day = today - param_1` and
+loops from that base day through today, writing `day_delta = param_1 - loopIdx`
+into each emitted record. The nap pass is gated by `param_2 == 1`; the night
+pass always runs:
 
 - If `param_2 == 1`: reads records via `sleep_read_nap_record(day, buf)`.
-  Emits one Channel-B `0x3E` frame (header + nap records).
+  Emits one Channel-B `0x3E` frame (header + all nap records in range).
 - Night-sleep pass (always): reads via `sleep_read_summary_record(day, buf)`.
-  Emits one Channel-B `0x27` frame (header + night records).
+  Emits one Channel-B `0x27` frame (header + all night records in range).
 
 Each emitted record (6-byte header + score bytes + label bytes) is
 laid out as:

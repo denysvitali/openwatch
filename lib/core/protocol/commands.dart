@@ -221,21 +221,22 @@ class Commands {
     return Codec.buildChannelA(OpA.readHeartRate, Codec.u32le(start));
   }
 
-  /// New sleep protocol (Channel-B `0x27`) for a given day offset. Sent as
+  /// New sleep protocol (Channel-B `0x27`) for a maximum day offset. Sent as
   /// a framed BC/27/len/crc/payload frame; see PROTOCOL.md §4.4.
   ///
   /// The firmware handler `FUN_0082fada` (GHIDRA §2.3) expects a 2-byte
-  /// payload: `[dayOffset, recordType]` where `recordType = 0x00` selects the
-  /// night sleep pass. `dayOffset` is clamped to `0..6` per the spec.
+  /// payload: `[maxDayOffset, recordType]`, where `recordType = 0x00` selects
+  /// the night sleep pass and `maxDayOffset` is clamped to `0..6`.
   static Uint8List readSleepNewProtocol({int dayOffset = 0}) =>
       Codec.buildChannelB(OpB.sleepNew, [_clamp(dayOffset, 0, 6), 0x00]);
 
-  /// New sleep protocol lunch/nap selector for a given day offset.
+  /// New sleep protocol lunch/nap selector for a maximum day offset.
   ///
   /// H59MA v14 has no direct host-request branch for Channel-B `0x3e`; that
   /// is a response opcode emitted by the `0x27` handler. Sending `0x27` with
-  /// payload `[dayOffset, 0x01]` selects the nap pass, emits `0x3e`, then emits
-  /// the normal `0x27` night records. `dayOffset` is clamped to `0..6`.
+  /// payload `[maxDayOffset, 0x01]` selects the nap pass, emits `0x3e`, then
+  /// emits the normal `0x27` night records. `maxDayOffset` is clamped to
+  /// `0..6`. The parameter is still named [dayOffset] for source compatibility.
   static Uint8List readSleepLunchProtocol({int dayOffset = 0}) =>
       Codec.buildChannelB(OpB.sleepNew, [_clamp(dayOffset, 0, 6), 0x01]);
 

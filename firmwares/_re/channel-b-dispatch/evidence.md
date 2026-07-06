@@ -139,14 +139,21 @@ instructions.
 ### Sleep `0x27` emits response `0x3e`
 
 Direct host requests for lunch/nap sleep still use command `0x27`. The
-`0x3e` value is a response opcode emitted only by the `0x27` handler when the
-second payload byte is `1`; direct host `0x3e` frames have no async compare
-entry and default to NAK status `0`.
+first payload byte is the maximum day offset: the handler clamps it to `6`,
+computes `baseDay = today - maxOffset`, loops through that range, and writes
+`maxOffset - loopIndex` into each emitted record. The `0x3e` value is a
+response opcode emitted only by the `0x27` handler when the second payload byte
+is `1`; direct host `0x3e` frames have no async compare entry and default to
+NAK status `0`.
 
 ```text
 v14:
+0x000096e6  cmp  r6, 6        ; clamp payload[0] max day offset
+0x000096ea  movs r6, 6
 0x000096fc  cmp  r7, 1        ; r7 = payload[1]
 0x000096fe  bne  0x9784       ; skip nap pass unless recordType == 1
+...
+0x0000971c  subs r0, r6, r7   ; record dayDelta = maxOffset - loopIndex
 ...
 0x0000977a  movs r0, 0x3e
 0x0000977c  bl   0x88e0       ; emit nap/lunch response
