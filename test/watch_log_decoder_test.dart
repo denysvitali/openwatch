@@ -824,6 +824,8 @@ void main() {
         Fee7.timeFormat: 'timeFormat',
         Fee7.bpSetting: 'bpSetting',
         Fee7.bpData: 'bpData',
+        Fee7.shortAlert: 'shortAlert',
+        Fee7.lowNoop14: 'lowNoop',
         Fee7.heartRateSetting: 'heartRateSetting',
         Fee7.degreeSwitch: 'degreeSwitch',
         Fee7.targetSetting: 'targetSetting',

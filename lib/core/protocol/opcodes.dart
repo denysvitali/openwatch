@@ -320,6 +320,8 @@ class Fee7 {
   static const int timeFormat = 0x0a; // FUN_0082b9c6
   static const int bpSetting = 0x0c; // FUN_0082c0de
   static const int bpData = 0x0d; // FUN_00834252 + FUN_0082c0a4
+  static const int shortAlert = 0x10; // Alert pattern + ACK
+  static const int lowNoop14 = 0x14; // Explicit low-range no-op
   static const int heartRateSetting = 0x16; // FUN_0082c164
   static const int degreeSwitch = 0x19; // FUN_0082c484
   static const int targetSetting = 0x21; // FUN_0082bfd8

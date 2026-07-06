@@ -1993,6 +1993,10 @@ String _labelForFee7(int opcode) {
       return 'bpSetting';
     case Fee7.bpData:
       return 'bpData';
+    case Fee7.shortAlert:
+      return 'shortAlert';
+    case Fee7.lowNoop14:
+      return 'lowNoop';
     case Fee7.heartRateSetting:
       return 'heartRateSetting';
     case Fee7.degreeSwitch:
