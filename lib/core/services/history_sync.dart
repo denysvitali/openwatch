@@ -863,14 +863,10 @@ class HistorySync extends ChangeNotifier {
         // replacement response is actually decoded; a missed or malformed
         // reply must not erase the user's previously-stored night.
         //
-        // NOTE: per GHIDRA_DECOMPILATION.md §2.3, the firmware handler
-        // `channel_b_send_sleep_records` (0x0082fada) **always** emits
-        // both `0x3E` (nap) and `0x27` (night) responses in a single
-        // call regardless of `recordType`. The `param_2` only affects
-        // which pass reads from storage first. Therefore, sending only
-        // `0x27` suffices to get both night and lunch/nap data; a
-        // separate `0x3e` send would be redundant and cause duplicate
-        // responses (absorbed by ChannelBParser dedup, but wasted).
+        // NOTE: per GHIDRA_DECOMPILATION.md §2.3, direct host requests use
+        // opcode 0x27. `payload[1] == 1` selects the nap pass, causing the
+        // firmware to emit a 0x3E nap response and then the normal 0x27 night
+        // response. A direct 0x3E host request is not implemented.
         final sleepToFetch = _daysToFetch(
           wantsDays,
           todayD,
@@ -883,7 +879,7 @@ class HistorySync extends ChangeNotifier {
           final sleepOffsets = sleepToFetch.toList()..sort();
           AppLog.instance.debug(
             'history',
-            'sleep: 0x27 for day offsets $sleepOffsets',
+            'sleep: 0x27 recordType=1 for day offsets $sleepOffsets',
           );
           for (final d in sleepOffsets) {
             // Attribute inbound 0x27/0x3e pushes to the requested day so
@@ -892,7 +888,7 @@ class HistorySync extends ChangeNotifier {
             _currentSyncDay = todayD.addDays(-d);
             try {
               await transport.sendB(
-                Commands.readSleepNewProtocol(dayOffset: d),
+                Commands.readSleepLunchProtocol(dayOffset: d),
               );
               await _drainRx(drainDuration);
               await Future<void>.delayed(postCommandDelay);

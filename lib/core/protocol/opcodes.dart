@@ -204,7 +204,8 @@ class OpB {
       0x2a; // v14 activity/sport summary — see GHIDRA §2.8
   static const int alarm = 0x2c; // Channel-B compact alarm read/write
   static const int h59Noop3b = 0x3b; // H59MA Channel-B placeholder; no reply
-  static const int sleepLunchNew = 0x3e; // new sleep (lunch/nap) — Ch B
+  // H59MA nap/lunch response opcode. Hosts request it via 0x27 recordType=1.
+  static const int sleepLunchNew = 0x3e;
   static const int h59Noop47 = 0x47; // H59MA Channel-B placeholder; no reply
   static const int h59Noop4b = 0x4b; // H59MA Channel-B placeholder; no reply
 

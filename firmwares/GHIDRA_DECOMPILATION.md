@@ -708,9 +708,9 @@ Uses the requested day-offset byte at `*(channel_b_async_state_ptr_primary + 4)`
 #### 2.3 Sleep records (`channel_b_send_sleep_records`)
 
 Inputs: `param_1` (clamped to 6) = day offset; `param_2` = record-type
-filter. Two parallel passes always run, regardless of `param_2`:
+filter. The nap pass is gated by `param_2 == 1`; the night pass always runs:
 
-- Nap pass (`param_2 == 1`): reads records via `sleep_read_nap_record(day, buf)`.
+- If `param_2 == 1`: reads records via `sleep_read_nap_record(day, buf)`.
   Emits one Channel-B `0x3E` frame (header + nap records).
 - Night-sleep pass (always): reads via `sleep_read_summary_record(day, buf)`.
   Emits one Channel-B `0x27` frame (header + night records).
@@ -6471,10 +6471,10 @@ section number* for a given operation.
 |---|---|---|---|
 | `0x11` | day_offset | §2.9 | sleep summary (101 B: echoed offset + 100 B) |
 | `0x12` | day_offset | §2.10 | sleep detail (289 B: echoed offset + 288 B) |
-| `0x27` | — | §2.4 | sleep records (night) |
+| `0x27` | — | §2.3 | sleep records (night) |
 | `0x2a` | day_offset | §2.8 | activity summary (up to 3 × 49 B) |
 | `0x2c` | sub 0x01 / 0x02 | §2.5 | alarm read / write |
-| `0x3e` | — | §2.4 | lunch sleep records (same as `0x27`) |
+| `0x3e` | — | §2.3 | lunch sleep response emitted by `0x27` with `payload[1] == 1`; not a direct request branch |
 | `0x41` | file_index | §2.11 | file list (up to 10 files, `0x42` response opcode) |
 | `0x43` | payload | §2.11 | file operation (`0x44` metadata + optional `0x45` chunks) |
 | `0x5a` | config_tlv | §2.7 | device info TLV |

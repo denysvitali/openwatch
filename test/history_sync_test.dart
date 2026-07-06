@@ -324,7 +324,8 @@ void main() {
         hasLength(1),
         reason: 'only today should be re-polled for night sleep',
       );
-      // 0x3e must never be sent (redundant per GHIDRA §2.3).
+      expect(Codec.rxChannelBPayload(nightReads.single), [0x00, 0x01]);
+      // 0x3e is a response opcode; hosts request naps via 0x27 recordType=1.
       final lunchReads = t.sentB
           .where(
             (f) => f.isNotEmpty && Codec.rxChannelBCmd(f) == OpB.sleepLunchNew,
@@ -333,7 +334,7 @@ void main() {
       expect(
         lunchReads,
         isEmpty,
-        reason: '0x3e sleepLunchNew must not be sent (redundant)',
+        reason: '0x3e sleepLunchNew must not be sent as a request',
       );
       sync.dispose();
       d.dispose();
@@ -629,7 +630,11 @@ void main() {
           [for (final frame in nightReads) Codec.rxChannelBPayload(frame)![0]],
           [0, 1],
         );
-        // 0x3e must never be sent (redundant per GHIDRA §2.3).
+        expect(
+          [for (final frame in nightReads) Codec.rxChannelBPayload(frame)![1]],
+          [1, 1],
+        );
+        // 0x3e is a response opcode; hosts request naps via 0x27 recordType=1.
         final lunchReads = t.sentB
             .where(
               (f) =>
@@ -639,7 +644,7 @@ void main() {
         expect(
           lunchReads,
           isEmpty,
-          reason: '0x3e sleepLunchNew must not be sent (redundant)',
+          reason: '0x3e sleepLunchNew must not be sent as a request',
         );
         sync.dispose();
         d.dispose();
@@ -698,7 +703,7 @@ void main() {
               (f) => f.isNotEmpty && Codec.rxChannelBCmd(f) == OpB.sleepNew,
             )
             .toList();
-        // 0x3e must never be sent (redundant per GHIDRA §2.3).
+        // 0x3e is a response opcode; hosts request naps via 0x27 recordType=1.
         final lunchReads = t.sentB
             .where(
               (f) =>
@@ -1563,7 +1568,7 @@ void main() {
     );
 
     test(
-      'syncAll sends only 0x27 sleep (not redundant 0x3e) when ChannelBParser is provided',
+      'syncAll sends 0x27 recordType=1 sleep when ChannelBParser is provided',
       () async {
         final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
@@ -1574,23 +1579,29 @@ void main() {
         await Future<void>.delayed(const Duration(milliseconds: 20));
         await future;
 
-        // 0x27 sleepNew must be sent.
+        // 0x27 sleepNew must be sent with recordType=1 so the firmware emits
+        // both the 0x3e nap response and the 0x27 night response.
+        final sleepRequests = t.sentB
+            .where(
+              (f) => f.isNotEmpty && Codec.rxChannelBCmd(f) == OpB.sleepNew,
+            )
+            .toList();
         expect(
-          t.sentB.where(
-            (f) => f.isNotEmpty && Codec.rxChannelBCmd(f) == OpB.sleepNew,
-          ),
+          sleepRequests,
           isNotEmpty,
           reason: '0x27 sleepNew must be sent when bParser is provided',
         );
-        // 0x3e sleepLunchNew must NOT be sent — the firmware always
-        // emits both 0x27 and 0x3e responses from a single 0x27 request
-        // per GHIDRA_DECOMPILATION.md §2.3.
+        expect([
+          for (final frame in sleepRequests) Codec.rxChannelBPayload(frame)![1],
+        ], everyElement(1));
+        // 0x3e sleepLunchNew must NOT be sent directly; it is emitted by the
+        // firmware from the 0x27 recordType=1 request per GHIDRA §2.3.
         expect(
           t.sentB.where(
             (f) => f.isNotEmpty && Codec.rxChannelBCmd(f) == OpB.sleepLunchNew,
           ),
           isEmpty,
-          reason: '0x3e sleepLunchNew is redundant; 0x27 alone triggers both',
+          reason: '0x3e sleepLunchNew must not be sent as a request',
         );
 
         sync.dispose();

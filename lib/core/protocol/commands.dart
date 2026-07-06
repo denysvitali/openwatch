@@ -230,13 +230,14 @@ class Commands {
   static Uint8List readSleepNewProtocol({int dayOffset = 0}) =>
       Codec.buildChannelB(OpB.sleepNew, [_clamp(dayOffset, 0, 6), 0x00]);
 
-  /// New sleep protocol lunch/nap variant (Channel-B `0x3e`) for a given
-  /// day offset. The firmware handler `FUN_0082fada` (GHIDRA §2.3) expects
-  /// a 2-byte payload: `[dayOffset, recordType]` where `recordType = 0x01`
-  /// selects the lunch/nap pass (`param_2 == 1`). `dayOffset` is clamped
-  /// to `0..6` per the spec.
+  /// New sleep protocol lunch/nap selector for a given day offset.
+  ///
+  /// H59MA v14 has no direct host-request branch for Channel-B `0x3e`; that
+  /// is a response opcode emitted by the `0x27` handler. Sending `0x27` with
+  /// payload `[dayOffset, 0x01]` selects the nap pass, emits `0x3e`, then emits
+  /// the normal `0x27` night records. `dayOffset` is clamped to `0..6`.
   static Uint8List readSleepLunchProtocol({int dayOffset = 0}) =>
-      Codec.buildChannelB(OpB.sleepLunchNew, [_clamp(dayOffset, 0, 6), 0x01]);
+      Codec.buildChannelB(OpB.sleepNew, [_clamp(dayOffset, 0, 6), 0x01]);
 
   /// H59MA v14 sleep summary (Channel-B `0x11`) for a given day offset.
   ///

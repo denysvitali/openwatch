@@ -482,6 +482,11 @@ prefer FEE7 writes for app flows without live-capture evidence.
 | readSmsQuick / writeSmsQuick | `0x4c` | →watch | r:`[01]`; w:`[02]+SmsQuickBean` | respMap[0x4c] | Quick-reply SMS templates. |
 | LargeData action id table | varies | both | `byte1`=action; `payload[0]`=01/02 | respMap[action] | `0x20` Location, `0x27` NewSleep, `0x28` ManualHeartRate, `0x29` Contacts_New, `0x2a` Blood_Oxygen, `0x2c` Alarm, `0x2d` Contact, `0x2e` BT_MAC, `0x2f` E_CARD/QrCode, `0x3a` Custom_WatchFace, `0x3e` NewSleep_Lunch, `0x47` Blood_Sugar, `0x48` GPS_Navigation, `0x49` Manual_Oxygen, `0x4a` AVATAR_Device(nickname), `0x4c` SMS_QUICK, `0x5f` Interval_Blood_Oxygen, `0x75` Interval_Heart_Rate. |
 
+H59MA v14 note: direct host requests use `0x27` for both night and nap sleep.
+`payload[1] == 1` makes the firmware emit a `0x3e` nap/lunch response before
+the normal `0x27` night response. A direct host request with command `0x3e`
+has no async-worker branch and returns compact NAK code `0`.
+
 ### 4.8 Channel-B file transfer (FileHandle / Avatar / Album / Ebook / Record / Temperature)
 
 The generic FileHandle names below come from APK-era host code. H59MA v14 does

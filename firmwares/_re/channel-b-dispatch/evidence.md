@@ -130,6 +130,33 @@ v13 has the same shape at `0x98ba`/`0x98de` -> `0xe3ea` and
 `0x98ca`/`0x990c` -> `0xa0a8`; both callees are also single `bx lr`
 instructions.
 
+### Sleep `0x27` emits response `0x3e`
+
+Direct host requests for lunch/nap sleep still use command `0x27`. The
+`0x3e` value is a response opcode emitted only by the `0x27` handler when the
+second payload byte is `1`; direct host `0x3e` frames have no async compare
+entry and default to NAK status `0`.
+
+```text
+v14:
+0x000096fc  cmp  r7, 1        ; r7 = payload[1]
+0x000096fe  bne  0x9784       ; skip nap pass unless recordType == 1
+...
+0x0000977a  movs r0, 0x3e
+0x0000977c  bl   0x88e0       ; emit nap/lunch response
+...
+0x000097fe  movs r0, 0x27
+0x00009800  bl   0x88e0       ; always emit night response
+
+v13:
+0x00009744  cmp  r7, 1
+0x00009746  bne  0x97cc
+0x000097c2  movs r0, 0x3e
+0x000097c4  bl   0x8928
+0x00009846  movs r0, 0x27
+0x00009848  bl   0x8928
+```
+
 ### Explicit NAK-code-2 rejects
 
 `0x21`, `0x22`, `0x23`, and `0x24` are recognized compare-cascade entries, not

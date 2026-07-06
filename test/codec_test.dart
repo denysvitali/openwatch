@@ -288,10 +288,10 @@ void main() {
     );
 
     test(
-      'readSleepLunchProtocol clamps dayOffset to 0..6 per PROTOCOL.md §4.4',
+      'readSleepLunchProtocol uses 0x27 recordType=1 and clamps dayOffset',
       () {
         final f = Commands.readSleepLunchProtocol(dayOffset: 99);
-        expect(Codec.rxChannelBCmd(f), OpB.sleepLunchNew);
+        expect(Codec.rxChannelBCmd(f), OpB.sleepNew);
         expect(Codec.rxChannelBPayload(f), [0x06, 0x01]);
       },
     );
