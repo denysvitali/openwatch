@@ -602,7 +602,7 @@ class Commands {
       Codec.buildChannelA(OpA.bpReadConform, [ok ? 0x00 : 0xFF]);
 
   // ---------------------------------------------------------------------------
-  // Settings (0x2c / 0x38 / 0x3e — feature enable bits).
+  // Settings (0x2c / 0x38 / 0x3b — feature/config enable bits).
   // ---------------------------------------------------------------------------
 
   /// `BloodOxygenSettingReq` (0x2c) write: enable the SpO2
@@ -641,11 +641,14 @@ class Commands {
   static Uint8List readPressureSetting() =>
       Codec.buildChannelA(OpA.pressureSetting, [OpA.mixRead]);
 
-  /// `UVSettingReq` (0x3e) write: UV auto-measure toggle.
+  /// `UVSettingReq` / `touchControl` (`0x3b`) write: UV/touch config toggle.
+  ///
+  /// The H59MA v14 handler requires `req[2] == 0` before it reads or writes;
+  /// nonzero is batch/no-commit mode. Write value is therefore `req[3]`.
   static Uint8List setUvSetting({required bool enabled}) =>
-      Codec.buildChannelA(OpA.uvSetting, [OpA.mixWrite, enabled ? 1 : 0]);
+      Codec.buildChannelA(OpA.uvSetting, [OpA.mixWrite, 0x00, enabled ? 1 : 0]);
   static Uint8List readUvSetting() =>
-      Codec.buildChannelA(OpA.uvSetting, [OpA.mixRead]);
+      Codec.buildChannelA(OpA.uvSetting, [OpA.mixRead, 0x00]);
 
   // ---------------------------------------------------------------------------
   // BP / DND / SitLong / Drink-alarm setters — full Mixture write path.

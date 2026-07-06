@@ -358,6 +358,22 @@ void main() {
       expect(f[1], OpA.mixRead);
     });
 
+    test('setUvSetting uses H59MA 0x3b touch/UV config guard byte', () {
+      final f = Commands.setUvSetting(enabled: true);
+      expect(f[0], OpA.touchControl);
+      expect(OpA.uvSetting, OpA.touchControl);
+      expect(f[1], OpA.mixWrite);
+      expect(f[2], 0x00);
+      expect(f[3], 0x01);
+    });
+
+    test('readUvSetting uses H59MA 0x3b touch/UV config read guard byte', () {
+      final f = Commands.readUvSetting();
+      expect(f[0], OpA.touchControl);
+      expect(f[1], OpA.mixRead);
+      expect(f[2], 0x00);
+    });
+
     test('Channel-A HRV setting builders are unsupported on H59MA v14', () {
       expect(
         // ignore: deprecated_member_use_from_same_package

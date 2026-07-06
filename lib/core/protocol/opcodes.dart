@@ -91,7 +91,12 @@ class OpA {
   /// handler call or fragmented response. Kept only for legacy/capture
   /// compatibility.
   static const int ultraViolet = 0x7d;
-  static const int uvSetting = 0x3e;
+
+  /// Legacy/SDK alias for the H59MA v14 UV/touch config opcode.
+  ///
+  /// Static RE proves Channel-A `0x3b` owns the UV/touch byte; `0x3e` is not a
+  /// Channel-A UV setting on this firmware.
+  static const int uvSetting = touchControl;
   static const int sugarLipidsSetting = 0x3a;
   static const int menstruation = 0x2b;
 
