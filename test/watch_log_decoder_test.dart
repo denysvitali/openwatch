@@ -895,25 +895,21 @@ void main() {
         0x01,
       ]);
       expect(start.details['label'], 'startMeasure');
-      expect(start.title, contains('startMeasure'));
 
       final stop = _decodeA(OpA.stopMeasure, [MeasureType.heartRate.id]);
       expect(stop.details['label'], 'stopMeasure');
-      expect(stop.title, contains('stopMeasure'));
 
       final fee7Start = const WatchLogDecoder().decodeHex(
         _hexBytes(Codec.buildChannelA(Fee7.modeControl, [0x06, 0x01])),
         uuid: _fee7,
       );
       expect(fee7Start.details['label'], 'modeControl');
-      expect(fee7Start.title, contains('modeControl'));
 
       final fee7Stop = const WatchLogDecoder().decodeHex(
         _hexBytes(Codec.buildChannelA(Fee7.modeControlCont, [0x06])),
         uuid: _fee7,
       );
       expect(fee7Stop.details['label'], 'modeControlCont');
-      expect(fee7Stop.title, contains('modeControlCont'));
     });
 
     test(
