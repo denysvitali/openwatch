@@ -275,6 +275,36 @@ void main() {
       expect(report.frames.single.details['label'], 'h59CleanupBypass46');
     });
 
+    test('summarizes H59MA Channel-B alarm read records', () {
+      final frame = Codec.buildChannelB(OpB.alarm, [
+        0x01,
+        0x01,
+        0x07,
+        0x83,
+        0x3c,
+        0x01,
+        ..._ascii('Gym'),
+      ]);
+
+      final report = const WatchLogDecoder().decodeNrfConnectLog(
+        _line(_chB, frame),
+      );
+
+      final decoded = report.frames.single;
+      expect(decoded.title, contains('alarm read records=1/1'));
+      expect(decoded.title, contains('first=05:16 "Gym"'));
+      expect(decoded.details['label'], 'alarm');
+      expect(decoded.details['declaredCount'], 1);
+      final records = decoded.details['alarmRecords']! as List<Object?>;
+      final alarm = records.single! as Map<String, Object?>;
+      expect(alarm['flags'], '0x83');
+      expect(alarm['flag80'], isTrue);
+      expect(alarm['weekMask'], 0x03);
+      expect(alarm['weekdays'], [0, 1]);
+      expect(alarm['minuteOfDay'], 316);
+      expect(alarm['label'], 'Gym');
+    });
+
     test('summarizes Channel B device-info static TLVs', () {
       final frame = Codec.buildChannelB(OpB.deviceInfoConfig, [
         0x03,

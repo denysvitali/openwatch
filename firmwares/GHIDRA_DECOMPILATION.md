@@ -753,9 +753,9 @@ Sub-cmd at `payload[0]`:
 
 | Sub | Action |
 |---|---|
-| `0x01` | Read: pulls `FUN_0082a9c2(count, ...)` and re-emits up to 10 alarms. Each alarm is a 0x29-byte record: `[len, id, hour, minute, day_bitmap(7 B), label(N)]` with `(len & 0x7F) ∈ [4, 0x22]`. Response is `1 + count * 0x29` bytes, cmd `0x2C`. |
-| `0x02` | Write: pulls count from `payload[1]`, clamps to 10, validates per-alarm `(len & 0x7F) ∈ [4, 0x24]`, calls `FUN_0082a9b0(record)`. Response is 1 byte (`0x02`) ack, cmd `0x2C`. |
-| other | no-op (response = 1 byte) |
+| `0x01` | Read: pulls fixed 0x29-byte internal records via `FUN_0082a9c2(...)`, then emits compact variable-length records. Response payload is `[0x01, count, {len, flags, minuteOfDay u16LE, labelBytes...}...]`, cmd `0x2C`. `len = internal_record[2] & 0x7f` and includes the 4-byte compact header. `flags` bit 7 is set when internal byte 3 is nonzero; bits 0..6 are copied from internal weekday bytes 6..12. `minuteOfDay = internal_hour * 60 + internal_minute`. Label bytes are copied from internal offset 13 with length `len - 4`. |
+| `0x02` | Write: pulls count from `payload[1]`, clamps to 10, decodes the same compact record shape from `payload[2..]` back into fixed 0x29-byte internal records, clamps `(len & 0x7F) - 4` to at most `0x1e`, calls `FUN_0082a9b0(record)`, and responds with one byte `[0x02]`. |
+| other | no-op response: one byte echoing the subcmd |
 
 #### 2.6 File commands (`FUN_008311b8`)
 

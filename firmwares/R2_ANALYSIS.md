@@ -513,6 +513,14 @@ The same compare cascade recognizes `0x21..0x24` separately and routes them to
 `channel_b_send_nak(cmd, 2)`, while the default unknown path uses
 `channel_b_send_nak(cmd, 0)`.
 
+Channel-B `0x2c` alarm read/write is compact on the wire. The read path at v14
+`0x9504..0x9592` writes response `[0x01, count]`, then appends variable-length
+records `{len, flags, minuteOfDay u16LE, labelBytes...}`. `len` comes from
+internal byte 2 masked to 7 bits; `flags` combines internal byte 3 into bit 7
+and weekday bytes 6..12 into bits 0..6; `minuteOfDay` is `hour * 60 + minute`.
+The write path at `0x9594..0x96ca` decodes the same compact records and sends
+the one-byte `[0x02]` ack via the common `0x96cc` sender.
+
 ---
 
 ## 6. Channel-A Command Dispatch

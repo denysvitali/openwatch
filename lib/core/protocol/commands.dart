@@ -739,6 +739,13 @@ class Commands {
   // Channel-B helpers — DIY watch face and other LargeData actions.
   // ---------------------------------------------------------------------------
 
+  /// H59MA Channel-B alarm read (`0x2c`, action `0x01`).
+  ///
+  /// The firmware responds with compact variable-length alarm records:
+  /// `[0x01, count, {len, flags, minuteOfDay u16LE, labelBytes...}...]`.
+  static Uint8List readChannelBAlarms() =>
+      Codec.buildChannelB(OpB.alarm, [0x01]);
+
   /// `readCustomWatch` (0x3a, action `0x01`): read the current
   /// DIY watch-face definition. See `PROTOCOL.md` §4.7 / §5.2.
   /// Response is dispatched to `respMap[0x3a]` and contains

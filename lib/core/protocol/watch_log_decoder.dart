@@ -807,6 +807,8 @@ class WatchLogDecoder {
         details['records'] = records.map((r) => r.toJson()).toList();
         return 'B 0x2a activity records=${records.length} '
             '${records.map((r) => 'd${r.dayOffset}:steps=${r.steps ?? 'n/a'}').join(', ')}';
+      case OpB.alarm:
+        return _summarizeChannelBAlarm(payload, details);
       case OpB.h59FileListResponse:
         final summary = _parseH59FileList(payload);
         details.addAll(summary.toJson());
@@ -822,6 +824,74 @@ class WatchLogDecoder {
     }
     return 'B ${_hex(cmd)} ${_labelForChannelB(cmd)} '
         'payload=${_compactHex(payload)}';
+  }
+
+  String _summarizeChannelBAlarm(
+    Uint8List payload,
+    Map<String, Object?> details,
+  ) {
+    if (payload.isEmpty) return 'B 0x2c alarm empty payload';
+
+    final sub = payload[0] & 0xff;
+    details['sub'] = _hex(sub);
+    if (sub == 0x02) {
+      details['ack'] = true;
+      return 'B 0x2c alarm write ack';
+    }
+    if (sub != 0x01) {
+      return 'B 0x2c alarm sub=${_hex(sub)} payload=${_compactHex(payload)}';
+    }
+    if (payload.length < 2) return 'B 0x2c alarm read short payload';
+
+    final declaredCount = payload[1] & 0xff;
+    final records = <Map<String, Object?>>[];
+    var offset = 2;
+    var malformed = false;
+    for (var i = 0; i < declaredCount && offset < payload.length; i++) {
+      final recordLen = payload[offset] & 0x7f;
+      if (recordLen < 4 || offset + recordLen > payload.length) {
+        malformed = true;
+        break;
+      }
+      final flags = payload[offset + 1] & 0xff;
+      final minuteOfDay = Codec.readU16le(payload, offset + 2);
+      final hour = (minuteOfDay ~/ 60) % 24;
+      final minute = minuteOfDay % 60;
+      final labelBytes = Uint8List.sublistView(
+        payload,
+        offset + 4,
+        offset + recordLen,
+      );
+      final label = _trimNulAscii(labelBytes).trim();
+      records.add({
+        'length': recordLen,
+        'flags': _hex(flags),
+        'flag80': (flags & 0x80) != 0,
+        'weekMask': flags & 0x7f,
+        'weekdays': [
+          for (var d = 0; d < 7; d++)
+            if ((flags & (1 << d)) != 0) d,
+        ],
+        'minuteOfDay': minuteOfDay,
+        'time': _hhmm(hour, minute),
+        'label': label,
+        'labelBytes': labelBytes.length,
+      });
+      offset += recordLen;
+    }
+    if (records.length < declaredCount) malformed = true;
+
+    details['declaredCount'] = declaredCount;
+    details['alarmRecords'] = records;
+    details['malformed'] = malformed;
+    details['trailingBytes'] = payload.length - offset;
+    final first = records.isEmpty ? null : records.first;
+    final firstSummary = first == null
+        ? ''
+        : ' first=${first['time']}'
+              '${(first['label'] as String).isEmpty ? '' : ' "${first['label']}"'}';
+    return 'B 0x2c alarm read records=${records.length}/$declaredCount'
+        '$firstSummary${malformed ? ' malformed' : ''}';
   }
 
   String _summarizeDeviceInfoConfig(
@@ -1721,6 +1791,8 @@ String _labelForChannelB(int cmd) {
       return 'h59Noop29';
     case OpB.activitySummary:
       return 'activitySummary';
+    case OpB.alarm:
+      return 'alarm';
     case OpB.h59Noop3b:
       return 'h59Noop3b';
     case OpB.sleepLunchNew:

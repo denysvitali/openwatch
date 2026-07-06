@@ -479,7 +479,7 @@ prefer FEE7 writes for app flows without live-capture evidence.
 | readQrCode / E-Card | `0x2f` | →watch | `[01, type]` (no frame if type==0xFF) | respMap[0x2f] | Read stored QR/e-card by type. |
 | writeQrCode / E-Card | `0x2f` | →watch | `[02, type, urlLen] + UTF-8 url` (`[02,FF,00]` to query/clear) | ack | Write QR/e-card. |
 | setDeviceNickName | `0x4a` | →watch | nickname bytes (`ACTION_AVATAR_Device`) | ack | Set device nickname. ⚠ overloaded: also AvatarHandle image upload. |
-| readAlarm / writeAlarm | `0x2c` | →watch | r:`[01]`; w:`[02]+AlarmNewEntity` | respMap[0x2c] | New-protocol alarms. |
+| readAlarm / writeAlarm | `0x2c` | →watch | r:`[01]`; w:`[02,count,records...]` | read:`[01,count,{len,flags,minuteOfDay u16LE,labelBytes...}...]`; write ack:`[02]` | New-protocol alarms. `flags` bit 7 mirrors firmware record byte 3; bits 0..6 are weekday bits. `len` includes the four-byte record header. |
 | readSmsQuick / writeSmsQuick | `0x4c` | →watch | r:`[01]`; w:`[02]+SmsQuickBean` | respMap[0x4c] | Quick-reply SMS templates. |
 | LargeData action id table | varies | both | `byte1`=action; `payload[0]`=01/02 | respMap[action] | `0x20` Location, `0x27` NewSleep, `0x28` ManualHeartRate, `0x29` Contacts_New, `0x2a` Blood_Oxygen, `0x2c` Alarm, `0x2d` Contact, `0x2e` BT_MAC, `0x2f` E_CARD/QrCode, `0x3a` Custom_WatchFace, `0x3e` NewSleep_Lunch, `0x47` Blood_Sugar, `0x48` GPS_Navigation, `0x49` Manual_Oxygen, `0x4a` AVATAR_Device(nickname), `0x4c` SMS_QUICK, `0x5f` Interval_Blood_Oxygen, `0x75` Interval_Heart_Rate. |
 

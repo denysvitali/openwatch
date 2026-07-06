@@ -596,6 +596,14 @@ void main() {
     });
   });
 
+  group('commands: Channel-B alarms', () {
+    test('readChannelBAlarms uses 0x2c with action 0x01', () {
+      final f = Commands.readChannelBAlarms();
+      expect(Codec.rxChannelBCmd(f), OpB.alarm);
+      expect(Codec.rxChannelBPayload(f), [0x01]);
+    });
+  });
+
   group('commands: Channel-B custom watch face', () {
     test('readCustomWatchFace uses 0x3a with action 0x01', () {
       final f = Commands.readCustomWatchFace();

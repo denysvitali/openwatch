@@ -200,6 +200,7 @@ class OpB {
   static const int h59Noop29 = 0x29; // H59MA Channel-B placeholder; no reply
   static const int activitySummary =
       0x2a; // v14 activity/sport summary — see GHIDRA §2.8
+  static const int alarm = 0x2c; // Channel-B compact alarm read/write
   static const int h59Noop3b = 0x3b; // H59MA Channel-B placeholder; no reply
   static const int sleepLunchNew = 0x3e; // new sleep (lunch/nap) — Ch B
   static const int h59Noop47 = 0x47; // H59MA Channel-B placeholder; no reply
