@@ -2013,6 +2013,16 @@ String _labelForFee7(int opcode) {
       return 'memoryRead';
     case Fee7.otaTrigger:
       return 'otaControl';
+    case Fee7.echoBase:
+      return 'selfMarkerEcho';
+    case Fee7.echoBase2:
+      return 'checksumEcho';
+    case Fee7.stateUpdateMode1:
+      return 'stateUpdateMode1';
+    case Fee7.stateUpdateMode3:
+      return 'stateUpdateMode3';
+    case Fee7.resetState:
+      return 'resetState';
     case Fee7.unaryC4:
       return 'runtimeNoop';
     case Fee7.unaryC5:

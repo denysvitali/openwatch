@@ -959,6 +959,34 @@ void main() {
       }
     });
 
+    test(
+      'labels FEE7 echo and state-update opcodes from reversed firmware',
+      () {
+        const cases = {
+          Fee7.echoBase: 'selfMarkerEcho',
+          Fee7.echoBase2: 'checksumEcho',
+          Fee7.stateUpdateMode1: 'stateUpdateMode1',
+          Fee7.stateUpdateMode3: 'stateUpdateMode3',
+          Fee7.resetState: 'resetState',
+          Fee7.memoryWrite: 'memoryWrite',
+        };
+
+        for (final entry in cases.entries) {
+          final frame = Codec.buildChannelA(entry.key);
+
+          final decoded = const WatchLogDecoder().decodeHex(
+            frame.map((b) => b.toRadixString(16).padLeft(2, '0')).join('-'),
+            uuid: _fee7,
+          );
+
+          expect(decoded.valid, isTrue);
+          expect(decoded.channel, WatchLogChannel.fee7);
+          expect(decoded.details['label'], entry.value);
+          expect(decoded.title, contains(entry.value));
+        }
+      },
+    );
+
     test('summarizes FEE7 memory-read chunks as raw data frames', () {
       final frame = Codec.buildChannelA(
         Fee7.memoryRead,
