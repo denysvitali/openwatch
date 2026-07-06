@@ -501,9 +501,9 @@ the firmware-specific `0x41`/`0x43` file-table path follows this inventory.
 | startObtainTemperatureOnce | `0x26` | →watch | `[arg]` | aggregate → TemperatureEntity | Single/once temperature set. |
 | A-GPS / startGpsOnline | `0x54` | both | test=empty; online=pockets | `payload[2]==0` ⇒ device requests AGPS data | A-GPS exchange. |
 | AvatarHandle file send | `0x4a` | →watch | `[3-byte prefix idx/flags] + zlib(1024B chunk)` | ack | Upload avatar bitmap (compressed pockets, **3-byte** pocket header). |
-| Album/Ebook/Record list (start) | `0x80` | →watch | `[type]` or empty | entry list | List album images / ebooks / voice records; reuse `0x31/0x32/0x33` for upload. |
-| Ebook delete | `0x81` | →watch | `id + UTF-8 name` | ack | Delete ebook/album entry. |
-| Record read | `0x82` | →watch | `id + UTF-8 name` | streamed content | Download a voice-record file. |
+| Album/Ebook/Record list (start) | `0x80` | →watch | `[type]` or empty | APK-era entry list; H59MA v14 compact NAK code `0` | APK-era list album images / ebooks / voice records; H59MA v14 has no handler above the final async compare `0x5a`. |
+| Ebook delete | `0x81` | →watch | `id + UTF-8 name` | APK-era ack; H59MA v14 compact NAK code `0` | APK-era ebook/album delete, not implemented by H59MA v14. |
+| Record read | `0x82` | →watch | `id + UTF-8 name` | APK-era stream; H59MA v14 compact NAK code `0` | APK-era voice-record download, not implemented by H59MA v14. |
 
 **H59MA v14 firmware-specific file/list flow.** Ghidra shows the async
 Channel-B processor does **not** accept the APK-era generic FileHandle upload
@@ -512,7 +512,9 @@ from the first-stage special cases and from the async worker, so valid-CRC
 frames return compact NAK code `0`. `0x31` is routed first through the
 OTA/file pre-store callback, then queued into the same async worker; because
 there is still no async `0x31` handler, it also returns compact NAK code `0`.
-The implemented file table/list path is:
+The high APK media/file ids `0x80`, `0x81`, and `0x82` are likewise above the
+final async-worker compare (`0x5a`) and return compact NAK code `0`. The
+implemented file table/list path is:
 
 | Cmd | Request | Response | Notes |
 |---|---|---|---|

@@ -77,7 +77,7 @@ by `0x02 0x29` (CCCD UUID).
 | Claim | Firmware evidence | Verdict |
 |---|---|---|
 | `0xBC` magic | 93 occurrences in v13, 90 in v14; first hit in code is at 0x1642 (v13) / 0x2109 (v14). | **match** |
-| `cmd` byte after `0xBC` | Many of the 0xBC hits are inside Thumb code (incidental), but at least 30 are tightly bounded as `bc XX` where XX ∈ {0x06, 0x20, 0x25..0x82} — consistent with a Channel-B sub-cmd dispatcher. | **match** |
+| `cmd` byte after `0xBC` | Many `0xBC xx` hits are inside Thumb code or data. A raw byte-presence scan found `xx` values in `{0x06, 0x20, 0x25..0x82}`, but later dispatcher reconstruction shows this does **not** prove those bytes are accepted commands. | **partial** |
 | Empty payload ⇒ `FF FF FF FF` | `ff ff ff ff` follows `bc` at 17 v13 offsets and 15 v14 offsets. | **match** |
 | CRC16 of payload | See §1.4. | **match** |
 | `len16LE` field | Inferred from the byte layout in the spec; not directly verifiable without a live trace, but the `0xBC` framing matches. | **partial** |
@@ -210,14 +210,14 @@ decode. The H59MA is more verbose than the spec assumes.
 
 ### 2.3 Channel B sub-cmd presence
 
-`protocol-validate/14_b_spec_check.txt` finds Channel-B `bc` frames
-in the body with cmd bytes `{0x06, 0x20, 0x25..0x82}` — significantly
-more Channel B sub-cmds than PROTOCOL.md currently lists (the spec
-covers 0x06, 0x20, 0x25..0x3E, 0x47, 0x48, 0x4C, 0x54, 0x5F, 0x75,
-0x80, 0x81, 0x82). Watch-side extras: **0x26, 0x27, 0x29, 0x2A, 0x2C,
-0x2D, 0x2E, 0x2F, 0x30, 0x31, 0x32, 0x33, 0x35, 0x39, 0x3A, 0x49,
-0x4A**. These are file/OTA side-channels the watch accepts on
-`de5bf72a`.
+`protocol-validate/14_b_spec_check.txt` is a raw byte-presence scan, not a
+dispatcher map. Later reconstruction of the first-stage dispatcher and async
+worker supersedes the early "watch accepts" inference here. In particular,
+APK-era FileHandle ids `0x30..0x33`/`0x39`, custom-watch-face `0x3a`, and high
+album/ebook/record ids `0x80..0x82` are not implemented as useful H59MA v14
+Channel-B handlers; valid frames reach the compact NAK-code-0 path, except
+where a command has an explicitly documented pre-store, bypass, or no-response
+placeholder route.
 
 ### 2.4 "V1 read characteristic" string
 

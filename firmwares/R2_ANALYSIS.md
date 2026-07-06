@@ -533,6 +533,12 @@ v14 `0x988a..0x98e6`. `0x31` is special only before async storage: v14
 OTA/file pre-store callback and queues the command. The async worker still has
 no `0x31` handler, so it also lands on the same NAK-code-0 path.
 
+High APK album/ebook/record commands `0x80`, `0x81`, and `0x82` are also
+absent. On the path for commands greater than `0x47`, v14 checks only `0x4b`
+and `0x5a`; non-`0x5a` commands fall through from `0x9886..0x9888` to the
+default `0x988a` NAK-code-0 block. v13 has the same shape at
+`0x98ca..0x98d2`.
+
 ---
 
 ## 6. Channel-A Command Dispatch
