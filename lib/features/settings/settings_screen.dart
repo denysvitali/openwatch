@@ -17,7 +17,9 @@ class SettingsScreen extends ConsumerWidget {
     final settings = ref.watch(settingsProvider);
     final settingsNotifier = ref.read(settingsProvider.notifier);
     final manager = ref.watch(watchManagerProvider);
-    final armedAlarmCount = manager.alarms.where((alarm) => alarm.enabled).length;
+    final armedAlarmCount = manager.alarms
+        .where((alarm) => alarm.enabled)
+        .length;
     final ready = manager.isReady;
     final theme = Theme.of(context);
 
@@ -31,28 +33,38 @@ class SettingsScreen extends ConsumerWidget {
             child: HealthCard(
               title: 'Status',
               icon: ready ? Icons.watch_rounded : Icons.watch_off_outlined,
-              metricColor: ready ? theme.colorScheme.primary : theme.colorScheme.error,
+              metricColor: ready
+                  ? theme.colorScheme.primary
+                  : theme.colorScheme.error,
               caption: ready ? 'Watch connected' : 'No watch connected',
               trailing: Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   StatusPill(
-                    icon: ready ? Icons.bluetooth_connected : Icons.bluetooth_disabled,
+                    icon: ready
+                        ? Icons.bluetooth_connected
+                        : Icons.bluetooth_disabled,
                     label: ready ? 'Connected' : 'Disconnected',
-                    color: ready ? theme.colorScheme.secondary : theme.colorScheme.error,
+                    color: ready
+                        ? theme.colorScheme.secondary
+                        : theme.colorScheme.error,
                   ),
                   const SizedBox(height: 6),
                   StatusPill(
-                    icon: settings.cloudSyncEnabled ? Icons.cloud_done : Icons.cloud_off,
+                    icon: settings.cloudSyncEnabled
+                        ? Icons.cloud_done
+                        : Icons.cloud_off,
                     label: settings.cloudSyncEnabled ? 'Cloud on' : 'Cloud off',
-                    color: settings.cloudSyncEnabled ? theme.colorScheme.primary : theme.colorScheme.onSurfaceVariant,
+                    color: settings.cloudSyncEnabled
+                        ? theme.colorScheme.primary
+                        : theme.colorScheme.onSurfaceVariant,
                   ),
                 ],
               ),
             ),
           ),
-          const HealthSectionHeader(title:'Device'),
+          const HealthSectionHeader(title: 'Device'),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 18),
             child: Card(
@@ -82,7 +94,8 @@ class SettingsScreen extends ConsumerWidget {
                   ),
                   _SwitchTile(
                     title: 'Auto-sync history on connect',
-                    subtitle: 'Fetch missing days from the watch each time it becomes ready',
+                    subtitle:
+                        'Fetch missing days from the watch each time it becomes ready',
                     icon: Icons.history_toggle_off,
                     value: settings.autoSyncHistoryOnConnect,
                     onChanged: settingsNotifier.setAutoSyncHistory,
@@ -92,7 +105,11 @@ class SettingsScreen extends ConsumerWidget {
                     subtitle: 'Local firmware images over BLE',
                     leadingIcon: Icons.system_update,
                     leadingColor: theme.colorScheme.primary,
-                    trailing: Icon(CupertinoIcons.chevron_forward, color: theme.colorScheme.onSurfaceVariant, size: 20),
+                    trailing: Icon(
+                      CupertinoIcons.chevron_forward,
+                      color: theme.colorScheme.onSurfaceVariant,
+                      size: 20,
+                    ),
                     onTap: () => context.push('/firmware'),
                   ),
                   HealthListTile(
@@ -100,12 +117,18 @@ class SettingsScreen extends ConsumerWidget {
                     subtitle: 'HR interval, alarms',
                     leadingIcon: Icons.sensors,
                     leadingColor: theme.colorScheme.primary,
-                    trailing: Icon(CupertinoIcons.chevron_forward, color: theme.colorScheme.onSurfaceVariant, size: 20),
+                    trailing: Icon(
+                      CupertinoIcons.chevron_forward,
+                      color: theme.colorScheme.onSurfaceVariant,
+                      size: 20,
+                    ),
                     onTap: () => context.push('/sensor-settings'),
                   ),
                   HealthListTile(
                     title: 'Clock alarms',
-                    subtitle: armedAlarmCount == 0 ? 'None armed' : '$armedAlarmCount armed',
+                    subtitle: armedAlarmCount == 0
+                        ? 'None armed'
+                        : '$armedAlarmCount armed',
                     leadingIcon: Icons.alarm,
                     leadingColor: theme.colorScheme.primary,
                     value: ready ? armedAlarmCount.toString() : null,
@@ -114,10 +137,15 @@ class SettingsScreen extends ConsumerWidget {
                   ),
                   HealthListTile(
                     title: 'Watch preferences',
-                    subtitle: 'Display, theme, DND, daily goals, sedentary alarms',
+                    subtitle:
+                        'Display, theme, DND, daily goals, sedentary alarms',
                     leadingIcon: Icons.tune,
                     leadingColor: theme.colorScheme.primary,
-                    trailing: Icon(CupertinoIcons.chevron_forward, color: theme.colorScheme.onSurfaceVariant, size: 20),
+                    trailing: Icon(
+                      CupertinoIcons.chevron_forward,
+                      color: theme.colorScheme.onSurfaceVariant,
+                      size: 20,
+                    ),
                     onTap: () => context.push('/preferences'),
                   ),
                   HealthListTile(
@@ -125,7 +153,11 @@ class SettingsScreen extends ConsumerWidget {
                     subtitle: 'Designer + DIY upload (Channel-B 0x3a)',
                     leadingIcon: Icons.brush_outlined,
                     leadingColor: theme.colorScheme.primary,
-                    trailing: Icon(CupertinoIcons.chevron_forward, color: theme.colorScheme.onSurfaceVariant, size: 20),
+                    trailing: Icon(
+                      CupertinoIcons.chevron_forward,
+                      color: theme.colorScheme.onSurfaceVariant,
+                      size: 20,
+                    ),
                     onTap: () => context.push('/watchface'),
                   ),
                   HealthListTile(
@@ -133,15 +165,21 @@ class SettingsScreen extends ConsumerWidget {
                     subtitle: 'Erases all data on the watch',
                     leadingIcon: Icons.restart_alt,
                     leadingColor: theme.colorScheme.error,
-                    trailing: Icon(CupertinoIcons.chevron_forward, color: theme.colorScheme.error, size: 20),
-                    onTap: ready ? () => _confirmReset(context, manager.factoryReset) : null,
+                    trailing: Icon(
+                      CupertinoIcons.chevron_forward,
+                      color: theme.colorScheme.error,
+                      size: 20,
+                    ),
+                    onTap: ready
+                        ? () => _confirmReset(context, manager.factoryReset)
+                        : null,
                     showDivider: false,
                   ),
                 ],
               ),
             ),
           ),
-          const HealthSectionHeader(title:'Cloud sync'),
+          const HealthSectionHeader(title: 'Cloud sync'),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 18),
             child: Card(
@@ -153,10 +191,15 @@ class SettingsScreen extends ConsumerWidget {
                     subtitle: settings.cloudSyncEnabled
                         ? 'Health & watch-face sync with QC Wireless servers'
                         : 'Off — OpenWatch runs fully offline',
-                    icon: settings.cloudSyncEnabled ? Icons.cloud_done : Icons.cloud_off,
+                    icon: settings.cloudSyncEnabled
+                        ? Icons.cloud_done
+                        : Icons.cloud_off,
                     value: settings.cloudSyncEnabled,
                     onChanged: (enabled) => enabled
-                        ? _confirmCloud(context, () => settingsNotifier.setCloudSync(true))
+                        ? _confirmCloud(
+                            context,
+                            () => settingsNotifier.setCloudSync(true),
+                          )
                         : settingsNotifier.setCloudSync(false),
                   ),
                   if (settings.cloudSyncEnabled)
@@ -167,7 +210,8 @@ class SettingsScreen extends ConsumerWidget {
                       leadingColor: theme.colorScheme.primary,
                       trailing: DropdownButton<CloudRegion>(
                         value: settings.region,
-                        onChanged: (r) => r == null ? null : settingsNotifier.setRegion(r),
+                        onChanged: (r) =>
+                            r == null ? null : settingsNotifier.setRegion(r),
                         underline: const SizedBox.shrink(),
                         items: const [
                           DropdownMenuItem(
@@ -183,13 +227,12 @@ class SettingsScreen extends ConsumerWidget {
                       onTap: null,
                       showDivider: false,
                     ),
-                  if (!settings.cloudSyncEnabled)
-                    const SizedBox.shrink(),
+                  if (!settings.cloudSyncEnabled) const SizedBox.shrink(),
                 ],
               ),
             ),
           ),
-          const HealthSectionHeader(title:'Diagnostics'),
+          const HealthSectionHeader(title: 'Diagnostics'),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 18),
             child: Card(
@@ -201,23 +244,37 @@ class SettingsScreen extends ConsumerWidget {
                     subtitle: 'BLE traffic & events — copy to share',
                     leadingIcon: Icons.bug_report_outlined,
                     leadingColor: theme.colorScheme.primary,
-                    trailing: Icon(CupertinoIcons.chevron_forward, color: theme.colorScheme.onSurfaceVariant, size: 20),
+                    trailing: Icon(
+                      CupertinoIcons.chevron_forward,
+                      color: theme.colorScheme.onSurfaceVariant,
+                      size: 20,
+                    ),
                     onTap: () => context.push('/logs'),
                   ),
                   HealthListTile(
                     title: 'BP raw bytes',
-                    subtitle: 'Compact history bytes for capture correlation. See PROTOCOL.md §8.5.',
+                    subtitle:
+                        'Compact history bytes for capture correlation. See PROTOCOL.md §8.5.',
                     leadingIcon: Icons.bloodtype_outlined,
                     leadingColor: theme.colorScheme.primary,
-                    trailing: Icon(CupertinoIcons.chevron_forward, color: theme.colorScheme.onSurfaceVariant, size: 20),
+                    trailing: Icon(
+                      CupertinoIcons.chevron_forward,
+                      color: theme.colorScheme.onSurfaceVariant,
+                      size: 20,
+                    ),
                     onTap: () => context.push('/bp-debug'),
                   ),
                   HealthListTile(
                     title: 'Clear stored history',
-                    subtitle: 'Wipes HR, sleep and step data stored on this phone',
+                    subtitle:
+                        'Wipes HR, sleep and step data stored on this phone',
                     leadingIcon: Icons.delete_sweep,
                     leadingColor: theme.colorScheme.error,
-                    trailing: Icon(CupertinoIcons.chevron_forward, color: theme.colorScheme.error, size: 20),
+                    trailing: Icon(
+                      CupertinoIcons.chevron_forward,
+                      color: theme.colorScheme.error,
+                      size: 20,
+                    ),
                     onTap: () => _confirmClearHistory(context, ref),
                     showDivider: false,
                   ),
@@ -225,7 +282,7 @@ class SettingsScreen extends ConsumerWidget {
               ),
             ),
           ),
-          const HealthSectionHeader(title:'About'),
+          const HealthSectionHeader(title: 'About'),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 18),
             child: Card(
@@ -237,12 +294,17 @@ class SettingsScreen extends ConsumerWidget {
                     subtitle: 'Version 0.1.0',
                     leadingIcon: Icons.info_outline,
                     leadingColor: theme.colorScheme.primary,
-                    trailing: Icon(CupertinoIcons.chevron_forward, color: theme.colorScheme.onSurfaceVariant, size: 20),
+                    trailing: Icon(
+                      CupertinoIcons.chevron_forward,
+                      color: theme.colorScheme.onSurfaceVariant,
+                      size: 20,
+                    ),
                     onTap: () => showAboutDialog(
                       context: context,
                       applicationName: 'OpenWatch',
                       applicationVersion: '0.1.0',
-                      applicationLegalese: 'Open-source, offline-first manager for Oudmon-based BLE smartwatches.',
+                      applicationLegalese:
+                          'Open-source, offline-first manager for Oudmon-based BLE smartwatches.',
                     ),
                   ),
                   HealthListTile(
@@ -250,7 +312,11 @@ class SettingsScreen extends ConsumerWidget {
                     subtitle: 'Keeps the watch paired for auto-reconnect',
                     leadingIcon: Icons.link_off,
                     leadingColor: theme.colorScheme.error,
-                    trailing: Icon(CupertinoIcons.chevron_forward, color: theme.colorScheme.error, size: 20),
+                    trailing: Icon(
+                      CupertinoIcons.chevron_forward,
+                      color: theme.colorScheme.error,
+                      size: 20,
+                    ),
                     onTap: () async {
                       await ref.read(bleTransportProvider).disconnect();
                       if (context.mounted) context.go('/scan');
@@ -261,10 +327,16 @@ class SettingsScreen extends ConsumerWidget {
                     subtitle: 'Disconnect and stop auto-reconnecting',
                     leadingIcon: Icons.delete_forever,
                     leadingColor: theme.colorScheme.error,
-                    trailing: Icon(CupertinoIcons.chevron_forward, color: theme.colorScheme.error, size: 20),
+                    trailing: Icon(
+                      CupertinoIcons.chevron_forward,
+                      color: theme.colorScheme.error,
+                      size: 20,
+                    ),
                     onTap: () async {
                       await ref.read(bleTransportProvider).disconnect();
-                      final svc = await ref.read(settingsServiceProvider.future);
+                      final svc = await ref.read(
+                        settingsServiceProvider.future,
+                      );
                       await svc.clearLastDevice();
                       if (context.mounted) context.go('/scan');
                     },
@@ -289,7 +361,9 @@ class SettingsScreen extends ConsumerWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Factory reset watch?'),
-        content: const Text('This erases all data on the watch and cannot be undone.'),
+        content: const Text(
+          'This erases all data on the watch and cannot be undone.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
@@ -394,10 +468,7 @@ class _SwitchTile extends StatelessWidget {
       subtitle: subtitle,
       leadingIcon: icon,
       leadingColor: theme.colorScheme.primary,
-      trailing: Switch(
-        value: value,
-        onChanged: onChanged,
-      ),
+      trailing: Switch(value: value, onChanged: onChanged),
       onTap: () => onChanged(!value),
     );
   }

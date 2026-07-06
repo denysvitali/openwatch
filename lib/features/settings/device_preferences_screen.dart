@@ -40,7 +40,7 @@ class DevicePreferencesScreen extends ConsumerWidget {
                 ),
               ),
             ),
-          const HealthSectionHeader(title:'Display'),
+          const HealthSectionHeader(title: 'Display'),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 18),
             child: Card(
@@ -85,7 +85,8 @@ class DevicePreferencesScreen extends ConsumerWidget {
                     subtitle: 'Pick a vendor wallpaper id (0..N)',
                     leadingColor: theme.colorScheme.primary,
                     enabled: ready,
-                    onTap: () => _pickId(context, 'Wallpaper id', manager.setWallpaper),
+                    onTap: () =>
+                        _pickId(context, 'Wallpaper id', manager.setWallpaper),
                     showDivider: false,
                   ),
                 ],
@@ -93,7 +94,7 @@ class DevicePreferencesScreen extends ConsumerWidget {
             ),
           ),
           if (caps.bloodPressure || caps.stress || caps.bloodOxygen)
-            const HealthSectionHeader(title:'Auto-measure'),
+            const HealthSectionHeader(title: 'Auto-measure'),
           if (caps.bloodPressure || caps.stress || caps.bloodOxygen)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 18),
@@ -141,7 +142,7 @@ class DevicePreferencesScreen extends ConsumerWidget {
                 ),
               ),
             ),
-          const HealthSectionHeader(title:'Reminders'),
+          const HealthSectionHeader(title: 'Reminders'),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 18),
             child: Card(
@@ -177,7 +178,7 @@ class DevicePreferencesScreen extends ConsumerWidget {
               ),
             ),
           ),
-          const HealthSectionHeader(title:'Goals'),
+          const HealthSectionHeader(title: 'Goals'),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 18),
             child: Card(

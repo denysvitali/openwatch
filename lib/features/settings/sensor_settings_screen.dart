@@ -53,7 +53,7 @@ class SensorSettingsScreen extends ConsumerWidget {
                 ),
               ),
             ),
-          const HealthSectionHeader(title:'Heart rate'),
+          const HealthSectionHeader(title: 'Heart rate'),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 18),
             child: Card(
@@ -69,7 +69,9 @@ class SensorSettingsScreen extends ConsumerWidget {
                       value: settings.hrAutoMeasureEnabled,
                       onChanged: settingsNotifier.setHrAutoMeasure,
                     ),
-                    onTap: () => settingsNotifier.setHrAutoMeasure(!settings.hrAutoMeasureEnabled),
+                    onTap: () => settingsNotifier.setHrAutoMeasure(
+                      !settings.hrAutoMeasureEnabled,
+                    ),
                   ),
                   HealthListTile(
                     title: 'Measurement interval',
@@ -95,7 +97,7 @@ class SensorSettingsScreen extends ConsumerWidget {
               ),
             ),
           ),
-          const HealthSectionHeader(title:'Alarm thresholds'),
+          const HealthSectionHeader(title: 'Alarm thresholds'),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 18),
             child: Card(
@@ -213,10 +215,7 @@ class _AlarmFieldTile extends StatelessWidget {
           initialValue: value.toString(),
           keyboardType: TextInputType.number,
           textAlign: TextAlign.center,
-          decoration: const InputDecoration(
-            suffixText: 'bpm',
-            isDense: true,
-          ),
+          decoration: const InputDecoration(suffixText: 'bpm', isDense: true),
           onFieldSubmitted: (v) {
             final parsed = int.tryParse(v);
             if (parsed != null && parsed >= 0 && parsed <= 255) {

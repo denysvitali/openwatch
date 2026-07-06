@@ -99,10 +99,7 @@ class DashboardScreen extends ConsumerWidget {
                 syncHistory: sync.syncAll,
               ),
               if (armedAlarms.isNotEmpty) ...[
-                const HealthSectionHeader(
-                  title: 'Alarms',
-                  onShowAll: null,
-                ),
+                const HealthSectionHeader(title: 'Alarms', onShowAll: null),
                 _AlarmsSummary(
                   count: armedAlarms.length,
                   next: armedAlarms.first,
@@ -402,10 +399,7 @@ class _SleepTrendHeader extends StatelessWidget {
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              Text(
-                trendText,
-                style: theme.textTheme.bodySmall,
-              ),
+              Text(trendText, style: theme.textTheme.bodySmall),
             ],
           ),
         ),
@@ -477,9 +471,7 @@ class _QuickActions extends StatelessWidget {
             ),
             PrimaryHealthButton(
               label: syncingHistory ? 'Syncing' : 'Sync',
-              icon: syncingHistory
-                  ? null
-                  : CupertinoIcons.arrow_2_circlepath,
+              icon: syncingHistory ? null : CupertinoIcons.arrow_2_circlepath,
               onPressed: ready && !syncingHistory ? syncHistory : null,
             ),
             PrimaryHealthButton(
