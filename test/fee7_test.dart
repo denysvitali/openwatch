@@ -413,10 +413,18 @@ void main() {
       final frame = Codec.buildChannelA(Fee7.capabilityBlock, [
         0x00,
         0x40,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
         0xa0,
+        0x00,
+        0x00,
+        0x00,
         0x20,
-        0x11,
-        0x22,
+        0x00,
+        0x00,
+        0x00,
       ]);
       host.inbound.add(frame);
 
@@ -426,7 +434,9 @@ void main() {
       // fixed[1..5] are the first 5 payload bytes.
       expect(b.fixed[1], 0x00);
       expect(b.fixed[2], 0x40);
-      expect(b.fixed[3], 0xa0);
+      expect(b.fixed[3], 0x00);
+      expect(b.tail[1], 0xa0); // full-frame byte 7
+      expect(b.tail[5], 0x20); // full-frame byte 11
       await svc.dispose();
     });
 

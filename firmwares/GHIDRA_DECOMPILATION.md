@@ -4774,7 +4774,7 @@ and marks the Channel-B receive side busy.
 | `0x2b, 0x37, 0x38, 0x3a, 0x3b, 0x43 'C', 0x72, 0x77, 0x7a, 0x7d, 0x81, 0xa1, 0xc6, 0xc7, 0xff` | Deferred-command ring | `enqueue_deferred_command_frame` |
 | `0x36` | Heart-rate related read/set | `FUN_0082c112` — see §8.8 |
 | `0x39` | HRV history path | `channel_a_handle_hrv_history` |
-| `0x3c` | Fixed capability block `[0x3c,0,0x40,0xa0,0x20,…]` | `fee7_send_fixed_capability_3c` — see §8.12 |
+| `0x3c` | Fixed capability block; non-zero bytes at full-frame offsets `0`, `2`, `7`, `11` | `fee7_send_fixed_capability_3c` — see §8.12 |
 | `0x3e` | Lipids read/set (bit 7 of shared config byte) | `fee7_handle_lipids_flag_3e` | see §8.15 |
 | `0x48 'H'` | Current sport/today totals and state bytes | `fee7_send_today_sport_totals` — see §8.2 |
 | `0x50 'P'` | **Inline** alert: `alert_start_sequence(0x14,0x10,1,0x19)` + `ui_overlay_start_forced(8)` (motor + UI) | inline |
@@ -4989,7 +4989,7 @@ entries decoded from the two `switch8` tables:
 | `0x19` | `fee7_handle_degree_unit_19` | Degree (C/F) switch |
 | `0x21` | `fee7_handle_target_setting_21` | Daily target setting |
 | `0x36` | `FUN_0082c112` | Heart-rate related read/set — see §8.8 |
-| `0x3c` | `fee7_send_fixed_capability_3c` | Returns fixed capability block `[0x3c,0,0x40,0xa0,0x20,...]` — see §8.12 |
+| `0x3c` | `fee7_send_fixed_capability_3c` | Returns fixed capability block with non-zero bytes at full-frame offsets `0`, `2`, `7`, `11` — see §8.12 |
 | `0x3e` | `fee7_handle_lipids_flag_3e` | Lipids read/set (bit 7 of shared config byte) — see §8.15 |
 | `0x48` `'H'` | `fee7_send_today_sport_totals` | Current sport/today totals and state bytes — see §8.2 |
 | `0x50` `'P'` | inline | Calls `alert_start_sequence(0x14,0x10,1,0x19)` + `ui_overlay_start_forced(8)` (alert/motor) |

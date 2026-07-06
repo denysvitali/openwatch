@@ -266,10 +266,9 @@ class Fee7Dispatcher {
   }
 
   CapabilityBlock _decodeCapabilityBlock(Uint8List frame) {
-    // The firmware returns a fixed byte sequence beginning
-    // `[0x3c, 0, 0x40, 0xa0, 0x20, ...]`. We surface the first 6 bytes of
-    // the frame verbatim so callers can compare against the expected
-    // signature; any extra bytes are kept in `tail`.
+    // The firmware returns a fixed 16-byte frame with non-zero feature IDs at
+    // full-frame bytes 2, 7, and 11. Keep the stable prefix in `fixed`; the
+    // later feature IDs and checksum stay in `tail` for diagnostics.
     final fixed = frame.length >= 6
         ? Uint8List.sublistView(frame, 0, 6)
         : Uint8List.fromList(frame);
@@ -409,9 +408,9 @@ class SpO2HrUpdate {
   final Uint8List payload;
 }
 
-/// `0x3c` fixed capability block. First 6 bytes carry the device
-/// signature `[0x3c, 0, 0x40, 0xa0, 0x20, ...]`; any extra bytes are
-/// preserved in [tail] for diagnostics.
+/// `0x3c` fixed capability block. The first 6 bytes carry the stable prefix
+/// `[0x3c, 0, 0x40, 0, 0, 0]`; later feature IDs at full-frame bytes 7 and 11
+/// are preserved in [tail] for diagnostics.
 class CapabilityBlock {
   CapabilityBlock({required this.fixed, Uint8List? tail})
     : tail = tail ?? _empty;
