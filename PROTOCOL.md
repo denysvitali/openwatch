@@ -522,6 +522,14 @@ length, and raw value bytes, and summarizes `0x44` metadata / `0x45` chunks.
 Field and metadata meanings remain opaque until live captures map record types
 and field ids.
 
+**H59MA v14 Channel-B no-op placeholders.** The async worker accepts
+`0x13`, `0x29`, `0x3B`, `0x47`, and `0x4B` as no-response placeholders, not
+unknown commands. `0x13`, `0x29`, and `0x3B` branch straight to worker cleanup;
+`0x47` and `0x4B` call one-instruction `bx lr` stubs with `payload[0]`. The
+watch does not NAK these commands and does not emit a protocol response. Do not
+confuse these Channel-B placeholders with the Channel-A opcodes of the same
+numeric values.
+
 **H59MA v14 device-info/config (`0x5a`).** The firmware handles this as a
 Channel-B command, not an APK generic large-data action:
 
@@ -1090,8 +1098,8 @@ The v14 dispatcher groups are now exact:
 
 The async processor then handles OTA low commands `0x01..0x07`, sleep
 `0x11/0x12/0x27`, activity `0x2a`, alarm `0x2c`, file table `0x41/0x43/0x46`,
-placeholders `0x47/0x4b`, and device-info/config `0x5a`; unrecognised commands
-fall through to `channel_b_send_nak(cmd, 0)`.
+no-response placeholders `0x13/0x29/0x3b/0x47/0x4b`, and device-info/config
+`0x5a`; unrecognised commands fall through to `channel_b_send_nak(cmd, 0)`.
 
 radare2 confirms the low OTA-command switch table is identical in v13/v14:
 max explicit index `0x08`, entries `2e 5f 63 69 6d 71 2e 75 2e`; therefore

@@ -88,6 +88,35 @@ call. The handler entry is still documented because it exists in the worker
 and can be reached if another firmware path seeds the async state with `cmd =
 0x46`.
 
+### No-response placeholders
+
+`0x13`, `0x29`, and `0x3b` compare equal in the cascade and branch directly to
+async-state cleanup (`strb 0, [state+1]`) without a helper call and without
+`channel_b_send_nak`.
+
+`0x47` and `0x4b` pass `payload[0]` to placeholder helpers, then also branch to
+cleanup:
+
+```text
+v14:
+0x00009872  cmp r0, 0x47
+0x00009874  beq 0x9896
+0x00009896  ldrb r0, [r4]
+0x00009898  bl 0xe3fa
+
+0x00009882  cmp r0, 0x4b
+0x00009884  beq 0x98c4
+0x000098c4  ldrb r0, [r4]
+0x000098c6  bl 0xa060
+
+0x0000e3fa  bx lr
+0x0000a060  bx lr
+```
+
+v13 has the same shape at `0x98ba`/`0x98de` -> `0xe3ea` and
+`0x98ca`/`0x990c` -> `0xa0a8`; both callees are also single `bx lr`
+instructions.
+
 ## Low-Command Switch Shape
 
 Commands:

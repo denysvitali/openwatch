@@ -762,6 +762,13 @@ class WatchLogDecoder {
     Uint8List payload,
     Map<String, Object?> details,
   ) {
+    if (_isH59NoopChannelB(cmd)) {
+      details['firmwareBehavior'] = 'no-op';
+      details['payloadBytes'] = payload.length;
+      return 'B ${_hex(cmd)} ${_labelForChannelB(cmd)} no-op '
+          'payloadBytes=${payload.length}';
+    }
+
     switch (cmd) {
       case OpB.h59SleepSummary:
         final dayOffset = payload[0] & 0xff;
@@ -1706,10 +1713,16 @@ String _labelForChannelB(int cmd) {
       return 'h59SleepSummary';
     case OpB.h59SleepDetail:
       return 'h59SleepDetail';
+    case OpB.h59Noop13:
+      return 'h59Noop13';
     case OpB.sleepNew:
       return 'sleepNew/night';
+    case OpB.h59Noop29:
+      return 'h59Noop29';
     case OpB.activitySummary:
       return 'activitySummary';
+    case OpB.h59Noop3b:
+      return 'h59Noop3b';
     case OpB.sleepLunchNew:
       return 'sleepLunch/nap';
     case OpB.fileList:
@@ -1728,10 +1741,27 @@ String _labelForChannelB(int cmd) {
       return 'h59FileChunk';
     case OpB.h59FileDelete:
       return 'h59FileDelete';
+    case OpB.h59Noop47:
+      return 'h59Noop47';
+    case OpB.h59Noop4b:
+      return 'h59Noop4b';
     case OpB.deviceInfoConfig:
       return 'deviceInfoConfig';
     default:
       return 'unknown';
+  }
+}
+
+bool _isH59NoopChannelB(int cmd) {
+  switch (cmd) {
+    case OpB.h59Noop13:
+    case OpB.h59Noop29:
+    case OpB.h59Noop3b:
+    case OpB.h59Noop47:
+    case OpB.h59Noop4b:
+      return true;
+    default:
+      return false;
   }
 }
 

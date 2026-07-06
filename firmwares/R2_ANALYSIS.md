@@ -499,6 +499,11 @@ any `0x45` data chunks. Resolved metadata forms are success
 Chunks are one-based `[chunkIndex, 00, data...]` with data capped at `0x1f4`
 bytes.
 
+The async worker's no-response placeholders are also statically resolved:
+`0x13`, `0x29`, and `0x3b` branch directly to worker cleanup, while `0x47` and
+`0x4b` call one-instruction `bx lr` stubs at v14 body `0xe3fa` and `0xa060`
+with `payload[0]`. These commands do not use the unknown-command NAK path.
+
 ---
 
 ## 6. Channel-A Command Dispatch

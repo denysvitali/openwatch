@@ -646,8 +646,10 @@ listed by the earlier radare2 notes:
 5. ~~Channel B sub-cmd bytes that the watch accepts beyond `PROTOCOL.md` §3.2.~~ **Resolved for static firmware routing:** a 2026-07-05 radare2 pass verifies the first-stage v13/v14 dispatcher groups and the second-stage async switch/cascade (`firmwares/_re/channel-b-dispatch/evidence.md`).
    `0x01`, `0x02`, `0x21`, `0x31`, `0x35`, `0x36`, and `0x61` call the OTA-state callback before falling through to async storage; `0x10`/`0x46` bypass async storage through the cleanup helper; every other valid-CRC frame enters the async worker directly.
    The low OTA switch has max explicit index `0x08`, so `0x08..0x10` clamp to the default NAK path.
-   The compare cascade handles sleep `0x11/0x12/0x27`, activity `0x2a`, alarm `0x2c`, file table `0x41/0x43/0x46`, no-op placeholders `0x13/0x29/0x3b/0x47/0x4b`, device-info/config `0x5a`, and explicit NAK-code-2 commands `0x21..0x24`; unknown commands NAK with code `0`.
-   Remaining work is payload semantics for opaque/no-op handlers, not command acceptance.
+   The compare cascade handles sleep `0x11/0x12/0x27`, activity `0x2a`, alarm `0x2c`, file table `0x41/0x43/0x46`, no-response placeholders `0x13/0x29/0x3b/0x47/0x4b`, device-info/config `0x5a`, and explicit NAK-code-2 commands `0x21..0x24`; unknown commands NAK with code `0`.
+   `0x13`, `0x29`, and `0x3b` branch straight to cleanup; `0x47` and `0x4b`
+   call single-instruction `bx lr` stubs. Remaining work is payload semantics
+   for opaque non-placeholder handlers, not command acceptance.
    The file-table list response container is now resolved: `0x41` returns `0x42`
    with `[count, records...]`, each record is `[recordLen, recordType,
    fieldTLVs...]`, and each field is `[fieldLen, fieldId, value...]` with

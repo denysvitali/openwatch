@@ -240,6 +240,30 @@ void main() {
       expect(chunkFrame.details['chunkMalformed'], isFalse);
     });
 
+    test('labels H59MA Channel-B no-op placeholders', () {
+      final frames = [
+        for (final cmd in [
+          OpB.h59Noop13,
+          OpB.h59Noop29,
+          OpB.h59Noop3b,
+          OpB.h59Noop47,
+          OpB.h59Noop4b,
+        ])
+          Codec.buildChannelB(cmd, [0x5A]),
+      ];
+
+      final report = const WatchLogDecoder().decodeNrfConnectLog(
+        frames.map((f) => _line(_chB, f)).join('\n'),
+      );
+
+      expect(report.frames, hasLength(5));
+      for (final frame in report.frames) {
+        expect(frame.title, contains('no-op payloadBytes=1'));
+        expect(frame.details['label'], startsWith('h59Noop'));
+        expect(frame.details['firmwareBehavior'], 'no-op');
+      }
+    });
+
     test('summarizes Channel B device-info static TLVs', () {
       final frame = Codec.buildChannelB(OpB.deviceInfoConfig, [
         0x03,

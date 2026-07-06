@@ -190,10 +190,15 @@ class OpB {
   // LargeData actions (PROTOCOL.md §4.7)
   static const int h59SleepSummary = 0x11; // H59MA 100B sleep summary
   static const int h59SleepDetail = 0x12; // H59MA 288B sleep detail
+  static const int h59Noop13 = 0x13; // H59MA Channel-B placeholder; no reply
   static const int sleepNew = 0x27; // new sleep protocol (night) — Ch B
+  static const int h59Noop29 = 0x29; // H59MA Channel-B placeholder; no reply
   static const int activitySummary =
       0x2a; // v14 activity/sport summary — see GHIDRA §2.8
+  static const int h59Noop3b = 0x3b; // H59MA Channel-B placeholder; no reply
   static const int sleepLunchNew = 0x3e; // new sleep (lunch/nap) — Ch B
+  static const int h59Noop47 = 0x47; // H59MA Channel-B placeholder; no reply
+  static const int h59Noop4b = 0x4b; // H59MA Channel-B placeholder; no reply
 
   /// H59MA v14 device-info / config TLV handler (Channel-B `0x5a`).
   ///
