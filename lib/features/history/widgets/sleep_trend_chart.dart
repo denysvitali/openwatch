@@ -9,21 +9,41 @@ import '../../../core/services/history_store.dart';
 /// Missing days render as a small placeholder so gaps in local history remain
 /// visible without implying zero sleep.
 class SleepTrendChart extends StatelessWidget {
-  const SleepTrendChart({super.key, required this.days, this.height = 112});
+  const SleepTrendChart({
+    super.key,
+    required this.days,
+    this.height = 112,
+    this.sleepColor,
+  });
 
   /// Days in display order, first entry = leftmost bar.
   final List<DailyHistory> days;
   final double height;
+  final Color? sleepColor;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final effectiveSleepColor = sleepColor ?? _sleepPurple(theme);
+    if (days.isEmpty) {
+      return SizedBox(
+        height: height,
+        child: Center(
+          child: Text(
+            'No sleep data',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+      );
+    }
     return SizedBox(
       height: height,
       child: CustomPaint(
         painter: _SleepTrendPainter(
           days: days,
-          sleepColor: const Color(0xFF5856D6),
+          sleepColor: effectiveSleepColor,
           todayColor: theme.colorScheme.tertiary,
           averageColor: theme.colorScheme.secondary,
           axisColor: theme.colorScheme.outlineVariant,
@@ -33,6 +53,12 @@ class SleepTrendChart extends StatelessWidget {
       ),
     );
   }
+}
+
+Color _sleepPurple(ThemeData theme) {
+  return theme.brightness == Brightness.dark
+      ? const Color(0xFF5E5CE6)
+      : const Color(0xFF5856D6);
 }
 
 @immutable

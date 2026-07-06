@@ -25,6 +25,7 @@ class HrLineChart extends StatefulWidget {
     this.maxBpm = 200,
     this.showAxes = true,
     this.now,
+    this.color,
   });
 
   final List<HrSample> samples;
@@ -32,6 +33,7 @@ class HrLineChart extends StatefulWidget {
   final int maxBpm;
   final bool showAxes;
   final DateTime? now;
+  final Color? color;
 
   @override
   State<HrLineChart> createState() => _HrLineChartState();
@@ -59,6 +61,7 @@ class _HrLineChartState extends State<HrLineChart> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final color = widget.color ?? theme.colorScheme.primary;
     // Build one chart data set and use it for paint, hit-testing, badges, and
     // scroll limits. Otherwise future fixed-slot watch records can be hidden
     // visually while still being selectable.
@@ -93,7 +96,7 @@ class _HrLineChartState extends State<HrLineChart> {
                   child: CustomPaint(
                     painter: _HrPainter(
                       samples: visible,
-                      color: theme.colorScheme.primary,
+                      color: color,
                       axisColor: theme.colorScheme.outlineVariant,
                       textColor: theme.colorScheme.onSurfaceVariant,
                       minBpm: widget.minBpm.toDouble(),
@@ -322,13 +325,16 @@ class MiniHrSpark extends StatelessWidget {
     required this.samples,
     this.height = 48,
     this.now,
+    this.color,
   });
   final List<HrSample> samples;
   final double height;
   final DateTime? now;
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final visible = _HrLineChartState._visibleSamples(
       samples,
       now ?? DateTime.now(),
@@ -338,7 +344,7 @@ class MiniHrSpark extends StatelessWidget {
       child: CustomPaint(
         painter: _HrPainter(
           samples: visible,
-          color: Theme.of(context).colorScheme.primary,
+          color: color ?? theme.colorScheme.primary,
           axisColor: Colors.transparent,
           textColor: Colors.transparent,
           minBpm: 40,

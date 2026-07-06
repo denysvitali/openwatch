@@ -8,8 +8,8 @@ import '../../core/ble/ble_transport.dart';
 import '../../core/providers/app_providers.dart';
 import '../../core/services/history_debug_export.dart';
 import '../../core/services/history_sync.dart';
-import '../widgets/inset_card.dart';
-import '../widgets/sync_status_pill.dart';
+import '../widgets/health_widgets.dart';
+import '../widgets/sync_status_pill.dart' show formatRelativeTime;
 import 'sleep_session_summary.dart';
 import 'widgets/hr_chart.dart';
 import 'widgets/scalar_chart.dart';
@@ -101,6 +101,7 @@ class HistoryScreen extends ConsumerWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    const HealthSectionHeader(title: 'Local history'),
                     _HistoryOverviewCard(
                       ready: ready,
                       linkState: linkState,
@@ -114,14 +115,9 @@ class HistoryScreen extends ConsumerWidget {
                       _SyncErrorBanner(message: sync.lastSyncError!),
                     ],
                     if (days.isNotEmpty) ...[
-                      const SizedBox(height: 14),
+                      const HealthSectionHeader(title: 'Last 7 days'),
                       _HistoryTrendCard(days: _recentDays(days)),
-                      const SizedBox(height: 14),
-                      _SectionTitle(
-                        title: 'Daily detail',
-                        trailing: '${days.length} days',
-                      ),
-                      const SizedBox(height: 6),
+                      const HealthSectionHeader(title: 'Daily detail'),
                       _DailyDetailSelector(
                         days: days.reversed.toList(),
                         sync: sync,
@@ -210,55 +206,17 @@ class _HistoryOverviewCard extends StatelessWidget {
         ? 'Pull down or use Sync history to update from the watch.'
         : 'Connect your watch to sync local history.';
 
-    return InsetCard(
-      padding: const EdgeInsets.all(18),
+    return HealthCard(
+      icon: CupertinoIcons.chart_bar_alt_fill,
+      title: 'Local history',
+      metricColor: theme.colorScheme.primary,
+      trailing: _SyncStatusPill(sync: sync),
+      caption: latest == null
+          ? _describeLink(linkState)
+          : 'Latest ${_formatDayTab(latest.day)}',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 52,
-                height: 52,
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.primary.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(
-                  CupertinoIcons.chart_bar_alt_fill,
-                  color: theme.colorScheme.primary,
-                  size: 28,
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Local history',
-                      style: theme.textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      latest == null
-                          ? _describeLink(linkState)
-                          : 'Latest ${_formatDayTab(latest.day)}',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 10),
-              SyncStatusPill(sync: sync),
-            ],
-          ),
-          const SizedBox(height: 16),
           if (sync.syncing) ...[
             LinearProgressIndicator(value: progress),
             const SizedBox(height: 10),
@@ -270,55 +228,82 @@ class _HistoryOverviewCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 14),
-          _StatGrid(
-            stats: [
-              _HistoryStat(
+          MetricGrid(
+            children: [
+              HealthCard(
                 icon: CupertinoIcons.calendar,
-                label: 'Stored',
                 value: '${days.length}',
-                detail: days.length == 1 ? 'day on phone' : 'days on phone',
+                unit: days.length == 1 ? 'day' : 'days',
+                caption: 'on phone',
+                metricColor: theme.colorScheme.primary,
               ),
-              _HistoryStat(
+              HealthCard(
                 icon: CupertinoIcons.clock,
-                label: 'Last sync',
                 value: sync.lastSyncedAt == null
                     ? 'Never'
                     : formatRelativeTime(sync.lastSyncedAt!),
-                detail: storeReady ? 'local watermark' : 'storage starting',
+                caption: storeReady ? 'local watermark' : 'storage starting',
+                metricColor: theme.colorScheme.primary,
               ),
-              _HistoryStat(
+              HealthCard(
                 icon: CupertinoIcons.waveform_path,
-                label: 'Watch data',
                 value: sync.watchDaysWithData.isEmpty
                     ? 'Unknown'
                     : '${sync.watchDaysWithData.length}',
-                detail: 'reported last sync',
+                caption: 'reported last sync',
+                metricColor: theme.colorScheme.primary,
               ),
-              _HistoryStat(
+              HealthCard(
                 icon: CupertinoIcons.sparkles,
-                label: 'Fetched',
                 value: '${sync.fetchedDays.length}',
-                detail: 'new this sync',
+                unit: sync.fetchedDays.length == 1 ? 'day' : 'days',
+                caption: 'new this sync',
+                metricColor: theme.colorScheme.primary,
               ),
             ],
           ),
           const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: ready && !sync.syncing ? onSync : null,
-              icon: sync.syncing
-                  ? const SizedBox.square(
-                      dimension: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(CupertinoIcons.arrow_2_circlepath),
-              label: Text(sync.syncing ? 'Syncing' : 'Sync history'),
-            ),
+          PrimaryHealthButton(
+            label: sync.syncing ? 'Syncing' : 'Sync history',
+            icon: sync.syncing ? null : CupertinoIcons.arrow_2_circlepath,
+            onPressed: ready && !sync.syncing ? onSync : null,
           ),
         ],
       ),
     );
+  }
+}
+
+class _SyncStatusPill extends StatelessWidget {
+  const _SyncStatusPill({required this.sync});
+
+  final HistorySync sync;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    late final String label;
+    late final Color color;
+    late final IconData icon;
+    if (sync.syncing) {
+      label = 'Syncing';
+      color = theme.colorScheme.primary;
+      icon = Icons.sync;
+    } else if (sync.lastSyncError != null) {
+      label = 'Error';
+      color = theme.colorScheme.error;
+      icon = CupertinoIcons.exclamationmark_circle;
+    } else if (sync.lastSyncedAt == null) {
+      label = 'No sync';
+      color = theme.colorScheme.outline;
+      icon = Icons.cloud_off_rounded;
+    } else {
+      label = formatRelativeTime(sync.lastSyncedAt!);
+      color = theme.colorScheme.secondary;
+      icon = CupertinoIcons.checkmark_circle_fill;
+    }
+
+    return StatusPill(icon: icon, label: label, color: color);
   }
 }
 
@@ -337,54 +322,27 @@ class _HistoryTrendCard extends StatelessWidget {
         : '${DateFormat.MMMd().format(days.first.day.midnight)} - '
               '${DateFormat.MMMd().format(days.last.day.midnight)}';
 
-    return InsetCard(
-      padding: const EdgeInsets.all(18),
+    return HealthCard(
+      icon: CupertinoIcons.chart_bar_alt_fill,
+      title: 'Last 7 days',
+      metricColor: theme.colorScheme.primary,
+      caption: subtitle,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Last 7 days',
-                      style: theme.textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (latest != null) ...[
-                const SizedBox(width: 12),
-                Flexible(
-                  child: Align(
-                    alignment: Alignment.centerRight,
-                    child: _LatestDaySummary(day: latest),
-                  ),
-                ),
-              ],
-            ],
-          ),
           if (latest?.hr.isNotEmpty == true) ...[
-            const SizedBox(height: 16),
             _TrendHeader(
               icon: CupertinoIcons.heart_fill,
               title: 'Heart rate',
               detail: '${avgBpm(latest!.hr)} bpm avg',
-              tint: const Color(0xFFFF3B30),
+              tint: _heartRed(context),
             ),
             const SizedBox(height: 8),
-            MiniHrSpark(samples: latest.hr, height: 58),
+            MiniHrSpark(
+              samples: latest.hr,
+              height: 58,
+              color: _heartRed(context),
+            ),
           ],
           const SizedBox(height: 16),
           _TrendHeader(
@@ -393,56 +351,30 @@ class _HistoryTrendCard extends StatelessWidget {
             detail: latest?.steps == null
                 ? 'No step total'
                 : '${NumberFormat.decimalPattern().format(latest!.steps)} steps',
-            tint: theme.colorScheme.primary,
+            tint: _activityGreen(context),
           ),
           const SizedBox(height: 8),
-          StepsBarChart(days: days, height: 118),
+          StepsBarChart(
+            days: days,
+            height: 118,
+            barColor: _activityGreen(context),
+          ),
           if (sleepSummary.hasData) ...[
             const SizedBox(height: 16),
             _TrendHeader(
               icon: CupertinoIcons.moon_fill,
               title: 'Sleep',
               detail: 'Week avg ${_formatDuration(sleepSummary.average)}',
-              tint: const Color(0xFF5856D6),
+              tint: _sleepPurple(context),
             ),
             const SizedBox(height: 8),
-            SleepTrendChart(days: days, height: 118),
+            SleepTrendChart(
+              days: days,
+              height: 118,
+              sleepColor: _sleepPurple(context),
+            ),
           ],
         ],
-      ),
-    );
-  }
-}
-
-class _LatestDaySummary extends StatelessWidget {
-  const _LatestDaySummary({required this.day});
-
-  final DailyHistory day;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final items = <String>[];
-    final avg = avgBpm(day.hr);
-    if (avg > 0) items.add('$avg bpm');
-    if (day.steps != null) {
-      items.add('${NumberFormat.compact().format(day.steps)} steps');
-    }
-    if (day.sleep.isNotEmpty) items.add(_sleepSummary(day));
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Text(
-        items.isEmpty ? _formatDayTab(day.day) : items.join(' · '),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: theme.textTheme.labelMedium?.copyWith(
-          color: theme.colorScheme.onSurfaceVariant,
-        ),
       ),
     );
   }
@@ -485,108 +417,6 @@ class _TrendHeader extends StatelessWidget {
   }
 }
 
-class _HistoryStat {
-  const _HistoryStat({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.detail,
-  });
-
-  final IconData icon;
-  final String label;
-  final String value;
-  final String detail;
-}
-
-class _StatGrid extends StatelessWidget {
-  const _StatGrid({required this.stats});
-
-  final List<_HistoryStat> stats;
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final columns = constraints.maxWidth >= 620 ? 4 : 2;
-        final width = (constraints.maxWidth - (columns - 1) * 8) / columns;
-        return Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final stat in stats)
-              SizedBox(
-                width: width.clamp(120.0, constraints.maxWidth),
-                child: _StatCell(stat: stat),
-              ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-class _StatCell extends StatelessWidget {
-  const _StatCell({required this.stat});
-
-  final _HistoryStat stat;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(
-                stat.icon,
-                size: 16,
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  stat.label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            stat.value,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            stat.detail,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _SyncErrorBanner extends StatelessWidget {
   const _SyncErrorBanner({required this.message});
 
@@ -595,7 +425,8 @@ class _SyncErrorBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return InsetCard(
+    return HealthCard(
+      metricColor: theme.colorScheme.error,
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -645,36 +476,6 @@ String _describeLink(LinkState state) => switch (state) {
   LinkState.readingDeviceInfo => 'Reading watch info',
 };
 
-class _SectionTitle extends StatelessWidget {
-  const _SectionTitle({required this.title, required this.trailing});
-
-  final String title;
-  final String trailing;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Row(
-      children: [
-        Expanded(
-          child: Text(
-            title,
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
-        Text(
-          trailing,
-          style: theme.textTheme.labelLarge?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 class _EmptyState extends StatelessWidget {
   const _EmptyState({required this.ready, required this.syncing});
 
@@ -698,7 +499,7 @@ class _EmptyState extends StatelessWidget {
             height: 72,
             decoration: BoxDecoration(
               color: theme.colorScheme.primary.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(20),
             ),
             child: Icon(
               CupertinoIcons.chart_bar,
@@ -726,7 +527,8 @@ class _StoreWarning extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return InsetCard(
+    return HealthCard(
+      metricColor: theme.colorScheme.tertiary,
       child: Row(
         children: [
           Icon(Icons.storage_rounded, color: theme.colorScheme.tertiary),
@@ -777,53 +579,50 @@ class _DailyDetailSelectorState extends State<_DailyDetailSelector> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            IconButton(
-              tooltip: 'Newer day',
-              icon: const Icon(CupertinoIcons.chevron_left),
-              onPressed: _index > 0 ? () => setState(() => _index--) : null,
-            ),
-            Expanded(
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<int>(
-                  value: _index,
-                  isExpanded: true,
-                  borderRadius: BorderRadius.circular(8),
-                  items: [
-                    for (var i = 0; i < widget.days.length; i++)
-                      DropdownMenuItem(
-                        value: i,
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Text(_formatDayTab(widget.days[i].day)),
-                            ),
-                            if (widget.sync.fetchedDays.contains(
-                              widget.days[i].day,
-                            ))
-                              const _NewDot(),
-                          ],
+        Container(
+          height: 40,
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            children: [
+              IconButton(
+                tooltip: 'Newer day',
+                icon: const Icon(CupertinoIcons.chevron_left, size: 20),
+                onPressed: _index > 0 ? () => setState(() => _index--) : null,
+              ),
+              Expanded(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      for (var i = 0; i < widget.days.length; i++) ...[
+                        if (i > 0) const SizedBox(width: 6),
+                        _DayChip(
+                          label: _formatDayTab(widget.days[i].day),
+                          selected: i == _index,
+                          hasNewData: widget.sync.fetchedDays.contains(
+                            widget.days[i].day,
+                          ),
+                          onTap: () => setState(() => _index = i),
                         ),
-                      ),
-                  ],
-                  onChanged: (value) {
-                    if (value == null) return;
-                    setState(() => _index = value);
-                  },
+                      ],
+                    ],
+                  ),
                 ),
               ),
-            ),
-            IconButton(
-              tooltip: 'Older day',
-              icon: const Icon(CupertinoIcons.chevron_right),
-              onPressed: _index < widget.days.length - 1
-                  ? () => setState(() => _index++)
-                  : null,
-            ),
-          ],
+              IconButton(
+                tooltip: 'Older day',
+                icon: const Icon(CupertinoIcons.chevron_right, size: 20),
+                onPressed: _index < widget.days.length - 1
+                    ? () => setState(() => _index++)
+                    : null,
+              ),
+            ],
+          ),
         ),
-        Divider(color: theme.colorScheme.outlineVariant),
+        const SizedBox(height: 12),
         AnimatedSize(
           duration: const Duration(milliseconds: 180),
           curve: Curves.easeOutCubic,
@@ -844,17 +643,62 @@ class _DailyDetailSelectorState extends State<_DailyDetailSelector> {
   }
 }
 
-class _NewDot extends StatelessWidget {
-  const _NewDot();
+class _DayChip extends StatelessWidget {
+  const _DayChip({
+    required this.label,
+    required this.selected,
+    required this.hasNewData,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final bool hasNewData;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.primary,
-        shape: BoxShape.circle,
+    final theme = Theme.of(context);
+    final bgColor = selected ? theme.colorScheme.primary : Colors.transparent;
+    final fgColor = selected
+        ? theme.colorScheme.onPrimary
+        : theme.colorScheme.onSurface;
+    return Center(
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                label,
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: fgColor,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                ),
+              ),
+              if (hasNewData) ...[
+                const SizedBox(width: 6),
+                Container(
+                  width: 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? theme.colorScheme.onPrimary
+                        : theme.colorScheme.primary,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
-      child: const SizedBox(width: 6, height: 6),
     );
   }
 }
@@ -916,143 +760,225 @@ class _DayDetailPage extends StatelessWidget {
                   _copyDayDebug(context, day, ctx, fresh);
                 },
               ),
-              if (freshlyFetched) _NewBadge(),
+              if (freshlyFetched) const _NewBadge(),
             ],
           ),
           const SizedBox(height: 14),
           if (isEmpty)
-            Text(
-              isToday ? 'No data today' : 'No watch data',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
+            HealthCard(
+              metricColor: theme.colorScheme.outline,
+              child: Row(
+                children: [
+                  Icon(
+                    CupertinoIcons.chart_bar,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    isToday ? 'No data today' : 'No watch data',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
               ),
             )
           else ...[
-            Wrap(
-              spacing: 10,
-              runSpacing: 8,
-              children: [
-                _MetricPill(
-                  icon: CupertinoIcons.heart_fill,
-                  label: displayDay.hr.isEmpty
-                      ? '-'
-                      : '${avgBpm(displayDay.hr)} bpm',
-                  tint: const Color(0xFFFF3B30),
-                ),
-                _MetricPill(
-                  icon: CupertinoIcons.moon_fill,
-                  label: _sleepSummary(displayDay),
-                  tint: const Color(0xFF5856D6),
-                ),
-                _MetricPill(
-                  icon: CupertinoIcons.arrow_up_right,
-                  label: displayDay.steps == null
-                      ? '-'
-                      : NumberFormat.compact().format(displayDay.steps),
-                  tint: theme.colorScheme.primary,
-                ),
-                _MetricPill(
-                  icon: CupertinoIcons.bolt_fill,
-                  label: displayDay.stress.isEmpty
-                      ? '-'
-                      : '${avgValue(displayDay.stress).round()} stress',
-                  tint: const Color(0xFFFF9500),
-                ),
-                _MetricPill(
-                  icon: CupertinoIcons.chart_bar_fill,
-                  label: displayDay.hrv.isEmpty
-                      ? '-'
-                      : '${avgValue(displayDay.hrv).round()} ms',
-                  tint: const Color(0xFF34C759),
-                ),
-                _MetricPill(
-                  icon: CupertinoIcons.waveform_path_ecg,
-                  label: _bpPillLabel(displayDay.bloodPressure),
-                  tint: const Color(0xFFFF3B30),
-                ),
-              ],
+            HealthCard(
+              icon: CupertinoIcons.heart_fill,
+              title: 'Daily summary',
+              metricColor: theme.colorScheme.primary,
+              child: Column(
+                children: [
+                  HealthListTile(
+                    leadingIcon: CupertinoIcons.heart_fill,
+                    leadingColor: _heartRed(context),
+                    title: 'Heart rate',
+                    subtitle: displayDay.hr.isEmpty
+                        ? 'No samples'
+                        : '${displayDay.hr.length} samples',
+                    value: displayDay.hr.isEmpty
+                        ? '-'
+                        : '${avgBpm(displayDay.hr)}',
+                    unit: 'bpm',
+                    showDivider: true,
+                  ),
+                  HealthListTile(
+                    leadingIcon: CupertinoIcons.moon_fill,
+                    leadingColor: _sleepPurple(context),
+                    title: 'Sleep',
+                    subtitle: displayDay.sleep.isEmpty
+                        ? 'No sessions'
+                        : '${SleepSessionSummary.fromSegments(displayDay.sleep).length} sessions',
+                    value: displayDay.sleep.isEmpty
+                        ? '-'
+                        : _formatDuration(
+                            displayDay.sleep.fold<Duration>(
+                              Duration.zero,
+                              (a, s) => a + s.duration,
+                            ),
+                          ),
+                    showDivider: true,
+                  ),
+                  HealthListTile(
+                    leadingIcon: CupertinoIcons.arrow_up_right,
+                    leadingColor: _activityGreen(context),
+                    title: 'Steps',
+                    subtitle: displayDay.steps == null ? 'No step total' : null,
+                    value: displayDay.steps == null
+                        ? '-'
+                        : NumberFormat.compact().format(displayDay.steps),
+                    showDivider: true,
+                  ),
+                  HealthListTile(
+                    leadingIcon: CupertinoIcons.bolt_fill,
+                    leadingColor: _stressOrange(context),
+                    title: 'Stress',
+                    subtitle: displayDay.stress.isEmpty
+                        ? 'No samples'
+                        : _scalarRange(displayDay.stress),
+                    value: displayDay.stress.isEmpty
+                        ? '-'
+                        : '${avgValue(displayDay.stress).round()}',
+                    unit: 'avg',
+                    showDivider: true,
+                  ),
+                  HealthListTile(
+                    leadingIcon: CupertinoIcons.chart_bar_fill,
+                    leadingColor: _activityGreen(context),
+                    title: 'HRV',
+                    subtitle: displayDay.hrv.isEmpty
+                        ? 'No samples'
+                        : _scalarRange(displayDay.hrv, unit: 'ms'),
+                    value: displayDay.hrv.isEmpty
+                        ? '-'
+                        : '${avgValue(displayDay.hrv).round()}',
+                    unit: 'ms',
+                    showDivider: true,
+                  ),
+                  HealthListTile(
+                    leadingIcon: CupertinoIcons.waveform_path_ecg,
+                    leadingColor: _heartRed(context),
+                    title: 'Blood pressure',
+                    subtitle: displayDay.bloodPressure.isEmpty
+                        ? 'No readings'
+                        : _bpMetricDetail(displayDay.bloodPressure),
+                    value: displayDay.bloodPressure.isEmpty
+                        ? '-'
+                        : _bpMetricValue(
+                            displayDay.bloodPressure,
+                          ).replaceAll(' mmHg', ''),
+                    unit: displayDay.bloodPressure.isEmpty ? null : 'mmHg',
+                    showDivider: false,
+                  ),
+                ],
+              ),
             ),
             if (displayDay.hr.isNotEmpty) ...[
-              const SizedBox(height: 20),
-              _ChartHeader(
+              const SizedBox(height: 12),
+              HealthCard(
+                icon: CupertinoIcons.heart_fill,
                 title: 'Heart rate',
-                detail: '${avgBpm(displayDay.hr)} bpm avg',
-              ),
-              const SizedBox(height: 10),
-              SizedBox(height: 184, child: HrLineChart(samples: displayDay.hr)),
-            ] else ...[
-              const SizedBox(height: 20),
-              SizedBox(
-                height: 64,
-                child: Center(
-                  child: Text(
-                    'No heart-rate samples',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
+                metricColor: _heartRed(context),
+                caption: '${avgBpm(displayDay.hr)} bpm average',
+                child: SizedBox(
+                  height: 184,
+                  child: HrLineChart(
+                    samples: displayDay.hr,
+                    color: _heartRed(context),
                   ),
                 ),
               ),
             ],
             if (displayDay.sleep.isNotEmpty) ...[
-              const SizedBox(height: 20),
-              _ChartHeader(
+              const SizedBox(height: 12),
+              HealthCard(
+                icon: CupertinoIcons.moon_fill,
                 title: 'Sleep',
-                detail: 'Total ${_sleepSummary(displayDay)}',
-              ),
-              const SizedBox(height: 8),
-              _SleepSessionRows(
-                sessions: SleepSessionSummary.fromSegments(displayDay.sleep),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                _sleepLongSummary(displayDay),
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
+                metricColor: _sleepPurple(context),
+                caption:
+                    'Total ${_sleepSummary(displayDay)} · ${_sleepLongSummary(displayDay)}',
+                child: Builder(
+                  builder: (context) {
+                    final sessions = SleepSessionSummary.fromSegments(
+                      displayDay.sleep,
+                    );
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SleepTimeline(segments: displayDay.sleep, height: 110),
+                        const SizedBox(height: 12),
+                        ...sessions.asMap().entries.map(
+                          (e) => HealthListTile(
+                            leadingIcon: CupertinoIcons.moon_fill,
+                            leadingColor: _sleepPurple(context),
+                            title: 'Session ${e.key + 1}',
+                            subtitle:
+                                '${DateFormat.jm().format(e.value.start)} - '
+                                '${DateFormat.jm().format(e.value.end)}',
+                            value: _formatDuration(e.value.duration),
+                            showDivider: e.key != sessions.length - 1,
+                          ),
+                        ),
+                      ],
+                    );
+                  },
                 ),
               ),
-              const SizedBox(height: 10),
-              SleepTimeline(segments: displayDay.sleep, height: 110),
             ],
-            if (displayDay.stress.isNotEmpty ||
-                displayDay.hrv.isNotEmpty ||
-                displayDay.bloodPressure.isNotEmpty) ...[
-              const SizedBox(height: 20),
-              _ChartHeader(title: 'Other metrics', detail: 'Synced values'),
-              const SizedBox(height: 10),
-              if (displayDay.stress.isNotEmpty) ...[
-                _ChartHeader(
-                  title: 'Stress',
-                  detail: _scalarRange(displayDay.stress),
-                ),
-                const SizedBox(height: 8),
-                SizedBox(
+            if (displayDay.stress.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              HealthCard(
+                icon: CupertinoIcons.bolt_fill,
+                title: 'Stress',
+                metricColor: _stressOrange(context),
+                caption: _scalarRange(displayDay.stress),
+                child: SizedBox(
                   height: 132,
                   child: ScalarMetricChart(
                     samples: displayDay.stress,
-                    color: const Color(0xFFFF9500),
+                    color: _stressOrange(context),
                     minValue: 0,
                     maxValue: 100,
                   ),
                 ),
-                const SizedBox(height: 14),
-              ],
-              if (displayDay.hrv.isNotEmpty) ...[
-                _ChartHeader(
-                  title: 'HRV',
-                  detail: _scalarRange(displayDay.hrv),
-                ),
-                const SizedBox(height: 8),
-                SizedBox(
+              ),
+            ],
+            if (displayDay.hrv.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              HealthCard(
+                icon: CupertinoIcons.chart_bar_fill,
+                title: 'HRV',
+                metricColor: _activityGreen(context),
+                caption: _scalarRange(displayDay.hrv, unit: 'ms'),
+                child: SizedBox(
                   height: 132,
                   child: ScalarMetricChart(
                     samples: displayDay.hrv,
-                    color: const Color(0xFF34C759),
+                    color: _activityGreen(context),
                   ),
                 ),
-                const SizedBox(height: 14),
-              ],
-              _MetricValueList(day: displayDay),
+              ),
+            ],
+            if (displayDay.bloodPressure.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              HealthCard(
+                icon: CupertinoIcons.waveform_path_ecg,
+                title: 'Blood pressure',
+                metricColor: _heartRed(context),
+                caption: _bpMetricDetail(displayDay.bloodPressure),
+                child: SizedBox(
+                  height: 132,
+                  child: ScalarMetricChart(
+                    samples: [
+                      for (final bp in displayDay.bloodPressure)
+                        if (!_isRawBpSlot(bp))
+                          HealthMetricSample(bp.timestamp, bp.systolic),
+                    ],
+                    color: _heartRed(context),
+                  ),
+                ),
+              ),
             ],
           ],
         ],
@@ -1145,13 +1071,6 @@ BloodPressureSample? _latestDecodedBp(List<BloodPressureSample> samples) {
   return null;
 }
 
-String _bpPillLabel(List<BloodPressureSample> samples) {
-  if (samples.isEmpty) return '-';
-  final decoded = _latestDecodedBp(samples);
-  if (decoded != null) return _formatBp(decoded);
-  return '${samples.length} BP ${samples.length == 1 ? 'slot' : 'slots'}';
-}
-
 String _bpMetricDetail(List<BloodPressureSample> samples) {
   final decoded = _latestDecodedBp(samples);
   if (decoded != null) return DateFormat.jm().format(decoded.timestamp);
@@ -1173,10 +1092,6 @@ String _sleepSummary(DailyHistory day) {
   return _formatDuration(total);
 }
 
-/// Copies a plain-text "day debug" package to the clipboard so users can
-/// paste one day into a bug report without screenshots. A fully populated
-/// day runs ~5–10 kB; if it ever creeps past 100 kB the snackbar will
-/// flag it so we hear about it instead of silently truncating.
 Future<void> _copyDayDebug(
   BuildContext context,
   DailyHistory day,
@@ -1235,211 +1150,6 @@ String _label(SleepStage s) => switch (s) {
   SleepStage.deep => 'Deep',
 };
 
-class _ChartHeader extends StatelessWidget {
-  const _ChartHeader({required this.title, required this.detail});
-
-  final String title;
-  final String detail;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Row(
-      children: [
-        Expanded(child: Text(title, style: theme.textTheme.titleSmall)),
-        Flexible(
-          child: Text(
-            detail,
-            textAlign: TextAlign.end,
-            style: theme.textTheme.labelMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _SleepSessionRows extends StatelessWidget {
-  const _SleepSessionRows({required this.sessions});
-
-  final List<SleepSessionSummary> sessions;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final timeFormat = DateFormat.jm();
-    return Column(
-      children: [
-        for (var i = 0; i < sessions.length; i++) ...[
-          if (i > 0) const SizedBox(height: 6),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  CupertinoIcons.moon_fill,
-                  size: 16,
-                  color: const Color(0xFF5856D6),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '${timeFormat.format(sessions[i].start)} - ${timeFormat.format(sessions[i].end)}',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      if (sessions.length > 1)
-                        Text(
-                          'Session ${i + 1}',
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-                Text(
-                  _formatDuration(sessions[i].duration),
-                  style: theme.textTheme.labelLarge,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-}
-
-class _MetricPill extends StatelessWidget {
-  const _MetricPill({
-    required this.icon,
-    required this.label,
-    required this.tint,
-  });
-
-  final IconData icon;
-  final String label;
-  final Color tint;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-      decoration: BoxDecoration(
-        color: tint.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 15, color: tint),
-          const SizedBox(width: 6),
-          Text(label, style: theme.textTheme.labelMedium),
-        ],
-      ),
-    );
-  }
-}
-
-class _MetricValueList extends StatelessWidget {
-  const _MetricValueList({required this.day});
-
-  final DailyHistory day;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final rows = <Widget>[
-      if (day.stress.isNotEmpty)
-        _MetricValueRow(
-          icon: CupertinoIcons.bolt_fill,
-          title: 'Stress',
-          detail: _scalarRange(day.stress),
-          value: _latestScalar(day.stress),
-          tint: const Color(0xFFFF9500),
-        ),
-      if (day.hrv.isNotEmpty)
-        _MetricValueRow(
-          icon: CupertinoIcons.chart_bar_fill,
-          title: 'HRV',
-          detail: _scalarRange(day.hrv, unit: 'ms'),
-          value: '${day.hrv.last.value} ms',
-          tint: const Color(0xFF34C759),
-        ),
-      if (day.bloodPressure.isNotEmpty)
-        _MetricValueRow(
-          icon: CupertinoIcons.waveform_path_ecg,
-          title: 'Blood pressure',
-          detail: _bpMetricDetail(day.bloodPressure),
-          value: _bpMetricValue(day.bloodPressure),
-          tint: const Color(0xFFFF3B30),
-        ),
-    ];
-
-    return Card(
-      child: Column(
-        children: [
-          for (var i = 0; i < rows.length; i++) ...[
-            rows[i],
-            if (i != rows.length - 1)
-              Divider(
-                height: 1,
-                indent: 56,
-                color: theme.colorScheme.outlineVariant.withValues(alpha: 0.7),
-              ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _MetricValueRow extends StatelessWidget {
-  const _MetricValueRow({
-    required this.icon,
-    required this.title,
-    required this.detail,
-    required this.value,
-    required this.tint,
-  });
-
-  final IconData icon;
-  final String title;
-  final String detail;
-  final String value;
-  final Color tint;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return ListTile(
-      leading: Icon(icon, color: tint),
-      title: Text(title),
-      subtitle: Text(detail),
-      trailing: Text(
-        value,
-        style: theme.textTheme.titleMedium?.copyWith(
-          color: theme.colorScheme.onSurfaceVariant,
-        ),
-      ),
-    );
-  }
-}
-
 String _scalarRange(List<HealthMetricSample> samples, {String unit = ''}) {
   final values = samples.map((s) => s.value).toList();
   final min = values.reduce((a, b) => a < b ? a : b);
@@ -1449,10 +1159,9 @@ String _scalarRange(List<HealthMetricSample> samples, {String unit = ''}) {
       'avg ${avgValue(samples).round()}$suffix · max $max$suffix';
 }
 
-String _latestScalar(List<HealthMetricSample> samples) =>
-    '${samples.last.value} · ${DateFormat.jm().format(samples.last.timestamp)}';
-
 class _NewBadge extends StatelessWidget {
+  const _NewBadge();
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -1474,4 +1183,28 @@ class _NewBadge extends StatelessWidget {
       ),
     );
   }
+}
+
+Color _heartRed(BuildContext context) {
+  return Theme.of(context).brightness == Brightness.dark
+      ? const Color(0xFFFF453A)
+      : const Color(0xFFFF3B30);
+}
+
+Color _sleepPurple(BuildContext context) {
+  return Theme.of(context).brightness == Brightness.dark
+      ? const Color(0xFF5E5CE6)
+      : const Color(0xFF5856D6);
+}
+
+Color _activityGreen(BuildContext context) {
+  return Theme.of(context).brightness == Brightness.dark
+      ? const Color(0xFF30D158)
+      : const Color(0xFF34C759);
+}
+
+Color _stressOrange(BuildContext context) {
+  return Theme.of(context).brightness == Brightness.dark
+      ? const Color(0xFFFF9F0A)
+      : const Color(0xFFFF9500);
 }

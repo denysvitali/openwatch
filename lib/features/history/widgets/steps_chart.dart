@@ -11,29 +11,59 @@ import '../../../core/services/history_store.dart';
 /// Days without a recorded step count render as a 1-px placeholder bar
 /// so the spacing stays uniform (an empty bar reads better than a gap).
 class StepsBarChart extends StatelessWidget {
-  const StepsBarChart({super.key, required this.days, this.height = 120});
+  const StepsBarChart({
+    super.key,
+    required this.days,
+    this.height = 120,
+    this.barColor,
+    this.todayColor,
+  });
 
   /// Days in display order — first entry = leftmost bar. Typically
   /// `today.subDays(N)..today` so the right-most bar is today.
   final List<DailyHistory> days;
   final double height;
+  final Color? barColor;
+  final Color? todayColor;
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final effectiveBarColor = barColor ?? _activityGreen(theme);
+    final effectiveTodayColor = todayColor ?? theme.colorScheme.tertiary;
+    if (days.isEmpty) {
+      return SizedBox(
+        height: height,
+        child: Center(
+          child: Text(
+            'No step data',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+      );
+    }
     return SizedBox(
       height: height,
       child: CustomPaint(
         painter: _StepsPainter(
           days: days,
-          barColor: Theme.of(context).colorScheme.primary,
-          todayColor: Theme.of(context).colorScheme.tertiary,
-          axisColor: Theme.of(context).colorScheme.outlineVariant,
-          textColor: Theme.of(context).colorScheme.onSurfaceVariant,
+          barColor: effectiveBarColor,
+          todayColor: effectiveTodayColor,
+          axisColor: theme.colorScheme.outlineVariant,
+          textColor: theme.colorScheme.onSurfaceVariant,
         ),
         size: Size.infinite,
       ),
     );
   }
+}
+
+Color _activityGreen(ThemeData theme) {
+  return theme.brightness == Brightness.dark
+      ? const Color(0xFF30D158)
+      : const Color(0xFF34C759);
 }
 
 class _StepsPainter extends CustomPainter {
