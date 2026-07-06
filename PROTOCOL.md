@@ -556,7 +556,7 @@ APK media sidecar ids `0x06`, `0x25`, `0x26`, `0x35`, `0x4a`, and `0x54` are
 also unsupported on H59MA v14; `0x35` only gets the first-stage pre-store
 callback before the async worker NAKs it, while the others enter the default
 NAK-code-0 path directly.
-implemented file table/list path is:
+The implemented file table/list path is:
 
 | Cmd | Request | Response | Notes |
 |---|---|---|---|

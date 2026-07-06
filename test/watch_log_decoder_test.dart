@@ -275,6 +275,33 @@ void main() {
       expect(report.frames.single.details['label'], 'h59CleanupBypass46');
     });
 
+    test('labels APK FileHandle commands as unsupported on H59MA', () {
+      final frames = [
+        OpB.fileList,
+        OpB.fileInit,
+        OpB.filePocket,
+        OpB.fileCheck,
+        OpB.fileDelete,
+      ].map((cmd) => Codec.buildChannelB(cmd, [0x01])).toList();
+
+      final report = const WatchLogDecoder().decodeNrfConnectLog(
+        frames.map((f) => _line(_chB, f)).join('\n'),
+      );
+
+      expect(report.frames, hasLength(5));
+      expect(report.frames.map((f) => f.details['label']), [
+        'apkFileListUnsupported',
+        'apkFileInitUnsupported',
+        'apkFilePocketUnsupported',
+        'apkFileCheckUnsupported',
+        'apkFileDeleteUnsupported',
+      ]);
+      for (final frame in report.frames) {
+        expect(frame.title, contains('unsupported compactNak=0'));
+        expect(frame.details['firmwareBehavior'], 'compact-nak-0');
+      }
+    });
+
     test('summarizes H59MA Channel-B alarm read records', () {
       final frame = Codec.buildChannelB(OpB.alarm, [
         0x01,

@@ -768,6 +768,12 @@ class WatchLogDecoder {
       return 'B ${_hex(cmd)} ${_labelForChannelB(cmd)} no-op '
           'payloadBytes=${payload.length}';
     }
+    if (_isUnsupportedApkFileHandleChannelB(cmd)) {
+      details['firmwareBehavior'] = 'compact-nak-0';
+      details['payloadBytes'] = payload.length;
+      return 'B ${_hex(cmd)} ${_labelForChannelB(cmd)} unsupported '
+          'compactNak=0 payloadBytes=${payload.length}';
+    }
 
     switch (cmd) {
       case OpB.h59SleepSummary:
@@ -1798,9 +1804,15 @@ String _labelForChannelB(int cmd) {
     case OpB.sleepLunchNew:
       return 'sleepLunch/nap';
     case OpB.fileList:
-      return 'fileList';
+      return 'apkFileListUnsupported';
+    case OpB.fileInit:
+      return 'apkFileInitUnsupported';
+    case OpB.filePocket:
+      return 'apkFilePocketUnsupported';
+    case OpB.fileCheck:
+      return 'apkFileCheckUnsupported';
     case OpB.fileDelete:
-      return 'fileDelete';
+      return 'apkFileDeleteUnsupported';
     case OpB.h59FileList:
       return 'h59FileList';
     case OpB.h59FileListResponse:
@@ -1831,6 +1843,19 @@ bool _isH59NoopChannelB(int cmd) {
     case OpB.h59Noop3b:
     case OpB.h59Noop47:
     case OpB.h59Noop4b:
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool _isUnsupportedApkFileHandleChannelB(int cmd) {
+  switch (cmd) {
+    case OpB.fileList:
+    case OpB.fileInit:
+    case OpB.filePocket:
+    case OpB.fileCheck:
+    case OpB.fileDelete:
       return true;
     default:
       return false;
