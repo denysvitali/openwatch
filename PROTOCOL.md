@@ -530,6 +530,13 @@ watch does not NAK these commands and does not emit a protocol response. Do not
 confuse these Channel-B placeholders with the Channel-A opcodes of the same
 numeric values.
 
+**H59MA v14 Channel-B explicit rejects.** The same async worker recognizes
+`0x21`, `0x22`, `0x23`, and `0x24`, but routes them to
+`channel_b_send_nak(cmd, 2)`. These numeric values overlap Channel-A target and
+alarm opcodes; over Channel B they are intentionally rejected commands, not
+implemented target/alarm requests. This is distinct from unrecognized Channel-B
+commands, which NAK with code `0`.
+
 **H59MA v14 device-info/config (`0x5a`).** The firmware handles this as a
 Channel-B command, not an APK generic large-data action:
 
@@ -1097,9 +1104,10 @@ The v14 dispatcher groups are now exact:
   directly and are later drained by `channel_b_async_command_processor`.
 
 The async processor then handles OTA low commands `0x01..0x07`, sleep
-`0x11/0x12/0x27`, activity `0x2a`, alarm `0x2c`, file table `0x41/0x43/0x46`,
-no-response placeholders `0x13/0x29/0x3b/0x47/0x4b`, and device-info/config
-`0x5a`; unrecognised commands fall through to `channel_b_send_nak(cmd, 0)`.
+`0x11/0x12/0x27`, explicit NAK-code-2 rejects `0x21..0x24`, activity `0x2a`,
+alarm `0x2c`, file table `0x41/0x43/0x46`, no-response placeholders
+`0x13/0x29/0x3b/0x47/0x4b`, and device-info/config `0x5a`; unrecognised
+commands fall through to `channel_b_send_nak(cmd, 0)`.
 
 radare2 confirms the low OTA-command switch table is identical in v13/v14:
 max explicit index `0x08`, entries `2e 5f 63 69 6d 71 2e 75 2e`; therefore

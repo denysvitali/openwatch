@@ -117,6 +117,45 @@ v13 has the same shape at `0x98ba`/`0x98de` -> `0xe3ea` and
 `0x98ca`/`0x990c` -> `0xa0a8`; both callees are also single `bx lr`
 instructions.
 
+### Explicit NAK-code-2 rejects
+
+`0x21`, `0x22`, `0x23`, and `0x24` are recognized compare-cascade entries, not
+the default unknown-command path. Each branch lands on the shared
+`movs r1, 2; bl channel_b_send_nak` block while `r0` still holds the original
+command. The unknown-command path sets `r1 = 0` before the same sender call.
+
+```text
+v14:
+0x0000981c  cmp  r0, 0x24
+0x0000981e  beq  0x98e4
+0x00009838  cmp  r0, 0x21
+0x0000983a  beq  0x98e4
+0x00009848  cmp  r0, 0x22
+0x0000984a  beq  0x98e4
+0x0000984c  cmp  r0, 0x23
+0x0000984e  bne  0x988a
+0x00009850  b    0x98e4
+0x0000988a  movs r1, 0
+0x0000988c  b    0x98e6
+0x000098e4  movs r1, 2
+0x000098e6  bl   0x8a00
+
+v13:
+0x00009864  cmp  r0, 0x24
+0x00009866  beq  0x992c
+0x00009880  cmp  r0, 0x21
+0x00009882  beq  0x992c
+0x00009890  cmp  r0, 0x22
+0x00009892  beq  0x992c
+0x00009894  cmp  r0, 0x23
+0x00009896  bne  0x98d2
+0x00009898  b    0x992c
+0x000098d2  movs r1, 0
+0x000098d4  b    0x992e
+0x0000992c  movs r1, 2
+0x0000992e  bl   0x8a48
+```
+
 ## Low-Command Switch Shape
 
 Commands:

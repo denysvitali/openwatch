@@ -670,6 +670,8 @@ the slot is reusable.
 | `0x5a` | `channel_b_handle_device_info_config(payload)` | Device info/config — see §2.7 |
 
 Unrecognized commands fall through to `channel_b_send_nak(cmd, 0)` (NAK code `0`).
+The explicit-reject rows are also intentional: `0x21..0x24` are recognized by
+the cascade and use NAK code `2`, not the default unknown-command code `0`.
 The no-op rows are intentionally different from the unrecognized-command path:
 `0x13`, `0x29`, and `0x3b` branch straight to worker cleanup, while `0x47` and
 `0x4b` call single-instruction placeholder stubs (`bx lr`) with `payload[0]`.

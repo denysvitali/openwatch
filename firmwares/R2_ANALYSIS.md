@@ -503,6 +503,9 @@ The async worker's no-response placeholders are also statically resolved:
 `0x13`, `0x29`, and `0x3b` branch directly to worker cleanup, while `0x47` and
 `0x4b` call one-instruction `bx lr` stubs at v14 body `0xe3fa` and `0xa060`
 with `payload[0]`. These commands do not use the unknown-command NAK path.
+The same compare cascade recognizes `0x21..0x24` separately and routes them to
+`channel_b_send_nak(cmd, 2)`, while the default unknown path uses
+`channel_b_send_nak(cmd, 0)`.
 
 ---
 
