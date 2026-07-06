@@ -1983,6 +1983,22 @@ String _labelForFee7(int opcode) {
   switch (opcode) {
     case Fee7.battery:
       return 'battery';
+    case Fee7.camera:
+      return 'camera';
+    case Fee7.bindAncs:
+      return 'bindAncs';
+    case Fee7.timeFormat:
+      return 'timeFormat';
+    case Fee7.bpSetting:
+      return 'bpSetting';
+    case Fee7.bpData:
+      return 'bpData';
+    case Fee7.heartRateSetting:
+      return 'heartRateSetting';
+    case Fee7.degreeSwitch:
+      return 'degreeSwitch';
+    case Fee7.targetSetting:
+      return 'targetSetting';
     case Fee7.spo2HrUpdate:
       return 'spo2HrUpdate';
     case Fee7.capabilityBlock:

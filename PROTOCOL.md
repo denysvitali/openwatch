@@ -446,7 +446,11 @@ prefer FEE7 writes for app flows without live-capture evidence.
 
 | Name | Opcode | Dir | Request | Response | Notes |
 |---|---:|---|---|---|---|
+| CameraControl | `0x02` | both | Channel-A-like camera/control frame | command-specific | Low-range switch entry; ignored while a health sensor session is active. Verified in H59MA v14 at body offset `0xc4d4`. |
 | BatteryStatus | `0x03` | both | bare opcode | `[percent, chargingFlag]` | Direct battery response. Verified in H59MA v14 at body offset `0x587e`: byte 1 is the percent helper result, byte 2 is non-zero when the charge-state helper is non-zero. |
+| BindAncs | `0x04` | both | Channel-A-like ANCS bind frame | command-specific | Bind/ANCS-style state update. Verified at v14 body offset `0xc432`. |
+| SettingMirrors | `0x0a` / `0x0c` / `0x16` / `0x19` / `0x21` | both | Channel-A-like read/write settings | matching setting response | Low-range switch entries for time format, BP setting, heart-rate setting, degree unit, and daily target setting. Verified at v14 body offsets `0xb9c6`, `0xc0de`, `0xc164`, `0xc484`, and `0xbfd8`. |
+| BpHistoryMirror | `0x0d` | both | BP history read request | compact `0x0d` record chunks | Uses the same BP-history preparation and compact sender as Channel-A BP records, without exposing full 4-byte slots. Verified at v14 body offset `0xde52`. |
 | Fee7Handshake | `0x48` (`'H'`) | both | bare opcode | 15-byte frame: hw version bytes, fw version bytes, battery counter `% 100`, status u16 | First vendor-side info block; OpenWatch decodes battery/status from this when present. |
 | PendingStatusWrite | `0x60` | →watch | `value u32LE` in request bytes `1..4` | self-marker ACK `[0x60,0,...,0x60]` | Writes `DAT_0082bfd4 + 0x2c`, paired with `0x61`; verified at v14 body offset `0x5a90`. Production hosts should not use this for ANCS. |
 | LiveStatus | `0x61` (`'a'`) | both | bare opcode | active: `statusValue u32LE`; idle: all-zero ACK | Reads `DAT_0082bfd4 + 0x2c` at body offset `0x5ae6`. The low byte mirrors the live status source used for battery-like updates, but hosts should keep the full u32 for diagnostics. |

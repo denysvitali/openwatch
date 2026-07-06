@@ -817,6 +817,33 @@ void main() {
       expect(decoded.title, isNot(contains('blood')));
     });
 
+    test('labels low-range FEE7 setting mirrors from reversed firmware', () {
+      const cases = {
+        Fee7.camera: 'camera',
+        Fee7.bindAncs: 'bindAncs',
+        Fee7.timeFormat: 'timeFormat',
+        Fee7.bpSetting: 'bpSetting',
+        Fee7.bpData: 'bpData',
+        Fee7.heartRateSetting: 'heartRateSetting',
+        Fee7.degreeSwitch: 'degreeSwitch',
+        Fee7.targetSetting: 'targetSetting',
+      };
+
+      for (final entry in cases.entries) {
+        final frame = Codec.buildChannelA(entry.key, [0x01, 0x00]);
+
+        final decoded = const WatchLogDecoder().decodeHex(
+          frame.map((b) => b.toRadixString(16).padLeft(2, '0')).join('-'),
+          uuid: _fee7,
+        );
+
+        expect(decoded.valid, isTrue);
+        expect(decoded.channel, WatchLogChannel.fee7);
+        expect(decoded.details['label'], entry.value);
+        expect(decoded.title, contains(entry.value));
+      }
+    });
+
     test(
       'summarizes high-bit FEE7 OTA and synthetic sleep frames as raw opcodes',
       () {
