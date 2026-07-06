@@ -2025,6 +2025,12 @@ String _labelForFee7(int opcode) {
       return 'modelName';
     case Fee7.highStatusFrame:
       return 'highStatus';
+    case Fee7.highNoop92:
+    case Fee7.highNoop97:
+    case Fee7.highNoop99:
+    case Fee7.highNoop9d:
+    case Fee7.highNoop9f:
+      return 'noResponsePlaceholder';
     case Fee7.syntheticSleep:
       return 'syntheticSleep';
     default:
