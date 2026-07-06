@@ -484,13 +484,17 @@ prefer FEE7 writes for app flows without live-capture evidence.
 
 ### 4.8 Channel-B file transfer (FileHandle / Avatar / Album / Ebook / Record / Temperature)
 
+The generic FileHandle names below come from APK-era host code. H59MA v14 does
+not implement that generic upload/list/delete flow as a usable watch protocol;
+the firmware-specific `0x41`/`0x43` file-table path follows this inventory.
+
 | Name | cmd | Dir | Request | Response | Meaning |
 |---|---|---|---|---|---|
-| FileHandle start (list) | `0x30` | →watch | empty | parseFileInfo: {len,name} list | Begin file-listing/directory. `currFileType`: 1=MarketWatchFace, 2=DiyWatchFace, 3=DismissFile, 4=OtaFile. |
-| cmdFileInit | `0x31` | →watch | `[01, fileSize u32 LE, reserved 0×4, nameLen, UTF-8 name]` | readiness ack | Announce a file to send. `executeFileInit` lets caller override cmd. |
-| send pocket | `0x32` | →watch | `[u16 LE 1-based idx] + zlib(compress(1024B chunk))` | per-pocket ack; progress = `idx*0x19000/len` | Stream a 1024B **compressed** chunk. |
-| cmdCheck | `0x33` | →watch | empty | verify status | Finalize/verify transfer (CRC/length). Shared across handles. |
-| executeFileDelete | `0x39` | →watch | `[01]+UTF-8 name` | ack | Delete a named file. |
+| FileHandle start (list) | `0x30` | →watch | empty | APK-era parseFileInfo; H59MA v14 compact NAK code `0` | APK-era begin file-listing/directory. `currFileType`: 1=MarketWatchFace, 2=DiyWatchFace, 3=DismissFile, 4=OtaFile. |
+| cmdFileInit | `0x31` | →watch | `[01, fileSize u32 LE, reserved 0×4, nameLen, UTF-8 name]` | APK-era readiness ack; H59MA v14 compact NAK code `0` after pre-store callback | APK-era file announcement. H59MA v14 calls the first-stage OTA/file callback, then the async worker has no `0x31` handler. |
+| send pocket | `0x32` | →watch | `[u16 LE 1-based idx] + zlib(compress(1024B chunk))` | APK-era per-pocket ack; H59MA v14 compact NAK code `0` | APK-era 1024B **compressed** chunk stream. |
+| cmdCheck | `0x33` | →watch | empty | APK-era verify status; H59MA v14 compact NAK code `0` | APK-era finalize/verify command. Shared across handlers in Android sources, not implemented by H59MA v14. |
+| executeFileDelete | `0x39` | →watch | `[01]+UTF-8 name` | APK-era ack; H59MA v14 compact NAK code `0` | APK-era named-file delete, not implemented by H59MA v14. |
 | executeMusicSend | `0x06` | →watch | `[(playing^1), progress, volume, UTF-8 name]` | — | Push now-playing music metadata. |
 | startObtainPlate | `0x35` | →watch | empty | first pkt `byte2..3`=total u16 LE; aggregate → parsePlate | Request installed-dial list/metadata. |
 | startObtainTemperatureSeries | `0x25` | →watch | `[dayOffset]` | aggregate → parseTemperature | Temperature time-series for a day. |
@@ -502,9 +506,13 @@ prefer FEE7 writes for app flows without live-capture evidence.
 | Record read | `0x82` | →watch | `id + UTF-8 name` | streamed content | Download a voice-record file. |
 
 **H59MA v14 firmware-specific file/list flow.** Ghidra shows the async
-Channel-B processor does **not** accept the APK-era `0x30`, `0x32`, `0x33`, or
-`0x39` file commands directly; `0x31` is routed to the OTA/file state machine
-before async handling. The implemented file table/list path is:
+Channel-B processor does **not** accept the APK-era generic FileHandle upload
+commands as usable operations. `0x30`, `0x32`, `0x33`, and `0x39` are absent
+from the first-stage special cases and from the async worker, so valid-CRC
+frames return compact NAK code `0`. `0x31` is routed first through the
+OTA/file pre-store callback, then queued into the same async worker; because
+there is still no async `0x31` handler, it also returns compact NAK code `0`.
+The implemented file table/list path is:
 
 | Cmd | Request | Response | Notes |
 |---|---|---|---|
@@ -586,20 +594,31 @@ by `BleConsumer`. **DFU differs:** pocket = `[u16 LE index] + RAW chunk` (no zli
 
 ### 5.2 Custom watch-face upload (DIY)
 
-```
-phone → [BC][3a][len][crc] payload=[0x02] + N×{type, x(u16 LE), y(u16 LE), R, G, B}
-watch → respMap[0x3a] ack
-```
+APK-era Android code used Channel-B `0x3a` with payload
+`[0x02] + N×{type, x(u16 LE), y(u16 LE), R, G, B}` for DIY watch-face writes.
+H59MA v14 has no async-worker branch for `0x3a`; valid-CRC frames fall through
+to compact NAK code `0`. OpenWatch marks the `0x3a` read/write builders
+unsupported instead of sending this action.
 
 ### 5.3 Generic file/watch-face upload
 
-```
+This is an APK-era recipe, not an H59MA v14 protocol flow. Do not use it for
+H59MA firmware. Use OTA `0x01..0x05` for firmware images and the H59MA
+file-table commands `0x41`/`0x43` for firmware-native record discovery/fetch.
+
+APK-era sequence, retained only for provenance:
+
+```text
 1. start          (0x30)   list current files (select currFileType)
-2. cmdFileInit    (0x31)   [01, size32LE, 0,0,0,0, nameLen, name]   → device readiness ack
-3. send pocket    (0x32)   [idx16LE]+zlib(1024B)  ×N                → per-pocket ack, progress%
-4. cmdCheck       (0x33)   empty                                    → CRC/length verify
-   (optional) executeFileDelete (0x39) to remove
+2. cmdFileInit    (0x31)   [01, size32LE, 0,0,0,0, nameLen, name]
+3. send pocket    (0x32)   [idx16LE]+zlib(1024B) x N
+4. cmdCheck       (0x33)   empty
+   optional executeFileDelete (0x39)
 ```
+
+H59MA v14 behavior: `0x30`, `0x32`, `0x33`, and `0x39` return compact NAK
+code `0`; `0x31` only triggers the first-stage OTA/file callback before also
+returning compact NAK code `0`.
 
 ### 5.4 Firmware OTA (DfuHandle)
 

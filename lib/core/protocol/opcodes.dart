@@ -170,7 +170,8 @@ class OpB {
   static const int otaCheck = 0x04;
   static const int otaEnd = 0x05;
 
-  // FileHandle
+  // APK-era FileHandle ids. H59MA v14 does not implement this generic
+  // upload/list/delete flow; 0x31 only reaches a pre-store callback before NAK.
   static const int fileList = 0x30;
   static const int fileInit = 0x31;
   static const int filePocket = 0x32;

@@ -22,7 +22,7 @@ final _log = AppLog.instance;
 ///   * [ChannelADispatcher] — typed view of every Channel-A response (opcodes
 ///     `0x01..0x72`), per-protocol spec in `firmwares/RE_FIRMWARE.md`.
 ///   * [ChannelBParser] — fragment reassembly + CRC-16/MODBUS verification
-///     for large Channel-B frames (OTA, file transfer, custom watch faces).
+///     for large Channel-B frames (OTA, H59 file-table, health/config frames).
 ///   * [AncsClient] — mirrors `ancs_add_client` / `ancs_client_cb` /
 ///     `app_parse_notification_source_data` so the host tracks the firmware's
 ///     internal ANCS state.
@@ -90,8 +90,8 @@ class ProtocolHub {
     // Channel-B OTA replies (`0x01..0x05`) are surfaced via the parser; a
     // dedicated OTA driver owns the state machine (see [startOta]).
     _bCmdSub = _parser.commands.listen((cmd) {
-      // One span per Channel-B command so OTA/file transfer traffic is
-      // easy to slice apart from push notifications.
+      // One span per Channel-B command so OTA, H59 file-table, and health/config
+      // traffic is easy to slice apart from push notifications.
       final span = OpenTelemetryService().startTrace(
         'hub.channel_b_cmd',
         kind: SpanKind.internal,

@@ -525,6 +525,14 @@ APK-era Channel-B `0x3a` custom-watch-face actions are not implemented in
 H59MA v14. The async compare cascade has no `0x3a` branch; valid frames land on
 the default `movs r1, 0; bl channel_b_send_nak` path at `0x988a..0x98e6`.
 
+Generic APK FileHandle commands are not implemented either. `0x30`, `0x32`,
+`0x33`, and `0x39` have no first-stage special case and no async compare entry,
+so valid-CRC frames are queued and then reach the default NAK-code-0 block at
+v14 `0x988a..0x98e6`. `0x31` is special only before async storage: v14
+`0x8b08` compares `cmd == 0x31`, then `0x8b30..0x8b38` calls the
+OTA/file pre-store callback and queues the command. The async worker still has
+no `0x31` handler, so it also lands on the same NAK-code-0 path.
+
 ---
 
 ## 6. Channel-A Command Dispatch

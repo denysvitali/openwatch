@@ -89,6 +89,13 @@ call. If another firmware path seeds the async state with `cmd = 0x46`, the
 local handler at `0xadb8` still returns immediately because it only handles
 `0x41` and `0x43`.
 
+The APK-era generic FileHandle ids are likewise not usable on H59MA v14:
+`0x30`, `0x32`, `0x33`, and `0x39` are neither first-stage special cases nor
+async compare-cascade entries, so they use the `other` NAK status `0` path.
+`0x31` is first-stage special only for the `ota_dfu_state_machine(1, 0)`
+pre-store callback; after it is queued, the async worker has no `0x31` branch
+and also returns NAK status `0`.
+
 ### No-response placeholders
 
 `0x13`, `0x29`, and `0x3b` compare equal in the cascade and branch directly to
