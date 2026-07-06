@@ -474,8 +474,7 @@ prefer FEE7 writes for app flows without live-capture evidence.
 
 | Name | cmd | Dir | Request | Response | Meaning |
 |---|---|---|---|---|---|
-| readCustomWatch | `0x3a` | →watch | `[01]` | respMap[0x3a] | Read DIY watch-face definition. |
-| writeCustomWatch | `0x3a` | →watch | `[02] + N×8B elements {type, x u16 LE, y u16 LE, R,G,B}` | ack | Upload DIY watch-face. |
+| readCustomWatch / writeCustomWatch | `0x3a` | →watch | APK-era: r:`[01]`; w:`[02] + N×8B elements` | H59MA v14: compact NAK code `0` | **Not implemented in H59MA v14.** The async worker has no `0x3a` branch, so valid-CRC frames fall through to `channel_b_send_nak(cmd, 0)`. |
 | readQrCode / E-Card | `0x2f` | →watch | `[01, type]` (no frame if type==0xFF) | respMap[0x2f] | Read stored QR/e-card by type. |
 | writeQrCode / E-Card | `0x2f` | →watch | `[02, type, urlLen] + UTF-8 url` (`[02,FF,00]` to query/clear) | ack | Write QR/e-card. |
 | setDeviceNickName | `0x4a` | →watch | nickname bytes (`ACTION_AVATAR_Device`) | ack | Set device nickname. ⚠ overloaded: also AvatarHandle image upload. |

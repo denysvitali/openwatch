@@ -746,34 +746,25 @@ class Commands {
   static Uint8List readChannelBAlarms() =>
       Codec.buildChannelB(OpB.alarm, [0x01]);
 
-  /// `readCustomWatch` (0x3a, action `0x01`): read the current
-  /// DIY watch-face definition. See `PROTOCOL.md` §4.7 / §5.2.
-  /// Response is dispatched to `respMap[0x3a]` and contains
-  /// `N × {type, x u16 LE, y u16 LE, R, G, B}` elements.
-  static Uint8List readCustomWatchFace() =>
-      Codec.buildChannelB(OpB.customWatchFace, [0x01]);
-
-  /// `writeCustomWatch` (0x3a, action `0x02`): upload a DIY
-  /// watch-face definition. Each element is 8 bytes:
-  ///   `[type, x u16 LE, y u16 LE, R, G, B]`.
+  /// Unsupported APK-era DIY watch-face read (`0x3a`).
   ///
-  /// [elements] is a list of (type, x, y, r, g, b) tuples. The
-  /// firmware caps the count at 32; longer lists are silently
-  /// truncated by the Oudmon SDK.
+  /// H59MA v14's Channel-B async worker does not implement `0x3a`; valid-CRC
+  /// frames fall through to the unknown-command NAK path with code `0`.
+  @Deprecated('H59MA v14 Channel-B 0x3a is not implemented.')
+  static Uint8List readCustomWatchFace() => throw UnsupportedError(
+    'H59MA v14 Channel-B 0x3a custom watch face is not implemented',
+  );
+
+  /// Unsupported APK-era DIY watch-face write (`0x3a`).
+  ///
+  /// H59MA v14's Channel-B async worker does not implement `0x3a`; valid-CRC
+  /// frames fall through to the unknown-command NAK path with code `0`.
+  @Deprecated('H59MA v14 Channel-B 0x3a is not implemented.')
   static Uint8List writeCustomWatchFace(
-    List<({int type, int x, int y, int r, int g, int b})> elements,
-  ) {
-    final body = <int>[0x02];
-    for (final e in elements.take(32)) {
-      body.add(e.type & 0xFF);
-      body.addAll(Codec.u16le(e.x));
-      body.addAll(Codec.u16le(e.y));
-      body.add(e.r & 0xFF);
-      body.add(e.g & 0xFF);
-      body.add(e.b & 0xFF);
-    }
-    return Codec.buildChannelB(OpB.customWatchFace, body);
-  }
+    List<({int type, int x, int y, int r, int g, int b})> _,
+  ) => throw UnsupportedError(
+    'H59MA v14 Channel-B 0x3a custom watch face is not implemented',
+  );
 
   /// H59MA v14 firmware-native file-table list request (`0x41`).
   ///

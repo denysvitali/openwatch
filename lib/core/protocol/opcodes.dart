@@ -190,6 +190,7 @@ class OpB {
   )
   static const int h59FileDelete = h59CleanupBypass46;
 
+  @Deprecated('H59MA v14 Channel-B 0x3a is not implemented.')
   static const int customWatchFace = 0x3a;
 
   // LargeData actions (PROTOCOL.md §4.7)

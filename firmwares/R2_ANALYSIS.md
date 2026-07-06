@@ -521,6 +521,10 @@ and weekday bytes 6..12 into bits 0..6; `minuteOfDay` is `hour * 60 + minute`.
 The write path at `0x9594..0x96ca` decodes the same compact records and sends
 the one-byte `[0x02]` ack via the common `0x96cc` sender.
 
+APK-era Channel-B `0x3a` custom-watch-face actions are not implemented in
+H59MA v14. The async compare cascade has no `0x3a` branch; valid frames land on
+the default `movs r1, 0; bl channel_b_send_nak` path at `0x988a..0x98e6`.
+
 ---
 
 ## 6. Channel-A Command Dispatch

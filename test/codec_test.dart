@@ -605,45 +605,16 @@ void main() {
   });
 
   group('commands: Channel-B custom watch face', () {
-    test('readCustomWatchFace uses 0x3a with action 0x01', () {
-      final f = Commands.readCustomWatchFace();
-      expect(Codec.rxChannelBCmd(f), OpB.customWatchFace);
-      expect(Codec.rxChannelBPayload(f), [0x01]);
-    });
-
-    test('writeCustomWatchFace packs 8-byte elements after action 0x02', () {
-      final f = Commands.writeCustomWatchFace([
-        (type: 1, x: 0x12, y: 0x34, r: 0xAA, g: 0xBB, b: 0xCC),
-        (type: 2, x: 0x0040, y: 0x0080, r: 0x11, g: 0x22, b: 0x33),
-      ]);
-      expect(Codec.rxChannelBCmd(f), OpB.customWatchFace);
-      final payload = Codec.rxChannelBPayload(f)!;
-      expect(payload[0], 0x02);
-      // Element 1
-      expect(payload[1], 1);
-      expect(payload.sublist(2, 4), [0x12, 0x00]); // x LE
-      expect(payload.sublist(4, 6), [0x34, 0x00]); // y LE
-      expect(payload[6], 0xAA);
-      expect(payload[7], 0xBB);
-      expect(payload[8], 0xCC);
-      // Element 2 (offset 9)
-      expect(payload[9], 2);
-      expect(payload.sublist(10, 12), [0x40, 0x00]);
-      expect(payload.sublist(12, 14), [0x80, 0x00]);
-      expect(payload[14], 0x11);
-      expect(payload[15], 0x22);
-      expect(payload[16], 0x33);
-    });
-
-    test('writeCustomWatchFace truncates to 32 elements', () {
-      final elements = List.generate(
-        50,
-        (i) => (type: 1, x: i, y: 0, r: 0xFF, g: 0xFF, b: 0xFF),
+    test('0x3a builders are unsupported on H59MA v14', () {
+      // ignore: deprecated_member_use_from_same_package
+      expect(Commands.readCustomWatchFace, throwsA(isA<UnsupportedError>()));
+      expect(
+        // ignore: deprecated_member_use_from_same_package
+        () => Commands.writeCustomWatchFace([
+          (type: 1, x: 0x12, y: 0x34, r: 0xAA, g: 0xBB, b: 0xCC),
+        ]),
+        throwsA(isA<UnsupportedError>()),
       );
-      final f = Commands.writeCustomWatchFace(elements);
-      final payload = Codec.rxChannelBPayload(f)!;
-      // 1 action byte + 32 × 8 element bytes = 257
-      expect(payload.length, 1 + 32 * 8);
     });
   });
 }

@@ -792,19 +792,19 @@ class WatchManager extends ChangeNotifier {
     ),
   );
 
-  // -- Channel-B custom watch face -----------------------------------------
+  // -- APK-era Channel-B custom watch face ---------------------------------
 
-  /// Send a DIY watch-face definition to the watch via Channel-B 0x3a.
+  /// Unsupported on H59MA v14.
   ///
-  /// Each element is a 6-tuple `(type, x, y, r, g, b)`. The Oudmon SDK
-  /// caps the list at 32; [Commands.writeCustomWatchFace] truncates
-  /// silently so callers don't have to.
+  /// The recovered Channel-B async worker has no `0x3a` handler, so sending
+  /// this APK-era action would only produce a compact NAK code `0`.
+  @Deprecated('H59MA v14 Channel-B 0x3a is not implemented.')
   Future<void> writeCustomWatchFace(
     List<({int type, int x, int y, int r, int g, int b})> elements,
-  ) => _withActionSpan(
-    'write_custom_watch_face',
-    () => _transport.sendB(Commands.writeCustomWatchFace(elements)),
-  );
+  ) => _withActionSpan('write_custom_watch_face', () async {
+    // ignore: deprecated_member_use_from_same_package
+    Commands.writeCustomWatchFace(elements);
+  });
 
   /// Direct accessor for the underlying typed-streams hub. Exposed so a
   /// diagnostic UI can observe everything the firmware emits without having

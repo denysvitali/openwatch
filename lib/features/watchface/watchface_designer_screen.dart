@@ -3,14 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/providers/app_providers.dart';
 
-/// DIY watch-face designer (Channel B `0x3a` upload).
+/// Diagnostic DIY watch-face designer for the APK-era Channel-B `0x3a` upload.
 ///
-/// The H59MA firmware expects a flat list of `{type, x, y, r, g, b}`
-/// elements (capped at 32) describing decals/elements to draw on the
-/// vendor canvas. The exact layout/coords are device-defined; this
-/// screen keeps things simple — a pixel grid sized to the device's
-/// `screenWidth × screenHeight` (queried via `readAvatar` / `deviceSupport`)
-/// where the user taps to place colored dots, then sends the bundle.
+/// H59MA v14 does not implement the `0x3a` Channel-B handler; the send path is
+/// retained as a diagnostic surface and reports the unsupported command error.
 class WatchFaceDesignerScreen extends ConsumerStatefulWidget {
   const WatchFaceDesignerScreen({super.key});
 
