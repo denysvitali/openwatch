@@ -929,11 +929,13 @@ class ChannelADispatcher {
   /// `musicNotify` (0x1d) — now-playing push forwarded from the watch's
   /// ANCS / iOS-media bridge.
   ///
-  /// The on-wire layout is inferred from the symmetric host→watch
-  /// `executeMusicSend` (`0x06 → [(playing^1), progress, volume, UTF-8 name]`,
-  /// see `PROTOCOL.md` §4.8 line 463). Per `PROTOCOL.md` §3.1 the
-  /// `MusicSwitch playing` boolean is XOR-1 inverted, so a wire byte
-  /// of `0` means "playing" and `1` means "paused".
+  /// The on-wire layout is inferred from the APK-era host→watch
+  /// `executeMusicSend` shape (`0x06 → [(playing^1), progress, volume,
+  /// UTF-8 name]`, see `PROTOCOL.md` §4.8). H59MA v14 does not implement that
+  /// Channel-B request, but the byte shape remains the best known provenance
+  /// for this notify payload. Per `PROTOCOL.md` §3.1 the `MusicSwitch playing`
+  /// boolean is XOR-1 inverted, so a wire byte of `0` means "playing" and `1`
+  /// means "paused".
   ///
   /// This decoder is best-effort: `0x1d` is in the persistent
   /// notify-listener registry pre-registered by the APK (`PROTOCOL.md`
@@ -1952,16 +1954,16 @@ class QueryDataDistribution {
 /// Now-playing push from the watch (`0x1d`).
 ///
 /// The `0x1d` opcode is the only entry in the persistent
-/// notify-listener registry (`PROTOCOL.md` §4.1 line 194) that is
+/// notify-listener registry (`PROTOCOL.md` §4.1) that is
 /// **not** statically resolved to a fixed payload in H59MA v14 — every
 /// other entry (`0x02` InnerCamera, `0x2f` PackageLength,
 /// `0x73` DeviceNotify, `0x78` DeviceSportNotify) has a documented
 /// byte shape. The wire layout we decode is inferred from the
-/// symmetric host→watch `executeMusicSend` command documented in
-/// `PROTOCOL.md` §4.8 (line 463 — `[(playing^1), progress, volume,
-/// UTF-8 name]`), so the field order is the most plausible
-/// reconstruction but should be re-validated on the first live
-/// capture.
+/// APK-era host→watch `executeMusicSend` shape documented in
+/// `PROTOCOL.md` §4.8 (`[(playing^1), progress, volume, UTF-8 name]`).
+/// H59MA v14 NAKs that Channel-B request, so the field order is plausible
+/// provenance rather than firmware proof and should be re-validated on the
+/// first live capture.
 ///
 /// The decoder ([ChannelADispatcher._decodeMusic]) drops frames
 /// shorter than 4 bytes; a sub-4-byte frame cannot carry a

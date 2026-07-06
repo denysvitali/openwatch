@@ -547,6 +547,12 @@ v14 `0x988a..0x98e6`. `0x31` is special only before async storage: v14
 OTA/file pre-store callback and queues the command. The async worker still has
 no `0x31` handler, so it also lands on the same NAK-code-0 path.
 
+APK media/file sidecar commands are not implemented: `0x06` uses the low-switch
+default NAK-code-0 slot; `0x25`, `0x26`, `0x4a`, and `0x54` are absent from the
+compare cascade and fall through to v14 `0x988a..0x98e6`. `0x35` is first-stage
+special only (`0x8b20..0x8b38` calls the OTA/file pre-store callback and queues
+the frame); the async worker still has no `0x35` branch and NAKs with code `0`.
+
 High APK album/ebook/record commands `0x80`, `0x81`, and `0x82` are also
 absent. On the path for commands greater than `0x47`, v14 checks only `0x4b`
 and `0x5a`; non-`0x5a` commands fall through from `0x9886..0x9888` to the

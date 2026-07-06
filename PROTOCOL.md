@@ -515,11 +515,12 @@ H59MA v14 static routing for the APK action ids above:
 | `0x5f` | Interval_Blood_Oxygen | Compact NAK code `0`. |
 | `0x75` | Interval_Heart_Rate | Compact NAK code `0`. |
 
-### 4.8 Channel-B file transfer (FileHandle / Avatar / Album / Ebook / Record / Temperature)
+### 4.8 Channel-B file transfer / media sidecars (APK ids vs H59MA routing)
 
-The generic FileHandle names below come from APK-era host code. H59MA v14 does
-not implement that generic upload/list/delete flow as a usable watch protocol;
-the firmware-specific `0x41`/`0x43` file-table path follows this inventory.
+The generic FileHandle/media names below come from APK-era host code. H59MA v14
+does not implement these generic upload/list/delete/media flows as usable watch
+protocols; the firmware-specific `0x41`/`0x43` file-table path follows this
+inventory.
 
 | Name | cmd | Dir | Request | Response | Meaning |
 |---|---|---|---|---|---|
@@ -528,12 +529,12 @@ the firmware-specific `0x41`/`0x43` file-table path follows this inventory.
 | send pocket | `0x32` | →watch | `[u16 LE 1-based idx] + zlib(compress(1024B chunk))` | APK-era per-pocket ack; H59MA v14 compact NAK code `0` | APK-era 1024B **compressed** chunk stream. |
 | cmdCheck | `0x33` | →watch | empty | APK-era verify status; H59MA v14 compact NAK code `0` | APK-era finalize/verify command. Shared across handlers in Android sources, not implemented by H59MA v14. |
 | executeFileDelete | `0x39` | →watch | `[01]+UTF-8 name` | APK-era ack; H59MA v14 compact NAK code `0` | APK-era named-file delete, not implemented by H59MA v14. |
-| executeMusicSend | `0x06` | →watch | `[(playing^1), progress, volume, UTF-8 name]` | — | Push now-playing music metadata. |
-| startObtainPlate | `0x35` | →watch | empty | first pkt `byte2..3`=total u16 LE; aggregate → parsePlate | Request installed-dial list/metadata. |
-| startObtainTemperatureSeries | `0x25` | →watch | `[dayOffset]` | aggregate → parseTemperature | Temperature time-series for a day. |
-| startObtainTemperatureOnce | `0x26` | →watch | `[arg]` | aggregate → TemperatureEntity | Single/once temperature set. |
-| A-GPS / startGpsOnline | `0x54` | both | test=empty; online=pockets | `payload[2]==0` ⇒ device requests AGPS data | A-GPS exchange. |
-| AvatarHandle file send | `0x4a` | →watch | `[3-byte prefix idx/flags] + zlib(1024B chunk)` | ack | Upload avatar bitmap (compressed pockets, **3-byte** pocket header). |
+| executeMusicSend | `0x06` | →watch | `[(playing^1), progress, volume, UTF-8 name]` | APK-era only; H59MA v14 compact NAK code `0` | APK-era now-playing metadata push. H59MA v14 has watch→host Channel-A `0x1d` music notify, but no implemented Channel-B host→watch `0x06` media path. |
+| startObtainPlate | `0x35` | →watch | empty | APK-era first-packet dial list; H59MA v14 compact NAK code `0` after pre-store callback | APK-era installed-dial list/metadata request. H59MA v14 treats `0x35` as first-stage OTA/file callback only, then the async worker NAKs it. |
+| startObtainTemperatureSeries | `0x25` | →watch | `[dayOffset]` | APK-era temperature aggregate; H59MA v14 compact NAK code `0` | APK-era temperature time-series request. Do not confuse with Channel-A sedentary config opcode `0x25`. |
+| startObtainTemperatureOnce | `0x26` | →watch | `[arg]` | APK-era single temperature; H59MA v14 compact NAK code `0` | APK-era single/once temperature request. Do not confuse with Channel-A sedentary config opcode `0x26`. |
+| A-GPS / startGpsOnline | `0x54` | both | test=empty; online=pockets | APK-era AGPS exchange; H59MA v14 compact NAK code `0` | APK-era A-GPS exchange; not implemented by H59MA v14 Channel-B. |
+| AvatarHandle file send | `0x4a` | →watch | `[3-byte prefix idx/flags] + zlib(1024B chunk)` | APK-era ack; H59MA v14 compact NAK code `0` | APK-era avatar bitmap upload; not implemented by H59MA v14 Channel-B. |
 | Album/Ebook/Record list (start) | `0x80` | →watch | `[type]` or empty | APK-era entry list; H59MA v14 compact NAK code `0` | APK-era list album images / ebooks / voice records; H59MA v14 has no handler above the final async compare `0x5a`. |
 | Ebook delete | `0x81` | →watch | `id + UTF-8 name` | APK-era ack; H59MA v14 compact NAK code `0` | APK-era ebook/album delete, not implemented by H59MA v14. |
 | Record read | `0x82` | →watch | `id + UTF-8 name` | APK-era stream; H59MA v14 compact NAK code `0` | APK-era voice-record download, not implemented by H59MA v14. |
@@ -547,6 +548,10 @@ OTA/file pre-store callback, then queued into the same async worker; because
 there is still no async `0x31` handler, it also returns compact NAK code `0`.
 The high APK media/file ids `0x80`, `0x81`, and `0x82` are likewise above the
 final async-worker compare (`0x5a`) and return compact NAK code `0`. The
+APK media sidecar ids `0x06`, `0x25`, `0x26`, `0x35`, `0x4a`, and `0x54` are
+also unsupported on H59MA v14; `0x35` only gets the first-stage pre-store
+callback before the async worker NAKs it, while the others enter the default
+NAK-code-0 path directly.
 implemented file table/list path is:
 
 | Cmd | Request | Response | Notes |

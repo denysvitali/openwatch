@@ -96,6 +96,12 @@ async compare-cascade entries, so they use the `other` NAK status `0` path.
 pre-store callback; after it is queued, the async worker has no `0x31` branch
 and also returns NAK status `0`.
 
+Other APK-era media/file sidecars share the same outcome. `0x06` maps to the
+low-switch default NAK status `0` slot; `0x25`, `0x26`, `0x4a`, and `0x54` are
+not in the compare cascade and fall through to `other`. `0x35` is first-stage
+special only for the pre-store callback, then the async worker has no `0x35`
+branch and also returns NAK status `0`.
+
 The APK-era high media ids `0x80`, `0x81`, and `0x82` are above every
 implemented async compare. v14 checks `0x4b` at `0x9882`, `0x5a` at `0x9886`,
 then falls through to `0x988a movs r1, 0`; v13 does the same at
