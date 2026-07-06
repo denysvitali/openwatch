@@ -68,6 +68,12 @@ final appRouterProvider = Provider<GoRouter>(
         builder: (context, state) => const HistoryScreen(),
       ),
       GoRoute(
+        path: '/notifications',
+        name: 'notifications',
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) => const NotificationsScreen(),
+      ),
+      GoRoute(
         path: '/sensor-settings',
         name: 'sensor-settings',
         parentNavigatorKey: _rootNavigatorKey,
@@ -110,9 +116,9 @@ final appRouterProvider = Provider<GoRouter>(
           StatefulShellBranch(
             routes: [
               GoRoute(
-                path: '/notifications',
-                name: 'notifications',
-                builder: (context, state) => const NotificationsScreen(),
+                path: '/history',
+                name: 'history-shell',
+                builder: (context, state) => const HistoryScreen(),
               ),
             ],
           ),

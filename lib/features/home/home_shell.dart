@@ -1,8 +1,10 @@
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-/// Bottom-navigation shell shown once a watch is connected.
+/// Bottom-navigation (or side-rail) shell shown once a watch is connected.
+///
+/// Follows the refreshed tab order: Summary, Health, History, Settings.
+/// Notifications are now a subsection of Settings and no longer have a tab.
 class HomeShell extends StatelessWidget {
   const HomeShell({super.key, required this.navigationShell});
 
@@ -37,21 +39,21 @@ class HomeShell extends StatelessWidget {
                   NavigationRailDestination(
                     icon: Icon(Icons.watch_outlined),
                     selectedIcon: Icon(Icons.watch_rounded),
-                    label: Text('Device'),
+                    label: Text('Summary'),
                   ),
                   NavigationRailDestination(
-                    icon: Icon(CupertinoIcons.heart),
-                    selectedIcon: Icon(CupertinoIcons.heart_fill),
+                    icon: Icon(Icons.favorite_outline),
+                    selectedIcon: Icon(Icons.favorite),
                     label: Text('Health'),
                   ),
                   NavigationRailDestination(
-                    icon: Icon(CupertinoIcons.bell),
-                    selectedIcon: Icon(CupertinoIcons.bell_fill),
-                    label: Text('Alerts'),
+                    icon: Icon(Icons.show_chart_outlined),
+                    selectedIcon: Icon(Icons.show_chart),
+                    label: Text('History'),
                   ),
                   NavigationRailDestination(
-                    icon: Icon(CupertinoIcons.gear_alt),
-                    selectedIcon: Icon(CupertinoIcons.gear_alt_fill),
+                    icon: Icon(Icons.settings_outlined),
+                    selectedIcon: Icon(Icons.settings),
                     label: Text('Settings'),
                   ),
                 ],
@@ -59,7 +61,7 @@ class HomeShell extends StatelessWidget {
             ),
             VerticalDivider(
               width: 1,
-              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.6),
+              color: theme.dividerColor.withValues(alpha: 0.6),
             ),
             Expanded(child: navigationShell),
           ],
@@ -74,7 +76,7 @@ class HomeShell extends StatelessWidget {
           color: theme.colorScheme.surface.withValues(alpha: 0.94),
           border: Border(
             top: BorderSide(
-              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.6),
+              color: theme.dividerColor.withValues(alpha: 0.6),
               width: 0.6,
             ),
           ),
@@ -88,21 +90,21 @@ class HomeShell extends StatelessWidget {
               NavigationDestination(
                 icon: Icon(Icons.watch_outlined),
                 selectedIcon: Icon(Icons.watch_rounded),
-                label: 'Device',
+                label: 'Summary',
               ),
               NavigationDestination(
-                icon: Icon(CupertinoIcons.heart),
-                selectedIcon: Icon(CupertinoIcons.heart_fill),
+                icon: Icon(Icons.favorite_outline),
+                selectedIcon: Icon(Icons.favorite),
                 label: 'Health',
               ),
               NavigationDestination(
-                icon: Icon(CupertinoIcons.bell),
-                selectedIcon: Icon(CupertinoIcons.bell_fill),
-                label: 'Alerts',
+                icon: Icon(Icons.show_chart_outlined),
+                selectedIcon: Icon(Icons.show_chart),
+                label: 'History',
               ),
               NavigationDestination(
-                icon: Icon(CupertinoIcons.gear_alt),
-                selectedIcon: Icon(CupertinoIcons.gear_alt_fill),
+                icon: Icon(Icons.settings_outlined),
+                selectedIcon: Icon(Icons.settings),
                 label: 'Settings',
               ),
             ],
