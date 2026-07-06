@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../../core/providers/app_providers.dart';
 import '../../core/services/bp_raw_store.dart';
 import '../../core/services/history_store.dart' show DateOnly;
+import '../widgets/health_widgets.dart';
 
 /// Debug-only screen that dumps the compact raw BP bytes the watch emitted so
 /// future capture work can correlate them with known readings.
@@ -68,7 +69,7 @@ class _DayList extends StatelessWidget {
           return const _EmptyState();
         }
         return ListView.builder(
-          padding: const EdgeInsets.symmetric(vertical: 8),
+          padding: const EdgeInsets.fromLTRB(18, 8, 18, 24),
           itemCount: days.length,
           itemBuilder: (context, i) =>
               _DayCard(day: days[i], loader: () => store.readDay(days[i])),
@@ -86,34 +87,59 @@ class _DayCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: HealthCard(
+        icon: Icons.bloodtype_outlined,
+        metricColor: theme.colorScheme.error,
+        title: day.iso,
         child: FutureBuilder<RawBpDay>(
           future: loader(),
           builder: (context, snapshot) {
             if (snapshot.connectionState != ConnectionState.done) {
-              return const SizedBox(
-                height: 48,
-                child: Center(child: CircularProgressIndicator()),
+              return const Padding(
+                padding: EdgeInsets.only(top: 12),
+                child: SizedBox(
+                  height: 48,
+                  child: Center(child: CircularProgressIndicator()),
+                ),
               );
             }
             final raw = snapshot.data;
             if (raw == null || raw.isEmpty) {
-              return const Text('No raw bytes for this day');
+              return const Padding(
+                padding: EdgeInsets.only(top: 12),
+                child: Text('No raw bytes for this day'),
+              );
             }
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(day.iso, style: Theme.of(context).textTheme.titleMedium),
-                Text(
-                  '${raw.slots.length} slot(s) · ${raw.slotMinutes} min each',
-                  style: Theme.of(context).textTheme.bodySmall,
+                Padding(
+                  padding: const EdgeInsets.only(top: 6, bottom: 8),
+                  child: StatusPill(
+                    icon: Icons.access_time,
+                    label:
+                        '${raw.slots.length} slots · ${raw.slotMinutes} min each',
+                    color: theme.colorScheme.error,
+                  ),
                 ),
-                const SizedBox(height: 8),
-                for (final slot in raw.slots)
-                  _SlotRow(slot: slot, slotMinutes: raw.slotMinutes),
+                Card(
+                  margin: EdgeInsets.zero,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      for (var i = 0; i < raw.slots.length; i++)
+                        _SlotRow(
+                          slot: raw.slots[i],
+                          slotMinutes: raw.slotMinutes,
+                          showDivider: i < raw.slots.length - 1,
+                          leadingColor: theme.colorScheme.error,
+                        ),
+                    ],
+                  ),
+                ),
               ],
             );
           },
@@ -124,10 +150,17 @@ class _DayCard extends StatelessWidget {
 }
 
 class _SlotRow extends StatelessWidget {
-  const _SlotRow({required this.slot, required this.slotMinutes});
+  const _SlotRow({
+    required this.slot,
+    required this.slotMinutes,
+    required this.showDivider,
+    required this.leadingColor,
+  });
 
   final RawBpSlot slot;
   final int slotMinutes;
+  final bool showDivider;
+  final Color leadingColor;
 
   @override
   Widget build(BuildContext context) {
@@ -137,56 +170,27 @@ class _SlotRow extends StatelessWidget {
     final timePlusOffset = slotMinutes == 0
         ? time
         : '$time (+${slot.slotIndex * slotMinutes}m)';
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  '#${slot.slotIndex.toString().padLeft(2, '0')}  '
-                  '$timePlusOffset',
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-              ),
-              IconButton(
-                visualDensity: VisualDensity.compact,
-                icon: const Icon(Icons.copy, size: 18),
-                tooltip: 'Copy row',
-                onPressed: () async {
-                  final payload =
-                      'slot=${slot.slotIndex} '
-                      't=${slot.timestamp.toIso8601String()} '
-                      'hex=$hex dec=$dec';
-                  await Clipboard.setData(ClipboardData(text: payload));
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(
-                      context,
-                    ).showSnackBar(const SnackBar(content: Text('Row copied')));
-                  }
-                },
-              ),
-            ],
-          ),
-          SelectableText(
-            hex,
-            style: const TextStyle(
-              fontFamily: 'monospace',
-              fontFamilyFallback: ['Menlo', 'Consolas'],
-            ),
-          ),
-          SelectableText(
-            dec,
-            style: const TextStyle(
-              fontFamily: 'monospace',
-              fontFamilyFallback: ['Menlo', 'Consolas'],
-              fontSize: 12,
-            ),
-          ),
-          const Divider(),
-        ],
+    return HealthListTile(
+      leadingIcon: Icons.access_time_filled,
+      leadingColor: leadingColor,
+      title: '#${slot.slotIndex.toString().padLeft(2, '0')}  $timePlusOffset',
+      subtitle: '$hex\n$dec',
+      showDivider: showDivider,
+      trailing: IconButton(
+        icon: const Icon(Icons.copy),
+        tooltip: 'Copy row',
+        onPressed: () async {
+          final payload =
+              'slot=${slot.slotIndex} '
+              't=${slot.timestamp.toIso8601String()} '
+              'hex=$hex dec=$dec';
+          await Clipboard.setData(ClipboardData(text: payload));
+          if (context.mounted) {
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(const SnackBar(content: Text('Row copied')));
+          }
+        },
       ),
     );
   }
@@ -197,34 +201,16 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
+    return const Center(
       child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.bloodtype_outlined, size: 48),
-            const SizedBox(height: 12),
-            Text(
-              'No BP raw bytes on disk yet',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Sync history from the watch to populate the sidecar.\n'
-              'Once at least one BP day is fetched, the raw byte '
-              'per present slot will appear here for inspection.',
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 12),
-            const Text(
-              'This screen exists because the 0x0d history stream emits '
-              'only one byte from each persistent BP slot. A future BLE '
-              'capture session can use the dumps here for correlation.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12),
-            ),
-          ],
+        padding: EdgeInsets.all(24),
+        child: HealthCard(
+          icon: Icons.bloodtype_outlined,
+          title: 'No BP raw bytes on disk yet',
+          caption:
+              'Sync history from the watch to populate the sidecar. '
+              'Once at least one BP day is fetched, the raw byte per present '
+              'slot will appear here for inspection.',
         ),
       ),
     );
@@ -238,9 +224,16 @@ class _ErrorView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Text('Failed to open BP raw store: $message'),
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: HealthCard(
+          icon: Icons.error_outline,
+          metricColor: Theme.of(context).colorScheme.error,
+          title: 'Failed to open BP raw store',
+          caption: message,
+        ),
+      ),
     );
   }
 }

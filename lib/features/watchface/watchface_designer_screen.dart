@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/providers/app_providers.dart';
+import '../widgets/health_widgets.dart';
 
 /// Diagnostic DIY watch-face designer for the APK-era Channel-B `0x3a` upload.
 ///
@@ -69,12 +70,13 @@ class _WatchFaceDesignerScreenState
               child: AspectRatio(
                 aspectRatio: w / h,
                 child: Container(
+                  margin: const EdgeInsets.all(18),
                   decoration: BoxDecoration(
                     color: Colors.black,
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(20),
                   ),
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(20),
                     child: LayoutBuilder(
                       builder: (ctx, c) {
                         final scaleX = c.maxWidth / w;
@@ -98,17 +100,23 @@ class _WatchFaceDesignerScreenState
               ),
             ),
           ),
-          const Divider(height: 1),
-          _Toolbar(
-            selectedType: _selectedType,
-            onTypeChanged: (t) => setState(() => _selectedType = t),
-            color: _color,
-            palette: _palette,
-            onColorChanged: (c) => setState(() => _color = c),
-            onUndo: _elements.isEmpty
-                ? null
-                : () => setState(() => _elements.removeLast()),
-            onClear: _elements.isEmpty ? null : () => setState(_elements.clear),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
+            child: _Toolbar(
+              selectedType: _selectedType,
+              onTypeChanged: (t) => setState(() => _selectedType = t),
+              color: _color,
+              palette: _palette,
+              onColorChanged: (c) => setState(() => _color = c),
+              onUndo: _elements.isEmpty
+                  ? null
+                  : () => setState(() => _elements.removeLast()),
+              onClear: _elements.isEmpty
+                  ? null
+                  : () => setState(_elements.clear),
+              canSend: ready && !_sending && _elements.isNotEmpty,
+              onSend: _send,
+            ),
           ),
         ],
       ),
@@ -229,6 +237,8 @@ class _Toolbar extends StatelessWidget {
     required this.onColorChanged,
     required this.onUndo,
     required this.onClear,
+    required this.canSend,
+    required this.onSend,
   });
 
   final int selectedType;
@@ -238,14 +248,22 @@ class _Toolbar extends StatelessWidget {
   final ValueChanged<Color> onColorChanged;
   final VoidCallback? onUndo;
   final VoidCallback? onClear;
+  final bool canSend;
+  final VoidCallback onSend;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 8, 8, 12),
+    final theme = Theme.of(context);
+    return HealthCard(
+      icon: Icons.palette_outlined,
+      metricColor: theme.colorScheme.primary,
+      title: 'Tools',
+      caption:
+          'Tap the preview to place an element. Choose shape and color below.',
       child: Column(
-        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          const SizedBox(height: 12),
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(
@@ -281,7 +299,7 @@ class _Toolbar extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           SizedBox(
             height: 44,
             child: ListView.separated(
@@ -308,6 +326,12 @@ class _Toolbar extends StatelessWidget {
                 );
               },
             ),
+          ),
+          const SizedBox(height: 16),
+          PrimaryHealthButton(
+            icon: Icons.cloud_upload_outlined,
+            label: 'Send to watch',
+            onPressed: canSend ? onSend : null,
           ),
         ],
       ),

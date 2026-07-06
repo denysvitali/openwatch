@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/protocol/channel_a.dart';
 import '../../core/providers/app_providers.dart';
 import '../../core/services/watch_manager.dart';
-import '../widgets/section_header.dart';
+import '../widgets/health_widgets.dart';
 
 /// Clock-alarm management screen.
 ///
@@ -26,6 +26,7 @@ class AlarmsScreen extends ConsumerWidget {
     final alarms = manager.alarms;
     final armedCount = alarms.where((alarm) => alarm.enabled).length;
     final supported = manager.capabilities.alarm;
+    final theme = Theme.of(context);
 
     return Scaffold(
       appBar: AppBar(
@@ -45,59 +46,51 @@ class AlarmsScreen extends ConsumerWidget {
           : RefreshIndicator(
               onRefresh: manager.refreshAlarms,
               child: ListView(
-                padding: const EdgeInsets.symmetric(vertical: 8),
+                padding: const EdgeInsets.only(bottom: 24),
                 children: [
-                  const SectionHeader('Clock alarms'),
-                  ..._alarmRows(context, ref, alarms),
+                  const HealthSectionHeader(title: 'Clock alarms'),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 18),
+                    child: _AlarmList(
+                      alarms: alarms,
+                      onEdit: (slot, alarm) =>
+                          _showEditor(context, ref, slot: slot, alarm: alarm),
+                      onDelete: (alarm) => _confirmDelete(context, ref, alarm),
+                    ),
+                  ),
                   const SizedBox(height: 12),
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    padding: const EdgeInsets.symmetric(horizontal: 18),
                     child: Text(
                       armedCount == 0
                           ? 'No alarms yet. Tap an empty slot above to add one.'
                           : '$armedCount of ${WatchManager.alarmSlotCount} alarms armed.',
-                      style: Theme.of(context).textTheme.bodySmall,
+                      style: theme.textTheme.bodySmall,
                     ),
                   ),
                 ],
               ),
             ),
       floatingActionButton: (ready && supported)
-          ? FloatingActionButton.extended(
-              onPressed: () {
-                final slot = _nextFreeSlot(alarms);
-                if (slot == null) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('All slots full')),
-                  );
-                  return;
-                }
-                _showEditor(context, ref, slot: slot);
-              },
-              icon: const Icon(Icons.add_alarm),
-              label: const Text('Add alarm'),
+          ? Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: PrimaryHealthButton(
+                icon: Icons.add_alarm,
+                label: 'Add alarm',
+                onPressed: () {
+                  final slot = _nextFreeSlot(alarms);
+                  if (slot == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('All slots full')),
+                    );
+                    return;
+                  }
+                  _showEditor(context, ref, slot: slot);
+                },
+              ),
             )
           : null,
     );
-  }
-
-  List<Widget> _alarmRows(
-    BuildContext context,
-    WidgetRef ref,
-    List<Alarm> alarms,
-  ) {
-    final bySlot = {for (final alarm in alarms) alarm.slot: alarm};
-    return [
-      for (var i = 0; i < WatchManager.alarmSlotCount; i++)
-        _AlarmRow(
-          slot: i,
-          alarm: bySlot[i],
-          onEdit: () => _showEditor(context, ref, slot: i, alarm: bySlot[i]),
-          onDelete: bySlot[i] == null
-              ? null
-              : () => _confirmDelete(context, ref, bySlot[i]!),
-        ),
-    ];
   }
 
   static int? _nextFreeSlot(List<Alarm> alarms) {
@@ -166,17 +159,55 @@ class AlarmsScreen extends ConsumerWidget {
   }
 }
 
+class _AlarmList extends StatelessWidget {
+  const _AlarmList({
+    required this.alarms,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  final List<Alarm> alarms;
+  final void Function(int slot, Alarm? alarm) onEdit;
+  final void Function(Alarm alarm) onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final bySlot = {for (final alarm in alarms) alarm.slot: alarm};
+    return Card(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (var i = 0; i < WatchManager.alarmSlotCount; i++)
+            _AlarmRow(
+              slot: i,
+              alarm: bySlot[i],
+              onEdit: () => onEdit(i, bySlot[i]),
+              onDelete: bySlot[i] == null ? null : () => onDelete(bySlot[i]!),
+              showDivider: i < WatchManager.alarmSlotCount - 1,
+              leadingColor: theme.colorScheme.secondary,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class _AlarmRow extends StatelessWidget {
   const _AlarmRow({
     required this.slot,
     required this.alarm,
     required this.onEdit,
     required this.onDelete,
+    required this.showDivider,
+    required this.leadingColor,
   });
   final int slot;
   final Alarm? alarm;
   final VoidCallback onEdit;
   final VoidCallback? onDelete;
+  final bool showDivider;
+  final Color leadingColor;
 
   @override
   Widget build(BuildContext context) {
@@ -187,19 +218,12 @@ class _AlarmRow extends StatelessWidget {
         : a.enabled
         ? (a.repeats ? _formatDays(a.weekdays) : 'Once, fires next occurrence')
         : 'Cleared';
-    return ListTile(
-      leading: CircleAvatar(child: Text('${slot + 1}')),
-      title: Text(
-        time,
-        style: TextStyle(
-          fontFeatures: const [FontFeature.tabularFigures()],
-          color: a?.enabled == true
-              ? Theme.of(context).colorScheme.onSurface
-              : Theme.of(context).colorScheme.outline,
-          fontSize: 22,
-        ),
-      ),
-      subtitle: Text(subtitle),
+    return HealthListTile(
+      leadingIcon: Icons.access_time_filled,
+      leadingColor: leadingColor,
+      title: time,
+      subtitle: subtitle,
+      showDivider: showDivider,
       trailing: a == null
           ? const Icon(Icons.chevron_right)
           : IconButton(
@@ -354,9 +378,9 @@ class _AlarmEditorState extends State<_AlarmEditor> {
                 onChanged: (v) => setState(() => _enabled = v),
               ),
               const SizedBox(height: 8),
-              FilledButton.icon(
-                icon: const Icon(Icons.check),
-                label: const Text('Save to watch'),
+              PrimaryHealthButton(
+                icon: Icons.check,
+                label: 'Save to watch',
                 onPressed: () {
                   Navigator.pop(
                     context,
@@ -401,23 +425,15 @@ class _NotReady extends StatelessWidget {
   const _NotReady();
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.bluetooth_disabled,
-            size: 56,
-            color: Theme.of(context).colorScheme.outline,
-          ),
-          const SizedBox(height: 12),
-          Text(
-            'Connect your watch to manage alarms',
-            style: Theme.of(context).textTheme.titleMedium,
-            textAlign: TextAlign.center,
-          ),
-        ],
+    return const Center(
+      child: Padding(
+        padding: EdgeInsets.all(24),
+        child: HealthCard(
+          icon: Icons.bluetooth_disabled,
+          metricColor: Colors.grey,
+          title: 'Connect your watch',
+          caption: 'Connect your watch to manage alarms.',
+        ),
       ),
     );
   }
@@ -427,23 +443,15 @@ class _Unsupported extends StatelessWidget {
   const _Unsupported();
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.notifications_off_outlined,
-            size: 56,
-            color: Theme.of(context).colorScheme.outline,
-          ),
-          const SizedBox(height: 12),
-          Text(
-            'This watch does not advertise clock-alarm support',
-            style: Theme.of(context).textTheme.titleMedium,
-            textAlign: TextAlign.center,
-          ),
-        ],
+    return const Center(
+      child: Padding(
+        padding: EdgeInsets.all(24),
+        child: HealthCard(
+          icon: Icons.notifications_off_outlined,
+          metricColor: Colors.grey,
+          title: 'Not supported',
+          caption: 'This watch does not advertise clock-alarm support.',
+        ),
       ),
     );
   }

@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/providers/app_providers.dart';
 import '../../core/services/app_log.dart';
 import '../../core/services/opentelemetry_service.dart';
+import '../widgets/health_widgets.dart';
 
 /// Diagnostics: live BLE/app log + copy-to-clipboard for bug reports,
 /// plus a JSON export of every persisted history day.
@@ -47,10 +48,14 @@ class LogsScreen extends ConsumerWidget {
       ),
       body: Column(
         children: [
-          // OpenTelemetry status banner — surfaces tracer state at a
+          // OpenTelemetry status card — surfaces tracer state at a
           // glance so a failed OTLP handshake is visible without
           // scrolling through the in-memory log buffer.
-          const _OtelStatusBanner(),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(18, 12, 18, 0),
+            child: _OtelStatusCard(),
+          ),
+          const HealthSectionHeader(title: 'Log stream'),
           Expanded(
             child: AnimatedBuilder(
               animation: log,
@@ -60,10 +65,12 @@ class LogsScreen extends ConsumerWidget {
                   return const Center(
                     child: Padding(
                       padding: EdgeInsets.all(24),
-                      child: Text(
-                        'No logs yet.\nConnect to your watch and try an '
-                        'action, then copy the log here and share it.',
-                        textAlign: TextAlign.center,
+                      child: HealthCard(
+                        icon: Icons.notes,
+                        title: 'No logs yet',
+                        caption:
+                            'Connect to your watch and try an action, '
+                            'then copy the log here and share it.',
                       ),
                     ),
                   );
@@ -135,30 +142,30 @@ class LogsScreen extends ConsumerWidget {
     final scheme = Theme.of(context).colorScheme;
     return switch (level) {
       LogLevel.error => scheme.error,
-      LogLevel.warn => Colors.orange,
-      LogLevel.tx => Colors.blueAccent,
-      LogLevel.rx => Colors.green,
+      LogLevel.warn => scheme.tertiary,
+      LogLevel.tx => scheme.primary,
+      LogLevel.rx => scheme.secondary,
       LogLevel.debug => scheme.onSurface.withValues(alpha: 0.5),
       LogLevel.info => scheme.onSurface,
     };
   }
 }
 
-/// Compact banner at the top of the Logs screen showing the current
+/// Compact card at the top of the Logs screen showing the current
 /// OpenTelemetry tracer state. Renders in green when active, red on
 /// failure (with the error message), and grey while init is pending.
 ///
 /// Uses a post-frame polling loop because the [OpenTelemetryService]
 /// singleton is a plain class (no ChangeNotifier); the polling cost is
 /// one setState per frame which the framework already coalesces.
-class _OtelStatusBanner extends StatefulWidget {
-  const _OtelStatusBanner();
+class _OtelStatusCard extends StatefulWidget {
+  const _OtelStatusCard();
 
   @override
-  State<_OtelStatusBanner> createState() => _OtelStatusBannerState();
+  State<_OtelStatusCard> createState() => _OtelStatusCardState();
 }
 
-class _OtelStatusBannerState extends State<_OtelStatusBanner> {
+class _OtelStatusCardState extends State<_OtelStatusCard> {
   @override
   void initState() {
     super.initState();
@@ -177,39 +184,42 @@ class _OtelStatusBannerState extends State<_OtelStatusBanner> {
   Widget build(BuildContext context) {
     final otel = OpenTelemetryService();
     final scheme = Theme.of(context).colorScheme;
+    final status = otel.statusLabel;
     final (
-      Color bg,
-      Color fg,
+      Color metricColor,
       IconData icon,
-      String text,
-    ) = switch (otel.statusLabel) {
+      String title,
+      String caption,
+    ) = switch (status) {
       'active' => (
-        Colors.green.shade700,
-        Colors.white,
+        scheme.secondary,
         Icons.check_circle,
-        'OpenTelemetry: active — traces shipping to '
-            '${OpenTelemetryService.endpoint}',
+        'OpenTelemetry active',
+        'Traces shipping to ${OpenTelemetryService.endpoint}',
       ),
       'failed' => (
-        scheme.errorContainer,
-        scheme.onErrorContainer,
+        scheme.error,
         Icons.error,
-        'OpenTelemetry: FAILED — ${otel.initErrorMessage ?? "unknown error"}. '
-            'Spans are NOT being exported.',
+        'OpenTelemetry failed',
+        otel.initErrorMessage ?? 'Spans are NOT being exported.',
       ),
       _ => (
-        scheme.surfaceContainerHighest,
         scheme.onSurfaceVariant,
         Icons.hourglass_empty,
-        'OpenTelemetry: pending initialization…',
+        'OpenTelemetry pending',
+        'Waiting for tracer initialization…',
       ),
     };
-    return Material(
-      color: bg,
-      child: InkWell(
-        onTap: () {
-          // Copy the current status + endpoint to the clipboard so
-          // users can paste it into a bug report.
+    return HealthCard(
+      icon: icon,
+      metricColor: metricColor,
+      title: title,
+      value: status[0].toUpperCase() + status.substring(1),
+      caption: caption,
+      trailing: IconButton(
+        icon: const Icon(Icons.copy),
+        tooltip: 'Copy status',
+        onPressed: () {
           final body =
               'OTel status: ${otel.statusLabel}\n'
               'Endpoint: ${OpenTelemetryService.endpoint}\n'
@@ -221,18 +231,21 @@ class _OtelStatusBannerState extends State<_OtelStatusBanner> {
             ),
           );
         },
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          child: Row(
-            children: [
-              Icon(icon, color: fg, size: 18),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(text, style: TextStyle(color: fg, fontSize: 12)),
-              ),
-              Icon(Icons.copy, color: fg.withValues(alpha: 0.6), size: 16),
-            ],
-          ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.only(top: 12),
+        child: StatusPill(
+          icon: status == 'active'
+              ? Icons.check_circle
+              : status == 'failed'
+              ? Icons.error
+              : Icons.hourglass_empty,
+          label: status == 'active'
+              ? 'Exporting'
+              : status == 'failed'
+              ? 'Not exporting'
+              : 'Initializing',
+          color: metricColor,
         ),
       ),
     );
