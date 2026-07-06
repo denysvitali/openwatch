@@ -636,6 +636,22 @@ void main() {
       expect(decoded.details['idle'], isFalse);
     });
 
+    test('labels FEE7 0x3e as lipids, not blood oxygen', () {
+      final frame = Codec.buildChannelA(Fee7.lipidsUpdate, [0x01, 0x00]);
+
+      final decoded = const WatchLogDecoder().decodeHex(
+        frame.map((b) => b.toRadixString(16).padLeft(2, '0')).join('-'),
+        uuid: _fee7,
+      );
+
+      expect(decoded.valid, isTrue);
+      expect(decoded.channel, WatchLogChannel.fee7);
+      expect(decoded.details['opcode'], '0x3e');
+      expect(decoded.details['label'], 'lipidsUpdate');
+      expect(decoded.title, contains('lipidsUpdate'));
+      expect(decoded.title, isNot(contains('blood')));
+    });
+
     test(
       'summarizes high-bit FEE7 OTA and synthetic sleep frames as raw opcodes',
       () {
