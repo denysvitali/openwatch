@@ -633,4 +633,11 @@ void main() {
       );
     });
   });
+
+  group('commands: legacy ANCS', () {
+    test('enableAncs does not build H59MA v14 0x60 status writes', () {
+      // ignore: deprecated_member_use_from_same_package
+      expect(Commands.enableAncs, throwsA(isA<UnsupportedError>()));
+    });
+  });
 }

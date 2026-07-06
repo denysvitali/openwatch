@@ -636,6 +636,26 @@ void main() {
       expect(decoded.details['idle'], isFalse);
     });
 
+    test('labels FEE7 0x60 as pending status write', () {
+      final frame = Codec.buildChannelA(Fee7.pendingStatusWrite, [
+        0x44,
+        0x33,
+        0x22,
+        0x11,
+      ]);
+
+      final decoded = const WatchLogDecoder().decodeHex(
+        frame.map((b) => b.toRadixString(16).padLeft(2, '0')).join('-'),
+        uuid: _fee7,
+      );
+
+      expect(decoded.valid, isTrue);
+      expect(decoded.channel, WatchLogChannel.fee7);
+      expect(decoded.details['opcode'], '0x60');
+      expect(decoded.details['label'], 'pendingStatusWrite');
+      expect(decoded.title, contains('pendingStatusWrite'));
+    });
+
     test('labels FEE7 0x3e as lipids, not blood oxygen', () {
       final frame = Codec.buildChannelA(Fee7.lipidsUpdate, [0x01, 0x00]);
 

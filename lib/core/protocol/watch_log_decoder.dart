@@ -1746,8 +1746,8 @@ String _labelForChannelA(int opcode) {
       return 'todaySport';
     case OpA.packageLength:
       return 'packageLength';
-    case OpA.setAncs:
-      return 'setAncs';
+    case OpA.pendingStatusWrite:
+      return 'pendingStatusWrite';
     case OpA.startMeasure:
       return 'startMeasure';
     case OpA.deviceNotify:
@@ -1855,6 +1855,8 @@ String _labelForFee7(int opcode) {
       return 'modeControl';
     case Fee7.modeControlCont:
       return 'modeControlCont';
+    case Fee7.pendingStatusWrite:
+      return 'pendingStatusWrite';
     case Fee7.statusResponse:
       return 'status';
     case Fee7.lipidsUpdate:

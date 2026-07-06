@@ -22,10 +22,9 @@ void main() {
         expect(t.sentFee7.skip(sentFee7Before), isEmpty);
 
         final channelAFrames = t.sentA.skip(sentABefore).toList();
-        expect(channelAFrames, hasLength(2));
+        expect(channelAFrames, hasLength(1));
         expect(Codec.rxOpcode(channelAFrames[0]), OpA.bindAncs);
         expect(channelAFrames[0].sublist(3, 15), 'ABCDEFGHIJKL'.codeUnits);
-        expect(Codec.rxOpcode(channelAFrames[1]), OpA.setAncs);
       },
     );
 
@@ -41,9 +40,8 @@ void main() {
 
       expect(t.sentFee7.skip(sentFee7Before), isEmpty);
       final channelAFrames = t.sentA.skip(sentABefore).toList();
-      expect(channelAFrames, hasLength(2));
+      expect(channelAFrames, hasLength(1));
       expect(Codec.rxOpcode(channelAFrames[0]), OpA.bindAncs);
-      expect(Codec.rxOpcode(channelAFrames[1]), OpA.setAncs);
     });
   });
 

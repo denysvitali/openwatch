@@ -424,8 +424,8 @@ REALTIMEHEARTRATE=6, ECG=7, PRESSURE=8, BLOOD_SUGAR=9, HRV=0xa, BODY_TEMPERATURE
 | Name | Opcode | Sub | Dir | Request | Response | Meaning |
 |---|---|---|---|---|---|---|
 | BindAncsReq | `0x04` | `0x02` | →watch | Channel-A frame `[02, verBucket, UTF-8 MODEL≤12B]` (APK uses `verBucket`: 0x0a SDK29/30, 0x09 SDK28, 0x08 SDK26/27, else 0). Firmware stores a 12-byte model slot from request offset 3. Earlier docs called this FEE7-native, but radare2 now shows the FEE7 write callback does not reach the 16-byte dispatcher. | one-byte ACK `[0x04]` | Register phone identity for ANCS attribute parsing. OpenWatch sends this over Channel A. |
-| SetANCSReq | `0x60` | — | →watch | `[FF,9F,FF,FF]` | **ReadANCSRsp**: `pl[0..1]`=stateMask u16 LE | Subscribe ANCS categories (near-all). |
-| SetMessagePushReq | `0x61` | — | →watch | empty | **ReadMessagePushRsp**: deviceSupport1/2/3 = ints @off 2/4/6 | Query message-push capability. |
+| SetANCSReq | `0x60` | — | →watch | APK-era `[FF,9F,FF,FF]` | H59MA v14 self-marker status-write ACK | **Not ANCS on H59MA v14.** `0x60` writes the pending-status u32 read by `0x61`; OpenWatch does not send this during notification enable. |
+| SetMessagePushReq | `0x61` | — | →watch | APK-era empty | H59MA v14 live-status snapshot | **Not message-push config on H59MA v14.** `0x61` reads the status field written by `0x60`; OpenWatch keeps APK naming only as deprecated provenance. |
 | PushMsgUintReq | `0x72` | — | →watch | `[type, argB, argC, content…]` | **PhoneNotifyRsp** (push): `action=pl[0]&0xff`; isReject ⇔ action==1 | Push a notification to watch. |
 | BlackListReq | `0x2d` | — | →watch | `[0x01]` | (none) | Contact black-list enable/read. |
 | LoverEventReq | `0x51` | — | →watch | `[0x01]` | (none) | Lover/anniversary event command. |
@@ -448,6 +448,7 @@ prefer FEE7 writes for app flows without live-capture evidence.
 |---|---:|---|---|---|---|
 | BatteryStatus | `0x03` | both | bare opcode | `[percent, chargingFlag]` | Direct battery response. Verified in H59MA v14 at body offset `0x587e`: byte 1 is the percent helper result, byte 2 is non-zero when the charge-state helper is non-zero. |
 | Fee7Handshake | `0x48` (`'H'`) | both | bare opcode | 15-byte frame: hw version bytes, fw version bytes, battery counter `% 100`, status u16 | First vendor-side info block; OpenWatch decodes battery/status from this when present. |
+| PendingStatusWrite | `0x60` | →watch | `value u32LE` in request bytes `1..4` | self-marker ACK `[0x60,0,...,0x60]` | Writes `DAT_0082bfd4 + 0x2c`, paired with `0x61`; verified at v14 body offset `0x5a90`. Production hosts should not use this for ANCS. |
 | LiveStatus | `0x61` (`'a'`) | both | bare opcode | active: `statusValue u32LE`; idle: all-zero ACK | Reads `DAT_0082bfd4 + 0x2c` at body offset `0x5ae6`. The low byte mirrors the live status source used for battery-like updates, but hosts should keep the full u32 for diagnostics. |
 | FirmwareBuildInfo | `0x93` | both | bare opcode | two frames: header self-marker `[0x93,0...,0x93]`, then ASCII version/build string in `frame[1..14]` plus checksum | Returns a printable build string such as `"1.00.14_260508"`, using blob0 overrides when enabled. Verified at v14 body offset `0x184a`. |
 | HighNoResponse | `0x97` / `0x99` / `0x9d` / `0x9f` | →watch | bare opcode | none | High-range reserved/session slots that return without queuing a frame in H59MA v14. Verified at v14 body offsets `0x6476`, `0x6486`, `0x6352`, and `0x64b6`. |

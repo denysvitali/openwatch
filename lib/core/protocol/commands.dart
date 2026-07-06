@@ -312,9 +312,15 @@ class Commands {
   static Uint8List resetContinuousHrWindow() =>
       Codec.buildChannelA(OpA.realTimeHeartRate, [0x03]);
 
-  /// `SetANCSReq` (0x60): subscribe to (near-)all ANCS categories.
-  static Uint8List enableAncs() =>
-      Codec.buildChannelA(OpA.setAncs, const [0xFF, 0x9F, 0xFF, 0xFF]);
+  /// APK-era `SetANCSReq` assumption.
+  ///
+  /// H59MA v14 uses `0x60` as a status-field write paired with the `0x61`
+  /// live-status read path. Production notification setup should only send
+  /// [bindAncs] and maintain local ANCS state in `ProtocolHub`.
+  @Deprecated('H59MA v14 0x60 is pendingStatusWrite, not ANCS')
+  static Uint8List enableAncs() => throw UnsupportedError(
+    'H59MA v14 0x60 writes pending status; ANCS enable uses bindAncs only',
+  );
 
   /// `BindAncsReq` (0x04): register the phone identity for ANCS parsing.
   ///

@@ -123,8 +123,15 @@ class OpA {
 
   // Notifications / weather / muslim
   static const int bindAncs = 0x04;
-  static const int setAncs = 0x60;
-  static const int setMessagePush = 0x61;
+  static const int pendingStatusWrite = 0x60;
+  static const int liveStatus = 0x61;
+
+  @Deprecated('H59MA v14 0x60 writes pending status; use bindAncs for ANCS')
+  static const int setAncs = pendingStatusWrite;
+
+  @Deprecated('H59MA v14 0x61 is liveStatus, not APK SetMessagePush')
+  static const int setMessagePush = liveStatus;
+
   static const int pushMsgUint = 0x72;
   static const int blackList = 0x2d;
   static const int loverEvent = 0x51;
@@ -265,7 +272,8 @@ class Fee7 {
   // Alerts / find-phone
   static const int alertTrigger = 0x50; // 'P' — alarm/motor pattern
   static const int findPhoneEvent = 0x51; // 'Q' — arms pattern when pl[1]==1
-  static const int miscAncs = 0x60; // FUN_0082be90
+  /// Writes the status field read by `0x61`.
+  static const int pendingStatusWrite = 0x60;
 
   // Status
   static const int statusResponse = 0x61; // 'a' — live u32 status snapshot
