@@ -398,6 +398,22 @@ void main() {
       }
     });
 
+    test('labels unknown Channel-B one-byte responses as compact status', () {
+      final frame = Codec.buildChannelB(0x60, [0x00]);
+
+      final report = const WatchLogDecoder().decodeNrfConnectLog(
+        _line(_chB, frame),
+      );
+      final decoded = report.frames.single;
+
+      expect(decoded.valid, isTrue);
+      expect(decoded.title, contains('B 0x60 unknown compactStatus=0x00'));
+      expect(decoded.details['label'], 'unknown');
+      expect(decoded.details['compactStatusCode'], 0);
+      expect(decoded.details['firmwareBehavior'], 'compact-status');
+      expect(decoded.details['payloadBytes'], 1);
+    });
+
     test('summarizes H59MA Channel-B alarm read records', () {
       final frame = Codec.buildChannelB(OpB.alarm, [
         0x01,

@@ -847,6 +847,13 @@ class WatchLogDecoder {
       case OpB.deviceInfoConfig:
         return _summarizeDeviceInfoConfig(payload, details);
     }
+    if (_labelForChannelB(cmd) == 'unknown' && payload.length == 1) {
+      final status = payload[0] & 0xff;
+      details['compactStatusCode'] = status;
+      details['firmwareBehavior'] = 'compact-status';
+      details['payloadBytes'] = payload.length;
+      return 'B ${_hex(cmd)} unknown compactStatus=${_hex(status)}';
+    }
     return 'B ${_hex(cmd)} ${_labelForChannelB(cmd)} '
         'payload=${_compactHex(payload)}';
   }
