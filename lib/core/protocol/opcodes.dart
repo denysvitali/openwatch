@@ -210,6 +210,12 @@ class OpB {
   static const int h59SleepSummary = 0x11; // H59MA 100B sleep summary
   static const int h59SleepDetail = 0x12; // H59MA 288B sleep detail
   static const int h59Noop13 = 0x13; // H59MA Channel-B placeholder; no reply
+  // H59MA v14 recognizes these Channel-B ids only to reject them with
+  // compact NAK code 2. They overlap Channel-A target/alarm-style opcodes.
+  static const int h59ExplicitReject21 = 0x21;
+  static const int h59ExplicitReject22 = 0x22;
+  static const int h59ExplicitReject23 = 0x23;
+  static const int h59ExplicitReject24 = 0x24;
   static const int sleepNew = 0x27; // new sleep protocol (night) — Ch B
   static const int h59Noop29 = 0x29; // H59MA Channel-B placeholder; no reply
   static const int activitySummary =

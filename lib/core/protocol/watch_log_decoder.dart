@@ -768,6 +768,13 @@ class WatchLogDecoder {
       return 'B ${_hex(cmd)} ${_labelForChannelB(cmd)} no-op '
           'payloadBytes=${payload.length}';
     }
+    if (_isH59ExplicitRejectChannelB(cmd)) {
+      details['firmwareBehavior'] = 'compact-nak-2';
+      details['compactNakCode'] = 2;
+      details['payloadBytes'] = payload.length;
+      return 'B ${_hex(cmd)} ${_labelForChannelB(cmd)} explicit-reject '
+          'compactNak=2 payloadBytes=${payload.length}';
+    }
     if (_isUnsupportedApkFileHandleChannelB(cmd)) {
       details['firmwareBehavior'] = 'compact-nak-0';
       details['payloadBytes'] = payload.length;
@@ -1791,6 +1798,14 @@ String _labelForChannelB(int cmd) {
       return 'h59SleepDetail';
     case OpB.h59Noop13:
       return 'h59Noop13';
+    case OpB.h59ExplicitReject21:
+      return 'h59ExplicitReject21';
+    case OpB.h59ExplicitReject22:
+      return 'h59ExplicitReject22';
+    case OpB.h59ExplicitReject23:
+      return 'h59ExplicitReject23';
+    case OpB.h59ExplicitReject24:
+      return 'h59ExplicitReject24';
     case OpB.sleepNew:
       return 'sleepNew/night';
     case OpB.h59Noop29:
@@ -1843,6 +1858,18 @@ bool _isH59NoopChannelB(int cmd) {
     case OpB.h59Noop3b:
     case OpB.h59Noop47:
     case OpB.h59Noop4b:
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool _isH59ExplicitRejectChannelB(int cmd) {
+  switch (cmd) {
+    case OpB.h59ExplicitReject21:
+    case OpB.h59ExplicitReject22:
+    case OpB.h59ExplicitReject23:
+    case OpB.h59ExplicitReject24:
       return true;
     default:
       return false;

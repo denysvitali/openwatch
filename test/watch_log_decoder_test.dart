@@ -275,6 +275,32 @@ void main() {
       expect(report.frames.single.details['label'], 'h59CleanupBypass46');
     });
 
+    test('labels H59MA Channel-B explicit rejects', () {
+      final frames = [
+        OpB.h59ExplicitReject21,
+        OpB.h59ExplicitReject22,
+        OpB.h59ExplicitReject23,
+        OpB.h59ExplicitReject24,
+      ].map((cmd) => Codec.buildChannelB(cmd, [0x01])).toList();
+
+      final report = const WatchLogDecoder().decodeNrfConnectLog(
+        frames.map((f) => _line(_chB, f)).join('\n'),
+      );
+
+      expect(report.frames, hasLength(4));
+      expect(report.frames.map((f) => f.details['label']), [
+        'h59ExplicitReject21',
+        'h59ExplicitReject22',
+        'h59ExplicitReject23',
+        'h59ExplicitReject24',
+      ]);
+      for (final frame in report.frames) {
+        expect(frame.title, contains('explicit-reject compactNak=2'));
+        expect(frame.details['firmwareBehavior'], 'compact-nak-2');
+        expect(frame.details['compactNakCode'], 2);
+      }
+    });
+
     test('labels APK FileHandle commands as unsupported on H59MA', () {
       final frames = [
         OpB.fileList,
