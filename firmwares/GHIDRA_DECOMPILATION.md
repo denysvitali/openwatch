@@ -664,7 +664,8 @@ the slot is reusable.
 | `0x2a` | `channel_b_send_activity_summary(payload[0])` | Read activity/sport summary — see §2.4 |
 | `0x2c` | `channel_b_handle_alarm_read_write()` | Alarm read/write — see §2.5 |
 | `0x41` | `channel_b_handle_file_command(0x41, payload, length)` | File list — see §2.6 |
-| `0x43`, `0x46` | `channel_b_handle_file_command(cmd, payload)` | File init / file delete family — see §2.6 |
+| `0x43` | `channel_b_handle_file_command(cmd, payload)` | File operation / chunk stream — see §2.6 |
+| `0x46` | first-stage cleanup bypass | Valid CRC frames branch around async storage; not a file-table delete on H59MA v14 |
 | `0x47` | `channel_b_handle_0x47_noop(payload[0])` | no-op |
 | `0x4b` | `channel_b_handle_0x4b_noop(payload[0])` | no-op |
 | `0x5a` | `channel_b_handle_device_info_config(payload)` | Device info/config — see §2.7 |
@@ -763,8 +764,8 @@ Sub-handler selected by `cmd`:
 | Cmd | Action |
 |---|---|
 | `0x41` | List: copies 4 B of context from `payload`, walks `FUN_008313ba` (up to 10 entries) and formats each via `FUN_0083105a`. Response uses cmd **`0x42`** (note: not `0x41`) — first byte is the file count. |
-| `0x43` | Init: `FUN_008310c8(payload)` — no response payload. |
-| `0x46` | Same body as `0x43` (file delete) — gated by caller's length check. |
+| `0x43` | Operation: `FUN_008310c8(payload)` — emits `0x44` metadata and `0x45` chunks when a record is found. |
+| `0x46` | Not handled here. Normal on-wire frames bypass async storage before reaching this handler; if reached internally, `FUN_008311b8` returns immediately for `cmd != 0x41 && cmd != 0x43`. |
 
 #### 2.7 Device info / config (`FUN_0082f6ec`)
 
@@ -1139,10 +1140,10 @@ void FUN_008311b8(int sub, void *req_payload) {
         }
         FUN_0082ece0(0x42, rsp, out_offset & 0xffff);
     } else if (sub == 0x43) {
-        // 0x43 file init/delete: no response, just call helper
+        // 0x43 file operation: helper may emit 0x44 metadata + 0x45 chunks
         FUN_008310c8(req_payload);
     }
-    // 0x46 routes here too (same body as 0x43, see §2.6)
+    // 0x46 does not reach this handler from normal on-wire dispatch.
 }
 ```
 
@@ -1156,10 +1157,14 @@ Two sub-codes share the same handler:
   response opcode). The body layout is `[count_byte] [TLV0]
   [TLV1] ...`.
 
-* **`0x43` / `0x46` file init / delete**:
-  just calls `FUN_008310c8(req_payload)`. **No response** is
-  shipped — the dispatcher (§2.0) ack frame is the
-  implicit "operation accepted" signal.
+* **`0x43` file operation**:
+  calls `FUN_008310c8(req_payload)`. It may emit `0x44`
+  metadata and one or more `0x45` chunks.
+* **`0x46` cleanup bypass**:
+  normal valid-CRC `0x46` frames branch around async storage in the
+  first-stage dispatcher and do not call `FUN_008311b8`. If some internal
+  path seeds `cmd = 0x46` into the async worker, `FUN_008311b8` still returns
+  immediately because its local dispatch only handles `0x41` and `0x43`.
 
 #### Request layout
 
@@ -1167,9 +1172,11 @@ Two sub-codes share the same handler:
   verbatim into `state`. The docstring for `0x41` doesn't
   tell us what this field encodes (probably an offset /
   start-index for the file dump, or a path qualifier).
-* **`0x43` / `0x46`** — `req[0..15]` is the operation payload
-  (e.g. filename for delete, content for init). The full
-  16-byte payload is forwarded to `FUN_008310c8`.
+* **`0x43`** — `req[0]` is the selector and `req[1..4]` is a little-endian
+  record id. The helper uses those fields to locate a record before emitting
+  `0x44` metadata and `0x45` chunks.
+* **`0x46`** — no H59MA v14 file-table payload. The command is a first-stage
+  cleanup/bypass path, not a delete operation.
 
 #### Response layout (`0x41` only)
 
@@ -1202,10 +1209,8 @@ each field length to 2, writes `fieldId`, copies 1/2/4 raw value
 bytes depending on the id-specific case, and returns the inclusive
 field length.
 
-`0x43` and `0x46` ship **no direct response payload** — the
-dispatcher's implicit ack is the only feedback unless the operation
-starts a `0x44` metadata + `0x45` chunk stream. `FUN_008310c8`
-builds three observed `0x44` forms: success
+`0x43` has no direct ack payload of its own; `FUN_008310c8`
+builds three observed `0x44` forms before any chunk stream: success
 `[00, chunkCount u16LE, meta3, 01, 11]`, not-found
 `[01, selector, recordId u32LE]`, and invalid-selector
 `[02, selector]`. Data chunks are one-based
@@ -1237,27 +1242,19 @@ on the wire. The tag + length + data layout is the standard
 "host SDK understands this" format; the raw 48-byte record
 is firmware-internal.
 
-#### Pair with `0x46` (§2.6)
+#### Why `0x46` is not a delete sibling
 
-`0x46` is the *delete* sibling — same handler body as `0x43`,
-same no-response behaviour. The §2.6 dispatcher routes
-`0x46` to the *same* `FUN_008311b8` via the `else if (sub ==
-0x43)` branch, but the second sub-byte is checked against
-`0x46` *inside* `FUN_008310c8` (not visible from this
-handler). The decompiler's `else if (sub == 0x43)` clause is
-in fact a multi-target `0x43 / 0x46` handler — the disassembly
-would show a `cmp r3, #0x46; beq ...` branch in `FUN_008310c8`.
+Earlier notes inferred a `0x46` delete sibling from the async-worker compare
+cascade. The full path disproves that inference: the first-stage dispatcher
+branches valid-CRC `0x46` frames around `channel_b_store_async_command`, and the
+local file handler at `0xadb8` has only `cmp r0, 0x41` and `cmp r0, 0x43`
+branches before returning. No `0x46` compare exists in `FUN_008310c8` either.
 
-#### Why no response on `0x43` / `0x46`
+#### Why no direct response on `0x43`
 
-`0x43` is the "create a new file" command and `0x46` is the
-"delete an existing file" command. Both are **mutating**
-operations — they either succeed or fail silently. A response
-frame would only tell the host "the firmware accepted the
-command", not "the operation succeeded" (the watch can
-still fail the actual create/delete if the file is invalid
-or the FS is full). The host SDK polls `0x41` after
-issuing `0x43` / `0x46` to verify the operation took effect.
+`0x43` is a record fetch/operation command. Success is expressed by the `0x44`
+metadata frame and following `0x45` chunk stream; not-found and invalid-selector
+cases also use `0x44` status frames.
 
 #### Why the response opcode is `0x42` (not `0x41`)
 
@@ -6422,10 +6419,10 @@ This document covers the H59MA v14 firmware in **~7,250 lines** with **17+ synth
 * **§1 Entry Point & Boot** — vector table, app_main_task, reset
   handler.
 * **§2 Channel-B** (12 sub-sections including §2.0 NAK
-  packet) — 11 documented handlers covering the parser,
+  packet) — 11 documented handlers/paths covering the parser,
   dispatcher, async processor, OTA sub-cmd routing, alarm,
   activity summary, sleep summary, sleep detail, sleep
-  records, file list, file init/delete, device info.
+  records, file list, file operation, cleanup bypass, device info.
 * **§3 Channel-A** (24 sub-sections including §3.23 1-bit
   config bitmap synthesis and §3.24 deferred-command ring
   synthesis) — 22 documented handlers covering setTime,
@@ -6468,7 +6465,7 @@ sections. Use this when you know the *transport* (Channel-A
 / Channel-B / 0xFEE7) but need to find the *exact opcode +
 section number* for a given operation.
 
-#### Channel-B (§2) — 11 documented handlers
+#### Channel-B (§2) — 11 documented handlers/paths
 
 | Cmd (hex) | Sub-byte | § | Operation |
 |---|---|---|---|
@@ -6479,9 +6476,9 @@ section number* for a given operation.
 | `0x2c` | sub 0x01 / 0x02 | §2.5 | alarm read / write |
 | `0x3e` | — | §2.4 | lunch sleep records (same as `0x27`) |
 | `0x41` | file_index | §2.11 | file list (up to 10 files, `0x42` response opcode) |
-| `0x43` | payload | §2.11 | file init (no response) |
-| `0x46` | payload | §2.11 | file delete (no response) |
+| `0x43` | payload | §2.11 | file operation (`0x44` metadata + optional `0x45` chunks) |
 | `0x5a` | config_tlv | §2.7 | device info TLV |
+| `0x46` | — | §2.0/§2.11 | cleanup/bypass path; not a file delete |
 | `NAK` | — | §2.0 | vendor NAK packet (error_code + cmd) |
 
 #### Channel-A (§3) — 22 documented handlers
@@ -7448,7 +7445,7 @@ All sections use **byte 1** as the sub-cmd selector:
 * **Channel-B** — `byte 1` is the sub-cmd for opcodes like
   `0x11 day_offset`, `0x12 day_offset`, `0x29 (nop)`,
   `0x2a day_offset`, `0x3b (nop)`, `0x41 file_index`,
-  `0x43 file_init_payload`, `0x46 file_delete_payload`,
+  `0x43 file_operation_payload`, `0x46 cleanup/bypass`,
   `0x47 (nop)`, `0x4b (nop)`, `0x5a config_tlv`.
 * **0xFEE7 vendor** — `byte 1` is the sub-cmd for opcodes
   like `0x60 0x00`, `0xce 0x01`, `0xce 0x02`,

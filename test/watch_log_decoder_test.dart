@@ -264,6 +264,17 @@ void main() {
       }
     });
 
+    test('labels H59MA Channel-B cleanup bypass 0x46', () {
+      final frame = Codec.buildChannelB(OpB.h59CleanupBypass46, [0x5A]);
+
+      final report = const WatchLogDecoder().decodeNrfConnectLog(
+        _line(_chB, frame),
+      );
+
+      expect(report.frames.single.title, contains('h59CleanupBypass46'));
+      expect(report.frames.single.details['label'], 'h59CleanupBypass46');
+    });
+
     test('summarizes Channel B device-info static TLVs', () {
       final frame = Codec.buildChannelB(OpB.deviceInfoConfig, [
         0x03,

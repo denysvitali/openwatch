@@ -646,7 +646,7 @@ listed by the earlier radare2 notes:
 5. ~~Channel B sub-cmd bytes that the watch accepts beyond `PROTOCOL.md` §3.2.~~ **Resolved for static firmware routing:** a 2026-07-05 radare2 pass verifies the first-stage v13/v14 dispatcher groups and the second-stage async switch/cascade (`firmwares/_re/channel-b-dispatch/evidence.md`).
    `0x01`, `0x02`, `0x21`, `0x31`, `0x35`, `0x36`, and `0x61` call the OTA-state callback before falling through to async storage; `0x10`/`0x46` bypass async storage through the cleanup helper; every other valid-CRC frame enters the async worker directly.
    The low OTA switch has max explicit index `0x08`, so `0x08..0x10` clamp to the default NAK path.
-   The compare cascade handles sleep `0x11/0x12/0x27`, activity `0x2a`, alarm `0x2c`, file table `0x41/0x43/0x46`, no-response placeholders `0x13/0x29/0x3b/0x47/0x4b`, device-info/config `0x5a`, and explicit NAK-code-2 commands `0x21..0x24`; unknown commands NAK with code `0`.
+   The compare cascade handles sleep `0x11/0x12/0x27`, activity `0x2a`, alarm `0x2c`, file table `0x41/0x43`, an unreachable async `0x46` branch that still returns from the local file handler, no-response placeholders `0x13/0x29/0x3b/0x47/0x4b`, device-info/config `0x5a`, and explicit NAK-code-2 commands `0x21..0x24`; unknown commands NAK with code `0`.
    `0x13`, `0x29`, and `0x3b` branch straight to cleanup; `0x47` and `0x4b`
    call single-instruction `bx lr` stubs. Remaining work is payload semantics
    for opaque non-placeholder handlers, not command acceptance.
@@ -657,7 +657,9 @@ listed by the earlier radare2 notes:
    remain live-capture work. `0x43` success metadata is
    `[00, chunkCount u16LE, meta3, 01, 11]`, followed by one-based `0x45`
    chunks `[chunkIndex, 00, <=0x1f4 data bytes]`; not-found and invalid
-   selector use `0x44` status forms `01` and `02`.
+   selector use `0x44` status forms `01` and `02`. The earlier `0x46`
+   file-delete inference is rejected: normal `0x46` frames bypass async
+   storage and only call the Channel-B cleanup helper.
 6. **Whether the OTA bootloader validates `image_digest` and `signature_a`** at flash time. Ghidra shows `body.bin` only checks the OTA container magic `0x81bdc3e5` in packet 1 and stages `size - 0x50` bytes. The `0x8721bee2` magic belongs to the config blob.
 7. ~~GATT attribute table record fields.~~ **Resolved for static layout:** H59MA uses Realtek-style service tables with `0x1c` inline attributes, compact `0x1a` entries for 128-bit primary services whose `pValueContext` points to the preceding UUID blob, and callback triples between service tables. See §3 and `firmwares/_re/gatt-table/evidence.md`. Runtime callback side effects remain covered by the per-handler RE sections.
 8. ~~`0xfee7` remaining vendor command semantics.~~ **Corrected by radare2:** the published `0xFEE7` service is real, but it is not the statically-proven entry point for the 16-byte vendor/high opcode dispatcher. Earlier Ghidra names assigned the Channel-A table at `0x1f204` (`0x0082e850`/`0x0082e87a`/`0x0082e8ce`) to FEE7. The actual FEE7 table starts at `0x1f2b8`, registers via `0x0082eb0a`, and uses callbacks `0x0082e9a3`/`0x0082ea4d`/`0x0082eabb`; its write callback emits a generic Realtek service event and does not branch to the 16-byte dispatcher. The high/vendor opcode semantics remain documented as Channel-A-reachable firmware paths; see `firmwares/_re/fee7-gatt/evidence.md` and `firmwares/_re/fee7-high/evidence.md`.

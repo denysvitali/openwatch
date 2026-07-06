@@ -183,7 +183,12 @@ class OpB {
   static const int h59FileOperation = 0x43;
   static const int h59FileMetadata = 0x44;
   static const int h59FileChunk = 0x45;
-  static const int h59FileDelete = 0x46;
+  static const int h59CleanupBypass46 = 0x46;
+
+  @Deprecated(
+    'Use h59CleanupBypass46; H59MA Channel-B 0x46 is not a file delete command.',
+  )
+  static const int h59FileDelete = h59CleanupBypass46;
 
   static const int customWatchFace = 0x3a;
 

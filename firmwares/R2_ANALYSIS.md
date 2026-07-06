@@ -499,6 +499,12 @@ any `0x45` data chunks. Resolved metadata forms are success
 Chunks are one-based `[chunkIndex, 00, data...]` with data capped at `0x1f4`
 bytes.
 
+The earlier `0x46` file-delete inference is rejected. Normal valid-CRC `0x46`
+frames bypass async storage in the first-stage dispatcher and call only the
+Channel-B cleanup/state helper. If an internal path seeds `cmd = 0x46` into the
+async worker, the local file handler at `0xadb8` still returns immediately
+because it compares only `0x41` and `0x43`.
+
 The async worker's no-response placeholders are also statically resolved:
 `0x13`, `0x29`, and `0x3b` branch directly to worker cleanup, while `0x47` and
 `0x4b` call one-instruction `bx lr` stubs at v14 body `0xe3fa` and `0xa060`

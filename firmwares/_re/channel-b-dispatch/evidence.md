@@ -77,16 +77,17 @@ Confirmed compare-cascade commands:
 | `0x29`, `0x3b` | no-op / skipped |
 | `0x2a` | activity summary |
 | `0x2c` | alarm read/write |
-| `0x41`, `0x43`, `0x46` | file table / file command handler |
+| `0x41`, `0x43` | file table / file operation handler |
+| `0x46` | unreachable async file-handler branch; normal on-wire path bypasses async storage |
 | `0x47`, `0x4b` | no-op placeholder handlers |
 | `0x5a` | device-info/config TLV handler |
 | other | NAK status `0` |
 
 Note: the async worker has a `0x46` file-command branch, but the first-stage
 complete-frame dispatcher branches parsed `0x46` frames around the async-store
-call. The handler entry is still documented because it exists in the worker
-and can be reached if another firmware path seeds the async state with `cmd =
-0x46`.
+call. If another firmware path seeds the async state with `cmd = 0x46`, the
+local handler at `0xadb8` still returns immediately because it only handles
+`0x41` and `0x43`.
 
 ### No-response placeholders
 

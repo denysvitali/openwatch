@@ -511,16 +511,16 @@ before async handling. The implemented file table/list path is:
 |---|---|---|---|
 | `0x41` | `[cursorOrMinRecordId u32LE]` | `0x42` payload `[count, entries...]`, max 10 entries | Each entry is length-prefixed: `[entryLen, recordType, fieldTLVs...]`. `entryLen` includes the length/type bytes. Field TLVs are `[fieldLen, fieldId, value...]`, and `fieldLen` includes the length/id bytes. Record types `0x04`, `0x07`, `0x08` use field ids `01 02 03 04 05 06 07 08 09 0d 13`; other record types use `01 02 04 07 08 09`. |
 | `0x43` | `[selector, recordId u32LE]` | `0x44` metadata then `0x45` chunks | Found records emit `0x44` metadata `[00, chunkCount u16LE, meta3, 01, 11]`, then `0x45` chunks shaped `[chunkIndex1Based, 00, up to 0x1f4 bytes]`. Not-found emits `[01, selector, recordId u32LE]`; invalid selector emits `[02, selector]`. |
-| `0x46` | Raw operation payload, same helper family as `0x43` (forwarded up to 16B) | none | Delete sibling of `0x43` per GHIDRA §2.6/§2.11; host should poll `0x41` afterwards to verify the table changed. |
+| `0x46` | Any valid Channel-B frame | none | **Not a file delete on H59MA v14.** The first-stage dispatcher bypasses async storage and calls only the Channel-B cleanup/state helper. If an internal path seeds `0x46` into the async worker, `FUN_008311b8` still returns immediately because it handles only `0x41` and `0x43`. |
 
 OpenWatch should treat this as an H59MA-specific file-table protocol, separate
 from the APK generic file upload commands above.
 
-OpenWatch implements raw request builders for `0x41`, `0x43`, and `0x46`, and
-its log decoder parses `0x42` records generically into record type, field id,
-length, and raw value bytes, and summarizes `0x44` metadata / `0x45` chunks.
-Field and metadata meanings remain opaque until live captures map record types
-and field ids.
+OpenWatch implements raw request builders for `0x41` and `0x43`; the stale
+`0x46` delete builder is deprecated and throws. Its log decoder parses `0x42`
+records generically into record type, field id, length, and raw value bytes, and
+summarizes `0x44` metadata / `0x45` chunks. Field and metadata meanings remain
+opaque until live captures map record types and field ids.
 
 **H59MA v14 Channel-B no-op placeholders.** The async worker accepts
 `0x13`, `0x29`, `0x3B`, `0x47`, and `0x4B` as no-response placeholders, not
@@ -1099,13 +1099,14 @@ The v14 dispatcher groups are now exact:
 - Pre-store `ota_dfu_state_machine(1, 0)` callback, then async store: `0x01`,
   `0x02`, `0x21`, `0x31`, `0x35`, `0x36`, `0x61`.
 - Bypass/no async store: `0x10`, `0x46` branch straight to the
-  cleanup/state-reset helper.
+  cleanup/state-reset helper. `0x46` is therefore not a normal file-table
+  command on the wire.
 - Async store: all other valid CRC frames call `channel_b_store_async_command`
   directly and are later drained by `channel_b_async_command_processor`.
 
 The async processor then handles OTA low commands `0x01..0x07`, sleep
 `0x11/0x12/0x27`, explicit NAK-code-2 rejects `0x21..0x24`, activity `0x2a`,
-alarm `0x2c`, file table `0x41/0x43/0x46`, no-response placeholders
+alarm `0x2c`, file table `0x41/0x43`, no-response placeholders
 `0x13/0x29/0x3b/0x47/0x4b`, and device-info/config `0x5a`; unrecognised
 commands fall through to `channel_b_send_nak(cmd, 0)`.
 

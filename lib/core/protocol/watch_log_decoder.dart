@@ -1739,8 +1739,8 @@ String _labelForChannelB(int cmd) {
       return 'h59FileMetadata';
     case OpB.h59FileChunk:
       return 'h59FileChunk';
-    case OpB.h59FileDelete:
-      return 'h59FileDelete';
+    case OpB.h59CleanupBypass46:
+      return 'h59CleanupBypass46';
     case OpB.h59Noop47:
       return 'h59Noop47';
     case OpB.h59Noop4b:

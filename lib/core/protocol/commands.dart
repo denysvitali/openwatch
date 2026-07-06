@@ -792,15 +792,16 @@ class Commands {
         _h59FileOperationPayload(operationPayload),
       );
 
-  /// H59MA v14 firmware-native file delete (`0x46`).
+  /// Unsupported H59MA v14 firmware-native file delete placeholder (`0x46`).
   ///
-  /// Shares the same 16-byte operation payload path as `0x43`, but ships no
-  /// response; hosts verify deletion by polling `0x41` afterwards.
-  static Uint8List h59FileTableDelete(List<int> operationPayload) =>
-      Codec.buildChannelB(
-        OpB.h59FileDelete,
-        _h59FileOperationPayload(operationPayload),
-      );
+  /// Static firmware analysis shows on-wire `0x46` valid-CRC frames bypass
+  /// async storage and go only through the Channel-B cleanup helper. The local
+  /// file-table handler returns immediately for commands other than `0x41` and
+  /// `0x43`, so OpenWatch must not expose this as a delete operation.
+  @Deprecated('H59MA Channel-B 0x46 is cleanup/bypass, not file delete.')
+  static Uint8List h59FileTableDelete(List<int> _) => throw UnsupportedError(
+    'H59MA Channel-B 0x46 is cleanup/bypass, not file delete',
+  );
 
   static List<int> _h59FileOperationPayload(List<int> operationPayload) => [
     for (final b in operationPayload.take(_h59FileOperationPayloadBytes))

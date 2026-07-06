@@ -22,9 +22,10 @@ r2 -2 -q -a arm -b 16 -e asm.cpu=cortex -e scr.color=0 \
 
 - `0x41`: builds a file-list response.
 - `0x43`: calls the file operation helper at `0xacc8`.
-- Other values return immediately from this local handler. The broader
-  Channel-B dispatcher still has a `0x46` file-command path; see
-  `firmwares/_re/channel-b-dispatch/evidence.md`.
+- Other values return immediately from this local handler. The normal
+  first-stage dispatcher bypasses async storage for on-wire `0x46`; if an
+  internal path seeds `cmd = 0x46` into the async worker, this local handler
+  still returns without calling the `0x43` operation helper.
 
 For `0x41`, the handler copies the 4-byte request value to stack state, sets
 `rsp[0] = 0`, then loops while `FUN_008313ba` (`0xafba`) returns a record and

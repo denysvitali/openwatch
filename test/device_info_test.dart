@@ -163,11 +163,12 @@ void main() {
       },
     );
 
-    test('h59FileTableDelete wraps the same raw operation block in 0x46', () {
-      final frame = Commands.h59FileTableDelete([0x01, 0x78, 0x56, 0x34, 0x12]);
-      expect(frame[0], Codec.channelBMagic);
-      expect(frame[1], OpB.h59FileDelete);
-      expect(Codec.rxChannelBPayload(frame), [0x01, 0x78, 0x56, 0x34, 0x12]);
+    test('h59FileTableDelete is unsupported on H59MA v14', () {
+      expect(
+        // ignore: deprecated_member_use_from_same_package
+        () => Commands.h59FileTableDelete([0x01, 0x78, 0x56, 0x34, 0x12]),
+        throwsA(isA<UnsupportedError>()),
+      );
     });
   });
 
