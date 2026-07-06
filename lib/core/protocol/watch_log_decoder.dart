@@ -781,6 +781,12 @@ class WatchLogDecoder {
       return 'B ${_hex(cmd)} ${_labelForChannelB(cmd)} unsupported '
           'compactNak=0 payloadBytes=${payload.length}';
     }
+    if (_isUnsupportedApkSidecarChannelB(cmd)) {
+      details['firmwareBehavior'] = 'compact-nak-0';
+      details['payloadBytes'] = payload.length;
+      return 'B ${_hex(cmd)} ${_labelForChannelB(cmd)} unsupported '
+          'compactNak=0 payloadBytes=${payload.length}';
+    }
 
     switch (cmd) {
       case OpB.h59SleepSummary:
@@ -1792,12 +1798,16 @@ String _labelForChannelA(int opcode) {
 
 String _labelForChannelB(int cmd) {
   switch (cmd) {
+    case OpB.apkMusicSendUnsupported:
+      return 'apkMusicSendUnsupported';
     case OpB.h59SleepSummary:
       return 'h59SleepSummary';
     case OpB.h59SleepDetail:
       return 'h59SleepDetail';
     case OpB.h59Noop13:
       return 'h59Noop13';
+    case OpB.apkLocationUnsupported:
+      return 'apkLocationUnsupported';
     case OpB.h59ExplicitReject21:
       return 'h59ExplicitReject21';
     case OpB.h59ExplicitReject22:
@@ -1806,14 +1816,30 @@ String _labelForChannelB(int cmd) {
       return 'h59ExplicitReject23';
     case OpB.h59ExplicitReject24:
       return 'h59ExplicitReject24';
+    case OpB.apkTemperatureSeriesUnsupported:
+      return 'apkTemperatureSeriesUnsupported';
+    case OpB.apkTemperatureOnceUnsupported:
+      return 'apkTemperatureOnceUnsupported';
     case OpB.sleepNew:
       return 'sleepNew/night';
+    case OpB.apkManualHeartRateUnsupported:
+      return 'apkManualHeartRateUnsupported';
     case OpB.h59Noop29:
       return 'h59Noop29';
     case OpB.activitySummary:
       return 'activitySummary';
     case OpB.alarm:
       return 'alarm';
+    case OpB.apkContactUnsupported:
+      return 'apkContactUnsupported';
+    case OpB.apkBtMacUnsupported:
+      return 'apkBtMacUnsupported';
+    case OpB.apkQrCodeUnsupported:
+      return 'apkQrCodeUnsupported';
+    case OpB.apkPlateListUnsupported:
+      return 'apkPlateListUnsupported';
+    case OpB.apkCustomWatchFaceUnsupported:
+      return 'apkCustomWatchFaceUnsupported';
     case OpB.h59Noop3b:
       return 'h59Noop3b';
     case OpB.sleepLunchNew:
@@ -1842,10 +1868,30 @@ String _labelForChannelB(int cmd) {
       return 'h59CleanupBypass46';
     case OpB.h59Noop47:
       return 'h59Noop47';
+    case OpB.apkGpsNavigationUnsupported:
+      return 'apkGpsNavigationUnsupported';
+    case OpB.apkManualOxygenUnsupported:
+      return 'apkManualOxygenUnsupported';
+    case OpB.apkAvatarDeviceUnsupported:
+      return 'apkAvatarDeviceUnsupported';
     case OpB.h59Noop4b:
       return 'h59Noop4b';
+    case OpB.apkSmsQuickUnsupported:
+      return 'apkSmsQuickUnsupported';
+    case OpB.apkAgpsUnsupported:
+      return 'apkAgpsUnsupported';
     case OpB.deviceInfoConfig:
       return 'deviceInfoConfig';
+    case OpB.apkIntervalBloodOxygenUnsupported:
+      return 'apkIntervalBloodOxygenUnsupported';
+    case OpB.apkIntervalHeartRateUnsupported:
+      return 'apkIntervalHeartRateUnsupported';
+    case OpB.apkAlbumEbookRecordListUnsupported:
+      return 'apkAlbumEbookRecordListUnsupported';
+    case OpB.apkEbookDeleteUnsupported:
+      return 'apkEbookDeleteUnsupported';
+    case OpB.apkRecordReadUnsupported:
+      return 'apkRecordReadUnsupported';
     default:
       return 'unknown';
   }
@@ -1870,6 +1916,34 @@ bool _isH59ExplicitRejectChannelB(int cmd) {
     case OpB.h59ExplicitReject22:
     case OpB.h59ExplicitReject23:
     case OpB.h59ExplicitReject24:
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool _isUnsupportedApkSidecarChannelB(int cmd) {
+  switch (cmd) {
+    case OpB.apkMusicSendUnsupported:
+    case OpB.apkLocationUnsupported:
+    case OpB.apkTemperatureSeriesUnsupported:
+    case OpB.apkTemperatureOnceUnsupported:
+    case OpB.apkManualHeartRateUnsupported:
+    case OpB.apkContactUnsupported:
+    case OpB.apkBtMacUnsupported:
+    case OpB.apkQrCodeUnsupported:
+    case OpB.apkPlateListUnsupported:
+    case OpB.apkCustomWatchFaceUnsupported:
+    case OpB.apkGpsNavigationUnsupported:
+    case OpB.apkManualOxygenUnsupported:
+    case OpB.apkAvatarDeviceUnsupported:
+    case OpB.apkSmsQuickUnsupported:
+    case OpB.apkAgpsUnsupported:
+    case OpB.apkIntervalBloodOxygenUnsupported:
+    case OpB.apkIntervalHeartRateUnsupported:
+    case OpB.apkAlbumEbookRecordListUnsupported:
+    case OpB.apkEbookDeleteUnsupported:
+    case OpB.apkRecordReadUnsupported:
       return true;
     default:
       return false;

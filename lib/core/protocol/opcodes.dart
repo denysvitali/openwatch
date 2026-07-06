@@ -182,6 +182,10 @@ class OpB {
   static const int otaCheck = 0x04;
   static const int otaEnd = 0x05;
 
+  // APK-era media sidecar id. H59MA v14's low Channel-B switch routes 0x06 to
+  // the default compact NAK code 0 slot, not to a host->watch music handler.
+  static const int apkMusicSendUnsupported = 0x06;
+
   // APK-era FileHandle ids. H59MA v14 does not implement this generic
   // upload/list/delete flow; 0x31 only reaches a pre-store callback before NAK.
   static const int fileList = 0x30;
@@ -203,29 +207,48 @@ class OpB {
   )
   static const int h59FileDelete = h59CleanupBypass46;
 
-  @Deprecated('H59MA v14 Channel-B 0x3a is not implemented.')
-  static const int customWatchFace = 0x3a;
-
   // LargeData actions (PROTOCOL.md §4.7)
   static const int h59SleepSummary = 0x11; // H59MA 100B sleep summary
   static const int h59SleepDetail = 0x12; // H59MA 288B sleep detail
   static const int h59Noop13 = 0x13; // H59MA Channel-B placeholder; no reply
+  static const int apkLocationUnsupported = 0x20;
   // H59MA v14 recognizes these Channel-B ids only to reject them with
   // compact NAK code 2. They overlap Channel-A target/alarm-style opcodes.
   static const int h59ExplicitReject21 = 0x21;
   static const int h59ExplicitReject22 = 0x22;
   static const int h59ExplicitReject23 = 0x23;
   static const int h59ExplicitReject24 = 0x24;
+  static const int apkTemperatureSeriesUnsupported = 0x25;
+  static const int apkTemperatureOnceUnsupported = 0x26;
   static const int sleepNew = 0x27; // new sleep protocol (night) — Ch B
+  static const int apkManualHeartRateUnsupported = 0x28;
   static const int h59Noop29 = 0x29; // H59MA Channel-B placeholder; no reply
   static const int activitySummary =
       0x2a; // v14 activity/sport summary — see GHIDRA §2.8
   static const int alarm = 0x2c; // Channel-B compact alarm read/write
+  static const int apkContactUnsupported = 0x2d;
+  static const int apkBtMacUnsupported = 0x2e;
+  static const int apkQrCodeUnsupported = 0x2f;
+  static const int apkPlateListUnsupported = 0x35;
+  static const int apkCustomWatchFaceUnsupported = 0x3a;
   static const int h59Noop3b = 0x3b; // H59MA Channel-B placeholder; no reply
   // H59MA nap/lunch response opcode. Hosts request it via 0x27 recordType=1.
   static const int sleepLunchNew = 0x3e;
   static const int h59Noop47 = 0x47; // H59MA Channel-B placeholder; no reply
+  static const int apkGpsNavigationUnsupported = 0x48;
+  static const int apkManualOxygenUnsupported = 0x49;
+  static const int apkAvatarDeviceUnsupported = 0x4a;
   static const int h59Noop4b = 0x4b; // H59MA Channel-B placeholder; no reply
+  static const int apkSmsQuickUnsupported = 0x4c;
+  static const int apkAgpsUnsupported = 0x54;
+  static const int apkIntervalBloodOxygenUnsupported = 0x5f;
+  static const int apkIntervalHeartRateUnsupported = 0x75;
+  static const int apkAlbumEbookRecordListUnsupported = 0x80;
+  static const int apkEbookDeleteUnsupported = 0x81;
+  static const int apkRecordReadUnsupported = 0x82;
+
+  @Deprecated('H59MA v14 Channel-B 0x3a is not implemented.')
+  static const int customWatchFace = apkCustomWatchFaceUnsupported;
 
   /// H59MA v14 device-info / config TLV handler (Channel-B `0x5a`).
   ///

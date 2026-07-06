@@ -328,6 +328,60 @@ void main() {
       }
     });
 
+    test('labels APK sidecar commands as unsupported on H59MA', () {
+      final cases = [
+        (OpB.apkMusicSendUnsupported, 'apkMusicSendUnsupported'),
+        (OpB.apkLocationUnsupported, 'apkLocationUnsupported'),
+        (
+          OpB.apkTemperatureSeriesUnsupported,
+          'apkTemperatureSeriesUnsupported',
+        ),
+        (OpB.apkTemperatureOnceUnsupported, 'apkTemperatureOnceUnsupported'),
+        (OpB.apkManualHeartRateUnsupported, 'apkManualHeartRateUnsupported'),
+        (OpB.apkContactUnsupported, 'apkContactUnsupported'),
+        (OpB.apkBtMacUnsupported, 'apkBtMacUnsupported'),
+        (OpB.apkQrCodeUnsupported, 'apkQrCodeUnsupported'),
+        (OpB.apkPlateListUnsupported, 'apkPlateListUnsupported'),
+        (OpB.apkCustomWatchFaceUnsupported, 'apkCustomWatchFaceUnsupported'),
+        (OpB.apkGpsNavigationUnsupported, 'apkGpsNavigationUnsupported'),
+        (OpB.apkManualOxygenUnsupported, 'apkManualOxygenUnsupported'),
+        (OpB.apkAvatarDeviceUnsupported, 'apkAvatarDeviceUnsupported'),
+        (OpB.apkSmsQuickUnsupported, 'apkSmsQuickUnsupported'),
+        (OpB.apkAgpsUnsupported, 'apkAgpsUnsupported'),
+        (
+          OpB.apkIntervalBloodOxygenUnsupported,
+          'apkIntervalBloodOxygenUnsupported',
+        ),
+        (
+          OpB.apkIntervalHeartRateUnsupported,
+          'apkIntervalHeartRateUnsupported',
+        ),
+        (
+          OpB.apkAlbumEbookRecordListUnsupported,
+          'apkAlbumEbookRecordListUnsupported',
+        ),
+        (OpB.apkEbookDeleteUnsupported, 'apkEbookDeleteUnsupported'),
+        (OpB.apkRecordReadUnsupported, 'apkRecordReadUnsupported'),
+      ];
+      final frames = cases
+          .map((entry) => Codec.buildChannelB(entry.$1, [0x01]))
+          .toList();
+
+      final report = const WatchLogDecoder().decodeNrfConnectLog(
+        frames.map((f) => _line(_chB, f)).join('\n'),
+      );
+
+      expect(report.frames, hasLength(cases.length));
+      expect(
+        report.frames.map((f) => f.details['label']),
+        cases.map((entry) => entry.$2),
+      );
+      for (final frame in report.frames) {
+        expect(frame.title, contains('unsupported compactNak=0'));
+        expect(frame.details['firmwareBehavior'], 'compact-nak-0');
+      }
+    });
+
     test('summarizes H59MA Channel-B alarm read records', () {
       final frame = Codec.buildChannelB(OpB.alarm, [
         0x01,
