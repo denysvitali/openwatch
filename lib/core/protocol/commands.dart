@@ -587,8 +587,11 @@ class Commands {
         0x32,
       ]);
 
-  /// `UltraVioletReq` (0x7d): historical UV-index samples for
-  /// [dayOffset] (0 = today, 1 = yesterday, ...).
+  /// `UltraVioletReq` (0x7d): unsupported/no-response on H59MA v14.
+  ///
+  /// The firmware accepts the opcode into the deferred worker, then branches
+  /// directly to queue cleanup without invoking a UV history handler. Kept for
+  /// legacy/capture compatibility only.
   static Uint8List readUvHistory({int dayOffset = 0}) =>
       Codec.buildChannelA(OpA.ultraViolet, [dayOffset & 0xFF]);
 

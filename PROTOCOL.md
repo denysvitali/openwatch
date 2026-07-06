@@ -367,7 +367,7 @@ the generic bitmap below.
 
 | Name | Opcode | Sub | Dir | Request | Response | Meaning |
 |---|---|---|---|---|---|---|
-| ReadHeartRateReq | `0x15` | — | →watch | `[1..4]`=local-day epoch seconds u32 LE (use local midnight for per-day reads; `0x00000000` asks for latest/current) | **ReadHeartRateRsp** multi-pkt per `FUN_0082cf48` (GHIDRA §3.12): hdr `pl[0]=0x18` (legacy) or `pl[0]=0x00,pl[1]=totalFrames` (H59MAX); data `pl[0]=seq(1..23)`, `pl[1..14]=13B` containing the echoed u32 LE (bytes 0..3 of the reassembled record) + 9 BPM bytes; `pl[0]=0xFF`=empty day. stride 13B. | Read stored HR history. Up to 288 5-min slots/day. The watch RTC is set from local BCD bytes, so per-day lookups must use the host-local midnight epoch, not a UTC reconstruction. Note: 0x15 has NO inner `0x01` tag byte — that scheme is for 0x0d/0x37/0x39/0x7d. |
+| ReadHeartRateReq | `0x15` | — | →watch | `[1..4]`=local-day epoch seconds u32 LE (use local midnight for per-day reads; `0x00000000` asks for latest/current) | **ReadHeartRateRsp** multi-pkt per `FUN_0082cf48` (GHIDRA §3.12): hdr `pl[0]=0x18` (legacy) or `pl[0]=0x00,pl[1]=totalFrames` (H59MAX); data `pl[0]=seq(1..23)`, `pl[1..14]=13B` containing the echoed u32 LE (bytes 0..3 of the reassembled record) + 9 BPM bytes; `pl[0]=0xFF`=empty day. stride 13B. | Read stored HR history. Up to 288 5-min slots/day. The watch RTC is set from local BCD bytes, so per-day lookups must use the host-local midnight epoch, not a UTC reconstruction. Note: 0x15 has NO inner `0x01` tag byte — that scheme is for 0x0d/0x37/0x39, not `0x7d`. |
 | HeartRateSettingReq | `0x16` | 01/02 | →watch | w2:`[02,en?1:2,interval]`; w5:`+[startInterval,tooLow,tooHigh]` | read: `[1]`en, `[2]`interval, `[3]`startInterval, `[4]`tooLow, `[5]`tooHigh | HR auto-measure config + hi/lo alarms. |
 | RealTimeHeartRate | `0x1e` | — | →watch | `[action]` where `01`=start 60 s, `02`=stop, `03`=reset/extend | no direct ack on H59MA; live HR arrives on notify paths | Toggle realtime HR stream. |
 | StartHeartRateReq | `0x69` | type | →watch | `[type, sub]` (type enum below) | `[0]`type `[1]`errCode `[2]`value; if len≥5 `[3]`sbp `[4]`dbp | Start a measurement session. |
@@ -380,7 +380,7 @@ the generic bitmap below.
 | HRVReq | `0x39` | index | →watch | `[index]` | multi-pkt (`[0]=00`{size,range=30}, `[0]=01`{offset days-back + samples}, `0xFF`=end). stride 13B. | Read HRV history for a day index. |
 | PressureReq | `0x37` | index | →watch | `[index]` | multi-pkt (same scheme as HRV). stride 13B. | Read stress history for a day index. |
 | PressureSettingReq | `0x38` | 01/02 | →watch | w:`[02,en(0/1)]` | read: `[1]`enable; response echoes `[0x38,sub,value]` | Stress/pressure auto-measure enable bit. H59MA v14 has no confirmed Channel-A HRV auto-measure setting; the old APK-era `0x38` HRV setting row is stale for this firmware. |
-| UltraVioletReq | `0x7d` | index | →watch | `[index]` | multi-pkt (same scheme). stride 13B. | Read UV-index history for a day index. |
+| UltraVioletReq | `0x7d` | index | →watch | `[index]` | **no response on H59MA v14** | Legacy/capture-only opcode. The deferred worker compares `0x7d` at body `0x6f5e`, then branches to the common queue-advance path at `0x6f7c` without a handler call or `FUN_0082c988` fragmenter. Do not use as a UV-history request on v14. |
 | UVSettingReq | `0x3e` | 01/02 | →watch | w:`[02,en(0/1)]` | read: `[1]`enable | UV auto-measure on/off. |
 | SugarLipidsSettingReq | `0x3a` | type+act | →watch | r:`[type,01]`; w:`[type,02,en(0/1),valLo,valHi]` | `[1]`act, if read `[0]`type,`[2]`en,`[3..4]`value LE,`[5]`supportUnit | Blood sugar/lipids reference config. (per-request waiter) |
 | MenstruationReq | `0x2b` | 01/02 | →watch | w(11B):`[02,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10]` | **MenstruationDataRsp** 16B (per GHIDRA §3.1/§3.1.1, `FUN_0082b078` lazy-init + `FUN_0082af28` read-memcpy): `[0]`sentinel (`0xCA`=present; lazy-init zeroes; quirk — `rsp[0]` is overwritten with `start_date_bcd[0]` on read, so host must re-stamp `rsp[0]=0x2B`), `[1]`startDate-yr BCD, `[2]`cycleLenDays BCD, `[3]`startDate-day BCD, `[4..5]`=`currentDay − record[4]` (u16 LE on write, low byte only returned), `[6..7]`=`currentMonth − record[6]` (u16 LE on write, low byte only returned), `[8..12]`=5B opaque `periodData` (semantics not RE-resolvable), `[13..15]`=padding (always zero on write/read-back). Decode via `MixtureState.tryParse`. | Menstrual-cycle config. |
@@ -1038,10 +1038,11 @@ Feedback, Customer-support chat.
 >   §10.2 fragmenter table). The 49-byte record body (1B slot-id echo + 48B
 >   null-padded producer output from `FUN_008344fe`/`FUN_0083468e`) is split
 >   into 4 chunks of 13B; no end-of-message sentinel — host must reassemble
->   by quiet-period or per-record marker. `0x7d` UV history is NOT in the
->   §3.x handler set (only deferred-ring dispatcher references); fragmenter
->   table at GHIDRA §10.2 lists `0x37/0x39/0x7a` only. Live capture needed
->   to confirm `0x7d`'s fragmenter / feature-id byte.
+>   by quiet-period or per-record marker. `0x7d` UV history is a queued no-op
+>   on H59MA v14: the deferred worker compares it at body `0x6f5e`, then
+>   branches to the common queue-advance path at `0x6f7c` without a handler
+>   call or `FUN_0082c988` fragmenter. The fragmenter table at GHIDRA §10.2
+>   lists `0x37/0x39/0x7a` only.
 > - **Channel-A `0x0d` BP-history wire split** — `FUN_00834296` builds a
 >   tagged 14-byte header and compact body frames. Header byte 4 is the interval
 >   in minutes (`0x3c` default = hourly), bytes 5..10 are a 48-bit presence
@@ -1101,6 +1102,7 @@ Documented v14 dispatcher targets include:
 | `0x72` | `0x00829e92` | Unicode notification text |
 | `0x77` | `0x0082ce0c` | phone-sport sub-dispatch |
 | `0x7a` | `0x0082cb3a` | Muslim/prayer config |
+| `0x7d` | no handler | queued no-op; deferred worker branches `0x6f5e -> 0x6f7c` with no response |
 | `0x81` | `0x0082cdac` | 6-byte config chunk |
 | `0xa1` | `0x00827f5c` | factory/test commands |
 | `0xc6` | inline branch | reboot / restore key |

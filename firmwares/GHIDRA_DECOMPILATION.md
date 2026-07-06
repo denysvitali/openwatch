@@ -1317,6 +1317,11 @@ like "+2" in decompiled pointer arithmetic, but handlers receive the copied
 | `0xc7` | — | `0x00832ebc` | Vibration/motor pattern player — see §3.2. |
 | `0xff` | — | `0x0082cde8` | Factory reset — see §3.8. |
 
+`0x7d` is intentionally absent from the handler table. The deferred worker
+does compare it (`cmp r1, 0x7d` at v14 body `0x6f5e`), but the equal branch
+goes directly to the common queue-advance path at `0x6f7c`. No handler call,
+simple ACK, or `FUN_0082c988` long-response fragmenter is reached.
+
 ### Common response path
 
 Most handlers build a 16-byte response buffer, compute an additive checksum
@@ -3512,8 +3517,8 @@ A cross-cutting view of the **10-slot deferred ring** at
 `DAT_0082bfcc` that backs *all* the opcodes routed through
 the dispatcher via the `FUN_0082be64(frame_ptr)` call.
 This ring is referenced in 15+ sections (every `0x2b`, `0x37`,
-`0x38`, `0x3a`, `0x3b`, `0x43 'C'`, `0x48 'H'`, `0x72`,
-`0x7a`, `0x81`, `0xa1`, `0xc6`, `0xc7 'D'`, `0xff`) but
+`0x38`, `0x3a`, `0x3b`, `0x43 'C'`, `0x72`,
+`0x77`, `0x7a`, `0x7d`, `0x81`, `0xa1`, `0xc6`, `0xc7 'D'`, `0xff`) but
 its actual structure was never documented in a single place.
 
 #### Behavior
@@ -3583,7 +3588,7 @@ clobbering pending work.
 
 #### Cross-reference table
 
-Every opcode routed through `FUN_0082be64` (per §8.1
+Primary high/config opcodes routed through `FUN_0082be64` (per §8.1
 dispatcher and §3 dispatcher):
 
 | Opcode | § | Handler (deferred-worker target) |
@@ -3595,14 +3600,16 @@ dispatcher and §3 dispatcher):
 | `0x3b` uvTouch | §3.18 | `channel_a_handle_touch_uv_config` |
 | `0x43 'C'` detail sport | §3.6 | `channel_a_handle_detail_sport_read` |
 | `0x72` pushMsgUint | §3.3 | `channel_a_handle_push_msg_unicode` |
+| `0x77` phoneSport | §3.16 | `channel_a_handle_phone_sport` |
 | `0x7a` muslim | §3.11 | `channel_a_handle_muslim_prayer` |
+| `0x7d` UV history placeholder | legacy | no handler; `cmp r1,0x7d` at body `0x6f5e` branches to `0x6f7c` queue-advance/no-response |
 | `0x81` config chunk | §3.5 companion | `channel_a_handle_config_chunk` |
 | `0xa1` factory/test | §3.x | `channel_a_handle_factory_test` |
 | `0xc6` restoreKey/reboot | §3.14 | inline case in `channel_a_dispatch_queued_frame` |
 | `0xc7` vibration | §3.2 | `channel_a_handle_vibration_pattern` |
 | `0xff` factory reset | §3.8 | `channel_a_handle_factory_reset` |
 
-That's **13 opcodes** routed through `enqueue_deferred_command_frame`. The
+That's **15 opcodes** in this high/config deferred set. The
 remaining ~30 documented 0xFEE7 opcodes are either inline
 in the dispatcher (no ring) or are state-update / ack-only
 (no response).
@@ -3612,7 +3619,7 @@ in the dispatcher (no ring) or are state-update / ack-only
 Every detailed handler section (e.g. §3.1, §3.20, §8.2)
 mentions `FUN_0082be64` in passing but never explains the
 **ring layout, the 10-slot wrap, the async worker, or the
-14-opcode consumer list**. A host SDK author who reads §3
+high/config consumer list**. A host SDK author who reads §3
 top-to-bottom sees the ring referenced many times without a
 unified view of its structure. This section pulls the threads
 together: the ring is the **single async-work queue for the
@@ -3622,11 +3629,13 @@ queue unboundedly.
 
 #### §3 vs §8 ring usage
 
-The §3 dispatcher (`channel_a_dispatch_queued_frame`) routes `0x2b`, `0x37`,
-`0x38`, `0x3a`, `0x3b`, `0x43`, `0x72`, `0x7a`, `0x81`,
+For the high/config group, the §3 dispatcher
+(`channel_a_dispatch_queued_frame`) routes `0x2b`, `0x37`, `0x38`, `0x3a`,
+`0x3b`, `0x43`, `0x72`, `0x77`, `0x7a`, `0x7d`, `0x81`,
 `0xa1`, `0xc6`, `0xc7`, `0xff` through `FUN_0082be64` —
-13 opcodes. The §8.1 0xFEE7 dispatcher adds `0x48 'H'` —
-1 opcode. Total **14 opcodes**.
+15 opcodes. The §8.1 0xFEE7 dispatcher routes the same high/config set
+through this helper when those opcodes arrive on the vendor path; `0x48 'H'`
+is handled inline by FEE7 and does not occupy a deferred-ring slot.
 
 The §3 vs §8 split is *only* by dispatch path — both paths
 share the same `FUN_0082be64` helper, the same ring buffer
@@ -4805,6 +4814,10 @@ into a 10-slot ring, increments the slot index, and wakes the
 `qc_app_task` loop. The ring base pointer is the literal value in
 `DAT_0082bfcc`:
 
+`0x7d` is included in this enqueue set for compatibility, but the worker later
+drops it: v14 body `0x6f5e cmp r1,0x7d` branches directly to `0x6f7c`, the
+common queue-advance/no-response path. It is not a UV-history fragmenter.
+
 ```c
 // DAT_0082bfcc == 0x00209f54
 memcpy((void *)(DAT_0082bfcc + 4 + slot * 0x10), param_1, 0x10);
@@ -5020,6 +5033,8 @@ are routed to `enqueue_deferred_command_frame` (deferred). Within the `0x00`–`
 `0x1e`, `0x25`, `0x26` are deferred; the rest are either immediate
 thunks, the explicit no-op at `0x14`, or vendor NAK. Opcodes
 `0x7b`, `0xb0`, `0xc2`, `0xcc`, `0xf0`, `0xf1` are explicit no-ops.
+`0x7d` is deferred but then no-ops in the worker (`0x6f5e -> 0x6f7c`), so
+it should not be treated as a UV-history request.
 Unrecognized opcodes fall through to `fee7_send_vendor_nak`.
 
 ### Take-away
@@ -6508,6 +6523,7 @@ section number* for a given operation.
 | `0x72` | §3.3 | pushMsgUint (chunked Unicode buffer, 11 B per chunk + flush marker) |
 | `0x77` | §3.16 | phoneSport (4-stage lifecycle via switch8) |
 | `0x7a` | §3.11 | muslim (long fragmented config; producer is a stub) |
+| `0x7d` | — | queued no-op; worker branches `0x6f5e -> 0x6f7c` with no response |
 | `0xa1` | §3.x | factory/test mode (6 sub-cmds, saves 1 kB context to `DAT_00830128`) |
 | `0xc6` | §3.14 | restoreKey (full reboot sequence) |
 | `0xc7` | §3.2 | vibration / motor pattern (two modes `'#'` / `'D'`) |

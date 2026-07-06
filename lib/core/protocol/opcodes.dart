@@ -84,12 +84,12 @@ class OpA {
   /// `[0x38, sub, value]`.
   static const int pressureSetting = 0x38;
 
-  /// `UltraVioletReq` (0x7d): NOT in section 10.2 fragmenter table —
-  /// needs live capture. Shares the FUN_0082c988 13-byte-chunk
-  /// fragmenter layout (49-byte record = 4 chunks) with 0x37/0x39,
-  /// but the section 10.2 inventory does not list 0x7d under the
-  /// fragmenter callers — verify before relying on the
-  /// header+3-body-chunk shape.
+  /// `UltraVioletReq` (0x7d): unsupported on H59MA v14.
+  ///
+  /// The deferred worker compares this opcode at body offset `0x6f5e`, then
+  /// branches directly to the common queue-advance path at `0x6f7c` without a
+  /// handler call or fragmented response. Kept only for legacy/capture
+  /// compatibility.
   static const int ultraViolet = 0x7d;
   static const int uvSetting = 0x3e;
   static const int sugarLipidsSetting = 0x3a;

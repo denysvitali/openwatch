@@ -68,6 +68,7 @@ The prior notes were broadly directionally right but carry a number of concrete 
 - **The bucket-table tail `0x81..0xff` is zero-fill padding**, not a populated range; the last real entry is opcode `0x80 = 0x40`. The table is never referenced by code.
 - **`0x21b58`/`0x1ff0c` is not a "command literal table" for Channel-A dispatch.** It is referenced only by a health-metric range-clamp routine (v13 `0x1d340` via inline pool at `0x1d458`; v14 `0x1c040` via absolute pointer at `0x1c0b8 → 0x84630c`). The `0x50..0x5a` values there are reused as small integer constants, not live BLE opcodes.
 - **There IS a firmware Channel-A dispatcher in v14.** Ghidra decompilation identifies `FUN_0082d2dc` at `0x0082d2dc`: it drains a 16-byte frame ring buffer, strips/processes the opcode at offset `2`, and dispatches to per-opcode handlers. The earlier conclusion that "Channel-A dispatch is phone-side only" was based on the dead bucket table and is therefore incorrect. See `firmwares/GHIDRA_DECOMPILATION.md` §3 for the opcode map.
+- **Channel-A `0x7d` is a deferred no-op, not UV history.** In the v14 deferred worker, `cmp r1,0x7d` at body `0x6f5e` branches directly to the common queue-advance path at `0x6f7c`; no handler call or long-response fragmenter is reached.
 
 ### BLE GATT
 
