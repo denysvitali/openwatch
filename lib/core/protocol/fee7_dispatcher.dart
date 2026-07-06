@@ -141,9 +141,9 @@ class Fee7Dispatcher {
   )
   Stream<SyntheticSleepRequest> get onVibration => onSyntheticSleep;
 
-  /// Catch-all unary opcodes that the firmware echoes/acks as the opcode
-  /// alone: `0x90`, `0x91`, `0x94..0x96`, `0xbf`, `0xc4`,
-  /// `0xc5`, `0xc8`, `0xc9`, `0xcd`, `0xce`.
+  /// Catch-all vendor/debug opcodes without a dedicated typed stream:
+  /// `0x90`, `0x91`, `0x94..0x96`, `0xbf`, `0xc4`, `0xc5`, `0xc8`, `0xc9`,
+  /// `0xcd`, `0xce`.
   Stream<UnaryOpcode> get onUnary => _unary.stream;
 
   /// Unrecognized opcodes (still surfaced as [UnaryOpcode] so observability

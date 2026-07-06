@@ -361,11 +361,11 @@ class Fee7 {
   static const int unaryBf = memoryWrite;
   @Deprecated('Use memoryRead; 0xc0 emits fragmented memory-read chunks.')
   static const int unaryC0 = memoryRead;
-  static const int unaryC4 = 0xc4;
-  static const int unaryC5 = 0xc5;
-  static const int unaryC8 = 0xc8;
-  static const int unaryC9 = 0xc9;
-  static const int unaryCd = 0xcd;
+  static const int unaryC4 = 0xc4; // No-op stub
+  static const int unaryC5 = 0xc5; // Runtime flag write: caec[3]
+  static const int unaryC8 = 0xc8; // Runtime flag write: caec[4]
+  static const int unaryC9 = 0xc9; // Runtime flag write: caec[5]
+  static const int unaryCd = 0xcd; // Small arbitrary-address read
   static const int unaryCe = 0xce; // factory/test sub-commands
   static const int syntheticSleep = 0xfe; // Synthetic sleep-history record
   @Deprecated(

@@ -934,6 +934,31 @@ void main() {
       }
     });
 
+    test('labels FEE7 vendor debug opcodes from reversed firmware', () {
+      const cases = {
+        Fee7.unaryC4: 'runtimeNoop',
+        Fee7.unaryC5: 'runtimeFlagWrite',
+        Fee7.unaryC8: 'runtimeFlagWrite',
+        Fee7.unaryC9: 'runtimeFlagWrite',
+        Fee7.unaryCd: 'smallMemoryRead',
+        Fee7.unaryCe: 'factoryTest',
+      };
+
+      for (final entry in cases.entries) {
+        final frame = Codec.buildChannelA(entry.key, [0x01, 0x02]);
+
+        final decoded = const WatchLogDecoder().decodeHex(
+          frame.map((b) => b.toRadixString(16).padLeft(2, '0')).join('-'),
+          uuid: _fee7,
+        );
+
+        expect(decoded.valid, isTrue);
+        expect(decoded.channel, WatchLogChannel.fee7);
+        expect(decoded.details['label'], entry.value);
+        expect(decoded.title, contains(entry.value));
+      }
+    });
+
     test('summarizes FEE7 memory-read chunks as raw data frames', () {
       final frame = Codec.buildChannelA(
         Fee7.memoryRead,

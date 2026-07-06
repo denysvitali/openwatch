@@ -663,10 +663,11 @@ class WatchLogDecoder {
         return 'FEE7 ${_hex(opcode)} syntheticSleep'
             '${durationMinutes == null ? '' : ' duration=${durationMinutes}m'}';
       default:
+        final label = _labelForFee7(opcode);
         if (Fee7.isUnary(opcode)) {
-          return 'FEE7 ${_hex(opcode)} unary';
+          return 'FEE7 ${_hex(opcode)} ${label == 'unary' ? 'unary' : label}';
         }
-        return 'FEE7 ${_hex(opcode)} ${_labelForFee7(opcode)}';
+        return 'FEE7 ${_hex(opcode)} $label';
     }
   }
 
@@ -2012,6 +2013,16 @@ String _labelForFee7(int opcode) {
       return 'memoryRead';
     case Fee7.otaTrigger:
       return 'otaControl';
+    case Fee7.unaryC4:
+      return 'runtimeNoop';
+    case Fee7.unaryC5:
+    case Fee7.unaryC8:
+    case Fee7.unaryC9:
+      return 'runtimeFlagWrite';
+    case Fee7.unaryCd:
+      return 'smallMemoryRead';
+    case Fee7.unaryCe:
+      return 'factoryTest';
     case Fee7.firmwareBuildInfo:
       return 'firmwareBuildInfo';
     case Fee7.sessionMode1Ack:
