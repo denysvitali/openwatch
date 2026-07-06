@@ -798,6 +798,12 @@ class WatchLogDecoder {
             'bytes=$bodyBytes';
       case OpB.h59SleepDetail:
         final dayOffset = payload[0] & 0xff;
+        if (payload.length == 1) {
+          details['compactStatusCode'] = dayOffset;
+          details['firmwareBehavior'] = 'compact-status';
+          details['payloadBytes'] = payload.length;
+          return 'B 0x12 H59 sleep detail compactStatus=${_hex(dayOffset)}';
+        }
         final bodyBytes = payload.length - 1;
         details['dayOffset'] = dayOffset;
         details['detailBytes'] = bodyBytes;

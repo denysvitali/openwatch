@@ -132,6 +132,22 @@ void main() {
       expect(decoded.details['detailBytes'], 288);
     });
 
+    test('summarizes H59MA sleep detail compact status frames', () {
+      final frame = Codec.buildChannelB(OpB.h59SleepDetail, [0x02]);
+
+      final report = const WatchLogDecoder().decodeNrfConnectLog(
+        _line(_chB, frame),
+      );
+      final decoded = report.frames.single;
+
+      expect(decoded.valid, isTrue);
+      expect(decoded.title, contains('H59 sleep detail compactStatus=0x02'));
+      expect(decoded.details['label'], 'h59SleepDetail');
+      expect(decoded.details['compactStatusCode'], 2);
+      expect(decoded.details['firmwareBehavior'], 'compact-status');
+      expect(decoded.details['payloadBytes'], 1);
+    });
+
     test('summarizes Channel B activity records and supports JSON output', () {
       final body = List<int>.filled(48, 0);
       body[2] = 100;
