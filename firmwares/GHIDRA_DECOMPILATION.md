@@ -1302,9 +1302,9 @@ like "+2" in decompiled pointer arithmetic, but handlers receive the copied
 | `0x26` | `readSitLong` | `0x0082d258` | Reads sedentary config — see §3.9. |
 | `0x2b` | `menstruation` (mixture container) | `0x0082ba54` | Sub `0x01`/`0x02` read/write mixture data; cycle-phase detector + notification sender — see §3.1. |
 | `0x2c` | `bloodOxygenSetting` | `0x0082d1c2` | Sub `0x01` reads SpO2 setting, `0x02` writes it — see §3.10. |
-| `0x37` | `pressureSetting` | `0x0082caa6` | Reads/sets pressure config; uses `FUN_008344fe` — see §3.20. |
+| `0x37` | `pressureHistory` | `0x0082caa6` | Reads pressure/stress history records; uses `FUN_008344fe` — see §3.20. |
 | `0x38` | `pressure` | `0x0082ca54` | Sub `0x01` reads pressure value, else sets pressure unit — see §3.17. |
-| `0x39` | `hrvSetting` | `0x0082c9da` | Reads/sets HRV config; uses `FUN_0083468e` — see §3.21. |
+| `0x39` | `hrvHistory` | `0x0082c9da` | Reads HRV history records; uses `FUN_0083468e` — see §3.21. |
 | `0x3a` | `sugarLipidsSetting` | `0x0082cc1e` | Sub `0x03`/`0x04` read/write sugar/lipids settings — see §3.22. |
 | `0x3b` | `uvSetting` / `touchControl` | `0x0082cbc8` | Read/write UV/touch config byte at `DAT_0082cfe8 + 8` — see §3.18. |
 | `0x43` | `readDetailSport` | `0x0082d034` | Reads detailed sport records by date range — see §3.6. |
@@ -1503,15 +1503,15 @@ three output bytes), so the rest of the frame is always zero.
   "1-bit setting" opcodes uniformly with the same
   `read = 0x01 / write = 0x02` sub-opcode pattern.
 
-#### Companion opcode `0x37` pressureSetting
+#### Companion opcode `0x37` pressure/stress history
 
-`0x37` (`FUN_0082caa6`) is a *separate* config opcode that
+`0x37` (`FUN_0082caa6`) is a *separate* deferred history opcode that
 uses the same shared `FUN_0082c988` 13-byte-chunk fragmenter
-as `0x7a muslim` (§3.11) and `0x39 hrv`. It likely configures
-the per-mode pressure algorithm (high/low threshold, alert
-frequency, etc.) rather than the on/off bit that `0x38`
-owns. The host should not confuse the two: `0x37` is the
-*settings* opcode (long fragmented response), `0x38` is the
+as `0x7a muslim` (§3.11) and `0x39 hrv`. Earlier notes inferred
+a threshold/config surface here, but the callee `FUN_008344fe`
+walks a record table and returns a 49-byte body. The host should
+not confuse the two: `0x37` is the long fragmented
+pressure/stress history record reader, while `0x38` is the
 *value* opcode (3-byte ack).
 
 ### 3.18 Opcode `0x3b` uvSetting / touchControl (`FUN_0082cbc8`)
@@ -1782,7 +1782,7 @@ The 0x0E handler never emits a 0x0E response — the response
 exhausted; a nonzero 0x0E sub-byte silently exits and sends no
 response.
 
-### 3.20 Opcode `0x37` pressureSetting (`FUN_0082caa6`)
+### 3.20 Opcode `0x37` pressure/stress history (`FUN_0082caa6`)
 
 Structurally a *clone* of the `0x7a muslim` handler (§3.11) —
 same two-phase response (header frame + 4-frame fragmented
@@ -1809,7 +1809,7 @@ Only `slot_id == 0` (today) is supported by the "happy path"
 in v14 — the dispatcher in §3 routes every non-zero sub-cmd
 to the default-slot (`FUN_0082cede` in 0x7a's case, the same
 here). Sub-`0x01` etc. are not implemented; the only valid
-host request is `0x37 0x00` (read today's pressure setting).
+host request is `0x37 0x00` (read today's pressure/stress record).
 
 #### Behavior
 
@@ -1884,7 +1884,7 @@ The slot id is at payload byte 0 (echo of `req[1]`), and the
 
 #### Comparison with `0x7a muslim`
 
-| | `0x37` pressureSetting | `0x7a` muslim |
+| | `0x37` pressure/stress history | `0x7a` muslim |
 |---|---|---|
 | Producer | `FUN_008344fe` (real) | `FUN_00829c88` (stub) |
 | Header dword | `0x1E050037` | `0x3C05007A` |
@@ -1902,7 +1902,7 @@ header to separate the two streams.
 #### Why 30 (0x1E) and not 60 (0x3C) for the feature id
 
 The `0x3C` in `0x7a muslim`'s header and the `0x1E` in
-`0x37 pressureSetting`'s header are likely **indexes into
+`0x37 pressure/stress history`'s header are likely **indexes into
 the same per-feature config table**. The dispatcher (and
 the long-config shared fragmenter from §3.11) does not
 *interpret* these bytes — they are producer-specific
@@ -1912,10 +1912,10 @@ feature a given header belongs to. The two-byte pattern
 config" ack shape that all the §3.11 / §3.20 handlers
 use.
 
-### 3.21 Opcode `0x39` hrvSetting (`FUN_0082c9da`)
+### 3.21 Opcode `0x39` HRV history (`FUN_0082c9da`)
 
 The third and final member of the *shared-fragmenter
-trio* (after `0x37 pressureSetting` §3.20 and `0x7a muslim`
+trio* (after `0x37 pressure/stress history` §3.20 and `0x7a muslim`
 §3.11). Structurally a near-clone of `0x37` — same
 two-phase response, same 4-byte header + 48-byte body
 shape, same 4-frame fragmented 49-byte payload via
@@ -1930,7 +1930,7 @@ literal.
 | 1 | `slot_id` | day offset (current day = `slot_id == 0`) |
 | 2..14 | unused | — |
 
-Identical to `0x37 pressureSetting`. Only `slot_id == 0`
+Identical to `0x37 pressure/stress history`. Only `slot_id == 0`
 (today) is on the happy path; the dispatcher routes every
 other sub-cmd to the default-slot ack.
 
@@ -1952,7 +1952,7 @@ void FUN_0082c9da(int param_1) {
 }
 ```
 
-Compare to §3.20's `0x37 pressureSetting`: the only byte that
+Compare to §3.20's `0x37 pressure/stress history`: the only byte that
 differs is the **cmd** in the header dword (`0x37` vs `0x39`);
 byte 3 (the feature id `0x1E`) is the *same* for both,
 suggesting that the watch's per-feature config table groups
@@ -2013,7 +2013,7 @@ at payload byte 1.
 
 #### Trio summary
 
-| | `0x37` pressureSetting | `0x39` hrvSetting | `0x7a` muslim |
+| | `0x37` pressure/stress history | `0x39` HRV history | `0x7a` muslim |
 |---|---|---|---|
 | Header dword | `0x1E050037` | `0x1E050039` | `0x3C05007A` |
 | Feature id (byte 3) | `0x1E` (30) | `0x1E` (30) | `0x3C` (60) |
@@ -3564,7 +3564,7 @@ tick of the main loop), a host that sends an opcode routed
 through `FUN_0082be64` does *not* get an immediate response
 — the response comes via the §3 "Common response path"
 once the worker has dispatched the frame. This is why
-opcodes like `0x2b menstruation` (§3.1), `0x37 pressureSetting`
+opcodes like `0x2b menstruation` (§3.1), `0x37 pressure/stress history`
 (§3.20), and `0xc6 restoreKey` (§3.14) have a longer
 response latency than opcodes routed inline (`0xc6 0x6C 'l'`
 reboot, `0x08 0x01` start-find, etc.).
@@ -4772,7 +4772,7 @@ and marks the Channel-B receive side busy.
 | `0x00..0x2a` | Low-range `switch8` at `fee7_low_switch_default_index` / `fee7_low_switch8_table` | Per-entry thunk — detailed below |
 | `0x2b, 0x37, 0x38, 0x3a, 0x3b, 0x43 'C', 0x72, 0x77, 0x7a, 0x7d, 0x81, 0xa1, 0xc6, 0xc7, 0xff` | Deferred-command ring | `enqueue_deferred_command_frame` |
 | `0x36` | Heart-rate related read/set | `FUN_0082c112` — see §8.8 |
-| `0x39` | HRV setting/history path | `channel_a_handle_hrv_history` |
+| `0x39` | HRV history path | `channel_a_handle_hrv_history` |
 | `0x3c` | Fixed capability block `[0x3c,0,0x40,0xa0,0x20,…]` | `fee7_send_fixed_capability_3c` — see §8.12 |
 | `0x3e` | Lipids read/set (bit 7 of shared config byte) | `fee7_handle_lipids_flag_3e` | see §8.15 |
 | `0x48 'H'` | Current sport/today totals and state bytes | `fee7_send_today_sport_totals` — see §8.2 |
@@ -6445,8 +6445,8 @@ This document covers the H59MA v14 firmware in **~7,250 lines** with **17+ synth
   config bitmap synthesis and §3.24 deferred-command ring
   synthesis) — 22 documented handlers covering setTime,
   displayClock, readDetailSport, DND, setSitLong,
-  readSitLong, bloodOxygenSetting, pressureSetting,
-  pressure, hrvSetting, sugarLipidsSetting, uvSetting,
+  readSitLong, bloodOxygenSetting, pressureHistory,
+  pressure, hrvHistory, sugarLipidsSetting, uvSetting,
   bpReadConform, menstruation, findDevice, phoneSport,
   vibration, factory reset, pushMsgUint, realTimeHeartRate,
   readHeartRate, restoreKey, factory test mode.
@@ -6514,9 +6514,9 @@ section number* for a given operation.
 | `0x26` | §3.9 | readSitLong (reads sedentary config) |
 | `0x2b` | §3.1 | menstruation (mixture container, 16 B record) |
 | `0x2c` | §3.10 | bloodOxygenSetting (SpO2 on/off, bit 1 of shared config byte) |
-| `0x37` | §3.20 | pressureSetting (long fragmented config) |
+| `0x37` | §3.20 | pressure/stress history (long fragmented record) |
 | `0x38` | §3.17 | pressure (bit 3 of shared config byte) |
-| `0x39` | §3.21 | hrvSetting (long fragmented config) |
+| `0x39` | §3.21 | HRV history (long fragmented record) |
 | `0x3a` | §3.22 | sugarLipidsSetting (bits 5 / 7 of shared config byte) |
 | `0x3b` | §3.18 | uvSetting (touch control, 1 byte at `DAT_0082cfe8 + 8`) |
 | `0x43` | §3.6 | readDetailSport (per-day 292 B detail dump) |
@@ -7369,7 +7369,7 @@ category:
 * `0x93` — two-frame config read: self-marker header, then
   checksumed version/date payload.
 
-The opposite case — *data-rich* opcodes like `0x37 pressureSetting`
+The opposite case — *data-rich* opcodes like `0x37 pressure/stress history`
 (§3.20) or `0x7a muslim` (§3.11) — uses the **standard
 additive checksum** because the host cares about the body
 content and the checksum catches transmission errors.
