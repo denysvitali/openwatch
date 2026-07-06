@@ -83,8 +83,8 @@ class Fee7Service {
   ///
   /// Invalid frames raise [ArgumentError] before any BLE write is attempted.
   Future<void> sendCommand(Uint8List frame) {
-    // Outbound fee7 command: client span so we can correlate vendor
-    // opcodes (SpO2, find-phone, etc.) with any fee7 transport errors.
+    // Outbound fee7 probe command: client span so we can correlate vendor
+    // opcodes (lipids, memory, test/session, etc.) with transport errors.
     final span = OpenTelemetryService().startTrace(
       'ble.fee7.send',
       kind: SpanKind.client,

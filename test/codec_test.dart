@@ -184,7 +184,7 @@ void main() {
       expect(f[7], 0x00);
     });
 
-    test('bindAncs uses FEE7 0x04 shape with 12 model bytes', () {
+    test('bindAncs uses Channel-A 0x04 shape with 12 model bytes', () {
       final f = Commands.bindAncs('ABCDEFGHIJKLMNO');
       expect(f[0], OpA.bindAncs);
       expect(f[1], OpA.mixWrite);

@@ -65,7 +65,7 @@ lib/
 Two logical GATT channels on one connection:
 - **Channel A** (`6e40fff0`) — 16-byte command frames `[opcode][sub..14][checksum]` with an additive 8-bit sum; write-with-response, opcode-correlated responses, gated behind a handshake (read HW/FW revision → `ready`).
 - **Channel B** (`de5bf728`) — `0xBC`-magic, length-prefixed, CRC-16/MODBUS-protected large payloads sliced into MTU-sized chunks; used for OTA, files, and custom watch faces.
-- **Vendor `0xFEE7`** (optional) — parallel 16-byte command path; SpO2, find-phone, vibration, OTA triggers. See `GHIDRA_DECOMPILATION.md` §8.
+- **Vendor `0xFEE7`** (optional) — passive/probe 16-byte notify surface; battery/status side-channel, lipids duplicate, session/test, memory, OTA-control, and synthetic-sleep opcodes. Static H59MA v14 routing does not wire FEE7 writes to normal app flows. See `GHIDRA_DECOMPILATION.md` §8.
 
 `PROTOCOL.md` is the single source of truth for opcodes, encodings, and CRC variants. Do not invent fields — if a value isn't documented there, treat it as "needs live capture" (the §8.5 list calls out ECG/PPG, legacy bind layout, and remaining semantic health-history splits).
 
