@@ -470,22 +470,50 @@ prefer FEE7 writes for app flows without live-capture evidence.
 | QueryDataDistributionRsp | `0x46` | watch→ | `distribution = bytes2Int(pl[0..3])` (BE); `isTheDayHasData(day)=(distribution>>day)&1` | 32-day bitmask of which days have stored health data. |
 | SwitchOTARsp | `0x0f` | watch→ | `stateMask = bytesToShort(pl,0)` (2B LE) | Device entered OTA mode; 16-bit capability mask. Precedes the `de5bf728` DFU flow. |
 
-### 4.7 Channel-B LargeData actions (cmd id @ `byte[1]`; `payload[0]`=0x01 read / 0x02 write)
+### 4.7 Channel-B LargeData actions (APK ids vs H59MA routing)
+
+APK-era host code treated these as generic LargeData action ids at Channel-B
+`byte[1]` with `payload[0] = 0x01` read / `0x02` write and response dispatch
+through `respMap[action]`. H59MA v14 does not contain a generic `respMap`
+dispatcher; static routing is command-specific.
 
 | Name | cmd | Dir | Request | Response | Meaning |
 |---|---|---|---|---|---|
 | readCustomWatch / writeCustomWatch | `0x3a` | →watch | APK-era: r:`[01]`; w:`[02] + N×8B elements` | H59MA v14: compact NAK code `0` | **Not implemented in H59MA v14.** The async worker has no `0x3a` branch, so valid-CRC frames fall through to `channel_b_send_nak(cmd, 0)`. |
-| readQrCode / E-Card | `0x2f` | →watch | `[01, type]` (no frame if type==0xFF) | respMap[0x2f] | Read stored QR/e-card by type. |
-| writeQrCode / E-Card | `0x2f` | →watch | `[02, type, urlLen] + UTF-8 url` (`[02,FF,00]` to query/clear) | ack | Write QR/e-card. |
-| setDeviceNickName | `0x4a` | →watch | nickname bytes (`ACTION_AVATAR_Device`) | ack | Set device nickname. ⚠ overloaded: also AvatarHandle image upload. |
+| readQrCode / E-Card | `0x2f` | →watch | `[01, type]` (no frame if type==0xFF) | H59MA v14: compact NAK code `0` | APK-era QR/e-card read; not implemented by H59MA v14. |
+| writeQrCode / E-Card | `0x2f` | →watch | `[02, type, urlLen] + UTF-8 url` (`[02,FF,00]` to query/clear) | H59MA v14: compact NAK code `0` | APK-era QR/e-card write; not implemented by H59MA v14. |
+| setDeviceNickName | `0x4a` | →watch | nickname bytes (`ACTION_AVATAR_Device`) | H59MA v14: compact NAK code `0` | APK-era nickname/avatar action; not implemented by H59MA v14. |
 | readAlarm / writeAlarm | `0x2c` | →watch | r:`[01]`; w:`[02,count,records...]` | read:`[01,count,{len,flags,minuteOfDay u16LE,labelBytes...}...]`; write ack:`[02]` | New-protocol alarms. `flags` bit 7 mirrors firmware record byte 3; bits 0..6 are weekday bits. `len` includes the four-byte record header. |
-| readSmsQuick / writeSmsQuick | `0x4c` | →watch | r:`[01]`; w:`[02]+SmsQuickBean` | respMap[0x4c] | Quick-reply SMS templates. |
-| LargeData action id table | varies | both | `byte1`=action; `payload[0]`=01/02 | respMap[action] | `0x20` Location, `0x27` NewSleep, `0x28` ManualHeartRate, `0x29` Contacts_New, `0x2a` Blood_Oxygen, `0x2c` Alarm, `0x2d` Contact, `0x2e` BT_MAC, `0x2f` E_CARD/QrCode, `0x3a` Custom_WatchFace, `0x3e` NewSleep_Lunch, `0x47` Blood_Sugar, `0x48` GPS_Navigation, `0x49` Manual_Oxygen, `0x4a` AVATAR_Device(nickname), `0x4c` SMS_QUICK, `0x5f` Interval_Blood_Oxygen, `0x75` Interval_Heart_Rate. |
+| readSmsQuick / writeSmsQuick | `0x4c` | →watch | r:`[01]`; w:`[02]+SmsQuickBean` | H59MA v14: compact NAK code `0` | APK-era quick-reply SMS templates; not implemented by H59MA v14. |
+| APK LargeData action inventory | varies | both | `byte1`=action; `payload[0]`=01/02 | APK `respMap[action]`; H59MA v14 see below | APK names: `0x20` Location, `0x27` NewSleep, `0x28` ManualHeartRate, `0x29` Contacts_New, `0x2a` Blood_Oxygen, `0x2c` Alarm, `0x2d` Contact, `0x2e` BT_MAC, `0x2f` E_CARD/QrCode, `0x3a` Custom_WatchFace, `0x3e` NewSleep_Lunch, `0x47` Blood_Sugar, `0x48` GPS_Navigation, `0x49` Manual_Oxygen, `0x4a` AVATAR_Device(nickname), `0x4c` SMS_QUICK, `0x5f` Interval_Blood_Oxygen, `0x75` Interval_Heart_Rate. |
 
 H59MA v14 note: direct host requests use `0x27` for both night and nap sleep.
 `payload[1] == 1` makes the firmware emit a `0x3e` nap/lunch response before
 the normal `0x27` night response. A direct host request with command `0x3e`
 has no async-worker branch and returns compact NAK code `0`.
+
+H59MA v14 static routing for the APK action ids above:
+
+| Cmd | APK name | H59MA v14 routing |
+|---:|---|---|
+| `0x20` | Location | Compact NAK code `0`. |
+| `0x27` | NewSleep | Implemented sleep-record request. `payload[1] == 1` also emits `0x3e` nap records. |
+| `0x28` | ManualHeartRate | Compact NAK code `0`. |
+| `0x29` | Contacts_New | Recognized no-response placeholder; no NAK and no payload response. |
+| `0x2a` | Blood_Oxygen | Repurposed as H59MA activity/sport summary, not SpO2. |
+| `0x2c` | Alarm | Implemented compact alarm read/write. |
+| `0x2d` | Contact | Compact NAK code `0`. |
+| `0x2e` | BT_MAC | Compact NAK code `0`. |
+| `0x2f` | E_CARD/QrCode | Compact NAK code `0`. |
+| `0x3a` | Custom_WatchFace | Compact NAK code `0`; OpenWatch builders throw. |
+| `0x3e` | NewSleep_Lunch | Response-only nap opcode emitted by `0x27`; direct requests compact-NAK code `0`. |
+| `0x47` | Blood_Sugar | Recognized no-response placeholder; no NAK and no payload response. |
+| `0x48` | GPS_Navigation | Compact NAK code `0`. |
+| `0x49` | Manual_Oxygen | Compact NAK code `0`. |
+| `0x4a` | AVATAR_Device / nickname | Compact NAK code `0`. |
+| `0x4c` | SMS_QUICK | Compact NAK code `0`. |
+| `0x5f` | Interval_Blood_Oxygen | Compact NAK code `0`. |
+| `0x75` | Interval_Heart_Rate | Compact NAK code `0`. |
 
 ### 4.8 Channel-B file transfer (FileHandle / Avatar / Album / Ebook / Record / Temperature)
 

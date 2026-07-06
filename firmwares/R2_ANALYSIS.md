@@ -528,6 +528,13 @@ checks it at `0x96fc`. Only `payload[1] == 1` enters the nap loop and emits a
 night response at `0x97fe..0x9800`. The async worker has no direct `0x3e`
 request branch, so direct host `0x3e` frames use the default NAK-code-0 path.
 
+The APK LargeData `respMap` action table is not present as a generic H59MA
+dispatcher. In the v14 compare cascade, APK ids `0x20`, `0x28`, `0x2d`,
+`0x2e`, `0x2f`, `0x48`, `0x49`, `0x4a`, `0x4c`, `0x5f`, and `0x75` fall
+through to default NAK code `0`. `0x29` and `0x47` are recognized no-response
+placeholders, `0x2a` is H59MA activity/sport summary rather than APK
+Blood_Oxygen, and `0x2c` is the compact alarm handler.
+
 APK-era Channel-B `0x3a` custom-watch-face actions are not implemented in
 H59MA v14. The async compare cascade has no `0x3a` branch; valid frames land on
 the default `movs r1, 0; bl channel_b_send_nak` path at `0x988a..0x98e6`.

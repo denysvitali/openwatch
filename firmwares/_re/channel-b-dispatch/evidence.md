@@ -157,6 +157,16 @@ v13:
 0x00009848  bl   0x8928
 ```
 
+### APK LargeData ids are not a generic map
+
+The APK `respMap[action]` inventory does not correspond to a generic H59MA
+Channel-B dispatcher. The only APK action ids with implemented H59MA handlers
+in the async cascade are `0x27` sleep records, `0x2a` activity/sport summary,
+and `0x2c` alarm read/write. `0x29` and `0x47` are recognized no-response
+placeholders. The APK ids `0x20`, `0x28`, `0x2d`, `0x2e`, `0x2f`, `0x3a`,
+`0x3e` as a direct request, `0x48`, `0x49`, `0x4a`, `0x4c`, `0x5f`, and
+`0x75` all use the default NAK status `0` path.
+
 ### Explicit NAK-code-2 rejects
 
 `0x21`, `0x22`, `0x23`, and `0x24` are recognized compare-cascade entries, not
