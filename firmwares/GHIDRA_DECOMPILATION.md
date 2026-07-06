@@ -19,7 +19,7 @@ output:
 | `0x0082efea` | `channel_b_parse_reassembly_frame` | Parses and reassembles Channel-B `0xBC` frames. |
 | `0x0082eee6` | `channel_b_dispatch_complete_frame` | Verifies CRC and routes complete Channel-B frames. |
 | `0x0082ece0` | `channel_b_queue_notify_frame` | Builds and MTU-slices Channel-B notify frames. |
-| `0x0082ee00` | `channel_b_send_nak` | Builds compact Channel-B NAK/error packets. |
+| `0x0082ee00` | `channel_b_send_nak` | Builds compact Channel-B NAK/error frames. |
 | `0x0082f114` | `crc16_modbus_update` | CRC-16/MODBUS helper using the reflected `0xA001` table. |
 | `0x0082ebdc` | `channel_a_queue_notify_frame` | Queues a 16-byte Channel-A/vendor-high notify frame. |
 | `0x0082b0c4` | `checksum8_additive` | Additive byte-sum helper used for 16-byte command responses. |
@@ -397,33 +397,35 @@ byte 4..5   payload CRC-16/MODBUS, little-endian u16
 byte 6..    payload bytes
 ```
 
-#### 2.0 Channel-B NAK packet (`FUN_0082ee00`)
+#### 2.0 Channel-B NAK frame (`FUN_0082ee00`)
 
 The *error-response* path for any Channel-B opcode. When
 the dispatcher detects an error (unknown cmd, no record
 found, bad payload length, etc.) it calls
 `FUN_0082ee00(cmd, error_code)` which builds a fixed-shape
-NAK packet.
+one-byte Channel-B error frame.
 
 ```c
 void FUN_0082ee00(byte cmd, byte error_code) {
-    rsp[0]  = 0xBC;                  // Channel-B magic
-    rsp[1..2] = 1;                   // u16 frame count = 1
-    rsp[3]  = error_code;
-    rsp[4]  = cmd;                    // original request cmd
-    rsp[5..6] = FUN_0082f114(&error_code, 1);  // CRC-16 over (error_code, cmd)
-    FUN_0082ece0(rsp, 7);             // send
+    payload[0] = error_code;
+
+    rsp[0] = 0xBC;                    // Channel-B magic
+    rsp[1] = cmd;                     // original request cmd
+    rsp[2..3] = 1;                    // u16 payload length
+    rsp[4..5] = crc16(payload, 1);    // CRC-16 over error_code only
+    rsp[6] = error_code;
+    send(rsp, 7);
 }
 ```
 
-#### NAK packet layout (7 bytes)
+#### NAK frame layout (7 bytes)
 
 ```
 byte 0:    0xBC                    (Channel-B magic)
-byte 1..2: u16 1 (frame count = 1, LE)
-byte 3:    error_code              (e.g. 0x02 = NAK code 2)
-byte 4:    cmd                     (original request cmd)
-byte 5..6: CRC-16/MODBUS over (error_code, cmd), LE
+byte 1:    cmd                     (original request cmd)
+byte 2..3: u16 payload length = 1, LE
+byte 4..5: CRC-16/MODBUS over byte 6 only, LE
+byte 6:    error_code              (e.g. 0x02 = NAK code 2)
 ```
 
 The error_code values used in the firmware:
@@ -435,24 +437,21 @@ The error_code values used in the firmware:
 A host SDK that consumes Channel-B responses should:
 1. Check the magic byte (`byte 0 == 0xBC`) to confirm a
    Channel-B packet.
-2. Parse the frame-count from bytes 1..2.
-3. For each frame: read `byte 1` of the payload as the
-   sub-cmd, the rest as the data.
-4. **Check byte 4 vs the request cmd** — if byte 4 ≠ cmd,
-   the firmware sent a NAK and byte 3 is the error_code.
-5. Verify CRC-16 over the payload (bytes 6..N) against
-   the 2-byte CRC at the end of the header (bytes 4..5 of
-   the *frame*, not the packet).
+2. Parse the cmd from byte 1 and the payload length from bytes 2..3.
+3. Verify CRC-16 over the payload (`bytes[6..]`) against bytes 4..5.
+4. Treat a one-byte payload on an error-capable response path as a compact
+   error/status code for `cmd`. For unsupported Channel-B commands this is the
+   NAK code. For OTA response types, the same shape is also the normal status
+   carrier, so the surrounding request state must decide whether to surface it
+   as an OTA status or as a rejected command.
 
 #### Why no response opcode
 
-Channel-B NAKs are **packet-level** (the 0xBC magic plus
-a frame count), not **opcode-level** (the request opcode).
-The error_code byte tells the host *what went wrong*; the
-original cmd byte tells the host *which request was
-rejected*. There is no separate "NAK opcode" — the NAK is
-the same 0xBC packet format as a normal response, just with
-the error_code byte set.
+Channel-B NAKs do not use a separate response opcode. The firmware reuses the
+original request cmd in byte 1 and sends a one-byte error payload. This is the
+same 0xBC packet format as a normal short Channel-B response, so parsers must
+validate length/CRC first and then interpret the one-byte payload in the
+request-specific context.
 
 This is why §2.6 (file commands) and §2.7 (device info) use
 `FUN_0082ee00(0x41, 0x02)` for "file cmd 0x41 not supported"
@@ -6615,7 +6614,7 @@ handlers are noted in their synthesis but not repeated in §10.2.
 handlers are documented in the 15+ synthesis sections:
 
 * §0 reading order — recommended navigation path
-* §2.0 — Channel-B NAK packet
+* §2.0 — Channel-B NAK frame
 * §3.23 — DAT_008277f0 + 0x2D 1-bit config bitmap
 * §3.24 — DAT_0082bfcc deferred-command ring
 * §5.1 — OTA state machine
