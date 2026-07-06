@@ -428,11 +428,12 @@ byte 4..5: CRC-16/MODBUS over byte 6 only, LE
 byte 6:    error_code              (e.g. 0x02 = NAK code 2)
 ```
 
-The error_code values used in the firmware:
-* `0x02` — generic NAK ("request rejected")
-* `0x10` — no data (e.g. `0x12 detailed sleep` when no
-  record exists)
-* `0x14` — invalid length
+The error_code/status bytes observed in resolved v14 call sites:
+* `0x00` — default unknown-command NAK from the async worker
+* `0x02` — generic NAK ("request rejected"), including CRC mismatch and the
+  explicit `0x21..0x24` Channel-B rejects
+* request-specific status — e.g. the `0x12` detailed-sleep error path passes
+  the requested day offset as the one-byte payload when the RTC/day guard fails
 
 A host SDK that consumes Channel-B responses should:
 1. Check the magic byte (`byte 0 == 0xBC`) to confirm a
@@ -453,11 +454,10 @@ same 0xBC packet format as a normal short Channel-B response, so parsers must
 validate length/CRC first and then interpret the one-byte payload in the
 request-specific context.
 
-This is why §2.6 (file commands) and §2.7 (device info) use
-`FUN_0082ee00(0x41, 0x02)` for "file cmd 0x41 not supported"
-but the same helper can emit `FUN_0082ee00(0x11, 0x10)` for
-"sleep summary cmd 0x11 has no data" — the opcode is just
-a parameter, not a separate dispatch.
+This is why the async worker can use `FUN_0082ee00(cmd, 0x00)` for an
+unknown command, `FUN_0082ee00(cmd, 0x02)` for an explicit reject, or
+`FUN_0082ee00(0x12, day_offset)` from the detailed-sleep RTC/day guard. The
+opcode is just a parameter, not a separate dispatch.
 
 ### Key functions
 
@@ -539,9 +539,9 @@ after the frame is queued.
 ##### `channel_b_send_nak` — ACK/NAK sender
 
 See §2.0 for the full NAK frame layout. The ACK/NAK sender
-is just a §2.0 NAK frame builder with `cmd = req_cmd,
-error_code = 1/2/0x10/0x14`. The §2.0 host-SDK recipe (§2.0)
-shows how to parse the returned NAK.
+is just a §2.0 NAK frame builder with `cmd = req_cmd` and a caller-supplied
+one-byte status/error value. The §2.0 host-SDK recipe (§2.0) shows how to parse
+the returned NAK.
 
 ##### `channel_b_start_fragment_timeout` — 2-second fragment timeout
 
