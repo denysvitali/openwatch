@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openwatch/core/protocol/codec.dart';
+import 'package:openwatch/core/protocol/commands.dart';
 import 'package:openwatch/core/protocol/opcodes.dart';
 import 'package:openwatch/core/protocol/watch_log_decoder.dart';
 
@@ -844,6 +845,75 @@ void main() {
         expect(decoded.details['label'], entry.value);
         expect(decoded.title, contains(entry.value));
       }
+    });
+
+    test('labels FEE7 deferred-command ring opcodes', () {
+      const deferredOpcodes = [
+        0x01,
+        0x06,
+        0x0e,
+        0x15,
+        0x18,
+        0x1e,
+        0x25,
+        0x26,
+        0x2b,
+        0x37,
+        0x38,
+        0x3a,
+        0x3b,
+        0x43,
+        0x72,
+        0x77,
+        0x7a,
+        0x7d,
+        0x81,
+        0xa1,
+        0xc6,
+        0xc7,
+        0xff,
+      ];
+
+      for (final opcode in deferredOpcodes) {
+        final frame = Codec.buildChannelA(opcode, [0x01]);
+
+        final decoded = const WatchLogDecoder().decodeHex(
+          frame.map((b) => b.toRadixString(16).padLeft(2, '0')).join('-'),
+          uuid: _fee7,
+        );
+
+        expect(decoded.valid, isTrue);
+        expect(decoded.channel, WatchLogChannel.fee7);
+        expect(decoded.details['label'], 'deferredCommand');
+        expect(decoded.title, contains('deferredCommand'));
+      }
+    });
+
+    test('labels health measurement session opcodes', () {
+      final start = _decodeA(OpA.startMeasure, [
+        MeasureType.heartRate.id,
+        0x01,
+      ]);
+      expect(start.details['label'], 'startMeasure');
+      expect(start.title, contains('startMeasure'));
+
+      final stop = _decodeA(OpA.stopMeasure, [MeasureType.heartRate.id]);
+      expect(stop.details['label'], 'stopMeasure');
+      expect(stop.title, contains('stopMeasure'));
+
+      final fee7Start = const WatchLogDecoder().decodeHex(
+        _hexBytes(Codec.buildChannelA(Fee7.modeControl, [0x06, 0x01])),
+        uuid: _fee7,
+      );
+      expect(fee7Start.details['label'], 'modeControl');
+      expect(fee7Start.title, contains('modeControl'));
+
+      final fee7Stop = const WatchLogDecoder().decodeHex(
+        _hexBytes(Codec.buildChannelA(Fee7.modeControlCont, [0x06])),
+        uuid: _fee7,
+      );
+      expect(fee7Stop.details['label'], 'modeControlCont');
+      expect(fee7Stop.title, contains('modeControlCont'));
     });
 
     test(

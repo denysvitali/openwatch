@@ -1783,6 +1783,8 @@ String _labelForChannelA(int opcode) {
       return 'pendingStatusWrite';
     case OpA.startMeasure:
       return 'startMeasure';
+    case OpA.stopMeasure:
+      return 'stopMeasure';
     case OpA.deviceNotify:
       return 'deviceNotify';
     case OpA.weatherForecast:
@@ -2075,8 +2077,40 @@ String _labelForFee7(int opcode) {
     case Fee7.syntheticSleep:
       return 'syntheticSleep';
     default:
+      if (_isFee7DeferredCommand(opcode)) return 'deferredCommand';
       if (Fee7.isUnary(opcode)) return 'unary';
       return 'unknown';
+  }
+}
+
+bool _isFee7DeferredCommand(int opcode) {
+  switch (opcode) {
+    case 0x01:
+    case 0x06:
+    case 0x0e:
+    case 0x15:
+    case 0x18:
+    case 0x1e:
+    case 0x25:
+    case 0x26:
+    case 0x2b:
+    case 0x37:
+    case 0x38:
+    case 0x3a:
+    case 0x3b:
+    case 0x43:
+    case 0x72:
+    case 0x77:
+    case 0x7a:
+    case 0x7d:
+    case 0x81:
+    case 0xa1:
+    case 0xc6:
+    case 0xc7:
+    case 0xff:
+      return true;
+    default:
+      return false;
   }
 }
 

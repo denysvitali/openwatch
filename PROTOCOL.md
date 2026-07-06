@@ -453,6 +453,7 @@ prefer FEE7 writes for app flows without live-capture evidence.
 | BpHistoryMirror | `0x0d` | both | BP history read request | compact `0x0d` record chunks | Uses the same BP-history preparation and compact sender as Channel-A BP records, without exposing full 4-byte slots. Verified at v14 body offset `0xde52`. |
 | ShortAlert | `0x10` | both | bare opcode | ACK `0x10` | Starts the short alert/vibration/display pattern. Verified in the low-range switch table at v14 body `0x621c`; see firmware §8.1. |
 | LowNoop | `0x14` | →watch | bare opcode | none | Explicit low-range no-op; the decoded switch slot returns through the dispatcher return path at v14 body `0x6352`. |
+| DeferredCommandRing | `0x01` / `0x06` / `0x0e` / `0x15` / `0x18` / `0x1e` / `0x25` / `0x26` / `0x2b` / `0x37` / `0x38` / `0x3a` / `0x3b` / `0x43` / `0x72` / `0x77` / `0x7a` / `0x7d` / `0x81` / `0xa1` / `0xc6` / `0xc7` / `0xff` | →watch | 16-byte frame | deferred worker response or none | Accepted by the FEE7 dispatcher and copied into the shared deferred-command ring instead of being treated as unknown. Verified at v14 body `0x620c..0x6320` and queue path `0x652c`; `0x7d` is later consumed as a worker no-response placeholder. |
 | Fee7Handshake | `0x48` (`'H'`) | both | bare opcode | 15-byte frame: hw version bytes, fw version bytes, battery counter `% 100`, status u16 | First vendor-side info block; OpenWatch decodes battery/status from this when present. |
 | PendingStatusWrite | `0x60` | →watch | `value u32LE` in request bytes `1..4` | self-marker ACK `[0x60,0,...,0x60]` | Writes `DAT_0082bfd4 + 0x2c`, paired with `0x61`; verified at v14 body offset `0x5a90`. Production hosts should not use this for ANCS. |
 | LiveStatus | `0x61` (`'a'`) | both | bare opcode | active: `statusValue u32LE`; idle: all-zero ACK | Reads `DAT_0082bfd4 + 0x2c` at body offset `0x5ae6`. The low byte mirrors the live status source used for battery-like updates, but hosts should keep the full u32 for diagnostics. |
@@ -964,20 +965,7 @@ Feedback, Customer-support chat.
 
 ### 8.5 Gaps / TODO
 
-- **ECG/PPG notify listener opcodes** (`HealthEcgRsp`, `PpgDataRspCmd`) — not statically
-  resolvable in H59MA v14 (§10.2 unified inventory enumerates every resolved FEE7
-  opcode; no match for the documented `[status,ecgInterval,ppgInterval]` /
-  `[rate;ppgValue i32 LE]` shapes). §8.5 per-mode start dispatch has no mode-0x07
-  (ECG) entry — it falls into the generic HR-mode-1 fallback. The §8.14 0xc1
-  one-shot health-result handler returns ONE byte from `DAT_0082caf0`, incompatible
-  with the documented shapes. SpO2 = PPG is on §3.10 `0x2c` (enable-bit +
-  auto-measure), NOT routed through `0x69` type=7. Static cross-check: the v13
-  and v14 high-range FEE7 switch bytes match, and §8.20 maps `0x97..0xA0`
-  to no-response slots plus session/model/status responses; none match the
-  documented ECG/PPG payload shapes, so no vendor-private ECG/PPG notify opcode
-  is hiding in that reserved range.
-  Resolution path: live BLE capture during a `0x69` type=7 session on real
-  hardware.
+- ~~**ECG/PPG notify listener opcodes** (`HealthEcgRsp`, `PpgDataRspCmd`)~~ — **resolved negative for H59MA v14.** radare2 on the v14 body confirms the live health-session notify uses Channel-A opcode `0x69` (same as `StartHeartRateReq`) and `0x6a` for stop/result. The `0x69` start dispatcher explicitly handles modes `0x03, 0x06, 0x09, 0x0B, 0x0C, 0x0D, 0x0E`; mode `0x07` (APK/SDK ECG) is absent and falls into the generic HR-mode-1 fallback. The only PPG/SpO2-related handler is §3.10 Channel-A `0x2c` (enable-bit + auto-measure cadence); there is no real-time PPG stream from a `0x69 type=7` session. No vendor/high opcode in the `0x90..0xA0` range matches the documented ECG/PPG shapes. OpenWatch therefore treats `0x69` frames as generic health-session notifies and does not expect dedicated ECG/PPG listener opcodes on H59MA v14.
 - **BP-history compact byte semantics** (`0x0d` BpDataRsp) — static firmware RE
   now resolves the wire split: the persistent table has 24 hourly 4-byte slots,
   but the `0x0d` stream emits only the first byte of each valid slot after a
