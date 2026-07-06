@@ -59,10 +59,11 @@ find-device, today's steps/calories, live heart-rate, notification enable,
 factory reset, offline-first cloud toggle, local history sync UI, custom
 watch-face designer/upload, firmware fetch-and-store + OTA flow.
 
-Needs live-capture verification (flagged in `PROTOCOL.md` §8.5): ECG/PPG
-notify opcodes, legacy APK-layer bind (`0x10`) layout, and remaining health
-history field splits. Channel B CRC is resolved as CRC-16/MODBUS from firmware.
-BP compact history bytes are preserved for capture correlation.
+Open verification gaps (flagged in `PROTOCOL.md` §8.5): ECG/PPG notify
+opcodes, BP compact-byte-to-cuff correlation, and the exact
+`@RequiresSignature` cloud endpoint set. Channel B CRC is resolved as
+CRC-16/MODBUS from firmware. Legacy APK-layer bind (`0x10`) is documented as
+not implemented on H59MA Channel-A; OpenWatch uses Channel-A `0x04` bind.
 
 ## Legal
 
