@@ -288,8 +288,8 @@ class WatchManager extends ChangeNotifier {
         // pl[0] discriminates which sensor is producing the frame:
         //   * HR-class ids (e.g. 0x05/0x06/0x12 on H59MA) carry a bpm.
         //   * ECG/PPG/blood-oxygen/etc. share these opcodes but have
-        //     a different payload shape — see PROTOCOL.md §4.3 TODO
-        //     on `HealthEcgRsp` / `PpgDataRspCmd`.
+        //     a different payload shape — see PROTOCOL.md §8.5 on
+        //     unresolved `HealthEcgRsp` / `PpgDataRspCmd` capture work.
         //
         // HrParser.parseDeviceNotify deliberately probes pl[1..4] for
         // any plausible bpm; without a dataType gate that probe
@@ -311,7 +311,7 @@ class WatchManager extends ChangeNotifier {
           }
         } else {
           // Unknown or non-HR dataType — record so a future live
-          // capture of ECG/PPG (PROTOCOL.md §4.3 TODO) can fill in
+          // capture of ECG/PPG (PROTOCOL.md §8.5) can fill in
           // the right decoder without losing data.
           _observedUnknownNotifyTypes.add(dataType ?? -1);
           _lastUnknownNotifyPayload = pl;
