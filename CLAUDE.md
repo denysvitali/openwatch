@@ -42,7 +42,7 @@ Platforms: Android (primary, signed release APK via CI), iOS, macOS, Linux, Wind
 
 Working: device scan/connect, handshake, time sync, capability detection, find-device, today's steps/calories, live heart-rate, notification enable, factory reset, offline-first cloud toggle, local history sync UI, firmware fetch-and-store + OTA flow. APK-era Channel-B custom watch-face upload is documented as unsupported on H59MA v14 (`0x3a` returns compact NAK code `0`).
 
-Open verification gaps (flagged in `PROTOCOL.md` §8.5): ECG/PPG notify opcodes, BP compact-byte-to-cuff correlation, and the exact `@RequiresSignature` cloud endpoint set. Channel B CRC is resolved as CRC-16/MODBUS from firmware. Legacy APK-layer bind (`0x10`) is documented as not implemented on H59MA Channel-A; OpenWatch uses Channel-A `0x04` bind.
+Open verification gaps (flagged in `PROTOCOL.md` §8.5): ECG/PPG notify opcodes, BP compact-byte-to-cuff correlation, and the exact `@RequiresSignature` cloud endpoint set. Channel B CRC is resolved as CRC-16/MODBUS from firmware. Legacy APK-layer bind (`0x10`) is documented as not implemented on H59MA Channel-A and as Channel-B cleanup/bypass with no protocol response; OpenWatch uses Channel-A `0x04` bind.
 
 ## Codebase architecture
 

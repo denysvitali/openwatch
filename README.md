@@ -66,7 +66,8 @@ Open verification gaps (flagged in `PROTOCOL.md` §8.5): ECG/PPG notify
 opcodes, BP compact-byte-to-cuff correlation, and the exact
 `@RequiresSignature` cloud endpoint set. Channel B CRC is resolved as
 CRC-16/MODBUS from firmware. Legacy APK-layer bind (`0x10`) is documented as
-not implemented on H59MA Channel-A; OpenWatch uses Channel-A `0x04` bind.
+not implemented on H59MA Channel-A and as Channel-B cleanup/bypass with no
+protocol response; OpenWatch uses Channel-A `0x04` bind.
 
 ## Legal
 
