@@ -225,7 +225,7 @@ but the recommended reading path is:
    envelope shared by §2 / §3 / §8, with the cmd-position table
    that shows §3 is the odd one out.
 2. **§2 (Channel-B) + §3 (Channel-A)** — the two main GATT
-   transports. Start with §2's wire format + NAK packet (§2.0),
+   transports. Start with §2's wire format + NAK frame (§2.0),
    then §2.1-§2.11 for the per-opcode details. Move to §3's
    dispatcher table, then §3.1-§3.24 for the Channel-A handlers.
 3. **§8 (0xFEE7 vendor service)** — the parallel vendor protocol.
@@ -468,7 +468,7 @@ a parameter, not a separate dispatch.
 | `0x0082fc0c` | `channel_b_async_command_processor` | **Async command processor** (runs from state stored by `channel_b_store_async_command`) | §2.0.1 |
 | `0x0082f114` | `crc16_modbus_update` | **CRC-16/MODBUS** (init `0xFFFF`, poly `0xA001`) | §2.0.1 (disassembly) |
 | `0x0082ece0` | `channel_b_queue_notify_frame` | **Frame builder / sender** (queues `0xBC` notifications) | §2.0.1 |
-| `0x0082ee00` | `channel_b_send_nak` | **ACK/NAK sender** | §2.0 (NAK packet) |
+| `0x0082ee00` | `channel_b_send_nak` | **ACK/NAK sender** | §2.0 (NAK frame) |
 | `0x0082f098` | `channel_b_start_fragment_timeout` | Starts 2000 ms fragment timeout timer (`m_ble_packet_timer_id`) | §2.0.1 |
 | `0x0082f4fa` | `channel_b_store_async_command` | Stores parsed Channel B command for asynchronous consumption | §2.0.1 |
 | `0x0082fe52` | `ota_dfu_state_machine` | OTA state machine (DFU) | §5.1 |
@@ -538,7 +538,7 @@ after the frame is queued.
 
 ##### `channel_b_send_nak` — ACK/NAK sender
 
-See §2.0 for the full NAK packet layout. The ACK/NAK sender
+See §2.0 for the full NAK frame layout. The ACK/NAK sender
 is just a §2.0 NAK frame builder with `cmd = req_cmd,
 error_code = 1/2/0x10/0x14`. The §2.0 host-SDK recipe (§2.0)
 shows how to parse the returned NAK.
@@ -6436,7 +6436,7 @@ This document covers the H59MA v14 firmware in **~7,250 lines** with **17+ synth
 * **§1 Entry Point & Boot** — vector table, app_main_task, reset
   handler.
 * **§2 Channel-B** (12 sub-sections including §2.0 NAK
-  packet) — 11 documented handlers/paths covering the parser,
+  frame) — 11 documented handlers/paths covering the parser,
   dispatcher, async processor, OTA sub-cmd routing, alarm,
   activity summary, sleep summary, sleep detail, sleep
   records, file list, file operation, cleanup bypass, device info.
@@ -6496,7 +6496,7 @@ section number* for a given operation.
 | `0x43` | payload | §2.11 | file operation (`0x44` metadata + optional `0x45` chunks) |
 | `0x5a` | config_tlv | §2.7 | device info TLV |
 | `0x46` | — | §2.0/§2.11 | cleanup/bypass path; not a file delete |
-| `NAK` | — | §2.0 | vendor NAK packet (error_code + cmd) |
+| `NAK` | — | §2.0 | compact NAK frame (cmd + one-byte error payload) |
 
 #### Channel-A (§3) — 22 documented handlers
 
