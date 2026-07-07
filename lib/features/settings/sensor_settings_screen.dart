@@ -5,6 +5,7 @@ import '../../core/providers/app_providers.dart';
 import '../../core/services/watch_manager.dart';
 import '../../core/ui/ui_constants.dart';
 import '../widgets/health_widgets.dart';
+import '../widgets/inset_card.dart';
 
 /// Wristband sensor settings: HR auto-measure interval, enable toggle,
 /// and optional low/high alarm thresholds.
@@ -63,12 +64,7 @@ class SensorSettingsScreen extends ConsumerWidget {
           const HealthSectionHeader(title: 'Heart rate'),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
-            child: Card(
-              elevation: 0,
-              margin: EdgeInsets.zero,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(kCardRadius),
-              ),
+            child: InsetCard(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -110,12 +106,7 @@ class SensorSettingsScreen extends ConsumerWidget {
           const HealthSectionHeader(title: 'Alarm thresholds'),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
-            child: Card(
-              elevation: 0,
-              margin: EdgeInsets.zero,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(kCardRadius),
-              ),
+            child: InsetCard(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [

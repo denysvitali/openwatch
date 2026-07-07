@@ -6,6 +6,7 @@ import 'package:openwatch/core/ui/ui_constants.dart';
 import '../../core/providers/app_providers.dart';
 import '../../core/services/settings_service.dart';
 import '../widgets/health_widgets.dart';
+import '../widgets/inset_card.dart';
 
 /// Device + app settings, including the offline-first cloud toggle.
 class SettingsScreen extends ConsumerWidget {
@@ -64,12 +65,7 @@ class SettingsScreen extends ConsumerWidget {
           const HealthSectionHeader(title: 'Device'),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
-            child: Card(
-              elevation: 0,
-              margin: EdgeInsets.zero,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(kCardRadius),
-              ),
+            child: InsetCard(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -156,12 +152,7 @@ class SettingsScreen extends ConsumerWidget {
           const HealthSectionHeader(title: 'Cloud sync'),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
-            child: Card(
-              elevation: 0,
-              margin: EdgeInsets.zero,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(kCardRadius),
-              ),
+            child: InsetCard(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -212,12 +203,7 @@ class SettingsScreen extends ConsumerWidget {
           const HealthSectionHeader(title: 'Diagnostics'),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
-            child: Card(
-              elevation: 0,
-              margin: EdgeInsets.zero,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(kCardRadius),
-              ),
+            child: InsetCard(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -252,12 +238,7 @@ class SettingsScreen extends ConsumerWidget {
           const HealthSectionHeader(title: 'About'),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
-            child: Card(
-              elevation: 0,
-              margin: EdgeInsets.zero,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(kCardRadius),
-              ),
+            child: InsetCard(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [

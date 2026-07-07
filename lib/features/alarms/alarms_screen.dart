@@ -7,6 +7,8 @@ import '../../core/protocol/channel_a.dart';
 import '../../core/providers/app_providers.dart';
 import '../../core/services/watch_manager.dart';
 import '../widgets/health_widgets.dart';
+import '../widgets/inset_card.dart';
+import '../widgets/max_width_container.dart';
 
 /// Clock-alarm management screen.
 ///
@@ -40,44 +42,47 @@ class AlarmsScreen extends ConsumerWidget {
           ),
         ],
       ),
-      body: !ready
-          ? const _NotReady()
-          : !supported
-          ? const _Unsupported()
-          : RefreshIndicator(
-              onRefresh: manager.refreshAlarms,
-              child: ListView(
-                padding: const EdgeInsets.only(
-                  bottom: kSectionHeaderPaddingTop,
+      body: MaxWidthContainer(
+        child: !ready
+            ? const _NotReady()
+            : !supported
+            ? const _Unsupported()
+            : RefreshIndicator(
+                onRefresh: manager.refreshAlarms,
+                child: ListView(
+                  padding: const EdgeInsets.only(
+                    bottom: kSectionHeaderPaddingTop,
+                  ),
+                  children: [
+                    const HealthSectionHeader(title: 'Clock alarms'),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: kCardPadding,
+                      ),
+                      child: _AlarmList(
+                        alarms: alarms,
+                        onEdit: (slot, alarm) =>
+                            _showEditor(context, ref, slot: slot, alarm: alarm),
+                        onDelete: (alarm) =>
+                            _confirmDelete(context, ref, alarm),
+                      ),
+                    ),
+                    const SizedBox(height: kGridSpacing),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: kCardPadding,
+                      ),
+                      child: Text(
+                        armedCount == 0
+                            ? 'No alarms yet. Tap an empty slot above to add one.'
+                            : '$armedCount of ${WatchManager.alarmSlotCount} alarms armed.',
+                        style: AppTextStyles.bodySmall(context),
+                      ),
+                    ),
+                  ],
                 ),
-                children: [
-                  const HealthSectionHeader(title: 'Clock alarms'),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: kCardPadding,
-                    ),
-                    child: _AlarmList(
-                      alarms: alarms,
-                      onEdit: (slot, alarm) =>
-                          _showEditor(context, ref, slot: slot, alarm: alarm),
-                      onDelete: (alarm) => _confirmDelete(context, ref, alarm),
-                    ),
-                  ),
-                  const SizedBox(height: kGridSpacing),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: kCardPadding,
-                    ),
-                    child: Text(
-                      armedCount == 0
-                          ? 'No alarms yet. Tap an empty slot above to add one.'
-                          : '$armedCount of ${WatchManager.alarmSlotCount} alarms armed.',
-                      style: AppTextStyles.bodySmall(context),
-                    ),
-                  ),
-                ],
               ),
-            ),
+      ),
       floatingActionButton: (ready && supported)
           ? Padding(
               padding: const EdgeInsets.only(bottom: kGridSpacing),
@@ -180,7 +185,7 @@ class _AlarmList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bySlot = {for (final alarm in alarms) alarm.slot: alarm};
-    return Card(
+    return InsetCard(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [

@@ -6,6 +6,7 @@ import '../../core/providers/app_providers.dart';
 import '../../core/services/watch_manager.dart';
 import '../../core/ui/ui_constants.dart';
 import '../widgets/health_widgets.dart';
+import '../widgets/inset_card.dart';
 
 /// Watch-side preferences surfaced from `PROTOCOL.md` §4.2.
 ///
@@ -47,12 +48,7 @@ class DevicePreferencesScreen extends ConsumerWidget {
           const HealthSectionHeader(title: 'Display'),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
-            child: Card(
-              elevation: 0,
-              margin: EdgeInsets.zero,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(kCardRadius),
-              ),
+            child: InsetCard(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -102,7 +98,7 @@ class DevicePreferencesScreen extends ConsumerWidget {
           if (caps.bloodPressure || caps.stress || caps.bloodOxygen)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
-              child: Card(
+              child: InsetCard(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -146,12 +142,7 @@ class DevicePreferencesScreen extends ConsumerWidget {
           const HealthSectionHeader(title: 'Reminders'),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
-            child: Card(
-              elevation: 0,
-              margin: EdgeInsets.zero,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(kCardRadius),
-              ),
+            child: InsetCard(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -184,12 +175,7 @@ class DevicePreferencesScreen extends ConsumerWidget {
           const HealthSectionHeader(title: 'Goals'),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
-            child: Card(
-              elevation: 0,
-              margin: EdgeInsets.zero,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(kCardRadius),
-              ),
+            child: InsetCard(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [

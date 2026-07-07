@@ -8,6 +8,7 @@ import '../../core/services/bp_raw_store.dart';
 import '../../core/services/history_store.dart' show DateOnly;
 import '../../core/ui/ui_constants.dart';
 import '../widgets/health_widgets.dart';
+import '../widgets/inset_card.dart';
 
 /// Debug-only screen that dumps the compact raw BP bytes the watch emitted so
 /// future capture work can correlate them with known readings.
@@ -131,8 +132,7 @@ class _DayCard extends StatelessWidget {
                     color: theme.colorScheme.error,
                   ),
                 ),
-                Card(
-                  margin: EdgeInsets.zero,
+                InsetCard(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
