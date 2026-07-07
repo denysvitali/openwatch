@@ -31,6 +31,9 @@ const double kSectionHeaderPaddingBottom = 12;
 const double kListTilePaddingH = 16;
 const double kListTilePaddingV = 12;
 
+const double kSpacingTiny = 4;
+const double kSpacingSmall = 8;
+
 const double kIconCircleSizeLarge = 48;
 const double kIconCircleSizeSmall = 36;
 
