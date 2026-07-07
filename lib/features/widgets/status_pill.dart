@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:openwatch/core/ui/ui_constants.dart';
 
 /// A compact status pill used for sync state, signal strength, update
 /// availability, cloud status, and similar discrete states.
@@ -20,20 +21,21 @@ class StatusPill extends StatelessWidget {
     final statusColor = color ?? theme.colorScheme.primary;
 
     return Container(
-      height: 24,
-      padding: const EdgeInsets.symmetric(horizontal: 10),
+      height: kPillHeight,
+      padding: const EdgeInsets.symmetric(horizontal: kPillPaddingH),
       decoration: BoxDecoration(
-        color: statusColor.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(12),
+        color: statusColor.withValues(alpha: kPillTintOpacity),
+        borderRadius: BorderRadius.circular(kPillRadius),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 12, color: statusColor),
-          const SizedBox(width: 6),
+          Icon(icon, size: kPillIconSize, color: statusColor),
+          const SizedBox(width: kPillSpacing),
           Text(
             label,
-            style: theme.textTheme.labelSmall?.copyWith(color: statusColor),
+            style: AppTextStyles.labelSmall(context)
+                ?.copyWith(color: statusColor),
           ),
         ],
       ),
