@@ -52,12 +52,54 @@ const double kPillHeight = 22;
 const double kPillRadius = 10;
 const double kPillIconSize = 12;
 
+// Chips / badges / tooltips ------------------------------------------------
+
+const double kChipRadius = 8;
+const double kChipPaddingH = 12;
+const double kChipPaddingV = 6;
+
+// Screen layout ------------------------------------------------------------
+
+const double kScreenPaddingH = 18;
+const double kScreenPaddingTop = 8;
+const double kScreenPaddingBottom = 24;
+const double kEmptyStatePadding = 24;
+
 // Semantic tints / opacity values -----------------------------------------
 
 const double kMetricTintOpacity = 0.08;
 const double kPillTintOpacity = 0.10;
 const double kCardGradientOpacityStart = 0.08;
 const double kCardGradientOpacityEnd = 0.02;
+
+// Chart / metric colors ----------------------------------------------------
+//
+// These are functional data colors used by charts and metric highlights.
+// Each returns the appropriate light/dark variant.
+
+Color kHeartRed(BuildContext context) {
+  return Theme.of(context).brightness == Brightness.dark
+      ? const Color(0xFFFF453A)
+      : const Color(0xFFFF3B30);
+}
+
+Color kSleepPurple(BuildContext context) {
+  return Theme.of(context).brightness == Brightness.dark
+      ? const Color(0xFF5E5CE6)
+      : const Color(0xFF5856D6);
+}
+
+Color kActivityGreen(BuildContext context) {
+  return Theme.of(context).brightness == Brightness.dark
+      ? const Color(0xFF30D158)
+      : const Color(0xFF34C759);
+}
+
+Color kStressOrange(BuildContext context) {
+  return Theme.of(context).brightness == Brightness.dark
+      ? const Color(0xFFFF9F0A)
+      : const Color(0xFFFF9500);
+}
 
 /// Convenience wrappers around [TextTheme] that use the UI constants above.
 ///

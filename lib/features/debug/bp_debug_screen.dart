@@ -70,7 +70,12 @@ class _DayList extends StatelessWidget {
           return const _EmptyState();
         }
         return ListView.builder(
-          padding: const EdgeInsets.fromLTRB(18, 8, 18, 24),
+          padding: const EdgeInsets.fromLTRB(
+            kScreenPaddingH,
+            kScreenPaddingTop,
+            kScreenPaddingH,
+            kScreenPaddingBottom,
+          ),
           itemCount: days.length,
           itemBuilder: (context, i) =>
               _DayCard(day: days[i], loader: () => store.readDay(days[i])),
@@ -204,7 +209,7 @@ class _EmptyState extends StatelessWidget {
   Widget build(BuildContext context) {
     return const Center(
       child: Padding(
-        padding: EdgeInsets.all(24),
+        padding: EdgeInsets.all(kEmptyStatePadding),
         child: HealthCard(
           icon: Icons.bloodtype_outlined,
           title: 'No BP raw bytes on disk yet',

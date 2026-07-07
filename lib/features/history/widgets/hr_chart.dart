@@ -625,11 +625,14 @@ class _PointBadge extends StatelessWidget {
         color: theme.colorScheme.surfaceContainerHighest.withValues(
           alpha: 0.88,
         ),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(kChipRadius),
         border: Border.all(color: theme.colorScheme.outlineVariant),
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        padding: const EdgeInsets.symmetric(
+          horizontal: kChipPaddingH,
+          vertical: kChipPaddingV,
+        ),
         child: Text(
           '${_clock(sample.timestamp)}  ${sample.bpm} bpm',
           style: AppTextStyles.labelMedium(context),
@@ -659,7 +662,7 @@ class _ChartControls extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: theme.colorScheme.surface.withValues(alpha: 0.8),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(kChipRadius),
         border: Border.all(color: theme.colorScheme.outlineVariant),
       ),
       child: Row(

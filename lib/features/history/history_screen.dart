@@ -341,13 +341,13 @@ class _HistoryTrendCard extends StatelessWidget {
               icon: CupertinoIcons.heart_fill,
               title: 'Heart rate',
               detail: '${avgBpm(latest!.hr)} bpm avg',
-              tint: _heartRed(context),
+              tint: kHeartRed(context),
             ),
             const SizedBox(height: kSpacingSmall),
             MiniHrSpark(
               samples: latest.hr,
               height: 48,
-              color: _heartRed(context),
+              color: kHeartRed(context),
             ),
           ],
           const SizedBox(height: kCardInternalSpacing),
@@ -357,13 +357,13 @@ class _HistoryTrendCard extends StatelessWidget {
             detail: latest?.steps == null
                 ? 'No step total'
                 : '${NumberFormat.decimalPattern().format(latest!.steps)} steps',
-            tint: _activityGreen(context),
+            tint: kActivityGreen(context),
           ),
           const SizedBox(height: kSpacingSmall),
           StepsBarChart(
             days: days,
             height: 100,
-            barColor: _activityGreen(context),
+            barColor: kActivityGreen(context),
           ),
           if (sleepSummary.hasData) ...[
             const SizedBox(height: kCardInternalSpacing),
@@ -371,13 +371,13 @@ class _HistoryTrendCard extends StatelessWidget {
               icon: CupertinoIcons.moon_fill,
               title: 'Sleep',
               detail: 'Week avg ${_formatDuration(sleepSummary.average)}',
-              tint: _sleepPurple(context),
+              tint: kSleepPurple(context),
             ),
             const SizedBox(height: kSpacingSmall),
             SleepTrendChart(
               days: days,
               height: 100,
-              sleepColor: _sleepPurple(context),
+              sleepColor: kSleepPurple(context),
             ),
           ],
         ],
@@ -714,7 +714,7 @@ class _DayChip extends StatelessWidget {
         ),
         decoration: BoxDecoration(
           color: bgColor,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(kChipRadius),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -837,7 +837,7 @@ class _DayDetailPage extends StatelessWidget {
                 children: [
                   HealthListTile(
                     leadingIcon: CupertinoIcons.heart_fill,
-                    leadingColor: _heartRed(context),
+                    leadingColor: kHeartRed(context),
                     title: 'Heart rate',
                     subtitle: displayDay.hr.isEmpty
                         ? 'No samples'
@@ -850,7 +850,7 @@ class _DayDetailPage extends StatelessWidget {
                   ),
                   HealthListTile(
                     leadingIcon: CupertinoIcons.moon_fill,
-                    leadingColor: _sleepPurple(context),
+                    leadingColor: kSleepPurple(context),
                     title: 'Sleep',
                     subtitle: displayDay.sleep.isEmpty
                         ? 'No sessions'
@@ -867,7 +867,7 @@ class _DayDetailPage extends StatelessWidget {
                   ),
                   HealthListTile(
                     leadingIcon: CupertinoIcons.arrow_up_right,
-                    leadingColor: _activityGreen(context),
+                    leadingColor: kActivityGreen(context),
                     title: 'Steps',
                     subtitle: displayDay.steps == null ? 'No step total' : null,
                     value: displayDay.steps == null
@@ -877,7 +877,7 @@ class _DayDetailPage extends StatelessWidget {
                   ),
                   HealthListTile(
                     leadingIcon: CupertinoIcons.bolt_fill,
-                    leadingColor: _stressOrange(context),
+                    leadingColor: kStressOrange(context),
                     title: 'Stress',
                     subtitle: displayDay.stress.isEmpty
                         ? 'No samples'
@@ -890,7 +890,7 @@ class _DayDetailPage extends StatelessWidget {
                   ),
                   HealthListTile(
                     leadingIcon: CupertinoIcons.chart_bar_fill,
-                    leadingColor: _activityGreen(context),
+                    leadingColor: kActivityGreen(context),
                     title: 'HRV',
                     subtitle: displayDay.hrv.isEmpty
                         ? 'No samples'
@@ -903,7 +903,7 @@ class _DayDetailPage extends StatelessWidget {
                   ),
                   HealthListTile(
                     leadingIcon: CupertinoIcons.waveform_path_ecg,
-                    leadingColor: _heartRed(context),
+                    leadingColor: kHeartRed(context),
                     title: 'Blood pressure',
                     subtitle: displayDay.bloodPressure.isEmpty
                         ? 'No readings'
@@ -924,13 +924,13 @@ class _DayDetailPage extends StatelessWidget {
               HealthCard(
                 icon: CupertinoIcons.heart_fill,
                 title: 'Heart rate',
-                metricColor: _heartRed(context),
+                metricColor: kHeartRed(context),
                 caption: '${avgBpm(displayDay.hr)} bpm average',
                 child: SizedBox(
                   height: 160,
                   child: HrLineChart(
                     samples: displayDay.hr,
-                    color: _heartRed(context),
+                    color: kHeartRed(context),
                   ),
                 ),
               ),
@@ -940,7 +940,7 @@ class _DayDetailPage extends StatelessWidget {
               HealthCard(
                 icon: CupertinoIcons.moon_fill,
                 title: 'Sleep',
-                metricColor: _sleepPurple(context),
+                metricColor: kSleepPurple(context),
                 caption:
                     'Total ${_sleepSummary(displayDay)} · ${_sleepLongSummary(displayDay)}',
                 child: Builder(
@@ -956,7 +956,7 @@ class _DayDetailPage extends StatelessWidget {
                         ...sessions.asMap().entries.map(
                           (e) => HealthListTile(
                             leadingIcon: CupertinoIcons.moon_fill,
-                            leadingColor: _sleepPurple(context),
+                            leadingColor: kSleepPurple(context),
                             title: 'Session ${e.key + 1}',
                             subtitle:
                                 '${DateFormat.jm().format(e.value.start)} - '
@@ -976,13 +976,13 @@ class _DayDetailPage extends StatelessWidget {
               HealthCard(
                 icon: CupertinoIcons.bolt_fill,
                 title: 'Stress',
-                metricColor: _stressOrange(context),
+                metricColor: kStressOrange(context),
                 caption: _scalarRange(displayDay.stress),
                 child: SizedBox(
                   height: 120,
                   child: ScalarMetricChart(
                     samples: displayDay.stress,
-                    color: _stressOrange(context),
+                    color: kStressOrange(context),
                     minValue: 0,
                     maxValue: 100,
                   ),
@@ -994,13 +994,13 @@ class _DayDetailPage extends StatelessWidget {
               HealthCard(
                 icon: CupertinoIcons.chart_bar_fill,
                 title: 'HRV',
-                metricColor: _activityGreen(context),
+                metricColor: kActivityGreen(context),
                 caption: _scalarRange(displayDay.hrv, unit: 'ms'),
                 child: SizedBox(
                   height: 120,
                   child: ScalarMetricChart(
                     samples: displayDay.hrv,
-                    color: _activityGreen(context),
+                    color: kActivityGreen(context),
                   ),
                 ),
               ),
@@ -1010,7 +1010,7 @@ class _DayDetailPage extends StatelessWidget {
               HealthCard(
                 icon: CupertinoIcons.waveform_path_ecg,
                 title: 'Blood pressure',
-                metricColor: _heartRed(context),
+                metricColor: kHeartRed(context),
                 caption: _bpMetricDetail(displayDay.bloodPressure),
                 child: SizedBox(
                   height: 120,
@@ -1020,7 +1020,7 @@ class _DayDetailPage extends StatelessWidget {
                         if (!_isRawBpSlot(bp))
                           HealthMetricSample(bp.timestamp, bp.systolic),
                     ],
-                    color: _heartRed(context),
+                    color: kHeartRed(context),
                   ),
                 ),
               ),
@@ -1219,7 +1219,7 @@ class _NewBadge extends StatelessWidget {
         ),
         decoration: BoxDecoration(
           color: theme.colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(kChipRadius),
         ),
         child: Text(
           'New',
@@ -1231,28 +1231,4 @@ class _NewBadge extends StatelessWidget {
       ),
     );
   }
-}
-
-Color _heartRed(BuildContext context) {
-  return Theme.of(context).brightness == Brightness.dark
-      ? const Color(0xFFFF453A)
-      : const Color(0xFFFF3B30);
-}
-
-Color _sleepPurple(BuildContext context) {
-  return Theme.of(context).brightness == Brightness.dark
-      ? const Color(0xFF5E5CE6)
-      : const Color(0xFF5856D6);
-}
-
-Color _activityGreen(BuildContext context) {
-  return Theme.of(context).brightness == Brightness.dark
-      ? const Color(0xFF30D158)
-      : const Color(0xFF34C759);
-}
-
-Color _stressOrange(BuildContext context) {
-  return Theme.of(context).brightness == Brightness.dark
-      ? const Color(0xFFFF9F0A)
-      : const Color(0xFFFF9500);
 }
