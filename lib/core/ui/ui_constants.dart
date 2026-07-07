@@ -43,7 +43,7 @@ const double kIconSizeSmall = 20;
 const double kIconSizeTiny = 16;
 
 const double kGridSpacing = 12;
-const double kGridChildAspectRatio = 1.05;
+const double kGridChildAspectRatio = 1.65;
 
 // Status pill -------------------------------------------------------------
 

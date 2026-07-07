@@ -11,6 +11,7 @@ import 'package:flutter_user_certificates_android/flutter_user_certificates_andr
 
 import 'core/routing/app_router.dart';
 import 'core/services/opentelemetry_service.dart';
+import 'core/ui/ui_constants.dart';
 
 /// Converts a DER-encoded certificate to PEM format.
 Uint8List _derToPem(Uint8List der) {
@@ -125,55 +126,80 @@ ThemeData _buildTheme(Brightness brightness) {
 
   final textTheme = base.textTheme.copyWith(
     displayLarge: base.textTheme.displayLarge?.copyWith(
-      fontSize: 56,
+      fontSize: kDisplayLarge,
       fontWeight: FontWeight.w700,
       height: 1.0,
       letterSpacing: -0.02,
     ),
-    headlineMedium: base.textTheme.headlineMedium?.copyWith(
-      fontSize: 32,
+    displayMedium: base.textTheme.displayMedium?.copyWith(
+      fontSize: kDisplayMedium,
       fontWeight: FontWeight.w700,
       height: 1.0,
     ),
+    displaySmall: base.textTheme.displaySmall?.copyWith(
+      fontSize: kDisplaySmall,
+      fontWeight: FontWeight.w700,
+      height: 1.0,
+    ),
+    headlineLarge: base.textTheme.headlineLarge?.copyWith(
+      fontSize: kHeadlineLarge,
+      fontWeight: FontWeight.w700,
+      height: 1.1,
+    ),
+    headlineMedium: base.textTheme.headlineMedium?.copyWith(
+      fontSize: kHeadlineMedium,
+      fontWeight: FontWeight.w700,
+      height: 1.1,
+    ),
     headlineSmall: base.textTheme.headlineSmall?.copyWith(
-      fontSize: 28,
+      fontSize: kHeadlineSmall,
       fontWeight: FontWeight.w700,
       height: 1.2,
     ),
     titleLarge: base.textTheme.titleLarge?.copyWith(
-      fontSize: 20,
+      fontSize: kTitleLarge,
       fontWeight: FontWeight.w700,
       height: 1.25,
     ),
     titleMedium: base.textTheme.titleMedium?.copyWith(
-      fontSize: 20,
+      fontSize: kTitleMedium,
       fontWeight: FontWeight.w600,
       height: 1.2,
       color: secondaryText,
     ),
+    titleSmall: base.textTheme.titleSmall?.copyWith(
+      fontSize: kTitleSmall,
+      fontWeight: FontWeight.w600,
+      height: 1.2,
+    ),
     bodyLarge: base.textTheme.bodyLarge?.copyWith(
-      fontSize: 17,
+      fontSize: kBodyLarge,
       fontWeight: FontWeight.w400,
       height: 1.35,
     ),
+    bodyMedium: base.textTheme.bodyMedium?.copyWith(
+      fontSize: kBodyMedium,
+      fontWeight: FontWeight.w400,
+      height: 1.3,
+    ),
     bodySmall: base.textTheme.bodySmall?.copyWith(
-      fontSize: 13,
+      fontSize: kBodySmall,
       fontWeight: FontWeight.w400,
       height: 1.3,
       color: secondaryText,
     ),
     labelLarge: base.textTheme.labelLarge?.copyWith(
-      fontSize: 16,
+      fontSize: kLabelLarge,
       fontWeight: FontWeight.w600,
       height: 1.25,
     ),
     labelMedium: base.textTheme.labelMedium?.copyWith(
-      fontSize: 14,
+      fontSize: kLabelMedium,
       fontWeight: FontWeight.w600,
       height: 1.0,
     ),
     labelSmall: base.textTheme.labelSmall?.copyWith(
-      fontSize: 11,
+      fontSize: kLabelSmall,
       fontWeight: FontWeight.w700,
       height: 1.0,
       letterSpacing: 0.8,
@@ -198,38 +224,45 @@ ThemeData _buildTheme(Brightness brightness) {
       margin: EdgeInsets.zero,
       color: scheme.surface,
       shadowColor: Colors.transparent,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(kCardRadius),
+      ),
     ),
     dividerTheme: DividerThemeData(color: divider, thickness: 1, space: 1),
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
-        minimumSize: const Size(0, 54),
-        padding: const EdgeInsets.symmetric(horizontal: 24),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        minimumSize: Size(0, kIconCircleSizeSmall + kListTilePaddingV),
+        padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(kCardRadius),
+        ),
         textStyle: textTheme.labelLarge?.copyWith(
-          fontSize: 16,
-          fontWeight: FontWeight.w600,
-          height: 1.25,
+          fontSize: kLabelLarge,
+          color: scheme.onPrimary,
         ),
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
-        minimumSize: const Size(0, 54),
-        padding: const EdgeInsets.symmetric(horizontal: 24),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        minimumSize: Size(0, kIconCircleSizeSmall + kListTilePaddingV),
+        padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(kCardRadius),
+        ),
         side: BorderSide(color: divider),
         textStyle: textTheme.labelLarge?.copyWith(
-          fontSize: 16,
-          fontWeight: FontWeight.w600,
-          height: 1.25,
+          fontSize: kLabelLarge,
+          color: scheme.onSurface,
         ),
       ),
     ),
     textButtonTheme: TextButtonThemeData(
       style: TextButton.styleFrom(
         minimumSize: const Size(44, 44),
-        textStyle: textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w700),
+        textStyle: textTheme.labelSmall?.copyWith(
+          fontSize: kLabelSmall,
+          fontWeight: FontWeight.w700,
+        ),
       ),
     ),
     iconButtonTheme: IconButtonThemeData(
@@ -239,7 +272,7 @@ ThemeData _buildTheme(Brightness brightness) {
       ),
     ),
     navigationBarTheme: NavigationBarThemeData(
-      height: 68,
+      height: 64,
       backgroundColor: Colors.transparent,
       elevation: 0,
       indicatorColor: scheme.primary.withValues(alpha: 0.12),
@@ -249,6 +282,7 @@ ThemeData _buildTheme(Brightness brightness) {
       labelTextStyle: WidgetStateProperty.resolveWith((states) {
         final selected = states.contains(WidgetState.selected);
         return textTheme.labelSmall?.copyWith(
+          fontSize: kLabelSmall,
           color: selected ? scheme.primary : secondaryText,
           fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
         );
@@ -257,20 +291,28 @@ ThemeData _buildTheme(Brightness brightness) {
         final selected = states.contains(WidgetState.selected);
         return IconThemeData(
           color: selected ? scheme.primary : secondaryText,
-          size: 24,
+          size: kIconSizeSmall,
         );
       }),
     ),
     navigationRailTheme: NavigationRailThemeData(
       backgroundColor: scheme.surface.withValues(alpha: 0.94),
       elevation: 0,
-      selectedIconTheme: IconThemeData(color: scheme.primary),
-      unselectedIconTheme: IconThemeData(color: secondaryText),
+      selectedIconTheme: IconThemeData(
+        color: scheme.primary,
+        size: kIconSizeSmall,
+      ),
+      unselectedIconTheme: IconThemeData(
+        color: secondaryText,
+        size: kIconSizeSmall,
+      ),
       selectedLabelTextStyle: textTheme.labelMedium?.copyWith(
+        fontSize: kLabelMedium,
         color: scheme.primary,
         fontWeight: FontWeight.w700,
       ),
       unselectedLabelTextStyle: textTheme.labelMedium?.copyWith(
+        fontSize: kLabelMedium,
         color: secondaryText,
       ),
       indicatorColor: scheme.primary.withValues(alpha: 0.12),
@@ -295,12 +337,19 @@ ThemeData _buildTheme(Brightness brightness) {
     listTileTheme: ListTileThemeData(
       iconColor: scheme.primary,
       minLeadingWidth: 28,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-      titleTextStyle: textTheme.bodyLarge?.copyWith(
+      contentPadding: const EdgeInsets.symmetric(
+        horizontal: kListTilePaddingH,
+        vertical: kListTilePaddingV,
+      ),
+      titleTextStyle: textTheme.bodyMedium?.copyWith(
+        fontSize: kBodyMedium,
         color: scheme.onSurface,
         fontWeight: FontWeight.w600,
       ),
-      subtitleTextStyle: textTheme.bodySmall?.copyWith(color: secondaryText),
+      subtitleTextStyle: textTheme.bodySmall?.copyWith(
+        fontSize: kBodySmall,
+        color: secondaryText,
+      ),
     ),
   );
 }
