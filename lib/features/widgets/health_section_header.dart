@@ -32,19 +32,16 @@ class HealthSectionHeader extends StatelessWidget {
       child: Row(
         children: [
           Expanded(
-            child: Text(
-              title,
-              style: AppTextStyles.headlineSmall(context),
-            ),
+            child: Text(title, style: AppTextStyles.headlineSmall(context)),
           ),
           if (onShowAll != null)
             TextButton(
               onPressed: onShowAll,
               child: Text(
                 actionLabel,
-                style: AppTextStyles.labelSmall(context)?.copyWith(
-                  color: theme.colorScheme.primary,
-                ),
+                style: AppTextStyles.labelSmall(
+                  context,
+                )?.copyWith(color: theme.colorScheme.primary),
               ),
             ),
         ],

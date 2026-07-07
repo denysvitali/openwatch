@@ -65,9 +65,9 @@ class HealthListTile extends StatelessWidget {
               children: [
                 Text(
                   title,
-                  style: AppTextStyles.bodyMedium(context)?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
+                  style: AppTextStyles.bodyMedium(
+                    context,
+                  )?.copyWith(fontWeight: FontWeight.w600),
                 ),
                 if (subtitle != null) ...[
                   const SizedBox(height: 2),
@@ -110,9 +110,9 @@ class HealthListTile extends StatelessWidget {
         if (value != null)
           Text(
             value!,
-            style: AppTextStyles.titleLarge(context)?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
+            style: AppTextStyles.titleLarge(
+              context,
+            )?.copyWith(color: theme.colorScheme.onSurfaceVariant),
           ),
         if (value != null && unit != null) const SizedBox(width: 4),
         if (unit != null) Text(unit!, style: AppTextStyles.bodySmall(context)),

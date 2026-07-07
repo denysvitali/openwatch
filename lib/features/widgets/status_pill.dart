@@ -34,8 +34,9 @@ class StatusPill extends StatelessWidget {
           const SizedBox(width: kSpacingTiny),
           Text(
             label,
-            style: AppTextStyles.labelSmall(context)
-                ?.copyWith(color: statusColor),
+            style: AppTextStyles.labelSmall(
+              context,
+            )?.copyWith(color: statusColor),
           ),
         ],
       ),
