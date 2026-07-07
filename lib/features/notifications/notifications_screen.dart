@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:openwatch/core/ui/ui_constants.dart';
 
 import '../widgets/health_widgets.dart';
 
@@ -21,7 +22,7 @@ class NotificationsScreen extends StatelessWidget {
         children: [
           const HealthSectionHeader(title: 'Push to watch'),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 18),
+            padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
             child: HealthCard(
               icon: Icons.info_outline,
               metricColor: colorScheme.primary,
@@ -32,19 +33,19 @@ class NotificationsScreen extends StatelessWidget {
               trailing: StatusPill(
                 icon: Icons.pending,
                 label: 'Coming soon',
-                color: colorScheme.tertiary,
+                color: colorScheme.primary,
               ),
             ),
           ),
           const HealthSectionHeader(title: 'Categories'),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 18),
+            padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
             child: Card(
               child: Column(
                 children: [
                   HealthListTile(
                     leadingIcon: Icons.call,
-                    leadingColor: colorScheme.secondary,
+                    leadingColor: colorScheme.primary,
                     title: 'Incoming calls',
                     subtitle: 'Ring and caller ID on the watch',
                     trailing: const Switch(value: false, onChanged: null),
@@ -58,7 +59,7 @@ class NotificationsScreen extends StatelessWidget {
                   ),
                   HealthListTile(
                     leadingIcon: Icons.apps,
-                    leadingColor: colorScheme.tertiary,
+                    leadingColor: colorScheme.primary,
                     title: 'App notifications',
                     subtitle: 'Other app alerts',
                     trailing: const Switch(value: false, onChanged: null),
@@ -68,7 +69,7 @@ class NotificationsScreen extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: kCardPadding),
         ],
       ),
     );
