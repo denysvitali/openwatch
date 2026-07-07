@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:openwatch/core/ui/ui_constants.dart';
 
 /// Bottom-navigation (or side-rail) shell shown once a watch is connected.
 ///
@@ -28,33 +29,48 @@ class HomeShell extends StatelessWidget {
                 minWidth: 86,
                 groupAlignment: -0.82,
                 leading: Padding(
-                  padding: const EdgeInsets.only(top: 8, bottom: 18),
+                  padding: const EdgeInsets.only(
+                    top: kSpacingSmall,
+                    bottom: kSpacingSmall * 2 + kSpacingMini,
+                  ),
                   child: Icon(
                     Icons.watch_rounded,
                     color: theme.colorScheme.primary,
-                    size: 30,
+                    size: kIconSizeLarge,
                   ),
                 ),
-                destinations: const [
+                destinations: [
                   NavigationRailDestination(
-                    icon: Icon(Icons.watch_outlined),
-                    selectedIcon: Icon(Icons.watch_rounded),
-                    label: Text('Summary'),
+                    icon: const Icon(Icons.watch_outlined),
+                    selectedIcon: const Icon(Icons.watch_rounded),
+                    label: Text(
+                      'Summary',
+                      style: AppTextStyles.labelSmall(context),
+                    ),
                   ),
                   NavigationRailDestination(
-                    icon: Icon(Icons.favorite_outline),
-                    selectedIcon: Icon(Icons.favorite),
-                    label: Text('Health'),
+                    icon: const Icon(Icons.favorite_outline),
+                    selectedIcon: const Icon(Icons.favorite),
+                    label: Text(
+                      'Health',
+                      style: AppTextStyles.labelSmall(context),
+                    ),
                   ),
                   NavigationRailDestination(
-                    icon: Icon(Icons.show_chart_outlined),
-                    selectedIcon: Icon(Icons.show_chart),
-                    label: Text('History'),
+                    icon: const Icon(Icons.show_chart_outlined),
+                    selectedIcon: const Icon(Icons.show_chart),
+                    label: Text(
+                      'History',
+                      style: AppTextStyles.labelSmall(context),
+                    ),
                   ),
                   NavigationRailDestination(
-                    icon: Icon(Icons.settings_outlined),
-                    selectedIcon: Icon(Icons.settings),
-                    label: Text('Settings'),
+                    icon: const Icon(Icons.settings_outlined),
+                    selectedIcon: const Icon(Icons.settings),
+                    label: Text(
+                      'Settings',
+                      style: AppTextStyles.labelSmall(context),
+                    ),
                   ),
                 ],
               ),
