@@ -25,7 +25,7 @@ class DevicePreferencesScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Watch preferences')),
       body: ListView(
-        padding: const EdgeInsets.only(bottom: kCardPadding * 2),
+        padding: const EdgeInsets.only(bottom: kCardPadding),
         children: [
           if (!ready)
             Padding(
@@ -48,6 +48,11 @@ class DevicePreferencesScreen extends ConsumerWidget {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
             child: Card(
+              elevation: 0,
+              margin: EdgeInsets.zero,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(kCardRadius),
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -142,6 +147,11 @@ class DevicePreferencesScreen extends ConsumerWidget {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
             child: Card(
+              elevation: 0,
+              margin: EdgeInsets.zero,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(kCardRadius),
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -175,6 +185,11 @@ class DevicePreferencesScreen extends ConsumerWidget {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
             child: Card(
+              elevation: 0,
+              margin: EdgeInsets.zero,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(kCardRadius),
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [

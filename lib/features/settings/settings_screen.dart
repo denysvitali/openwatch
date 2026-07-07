@@ -27,7 +27,7 @@ class SettingsScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
-        padding: const EdgeInsets.only(bottom: kSectionHeaderPaddingTop),
+        padding: const EdgeInsets.only(bottom: kCardPadding),
         children: [
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
@@ -66,6 +66,11 @@ class SettingsScreen extends ConsumerWidget {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
             child: Card(
+              elevation: 0,
+              margin: EdgeInsets.zero,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(kCardRadius),
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -173,6 +178,11 @@ class SettingsScreen extends ConsumerWidget {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
             child: Card(
+              elevation: 0,
+              margin: EdgeInsets.zero,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(kCardRadius),
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -224,6 +234,11 @@ class SettingsScreen extends ConsumerWidget {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
             child: Card(
+              elevation: 0,
+              margin: EdgeInsets.zero,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(kCardRadius),
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -271,6 +286,11 @@ class SettingsScreen extends ConsumerWidget {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
             child: Card(
+              elevation: 0,
+              margin: EdgeInsets.zero,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(kCardRadius),
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -448,7 +468,7 @@ class _SwitchTile extends StatelessWidget {
       title: title,
       subtitle: subtitle,
       leadingIcon: icon,
-      trailing: Switch(value: value, onChanged: onChanged),
+      control: Switch(value: value, onChanged: onChanged),
       onTap: () => onChanged(!value),
     );
   }
