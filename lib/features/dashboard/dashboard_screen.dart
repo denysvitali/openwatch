@@ -158,9 +158,17 @@ class _DeviceHeroCard extends StatelessWidget {
       caption: status,
       icon: Icons.watch_rounded,
       metricColor: theme.colorScheme.primary,
-      trailing: _BatteryBadge(percent: batteryPercent, charging: charging),
+      trailing: StatusPill(
+        icon: charging
+            ? CupertinoIcons.battery_charging
+            : CupertinoIcons.battery_100,
+        label: batteryPercent == null ? '-' : '$batteryPercent%',
+        color: charging
+            ? theme.colorScheme.secondary
+            : theme.colorScheme.onSurface,
+      ),
       child: Padding(
-        padding: const EdgeInsets.only(top: kSpacingSmall),
+        padding: const EdgeInsets.only(top: kCardInternalSpacing),
         child: Wrap(
           spacing: kSpacingSmall,
           runSpacing: kSpacingSmall,
@@ -187,49 +195,6 @@ class _DeviceHeroCard extends StatelessWidget {
   }
 }
 
-class _BatteryBadge extends StatelessWidget {
-  const _BatteryBadge({required this.percent, required this.charging});
-
-  final int? percent;
-  final bool charging;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final color = charging
-        ? theme.colorScheme.secondary
-        : theme.colorScheme.onSurface;
-
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: kSpacingSmall,
-        vertical: kSpacingTiny,
-      ),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(kSpacingSmall + kSpacingTiny),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            charging
-                ? CupertinoIcons.battery_charging
-                : CupertinoIcons.battery_100,
-            size: kIconSizeSmall,
-            color: color,
-          ),
-          SizedBox(width: kSpacingTiny + kSpacingMini),
-          Text(
-            percent == null ? '-' : '$percent%',
-            style: AppTextStyles.labelMedium(context)?.copyWith(color: color),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _MetricGrid extends StatelessWidget {
   const _MetricGrid({
     required this.steps,
@@ -245,34 +210,42 @@ class _MetricGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MetricGrid(
-      children: [
-        HealthCard(
-          icon: CupertinoIcons.arrow_up_right,
-          title: 'Steps',
-          value: _formatInt(steps),
-        ),
-        HealthCard(
-          icon: CupertinoIcons.heart_fill,
-          title: 'Heart',
-          value: heartRate == null ? '-' : '$heartRate',
-          unit: heartRate == null ? null : 'bpm',
-        ),
-        HealthCard(
-          icon: CupertinoIcons.flame_fill,
-          title: 'Energy',
-          value: _formatInt(calories),
-          unit: calories == null ? null : 'kcal',
-        ),
-        HealthCard(
-          icon: CupertinoIcons.location_fill,
-          title: 'Distance',
-          value: distanceMeters == null
-              ? '-'
-              : (distanceMeters! / 1000).toStringAsFixed(2),
-          unit: distanceMeters == null ? null : 'km',
-        ),
-      ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final columns = width >= 560 ? 4 : 2;
+        final maxExtent = (width - (columns - 1) * kGridSpacing) / columns;
+        return MetricGrid(
+          maxCrossAxisExtent: maxExtent,
+          children: [
+            HealthCard(
+              icon: CupertinoIcons.arrow_up_right,
+              title: 'Steps',
+              value: _formatInt(steps),
+            ),
+            HealthCard(
+              icon: CupertinoIcons.heart_fill,
+              title: 'Heart',
+              value: heartRate == null ? '-' : '$heartRate',
+              unit: heartRate == null ? null : 'bpm',
+            ),
+            HealthCard(
+              icon: CupertinoIcons.flame_fill,
+              title: 'Energy',
+              value: _formatInt(calories),
+              unit: calories == null ? null : 'kcal',
+            ),
+            HealthCard(
+              icon: CupertinoIcons.location_fill,
+              title: 'Distance',
+              value: distanceMeters == null
+                  ? '-'
+                  : (distanceMeters! / 1000).toStringAsFixed(2),
+              unit: distanceMeters == null ? null : 'km',
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -308,6 +281,9 @@ class _RecentActivityCard extends StatelessWidget {
 
     final recent = _recentWeek(sync.days);
     final sleepSummary = SleepTrendSummary.fromDays(recent);
+    final trendText = sleepSummary.trendMinutes == null
+        ? 'Daily sleep time'
+        : '${sleepSummary.trendMinutes! >= 0 ? '+' : '-'}${_formatTrendMinutes(sleepSummary.trendMinutes!.abs())} vs prior';
     final today = sync.days.last;
 
     return HealthCard(
@@ -325,7 +301,22 @@ class _RecentActivityCard extends StatelessWidget {
             const SizedBox(height: kSpacingSmall),
           ],
           if (sleepSummary.hasData) ...[
-            _SleepTrendHeader(summary: sleepSummary),
+            HealthListTile(
+              leadingIcon: CupertinoIcons.moon_fill,
+              leadingColor: theme.colorScheme.primary,
+              title: 'Sleep trend',
+              subtitle: trendText,
+              control: Text(
+                'Week avg ${_formatDuration(sleepSummary.average)}',
+                style: AppTextStyles.labelSmall(
+                  context,
+                )?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              showDivider: false,
+              contentPadding: EdgeInsets.zero,
+            ),
             const SizedBox(height: kSpacingSmall),
             SleepTrendChart(days: recent, height: 80),
             const SizedBox(height: kSpacingSmall),
@@ -365,77 +356,19 @@ class _RecentActivityCard extends StatelessWidget {
   }
 }
 
-class _SleepTrendHeader extends StatelessWidget {
-  const _SleepTrendHeader({required this.summary});
+String _formatDuration(Duration d) {
+  final h = d.inMinutes ~/ 60;
+  final m = d.inMinutes.remainder(60);
+  if (m == 0) return '${h}h';
+  return '${h}h ${m}m';
+}
 
-  final SleepTrendSummary summary;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final trend = summary.trendMinutes;
-    final trendText = trend == null
-        ? 'Daily sleep time'
-        : '${trend >= 0 ? '+' : '-'}${_formatTrendMinutes(trend.abs())} vs prior';
-    return Row(
-      children: [
-        Container(
-          width: kIconCircleSizeSmall,
-          height: kIconCircleSizeSmall,
-          decoration: BoxDecoration(
-            color: theme.colorScheme.primary.withValues(
-              alpha: kMetricTintOpacity,
-            ),
-            shape: BoxShape.circle,
-          ),
-          alignment: Alignment.center,
-          child: Icon(
-            CupertinoIcons.moon_fill,
-            size: kIconSizeSmall,
-            color: theme.colorScheme.primary,
-          ),
-        ),
-        const SizedBox(width: kGridSpacing),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Sleep trend',
-                style: AppTextStyles.titleSmall(
-                  context,
-                )?.copyWith(fontWeight: FontWeight.w600),
-              ),
-              Text(trendText, style: AppTextStyles.labelMedium(context)),
-            ],
-          ),
-        ),
-        Text(
-          'Week avg ${_formatDuration(summary.average)}',
-          style: AppTextStyles.labelSmall(
-            context,
-          )?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-      ],
-    );
-  }
-
-  static String _formatDuration(Duration d) {
-    final h = d.inMinutes ~/ 60;
-    final m = d.inMinutes.remainder(60);
-    if (m == 0) return '${h}h';
-    return '${h}h ${m}m';
-  }
-
-  static String _formatTrendMinutes(int minutes) {
-    if (minutes < 60) return '${minutes}m';
-    final h = minutes ~/ 60;
-    final m = minutes.remainder(60);
-    if (m == 0) return '${h}h';
-    return '${h}h ${m}m';
-  }
+String _formatTrendMinutes(int minutes) {
+  if (minutes < 60) return '${minutes}m';
+  final h = minutes ~/ 60;
+  final m = minutes.remainder(60);
+  if (m == 0) return '${h}h';
+  return '${h}h ${m}m';
 }
 
 class _QuickActions extends StatelessWidget {
@@ -508,7 +441,7 @@ class _AlarmsSummary extends StatelessWidget {
     return HealthListTile(
       title: 'Clock alarms',
       subtitle: '$count armed — next at $time',
-      leadingIcon: Icons.alarm,
+      leadingIcon: CupertinoIcons.alarm,
       leadingColor: theme.colorScheme.primary,
       value: '$count',
       onTap: () => GoRouter.of(context).push('/alarms'),
@@ -543,43 +476,14 @@ class _NowPlayingCard extends StatelessWidget {
       title: 'Now playing',
       caption: music.track,
       metricColor: tint,
-      trailing: _VolumeChip(volume: music.volume),
-    );
-  }
-}
-
-class _VolumeChip extends StatelessWidget {
-  const _VolumeChip({required this.volume});
-  final int volume;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final icon = volume == 0
-        ? CupertinoIcons.volume_off
-        : volume < 64
-        ? CupertinoIcons.volume_down
-        : CupertinoIcons.volume_up;
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: kSpacingSmall,
-        vertical: kSpacingTiny,
-      ),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(kPillRadius),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            icon,
-            size: kIconSizeTiny,
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-          const SizedBox(width: kSpacingTiny),
-          Text('$volume', style: AppTextStyles.labelMedium(context)),
-        ],
+      trailing: StatusPill(
+        icon: music.volume == 0
+            ? CupertinoIcons.volume_off
+            : music.volume < 64
+            ? CupertinoIcons.volume_down
+            : CupertinoIcons.volume_up,
+        label: '${music.volume}',
+        color: theme.colorScheme.onSurfaceVariant,
       ),
     );
   }

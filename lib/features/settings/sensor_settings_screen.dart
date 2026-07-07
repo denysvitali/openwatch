@@ -41,7 +41,7 @@ class SensorSettingsScreen extends ConsumerWidget {
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.only(bottom: kSectionHeaderPaddingTop),
+        padding: const EdgeInsets.only(bottom: kCardPadding),
         children: [
           if (!hrSupported)
             Padding(
@@ -64,6 +64,11 @@ class SensorSettingsScreen extends ConsumerWidget {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
             child: Card(
+              elevation: 0,
+              margin: EdgeInsets.zero,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(kCardRadius),
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -106,6 +111,11 @@ class SensorSettingsScreen extends ConsumerWidget {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
             child: Card(
+              elevation: 0,
+              margin: EdgeInsets.zero,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(kCardRadius),
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -227,7 +237,7 @@ class _AlarmFieldTile extends StatelessWidget {
       title: title,
       subtitle: subtitle,
       leadingIcon: icon,
-      trailing: SizedBox(
+      control: SizedBox(
         width: 80,
         child: TextFormField(
           initialValue: value.toString(),

@@ -388,7 +388,12 @@ class _SleepPainter extends CustomPainter {
     double laneH,
     List<SleepStage> lanes,
   ) {
-    final textStyle = TextStyle(color: textColor, fontSize: kLabelSmall);
+    final textStyle = TextStyle(
+      color: textColor,
+      fontSize: kLabelSmall,
+      height: 1.0,
+      letterSpacing: 0,
+    );
     for (var i = 0; i < lanes.length; i++) {
       final tp = TextPainter(
         text: TextSpan(text: _label(lanes[i]), style: textStyle),
@@ -441,6 +446,8 @@ class _SleepPainter extends CustomPainter {
         style: TextStyle(
           color: textColor.withValues(alpha: 0.6),
           fontSize: kBodySmall,
+          height: 1.0,
+          letterSpacing: 0,
         ),
       ),
       textDirection: TextDirection.ltr,
@@ -461,7 +468,12 @@ class _SleepPainter extends CustomPainter {
     final tp = TextPainter(
       text: TextSpan(
         text: text,
-        style: TextStyle(color: color, fontSize: size),
+        style: TextStyle(
+          color: color,
+          fontSize: size,
+          height: 1.0,
+          letterSpacing: 0,
+        ),
       ),
       textDirection: TextDirection.ltr,
     )..layout();
@@ -509,7 +521,7 @@ class _SleepBadge extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         child: Text(
           '${_label(segment.stage)}  ${_clock(segment.start)}  ${segment.duration.inMinutes}m',
-          style: theme.textTheme.labelMedium,
+          style: AppTextStyles.labelMedium(context),
         ),
       ),
     );

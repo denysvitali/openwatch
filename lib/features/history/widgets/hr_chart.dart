@@ -506,6 +506,8 @@ class _HrPainter extends CustomPainter {
         style: TextStyle(
           color: textColor.withValues(alpha: 0.54),
           fontSize: kBodySmall,
+          height: 1.0,
+          letterSpacing: 0,
         ),
       ),
       textDirection: TextDirection.ltr,
@@ -586,7 +588,12 @@ class _HrPainter extends CustomPainter {
     final tp = TextPainter(
       text: TextSpan(
         text: text,
-        style: TextStyle(color: textColor, fontSize: size),
+        style: TextStyle(
+          color: textColor,
+          fontSize: size,
+          height: 1.0,
+          letterSpacing: 0,
+        ),
       ),
       textDirection: TextDirection.ltr,
     )..layout();
@@ -625,7 +632,7 @@ class _PointBadge extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         child: Text(
           '${_clock(sample.timestamp)}  ${sample.bpm} bpm',
-          style: theme.textTheme.labelMedium,
+          style: AppTextStyles.labelMedium(context),
         ),
       ),
     );

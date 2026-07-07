@@ -38,9 +38,9 @@ class StepsBarChart extends StatelessWidget {
         child: Center(
           child: Text(
             'No step data',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
+            style: AppTextStyles.bodySmall(
+              context,
+            )?.copyWith(color: theme.colorScheme.onSurfaceVariant),
           ),
         ),
       );
@@ -173,7 +173,7 @@ class _StepsPainter extends CustomPainter {
     final tp = TextPainter(
       text: TextSpan(
         text: text,
-        style: TextStyle(fontSize: size, height: 1.0),
+        style: TextStyle(fontSize: size, height: 1.0, letterSpacing: 0),
       ),
       textDirection: TextDirection.ltr,
     )..layout();
@@ -190,7 +190,12 @@ class _StepsPainter extends CustomPainter {
     final tp = TextPainter(
       text: TextSpan(
         text: text,
-        style: TextStyle(color: color, fontSize: size, height: 1.0),
+        style: TextStyle(
+          color: color,
+          fontSize: size,
+          height: 1.0,
+          letterSpacing: 0,
+        ),
       ),
       textDirection: TextDirection.ltr,
     )..layout();

@@ -81,8 +81,8 @@ class _ScalarMetricPainter extends CustomPainter {
       max += 1;
     }
 
-    _label(canvas, Offset(0, rect.top - 4), '$max');
-    _label(canvas, Offset(0, rect.bottom - 10), '$min');
+    _label(canvas, Offset(4, rect.top - 4), '$max');
+    _label(canvas, Offset(4, rect.bottom - 10), '$min');
     _label(canvas, Offset(rect.left, rect.bottom + 6), '00');
     _label(canvas, Offset(rect.right - 18, rect.bottom + 6), '24');
 
@@ -125,7 +125,12 @@ class _ScalarMetricPainter extends CustomPainter {
     final painter = TextPainter(
       text: TextSpan(
         text: text,
-        style: TextStyle(color: textColor, fontSize: kLabelSmall, height: 1.0),
+        style: TextStyle(
+          color: textColor,
+          fontSize: kLabelSmall,
+          height: 1.0,
+          letterSpacing: 0,
+        ),
       ),
       textDirection: TextDirection.ltr,
     )..layout();

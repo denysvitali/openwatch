@@ -32,9 +32,9 @@ class SleepTrendChart extends StatelessWidget {
         child: Center(
           child: Text(
             'No sleep data',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
+            style: AppTextStyles.bodySmall(
+              context,
+            )?.copyWith(color: theme.colorScheme.onSurfaceVariant),
           ),
         ),
       );
@@ -293,7 +293,7 @@ class _SleepTrendPainter extends CustomPainter {
     final tp = TextPainter(
       text: TextSpan(
         text: text,
-        style: TextStyle(fontSize: size),
+        style: TextStyle(fontSize: size, height: 1.0, letterSpacing: 0),
       ),
       textDirection: TextDirection.ltr,
     )..layout();
@@ -310,7 +310,12 @@ class _SleepTrendPainter extends CustomPainter {
     final tp = TextPainter(
       text: TextSpan(
         text: text,
-        style: TextStyle(color: color, fontSize: size),
+        style: TextStyle(
+          color: color,
+          fontSize: size,
+          height: 1.0,
+          letterSpacing: 0,
+        ),
       ),
       textDirection: TextDirection.ltr,
     )..layout();
