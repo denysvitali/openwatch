@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:openwatch/core/ui/ui_constants.dart';
 
 import '../../core/protocol/channel_a.dart';
 import '../../core/providers/app_providers.dart';
@@ -26,7 +27,6 @@ class AlarmsScreen extends ConsumerWidget {
     final alarms = manager.alarms;
     final armedCount = alarms.where((alarm) => alarm.enabled).length;
     final supported = manager.capabilities.alarm;
-    final theme = Theme.of(context);
 
     return Scaffold(
       appBar: AppBar(
@@ -46,11 +46,15 @@ class AlarmsScreen extends ConsumerWidget {
           : RefreshIndicator(
               onRefresh: manager.refreshAlarms,
               child: ListView(
-                padding: const EdgeInsets.only(bottom: 24),
+                padding: const EdgeInsets.only(
+                  bottom: kSectionHeaderPaddingTop,
+                ),
                 children: [
                   const HealthSectionHeader(title: 'Clock alarms'),
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 18),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: kCardPadding,
+                    ),
                     child: _AlarmList(
                       alarms: alarms,
                       onEdit: (slot, alarm) =>
@@ -58,14 +62,16 @@ class AlarmsScreen extends ConsumerWidget {
                       onDelete: (alarm) => _confirmDelete(context, ref, alarm),
                     ),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: kGridSpacing),
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 18),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: kCardPadding,
+                    ),
                     child: Text(
                       armedCount == 0
                           ? 'No alarms yet. Tap an empty slot above to add one.'
                           : '$armedCount of ${WatchManager.alarmSlotCount} alarms armed.',
-                      style: theme.textTheme.bodySmall,
+                      style: AppTextStyles.bodySmall(context),
                     ),
                   ),
                 ],
@@ -73,7 +79,7 @@ class AlarmsScreen extends ConsumerWidget {
             ),
       floatingActionButton: (ready && supported)
           ? Padding(
-              padding: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.only(bottom: kGridSpacing),
               child: PrimaryHealthButton(
                 icon: Icons.add_alarm,
                 label: 'Add alarm',
@@ -172,7 +178,6 @@ class _AlarmList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final bySlot = {for (final alarm in alarms) alarm.slot: alarm};
     return Card(
       child: Column(
@@ -185,7 +190,6 @@ class _AlarmList extends StatelessWidget {
               onEdit: () => onEdit(i, bySlot[i]),
               onDelete: bySlot[i] == null ? null : () => onDelete(bySlot[i]!),
               showDivider: i < WatchManager.alarmSlotCount - 1,
-              leadingColor: theme.colorScheme.secondary,
             ),
         ],
       ),
@@ -200,14 +204,12 @@ class _AlarmRow extends StatelessWidget {
     required this.onEdit,
     required this.onDelete,
     required this.showDivider,
-    required this.leadingColor,
   });
   final int slot;
   final Alarm? alarm;
   final VoidCallback onEdit;
   final VoidCallback? onDelete;
   final bool showDivider;
-  final Color leadingColor;
 
   @override
   Widget build(BuildContext context) {
@@ -220,7 +222,6 @@ class _AlarmRow extends StatelessWidget {
         : 'Cleared';
     return HealthListTile(
       leadingIcon: Icons.access_time_filled,
-      leadingColor: leadingColor,
       title: time,
       subtitle: subtitle,
       showDivider: showDivider,
@@ -291,7 +292,12 @@ class _AlarmEditorState extends State<_AlarmEditor> {
       child: SafeArea(
         top: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+          padding: const EdgeInsets.fromLTRB(
+            kCardPadding,
+            kSpacingSmall,
+            kCardPadding,
+            kSectionHeaderPaddingTop,
+          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -306,34 +312,37 @@ class _AlarmEditorState extends State<_AlarmEditor> {
                   ),
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: kGridSpacing),
               Text(
                 widget.initial.enabled
                     ? 'Edit alarm ${widget.initial.slot + 1}'
                     : 'New alarm ${widget.initial.slot + 1}',
                 textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.titleMedium,
+                style: AppTextStyles.titleSmall(context),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: kSectionHeaderPaddingTop),
               Center(
                 child: TextButton(
                   onPressed: _pickTime,
                   child: Text(
                     '$hh:$mm',
-                    style: const TextStyle(
-                      fontSize: 56,
-                      fontFeatures: [FontFeature.tabularFigures()],
+                    style: TextStyle(
+                      fontSize: kDisplayLarge,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                      color: Theme.of(context).colorScheme.primary,
                     ),
                   ),
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: kCardPadding),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   for (var i = 0; i < _dayLabels.length; i++)
                     Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 2),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: kSpacingMini,
+                      ),
                       child: ChoiceChip(
                         label: Text(_dayLabels[i]),
                         selected: _days[i],
@@ -342,42 +351,48 @@ class _AlarmEditorState extends State<_AlarmEditor> {
                     ),
                 ],
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: kCardPadding),
               Row(
                 children: [
                   Expanded(
                     child: OutlinedButton.icon(
                       onPressed: () => _selectPreset(_Preset.weekdays),
-                      icon: const Icon(Icons.work_outline, size: 18),
+                      icon: const Icon(
+                        Icons.work_outline,
+                        size: kIconSizeSmall,
+                      ),
                       label: const Text('Weekdays'),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: kSpacingSmall),
                   Expanded(
                     child: OutlinedButton.icon(
                       onPressed: () => _selectPreset(_Preset.weekends),
-                      icon: const Icon(Icons.weekend_outlined, size: 18),
+                      icon: const Icon(
+                        Icons.weekend_outlined,
+                        size: kIconSizeSmall,
+                      ),
                       label: const Text('Weekends'),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: kSpacingSmall),
                   Expanded(
                     child: OutlinedButton.icon(
                       onPressed: () => _selectPreset(_Preset.everyday),
-                      icon: const Icon(Icons.today, size: 18),
+                      icon: const Icon(Icons.today, size: kIconSizeSmall),
                       label: const Text('Daily'),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: kCardPadding),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('Enabled'),
                 value: _enabled,
                 onChanged: (v) => setState(() => _enabled = v),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: kSpacingSmall),
               PrimaryHealthButton(
                 icon: Icons.check,
                 label: 'Save to watch',
@@ -427,10 +442,9 @@ class _NotReady extends StatelessWidget {
   Widget build(BuildContext context) {
     return const Center(
       child: Padding(
-        padding: EdgeInsets.all(24),
+        padding: EdgeInsets.all(kSectionHeaderPaddingTop),
         child: HealthCard(
           icon: Icons.bluetooth_disabled,
-          metricColor: Colors.grey,
           title: 'Connect your watch',
           caption: 'Connect your watch to manage alarms.',
         ),
@@ -445,10 +459,9 @@ class _Unsupported extends StatelessWidget {
   Widget build(BuildContext context) {
     return const Center(
       child: Padding(
-        padding: EdgeInsets.all(24),
+        padding: EdgeInsets.all(kSectionHeaderPaddingTop),
         child: HealthCard(
           icon: Icons.notifications_off_outlined,
-          metricColor: Colors.grey,
           title: 'Not supported',
           caption: 'This watch does not advertise clock-alarm support.',
         ),

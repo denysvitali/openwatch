@@ -7,6 +7,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../../core/ble/ble_constants.dart';
 import '../../core/providers/app_providers.dart';
 import '../../core/services/app_log.dart';
+import '../../core/ui/ui_constants.dart';
 import '../widgets/health_widgets.dart';
 
 /// Scans for nearby Oudmon watches and connects to the chosen one.
@@ -180,8 +181,8 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
                 'Reconnecting to ${_reconnectName ?? "your watch"}…',
               ),
               leading: const SizedBox(
-                width: 20,
-                height: 20,
+                width: kIconSizeSmall,
+                height: kIconSizeSmall,
                 child: CircularProgressIndicator(strokeWidth: 2),
               ),
               actions: [
@@ -211,7 +212,12 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 520),
                   child: ListView(
-                    padding: const EdgeInsets.fromLTRB(20, 24, 20, 96),
+                    padding: const EdgeInsets.fromLTRB(
+                      kSectionHeaderPaddingH,
+                      kCardPadding,
+                      kSectionHeaderPaddingH,
+                      96,
+                    ),
                     children: [
                       if (_error != null) ...[
                         HealthCard(
@@ -219,8 +225,9 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
                           metricColor: theme.colorScheme.error,
                           title: 'Something went wrong',
                           caption: _error!,
+                          padding: const EdgeInsets.all(kGridSpacing),
                         ),
-                        const SizedBox(height: 20),
+                        const SizedBox(height: kGridSpacing),
                       ],
                       Center(
                         child: HealthCard(
@@ -232,16 +239,17 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
                           caption: statusCaption,
                           trailing: scanning
                               ? const SizedBox(
-                                  width: 24,
-                                  height: 24,
+                                  width: kIconSizeLarge,
+                                  height: kIconSizeLarge,
                                   child: CircularProgressIndicator(
                                     strokeWidth: 2.5,
                                   ),
                                 )
                               : null,
+                          padding: const EdgeInsets.all(kGridSpacing),
                         ),
                       ),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: kGridSpacing),
                       PrimaryHealthButton(
                         label: scanning ? 'Stop scanning' : 'Scan for watches',
                         icon: scanning ? Icons.stop : Icons.search,
@@ -252,7 +260,7 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
                             : _startScan,
                       ),
                       if (results.isEmpty) ...[
-                        const SizedBox(height: 32),
+                        const SizedBox(height: kCardPadding),
                         _EmptyScanState(scanning: scanning),
                       ] else ...[
                         const HealthSectionHeader(title: 'Nearby watches'),
@@ -322,7 +330,6 @@ class _DeviceTile extends StatelessWidget {
 
     return HealthListTile(
       leadingIcon: Icons.watch_rounded,
-      leadingColor: theme.colorScheme.primary,
       title: name,
       subtitle: result.device.remoteId.str,
       trailing: StatusPill(
@@ -332,6 +339,10 @@ class _DeviceTile extends StatelessWidget {
       ),
       onTap: connecting ? null : onConnect,
       showDivider: true,
+      contentPadding: const EdgeInsets.symmetric(
+        horizontal: kListTilePaddingH,
+        vertical: kSpacingSmall,
+      ),
     );
   }
 }
@@ -351,11 +362,12 @@ class _EmptyScanState extends StatelessWidget {
           : 'Tap Scan and keep the watch close to this phone.',
       trailing: scanning
           ? const SizedBox(
-              width: 22,
-              height: 22,
+              width: kIconSizeSmall,
+              height: kIconSizeSmall,
               child: CircularProgressIndicator(strokeWidth: 2.5),
             )
           : null,
+      padding: const EdgeInsets.all(kGridSpacing),
     );
   }
 }

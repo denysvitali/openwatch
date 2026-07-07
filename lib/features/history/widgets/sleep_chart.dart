@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../core/protocol/sleep_parser.dart';
+import '../../../core/ui/ui_constants.dart';
 
 /// Horizontal sleep timeline — one row per [SleepStage] showing the
 /// cumulative minutes spent in each stage, with hour-of-day ticks along
@@ -291,15 +292,15 @@ class _SleepPainter extends CustomPainter {
   final double viewEnd;
   final SleepSegment? selected;
 
-  static const double _leftLabelWidth = 44;
-  static const double _bottomAxisHeight = 18;
+  static const double _leftLabelWidth = 40;
+  static const double _bottomAxisHeight = 16;
 
   static Rect chartRectFor(Size size) {
     return Rect.fromLTWH(
       _leftLabelWidth,
-      4,
+      2,
       math.max(0, size.width - _leftLabelWidth),
-      math.max(0, size.height - _bottomAxisHeight - 4),
+      math.max(0, size.height - _bottomAxisHeight - 2),
     );
   }
 
@@ -375,7 +376,7 @@ class _SleepPainter extends CustomPainter {
       Offset(x, chartRect.bottom),
       Paint()
         ..color = (colors[segment.stage] ?? Colors.blueGrey).withValues(
-          alpha: 0.45,
+          alpha: 0.35,
         )
         ..strokeWidth = 1,
     );
@@ -387,7 +388,7 @@ class _SleepPainter extends CustomPainter {
     double laneH,
     List<SleepStage> lanes,
   ) {
-    final textStyle = TextStyle(color: textColor, fontSize: 9);
+    final textStyle = TextStyle(color: textColor, fontSize: kLabelSmall);
     for (var i = 0; i < lanes.length; i++) {
       final tp = TextPainter(
         text: TextSpan(text: _label(lanes[i]), style: textStyle),
@@ -413,7 +414,7 @@ class _SleepPainter extends CustomPainter {
     int visibleSpan,
   ) {
     final gridPaint = Paint()
-      ..color = axisColor.withValues(alpha: 0.64)
+      ..color = axisColor.withValues(alpha: 0.48)
       ..strokeWidth = 0.5;
     canvas.drawLine(
       Offset(chartRect.left, chartRect.bottom),
@@ -427,7 +428,7 @@ class _SleepPainter extends CustomPainter {
         canvas,
         _clock(DateTime.fromMillisecondsSinceEpoch(ms)),
         Offset(x - 12, chartRect.bottom + 4),
-        size: 10,
+        size: kLabelSmall,
         color: textColor,
       );
     }
@@ -437,7 +438,10 @@ class _SleepPainter extends CustomPainter {
     final tp = TextPainter(
       text: TextSpan(
         text: 'No sleep data',
-        style: TextStyle(color: textColor.withValues(alpha: 0.6), fontSize: 12),
+        style: TextStyle(
+          color: textColor.withValues(alpha: 0.6),
+          fontSize: kBodySmall,
+        ),
       ),
       textDirection: TextDirection.ltr,
     )..layout();
@@ -451,7 +455,7 @@ class _SleepPainter extends CustomPainter {
     Canvas canvas,
     String text,
     Offset at, {
-    double size = 11,
+    double size = kLabelSmall,
     required Color color,
   }) {
     final tp = TextPainter(

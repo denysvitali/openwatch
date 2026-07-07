@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/providers/app_providers.dart';
 import '../../core/services/watch_manager.dart';
+import '../../core/ui/ui_constants.dart';
 import '../widgets/health_widgets.dart';
 
 /// Watch-side preferences surfaced from `PROTOCOL.md` §4.2.
@@ -24,11 +25,14 @@ class DevicePreferencesScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Watch preferences')),
       body: ListView(
-        padding: const EdgeInsets.only(bottom: 32),
+        padding: const EdgeInsets.only(bottom: kCardPadding * 2),
         children: [
           if (!ready)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+              padding: const EdgeInsets.symmetric(
+                horizontal: kCardPadding,
+                vertical: kSpacingTiny,
+              ),
               child: HealthCard(
                 icon: Icons.bluetooth_disabled,
                 metricColor: theme.colorScheme.error,
@@ -42,7 +46,7 @@ class DevicePreferencesScreen extends ConsumerWidget {
             ),
           const HealthSectionHeader(title: 'Display'),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 18),
+            padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
             child: Card(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -51,7 +55,6 @@ class DevicePreferencesScreen extends ConsumerWidget {
                     icon: Icons.access_time_filled,
                     title: 'Time format',
                     subtitle: '12-hour vs 24-hour',
-                    leadingColor: theme.colorScheme.primary,
                     enabled: ready,
                     onTap: () => _pickTimeFormat(context, manager),
                   ),
@@ -59,7 +62,6 @@ class DevicePreferencesScreen extends ConsumerWidget {
                     icon: Icons.thermostat,
                     title: 'Temperature unit',
                     subtitle: 'Celsius / Fahrenheit',
-                    leadingColor: theme.colorScheme.primary,
                     enabled: ready,
                     onTap: () => _pickTemperatureUnit(context, manager),
                   ),
@@ -67,7 +69,6 @@ class DevicePreferencesScreen extends ConsumerWidget {
                     icon: Icons.auto_awesome,
                     title: 'Display clock',
                     subtitle: 'Always-on face when idle',
-                    leadingColor: theme.colorScheme.primary,
                     enabled: ready,
                     onTap: () => _toggleDisplayClock(context, manager),
                   ),
@@ -75,7 +76,6 @@ class DevicePreferencesScreen extends ConsumerWidget {
                     icon: Icons.palette,
                     title: 'Theme',
                     subtitle: 'Pick a vendor theme id (0..N)',
-                    leadingColor: theme.colorScheme.primary,
                     enabled: ready,
                     onTap: () => _pickId(context, 'Theme id', manager.setTheme),
                   ),
@@ -83,7 +83,6 @@ class DevicePreferencesScreen extends ConsumerWidget {
                     icon: Icons.wallpaper,
                     title: 'Wallpaper',
                     subtitle: 'Pick a vendor wallpaper id (0..N)',
-                    leadingColor: theme.colorScheme.primary,
                     enabled: ready,
                     onTap: () =>
                         _pickId(context, 'Wallpaper id', manager.setWallpaper),
@@ -97,7 +96,7 @@ class DevicePreferencesScreen extends ConsumerWidget {
             const HealthSectionHeader(title: 'Auto-measure'),
           if (caps.bloodPressure || caps.stress || caps.bloodOxygen)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 18),
+              padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
               child: Card(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -107,7 +106,6 @@ class DevicePreferencesScreen extends ConsumerWidget {
                         icon: CupertinoIcons.drop_fill,
                         title: 'Blood-oxygen auto-measure',
                         subtitle: 'Periodic SpO2 sampling',
-                        leadingColor: theme.colorScheme.error,
                         enabled: ready,
                         onTap: () => _toggleAutoMeasure(
                           context,
@@ -120,7 +118,6 @@ class DevicePreferencesScreen extends ConsumerWidget {
                         icon: CupertinoIcons.bolt_fill,
                         title: 'Stress auto-measure',
                         subtitle: 'Periodic pressure (stress) sampling',
-                        leadingColor: theme.colorScheme.error,
                         enabled: ready,
                         onTap: () => _toggleAutoMeasure(
                           context,
@@ -133,7 +130,6 @@ class DevicePreferencesScreen extends ConsumerWidget {
                         icon: CupertinoIcons.waveform_path_ecg,
                         title: 'Blood-pressure window',
                         subtitle: 'Schedule BP measurement window',
-                        leadingColor: theme.colorScheme.error,
                         enabled: ready,
                         onTap: () => _pickBpWindow(context, manager),
                         showDivider: false,
@@ -144,7 +140,7 @@ class DevicePreferencesScreen extends ConsumerWidget {
             ),
           const HealthSectionHeader(title: 'Reminders'),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 18),
+            padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
             child: Card(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -153,7 +149,6 @@ class DevicePreferencesScreen extends ConsumerWidget {
                     icon: Icons.do_not_disturb_on,
                     title: 'Do not disturb',
                     subtitle: 'Configure a daily quiet window',
-                    leadingColor: theme.colorScheme.tertiary,
                     enabled: ready,
                     onTap: () => _pickDndWindow(context, manager),
                   ),
@@ -161,7 +156,6 @@ class DevicePreferencesScreen extends ConsumerWidget {
                     icon: Icons.airline_seat_recline_normal,
                     title: 'Sit reminder',
                     subtitle: 'Sedentary alert cadence',
-                    leadingColor: theme.colorScheme.tertiary,
                     enabled: ready,
                     onTap: () => _pickSitReminder(context, manager),
                   ),
@@ -169,7 +163,6 @@ class DevicePreferencesScreen extends ConsumerWidget {
                     icon: Icons.local_drink,
                     title: 'Drink alarm',
                     subtitle: 'Stay-hydrated reminder',
-                    leadingColor: theme.colorScheme.tertiary,
                     enabled: ready,
                     onTap: () => _pickDrinkAlarm(context, manager),
                     showDivider: false,
@@ -180,7 +173,7 @@ class DevicePreferencesScreen extends ConsumerWidget {
           ),
           const HealthSectionHeader(title: 'Goals'),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 18),
+            padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
             child: Card(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -189,7 +182,6 @@ class DevicePreferencesScreen extends ConsumerWidget {
                     icon: Icons.flag,
                     title: 'Daily goals',
                     subtitle: 'Steps / calories / distance targets',
-                    leadingColor: theme.colorScheme.secondary,
                     enabled: ready,
                     onTap: () => _pickTarget(context, manager),
                     showDivider: false,
@@ -216,14 +208,14 @@ class DevicePreferencesScreen extends ConsumerWidget {
             HealthListTile(
               title: '24-hour',
               leadingIcon: Icons.access_time,
-              leadingColor: Theme.of(context).colorScheme.primary,
+              leadingColor: Theme.of(context).colorScheme.onSurfaceVariant,
               showDivider: false,
               onTap: () => Navigator.pop(ctx, true),
             ),
             HealthListTile(
               title: '12-hour',
               leadingIcon: Icons.access_time_filled,
-              leadingColor: Theme.of(context).colorScheme.primary,
+              leadingColor: Theme.of(context).colorScheme.onSurfaceVariant,
               showDivider: false,
               onTap: () => Navigator.pop(ctx, false),
             ),
@@ -249,14 +241,14 @@ class DevicePreferencesScreen extends ConsumerWidget {
             HealthListTile(
               title: 'Celsius',
               leadingIcon: Icons.thermostat,
-              leadingColor: Theme.of(context).colorScheme.primary,
+              leadingColor: Theme.of(context).colorScheme.onSurfaceVariant,
               showDivider: false,
               onTap: () => Navigator.pop(ctx, true),
             ),
             HealthListTile(
               title: 'Fahrenheit',
               leadingIcon: Icons.thermostat,
-              leadingColor: Theme.of(context).colorScheme.primary,
+              leadingColor: Theme.of(context).colorScheme.onSurfaceVariant,
               showDivider: false,
               onTap: () => Navigator.pop(ctx, false),
             ),
@@ -282,14 +274,14 @@ class DevicePreferencesScreen extends ConsumerWidget {
             HealthListTile(
               title: 'Enable',
               leadingIcon: Icons.toggle_on,
-              leadingColor: Theme.of(context).colorScheme.primary,
+              leadingColor: Theme.of(context).colorScheme.onSurfaceVariant,
               showDivider: false,
               onTap: () => Navigator.pop(ctx, true),
             ),
             HealthListTile(
               title: 'Disable',
               leadingIcon: Icons.toggle_off,
-              leadingColor: Theme.of(context).colorScheme.primary,
+              leadingColor: Theme.of(context).colorScheme.onSurfaceVariant,
               showDivider: false,
               onTap: () => Navigator.pop(ctx, false),
             ),
@@ -311,7 +303,7 @@ class DevicePreferencesScreen extends ConsumerWidget {
     final picked = await showDialog<int>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(title),
+        title: Text(title, style: AppTextStyles.titleLarge(context)),
         content: TextField(
           controller: ctl,
           keyboardType: TextInputType.number,
@@ -352,14 +344,14 @@ class DevicePreferencesScreen extends ConsumerWidget {
             HealthListTile(
               title: 'Enable',
               leadingIcon: Icons.toggle_on,
-              leadingColor: Theme.of(context).colorScheme.error,
+              leadingColor: Theme.of(context).colorScheme.onSurfaceVariant,
               showDivider: false,
               onTap: () => Navigator.pop(ctx, true),
             ),
             HealthListTile(
               title: 'Disable',
               leadingIcon: Icons.toggle_off,
-              leadingColor: Theme.of(context).colorScheme.error,
+              leadingColor: Theme.of(context).colorScheme.onSurfaceVariant,
               showDivider: false,
               onTap: () => Navigator.pop(ctx, false),
             ),
@@ -430,7 +422,7 @@ class DevicePreferencesScreen extends ConsumerWidget {
               HealthListTile(
                 title: 'Every $c minutes',
                 leadingIcon: Icons.timer,
-                leadingColor: Theme.of(context).colorScheme.tertiary,
+                leadingColor: Theme.of(context).colorScheme.onSurfaceVariant,
                 showDivider: false,
                 onTap: () => Navigator.pop(ctx, c),
               ),
@@ -505,7 +497,7 @@ class DevicePreferencesScreen extends ConsumerWidget {
     final picked = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Daily goals'),
+        title: Text('Daily goals', style: AppTextStyles.titleLarge(context)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -581,7 +573,6 @@ class _PreferenceTile extends StatelessWidget {
     required this.subtitle,
     required this.enabled,
     required this.onTap,
-    this.leadingColor,
     this.showDivider = true,
   });
 
@@ -590,7 +581,6 @@ class _PreferenceTile extends StatelessWidget {
   final String subtitle;
   final bool enabled;
   final VoidCallback onTap;
-  final Color? leadingColor;
   final bool showDivider;
 
   @override
@@ -600,10 +590,10 @@ class _PreferenceTile extends StatelessWidget {
       title: title,
       subtitle: subtitle,
       leadingIcon: icon,
-      leadingColor: leadingColor ?? theme.colorScheme.primary,
+      leadingColor: theme.colorScheme.onSurfaceVariant,
       trailing: Icon(
         CupertinoIcons.chevron_forward,
-        size: 20,
+        size: kIconSizeSmall,
         color: enabled
             ? theme.colorScheme.onSurfaceVariant
             : theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.38),

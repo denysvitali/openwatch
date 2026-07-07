@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/services/history_sync.dart';
+import '../../../core/ui/ui_constants.dart';
 
 /// Compact line chart for scalar day metrics such as stress and HRV.
 class ScalarMetricChart extends StatelessWidget {
@@ -124,7 +125,7 @@ class _ScalarMetricPainter extends CustomPainter {
     final painter = TextPainter(
       text: TextSpan(
         text: text,
-        style: TextStyle(color: textColor, fontSize: 10),
+        style: TextStyle(color: textColor, fontSize: kLabelSmall, height: 1.0),
       ),
       textDirection: TextDirection.ltr,
     )..layout();

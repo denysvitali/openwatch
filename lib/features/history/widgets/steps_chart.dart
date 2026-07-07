@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/services/history_store.dart';
+import '../../../core/ui/ui_constants.dart';
 
 /// Vertical bar chart of step counts across a small range of days.
 ///
@@ -81,8 +82,8 @@ class _StepsPainter extends CustomPainter {
   final Color axisColor;
   final Color textColor;
 
-  static const double _topLabelHeight = 18;
-  static const double _bottomAxisHeight = 24;
+  static const double _topLabelHeight = 16;
+  static const double _bottomAxisHeight = 18;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -106,7 +107,7 @@ class _StepsPainter extends CustomPainter {
     final barW = (slot * 0.6).clamp(2.0, 24.0);
     final paint = Paint()..style = PaintingStyle.fill;
     final gridPaint = Paint()
-      ..color = axisColor.withValues(alpha: 0.64)
+      ..color = axisColor.withValues(alpha: 0.32)
       ..strokeWidth = 0.5;
 
     // Y-axis: a minimal Apple-style grid: enough scale without clutter.
@@ -120,9 +121,9 @@ class _StepsPainter extends CustomPainter {
       _paintText(
         canvas,
         _formatSteps((maxSteps * frac).round()),
-        Offset(0, y - 13),
-        color: textColor.withValues(alpha: 0.72),
-        size: 10,
+        Offset(0, y - 12),
+        color: textColor.withValues(alpha: 0.56),
+        size: kLabelSmall,
       );
     }
     // Baseline.
@@ -146,33 +147,33 @@ class _StepsPainter extends CustomPainter {
       canvas.drawRRect(rect, paint);
       if (steps > 0 && barCount <= 7) {
         final label = _formatSteps(steps);
-        final labelWidth = _measureText(label, size: 9);
+        final labelWidth = _measureText(label, size: kLabelSmall);
         _paintText(
           canvas,
           label,
-          Offset(centerX - labelWidth / 2, chartRect.bottom - h - 16),
-          color: textColor.withValues(alpha: 0.72),
-          size: 9,
+          Offset(centerX - labelWidth / 2, chartRect.bottom - h - 14),
+          color: textColor.withValues(alpha: 0.56),
+          size: kLabelSmall,
         );
       }
       // Day-of-week label below the bar.
       final weekday = _weekdayShort(d.day);
-      final labelWidth = _measureText(weekday, size: 10);
+      final labelWidth = _measureText(weekday, size: kLabelSmall);
       _paintText(
         canvas,
         weekday,
-        Offset(centerX - labelWidth / 2, chartRect.bottom + 7),
-        color: textColor,
-        size: 10,
+        Offset(centerX - labelWidth / 2, chartRect.bottom + 5),
+        color: textColor.withValues(alpha: 0.72),
+        size: kLabelSmall,
       );
     }
   }
 
-  double _measureText(String text, {double size = 11}) {
+  double _measureText(String text, {double size = kLabelSmall}) {
     final tp = TextPainter(
       text: TextSpan(
         text: text,
-        style: TextStyle(fontSize: size),
+        style: TextStyle(fontSize: size, height: 1.0),
       ),
       textDirection: TextDirection.ltr,
     )..layout();
@@ -183,13 +184,13 @@ class _StepsPainter extends CustomPainter {
     Canvas canvas,
     String text,
     Offset at, {
-    double size = 11,
+    double size = kLabelSmall,
     required Color color,
   }) {
     final tp = TextPainter(
       text: TextSpan(
         text: text,
-        style: TextStyle(color: color, fontSize: size),
+        style: TextStyle(color: color, fontSize: size, height: 1.0),
       ),
       textDirection: TextDirection.ltr,
     )..layout();

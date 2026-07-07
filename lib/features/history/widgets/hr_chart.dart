@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../core/services/history_sync.dart';
+import '../../../core/ui/ui_constants.dart';
 
 /// Full-width heart-rate line chart for one day.
 ///
@@ -477,7 +478,7 @@ class _HrPainter extends CustomPainter {
         Offset(selectedPoint.dx, chartRect.top),
         Offset(selectedPoint.dx, chartRect.bottom),
         Paint()
-          ..color = color.withValues(alpha: 0.28)
+          ..color = color.withValues(alpha: 0.22)
           ..strokeWidth = 1,
       );
       canvas.drawCircle(selectedPoint, 5.5, markerPaint);
@@ -502,7 +503,10 @@ class _HrPainter extends CustomPainter {
     final tp = TextPainter(
       text: TextSpan(
         text: 'No data',
-        style: TextStyle(color: textColor.withValues(alpha: 0.6), fontSize: 12),
+        style: TextStyle(
+          color: textColor.withValues(alpha: 0.54),
+          fontSize: kBodySmall,
+        ),
       ),
       textDirection: TextDirection.ltr,
     )..layout();
@@ -514,7 +518,7 @@ class _HrPainter extends CustomPainter {
 
   void _paintAxes(Canvas canvas, Size size, Rect chartRect) {
     final gridPaint = Paint()
-      ..color = axisColor.withValues(alpha: 0.64)
+      ..color = axisColor.withValues(alpha: 0.48)
       ..strokeWidth = 0.5;
 
     // Horizontal BPM gridlines at calm, readable intervals.
@@ -526,7 +530,12 @@ class _HrPainter extends CustomPainter {
         Offset(chartRect.right, y),
         gridPaint,
       );
-      _paintText(canvas, bpm.toInt().toString(), Offset(2, y - 7), size: 10);
+      _paintText(
+        canvas,
+        bpm.toInt().toString(),
+        Offset(2, y - 7),
+        size: kLabelSmall,
+      );
     }
     // Bottom axis baseline.
     canvas.drawLine(
@@ -542,7 +551,7 @@ class _HrPainter extends CustomPainter {
         canvas,
         _formatHourFraction(frac),
         Offset(x - 6, chartRect.bottom + 4),
-        size: 10,
+        size: kLabelSmall,
       );
     }
   }
@@ -568,7 +577,12 @@ class _HrPainter extends CustomPainter {
     return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
   }
 
-  void _paintText(Canvas canvas, String text, Offset at, {double size = 11}) {
+  void _paintText(
+    Canvas canvas,
+    String text,
+    Offset at, {
+    double size = kLabelSmall,
+  }) {
     final tp = TextPainter(
       text: TextSpan(
         text: text,
@@ -602,7 +616,7 @@ class _PointBadge extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerHighest.withValues(
-          alpha: 0.94,
+          alpha: 0.88,
         ),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: theme.colorScheme.outlineVariant),
@@ -637,7 +651,7 @@ class _ChartControls extends StatelessWidget {
     final theme = Theme.of(context);
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface.withValues(alpha: 0.88),
+        color: theme.colorScheme.surface.withValues(alpha: 0.8),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: theme.colorScheme.outlineVariant),
       ),

@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../../core/services/history_store.dart';
+import '../../../core/ui/ui_constants.dart';
 
 /// Compact daily sleep-duration trend with a weekly average marker.
 ///
@@ -130,8 +131,8 @@ class _SleepTrendPainter extends CustomPainter {
   final Color axisColor;
   final Color textColor;
 
-  static const double _topLabelHeight = 18;
-  static const double _bottomAxisHeight = 24;
+  static const double _topLabelHeight = 14;
+  static const double _bottomAxisHeight = 20;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -160,7 +161,7 @@ class _SleepTrendPainter extends CustomPainter {
     );
 
     final gridPaint = Paint()
-      ..color = axisColor.withValues(alpha: 0.64)
+      ..color = axisColor.withValues(alpha: 0.38)
       ..strokeWidth = 0.5;
     _paintGrid(canvas, chartRect, gridPaint, maxMinutes);
     if (averageMinutes > 0) {
@@ -185,9 +186,9 @@ class _SleepTrendPainter extends CustomPainter {
       _paintText(
         canvas,
         _formatDuration(Duration(minutes: (maxMinutes * frac).round())),
-        Offset(0, y - 13),
-        color: textColor.withValues(alpha: 0.72),
-        size: 10,
+        Offset(0, y - 11),
+        color: textColor.withValues(alpha: 0.6),
+        size: kLabelSmall,
       );
     }
     canvas.drawLine(
@@ -221,9 +222,9 @@ class _SleepTrendPainter extends CustomPainter {
     _paintText(
       canvas,
       'avg',
-      Offset(chartRect.right - 20, y - 16),
+      Offset(chartRect.right - 20, y - 13),
       color: averageColor,
-      size: 10,
+      size: kLabelSmall,
     );
   }
 
@@ -247,7 +248,7 @@ class _SleepTrendPainter extends CustomPainter {
           ? 1.0
           : (minutes / maxMinutes) * chartRect.height;
       paint.color = minutes <= 0
-          ? axisColor.withValues(alpha: 0.72)
+          ? axisColor.withValues(alpha: 0.48)
           : day.day == today
           ? todayColor
           : sleepColor;
@@ -266,29 +267,29 @@ class _SleepTrendPainter extends CustomPainter {
 
       if (minutes > 0 && days.length <= 7) {
         final label = _compactDuration(total);
-        final labelWidth = _measureText(label, size: 9);
+        final labelWidth = _measureText(label, size: kLabelSmall);
         _paintText(
           canvas,
           label,
-          Offset(centerX - labelWidth / 2, chartRect.bottom - height - 16),
-          color: textColor.withValues(alpha: 0.72),
-          size: 9,
+          Offset(centerX - labelWidth / 2, chartRect.bottom - height - 13),
+          color: textColor.withValues(alpha: 0.64),
+          size: kLabelSmall,
         );
       }
 
       final weekday = _weekdayShort(day.day);
-      final labelWidth = _measureText(weekday, size: 10);
+      final labelWidth = _measureText(weekday, size: kLabelSmall);
       _paintText(
         canvas,
         weekday,
-        Offset(centerX - labelWidth / 2, chartRect.bottom + 7),
-        color: textColor,
-        size: 10,
+        Offset(centerX - labelWidth / 2, chartRect.bottom + 5),
+        color: textColor.withValues(alpha: 0.72),
+        size: kLabelSmall,
       );
     }
   }
 
-  double _measureText(String text, {double size = 11}) {
+  double _measureText(String text, {double size = kLabelSmall}) {
     final tp = TextPainter(
       text: TextSpan(
         text: text,
@@ -303,7 +304,7 @@ class _SleepTrendPainter extends CustomPainter {
     Canvas canvas,
     String text,
     Offset at, {
-    double size = 11,
+    double size = kLabelSmall,
     required Color color,
   }) {
     final tp = TextPainter(

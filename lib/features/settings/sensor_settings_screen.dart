@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/providers/app_providers.dart';
 import '../../core/services/watch_manager.dart';
+import '../../core/ui/ui_constants.dart';
 import '../widgets/health_widgets.dart';
 
 /// Wristband sensor settings: HR auto-measure interval, enable toggle,
@@ -25,23 +26,29 @@ class SensorSettingsScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Sensor settings'),
+        title: Text(
+          'Sensor settings',
+          style: AppTextStyles.titleLarge(context),
+        ),
         actions: [
           TextButton.icon(
             onPressed: (ready && hrSupported)
                 ? () => _applyToDevice(context, ref, manager)
                 : null,
-            icon: const Icon(Icons.watch),
+            icon: const Icon(Icons.watch, size: kIconSizeSmall),
             label: const Text('Apply'),
           ),
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.only(bottom: 32),
+        padding: const EdgeInsets.only(bottom: kSectionHeaderPaddingTop),
         children: [
           if (!hrSupported)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+              padding: const EdgeInsets.symmetric(
+                horizontal: kCardPadding,
+                vertical: kSpacingSmall,
+              ),
               child: HealthCard(
                 icon: Icons.info_outline,
                 metricColor: theme.colorScheme.error,
@@ -55,7 +62,7 @@ class SensorSettingsScreen extends ConsumerWidget {
             ),
           const HealthSectionHeader(title: 'Heart rate'),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 18),
+            padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
             child: Card(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -64,7 +71,6 @@ class SensorSettingsScreen extends ConsumerWidget {
                     title: 'Auto-measure',
                     subtitle: 'Periodic background readings',
                     leadingIcon: Icons.favorite,
-                    leadingColor: theme.colorScheme.error,
                     trailing: Switch(
                       value: settings.hrAutoMeasureEnabled,
                       onChanged: settingsNotifier.setHrAutoMeasure,
@@ -77,7 +83,6 @@ class SensorSettingsScreen extends ConsumerWidget {
                     title: 'Measurement interval',
                     subtitle: '${settings.hrIntervalMinutes} minutes',
                     leadingIcon: Icons.timer,
-                    leadingColor: theme.colorScheme.primary,
                     trailing: SizedBox(
                       width: 180,
                       child: Slider(
@@ -99,7 +104,7 @@ class SensorSettingsScreen extends ConsumerWidget {
           ),
           const HealthSectionHeader(title: 'Alarm thresholds'),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 18),
+            padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
             child: Card(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -124,7 +129,12 @@ class SensorSettingsScreen extends ConsumerWidget {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(18, 24, 18, 0),
+            padding: const EdgeInsets.fromLTRB(
+              kCardPadding,
+              kGridSpacing,
+              kCardPadding,
+              0,
+            ),
             child: PrimaryHealthButton(
               label: 'Apply to device now',
               icon: Icons.watch,
@@ -135,7 +145,12 @@ class SensorSettingsScreen extends ConsumerWidget {
           ),
           if (!ready)
             Padding(
-              padding: const EdgeInsets.fromLTRB(18, 12, 18, 0),
+              padding: const EdgeInsets.fromLTRB(
+                kCardPadding,
+                kGridSpacing,
+                kCardPadding,
+                0,
+              ),
               child: StatusPill(
                 icon: Icons.bluetooth_disabled,
                 label: 'Connect a watch first',
@@ -144,7 +159,12 @@ class SensorSettingsScreen extends ConsumerWidget {
             )
           else if (!hrSupported)
             Padding(
-              padding: const EdgeInsets.fromLTRB(18, 12, 18, 0),
+              padding: const EdgeInsets.fromLTRB(
+                kCardPadding,
+                kGridSpacing,
+                kCardPadding,
+                0,
+              ),
               child: StatusPill(
                 icon: Icons.error_outline,
                 label: 'HR not supported on this device',
@@ -203,12 +223,10 @@ class _AlarmFieldTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return HealthListTile(
       title: title,
       subtitle: subtitle,
       leadingIcon: icon,
-      leadingColor: theme.colorScheme.primary,
       trailing: SizedBox(
         width: 80,
         child: TextFormField(

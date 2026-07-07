@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:openwatch/core/ui/ui_constants.dart';
 
 import '../../core/ble/ble_transport.dart';
 import '../../core/providers/app_providers.dart';
@@ -62,13 +63,13 @@ class HistoryScreen extends ConsumerWidget {
               PopupMenuItem(
                 value: _HistoryMenuAction.fullSync,
                 enabled: ready && !sync.syncing,
-                child: const SizedBox(
+                child: SizedBox(
                   width: 220,
                   child: Row(
                     children: [
-                      Icon(CupertinoIcons.arrow_counterclockwise),
-                      SizedBox(width: 12),
-                      Expanded(
+                      const Icon(CupertinoIcons.arrow_counterclockwise),
+                      const SizedBox(width: kGridSpacing),
+                      const Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           mainAxisSize: MainAxisSize.min,
@@ -76,7 +77,7 @@ class HistoryScreen extends ConsumerWidget {
                             Text('Full resync'),
                             Text(
                               'Re-fetch stored days',
-                              style: TextStyle(fontSize: 12),
+                              style: TextStyle(fontSize: kBodySmall),
                             ),
                           ],
                         ),
@@ -93,7 +94,12 @@ class HistoryScreen extends ConsumerWidget {
         onRefresh: () => _runHistorySync(context, sync, ready),
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
+          padding: const EdgeInsets.fromLTRB(
+            kCardPadding,
+            kSpacingSmall,
+            kCardPadding,
+            kSectionHeaderPaddingTop,
+          ),
           children: [
             Center(
               child: ConstrainedBox(
@@ -111,7 +117,7 @@ class HistoryScreen extends ConsumerWidget {
                       onSync: () => _runHistorySync(context, sync, ready),
                     ),
                     if (sync.lastSyncError != null) ...[
-                      const SizedBox(height: 12),
+                      const SizedBox(height: kGridSpacing),
                       _SyncErrorBanner(message: sync.lastSyncError!),
                     ],
                     if (days.isNotEmpty) ...[
@@ -124,11 +130,11 @@ class HistoryScreen extends ConsumerWidget {
                         debugContext: ctx,
                       ),
                     ] else ...[
-                      const SizedBox(height: 14),
+                      const SizedBox(height: kGridSpacing),
                       _EmptyState(ready: ready, syncing: sync.syncing),
                     ],
                     if (store == null) ...[
-                      const SizedBox(height: 16),
+                      const SizedBox(height: kCardInternalSpacing),
                       _StoreWarning(),
                     ],
                   ],
@@ -219,15 +225,15 @@ class _HistoryOverviewCard extends StatelessWidget {
         children: [
           if (sync.syncing) ...[
             LinearProgressIndicator(value: progress),
-            const SizedBox(height: 10),
+            const SizedBox(height: kSpacingSmall),
           ],
           Text(
             syncHint,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
+            style: AppTextStyles.bodySmall(
+              context,
+            )?.copyWith(color: theme.colorScheme.onSurfaceVariant),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: kGridSpacing),
           MetricGrid(
             children: [
               HealthCard(
@@ -235,7 +241,7 @@ class _HistoryOverviewCard extends StatelessWidget {
                 value: '${days.length}',
                 unit: days.length == 1 ? 'day' : 'days',
                 caption: 'on phone',
-                metricColor: theme.colorScheme.primary,
+                metricColor: theme.colorScheme.onSurfaceVariant,
               ),
               HealthCard(
                 icon: CupertinoIcons.clock,
@@ -243,7 +249,7 @@ class _HistoryOverviewCard extends StatelessWidget {
                     ? 'Never'
                     : formatRelativeTime(sync.lastSyncedAt!),
                 caption: storeReady ? 'local watermark' : 'storage starting',
-                metricColor: theme.colorScheme.primary,
+                metricColor: theme.colorScheme.onSurfaceVariant,
               ),
               HealthCard(
                 icon: CupertinoIcons.waveform_path,
@@ -251,18 +257,18 @@ class _HistoryOverviewCard extends StatelessWidget {
                     ? 'Unknown'
                     : '${sync.watchDaysWithData.length}',
                 caption: 'reported last sync',
-                metricColor: theme.colorScheme.primary,
+                metricColor: theme.colorScheme.onSurfaceVariant,
               ),
               HealthCard(
                 icon: CupertinoIcons.sparkles,
                 value: '${sync.fetchedDays.length}',
                 unit: sync.fetchedDays.length == 1 ? 'day' : 'days',
                 caption: 'new this sync',
-                metricColor: theme.colorScheme.primary,
+                metricColor: theme.colorScheme.onSurfaceVariant,
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: kCardInternalSpacing),
           PrimaryHealthButton(
             label: sync.syncing ? 'Syncing' : 'Sync history',
             icon: sync.syncing ? null : CupertinoIcons.arrow_2_circlepath,
@@ -325,7 +331,7 @@ class _HistoryTrendCard extends StatelessWidget {
     return HealthCard(
       icon: CupertinoIcons.chart_bar_alt_fill,
       title: 'Last 7 days',
-      metricColor: theme.colorScheme.primary,
+      metricColor: theme.colorScheme.onSurfaceVariant,
       caption: subtitle,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -337,14 +343,14 @@ class _HistoryTrendCard extends StatelessWidget {
               detail: '${avgBpm(latest!.hr)} bpm avg',
               tint: _heartRed(context),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: kSpacingSmall),
             MiniHrSpark(
               samples: latest.hr,
-              height: 58,
+              height: 48,
               color: _heartRed(context),
             ),
           ],
-          const SizedBox(height: 16),
+          const SizedBox(height: kCardInternalSpacing),
           _TrendHeader(
             icon: CupertinoIcons.arrow_up_right,
             title: 'Steps',
@@ -353,24 +359,24 @@ class _HistoryTrendCard extends StatelessWidget {
                 : '${NumberFormat.decimalPattern().format(latest!.steps)} steps',
             tint: _activityGreen(context),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: kSpacingSmall),
           StepsBarChart(
             days: days,
-            height: 118,
+            height: 100,
             barColor: _activityGreen(context),
           ),
           if (sleepSummary.hasData) ...[
-            const SizedBox(height: 16),
+            const SizedBox(height: kCardInternalSpacing),
             _TrendHeader(
               icon: CupertinoIcons.moon_fill,
               title: 'Sleep',
               detail: 'Week avg ${_formatDuration(sleepSummary.average)}',
               tint: _sleepPurple(context),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: kSpacingSmall),
             SleepTrendChart(
               days: days,
-              height: 118,
+              height: 100,
               sleepColor: _sleepPurple(context),
             ),
           ],
@@ -395,21 +401,20 @@ class _TrendHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Row(
       children: [
-        Icon(icon, size: 17, color: tint),
-        const SizedBox(width: 7),
-        Expanded(child: Text(title, style: theme.textTheme.titleSmall)),
+        Icon(icon, size: kIconSizeTiny, color: tint),
+        const SizedBox(width: kSpacingSmall),
+        Expanded(child: Text(title, style: AppTextStyles.titleSmall(context))),
         Flexible(
           child: Text(
             detail,
             textAlign: TextAlign.end,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.labelMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
+            style: AppTextStyles.labelMedium(
+              context,
+            )?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
         ),
       ],
@@ -432,22 +437,23 @@ class _SyncErrorBanner extends StatelessWidget {
         children: [
           Icon(
             CupertinoIcons.exclamationmark_triangle,
+            size: kIconSizeSmall,
             color: theme.colorScheme.error,
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: kGridSpacing),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Sync failed', style: theme.textTheme.titleSmall),
-                const SizedBox(height: 2),
+                Text('Sync failed', style: AppTextStyles.titleSmall(context)),
+                const SizedBox(height: kSpacingMini),
                 Text(
                   message,
                   maxLines: 3,
                   overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
+                  style: AppTextStyles.bodySmall(
+                    context,
+                  )?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                 ),
               ],
             ),
@@ -491,31 +497,33 @@ class _EmptyState extends StatelessWidget {
         ? 'Use Sync history to pull local watch data.'
         : 'Connect your watch, then sync history.';
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 56),
+      padding: const EdgeInsets.symmetric(
+        vertical: kSectionHeaderPaddingTop * 2,
+      ),
       child: Column(
         children: [
           Container(
-            width: 72,
-            height: 72,
+            width: kIconCircleSizeLarge + kSpacingSmall * 2,
+            height: kIconCircleSizeLarge + kSpacingSmall * 2,
             decoration: BoxDecoration(
-              color: theme.colorScheme.primary.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(20),
+              color: theme.colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(kCardRadius),
             ),
             child: Icon(
               CupertinoIcons.chart_bar,
-              size: 34,
-              color: theme.colorScheme.primary,
+              size: kIconSizeLarge,
+              color: theme.colorScheme.onSurfaceVariant,
             ),
           ),
-          const SizedBox(height: 16),
-          Text('No history yet', style: theme.textTheme.titleMedium),
-          const SizedBox(height: 4),
+          const SizedBox(height: kCardInternalSpacing),
+          Text('No history yet', style: AppTextStyles.titleMedium(context)),
+          const SizedBox(height: kSpacingTiny),
           Text(
             message,
             textAlign: TextAlign.center,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
+            style: AppTextStyles.bodySmall(
+              context,
+            )?.copyWith(color: theme.colorScheme.onSurfaceVariant),
           ),
         ],
       ),
@@ -528,15 +536,19 @@ class _StoreWarning extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return HealthCard(
-      metricColor: theme.colorScheme.tertiary,
+      metricColor: theme.colorScheme.outline,
       child: Row(
         children: [
-          Icon(Icons.storage_rounded, color: theme.colorScheme.tertiary),
-          const SizedBox(width: 12),
+          Icon(
+            Icons.storage_rounded,
+            size: kIconSizeSmall,
+            color: theme.colorScheme.outline,
+          ),
+          const SizedBox(width: kGridSpacing),
           Expanded(
             child: Text(
               'Local store unavailable. History will stay in memory until storage finishes initialising.',
-              style: theme.textTheme.bodySmall,
+              style: AppTextStyles.bodySmall(context),
             ),
           ),
         ],
@@ -583,13 +595,16 @@ class _DailyDetailSelectorState extends State<_DailyDetailSelector> {
           height: 40,
           decoration: BoxDecoration(
             color: theme.colorScheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(kPillRadius),
           ),
           child: Row(
             children: [
               IconButton(
                 tooltip: 'Newer day',
-                icon: const Icon(CupertinoIcons.chevron_left, size: 20),
+                icon: const Icon(
+                  CupertinoIcons.chevron_left,
+                  size: kIconSizeSmall,
+                ),
                 onPressed: _index > 0 ? () => setState(() => _index--) : null,
               ),
               Expanded(
@@ -598,7 +613,7 @@ class _DailyDetailSelectorState extends State<_DailyDetailSelector> {
                   child: Row(
                     children: [
                       for (var i = 0; i < widget.days.length; i++) ...[
-                        if (i > 0) const SizedBox(width: 6),
+                        if (i > 0) const SizedBox(width: kSpacingTiny),
                         _DayChip(
                           label: _formatDayTab(widget.days[i].day),
                           selected: i == _index,
@@ -614,7 +629,10 @@ class _DailyDetailSelectorState extends State<_DailyDetailSelector> {
               ),
               IconButton(
                 tooltip: 'Older day',
-                icon: const Icon(CupertinoIcons.chevron_right, size: 20),
+                icon: const Icon(
+                  CupertinoIcons.chevron_right,
+                  size: kIconSizeSmall,
+                ),
                 onPressed: _index < widget.days.length - 1
                     ? () => setState(() => _index++)
                     : null,
@@ -622,7 +640,7 @@ class _DailyDetailSelectorState extends State<_DailyDetailSelector> {
             ],
           ),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: kGridSpacing),
         AnimatedSize(
           duration: const Duration(milliseconds: 180),
           curve: Curves.easeOutCubic,
@@ -667,7 +685,10 @@ class _DayChip extends StatelessWidget {
       child: GestureDetector(
         onTap: onTap,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          padding: const EdgeInsets.symmetric(
+            horizontal: kGridSpacing,
+            vertical: kSpacingTiny,
+          ),
           decoration: BoxDecoration(
             color: bgColor,
             borderRadius: BorderRadius.circular(8),
@@ -677,13 +698,13 @@ class _DayChip extends StatelessWidget {
             children: [
               Text(
                 label,
-                style: theme.textTheme.labelMedium?.copyWith(
+                style: AppTextStyles.labelMedium(context)?.copyWith(
                   color: fgColor,
                   fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                 ),
               ),
               if (hasNewData) ...[
-                const SizedBox(width: 6),
+                const SizedBox(width: kSpacingTiny),
                 Container(
                   width: 6,
                   height: 6,
@@ -725,7 +746,7 @@ class _DayDetailPage extends StatelessWidget {
     final isEmpty = _isEmpty(displayDay);
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: kSpacingSmall),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -737,23 +758,26 @@ class _DayDetailPage extends StatelessWidget {
                   children: [
                     Text(
                       _formatDayHeader(displayDay.day),
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
+                      style: AppTextStyles.titleMedium(
+                        context,
+                      )?.copyWith(fontWeight: FontWeight.w700),
                     ),
                     if (displayDay.lastUpdated != null)
                       Text(
                         'Updated ${DateFormat.jm().format(displayDay.lastUpdated!)}',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
+                        style: AppTextStyles.bodySmall(
+                          context,
+                        )?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                       ),
                   ],
                 ),
               ),
               IconButton(
                 tooltip: 'Copy day debug',
-                icon: const Icon(Icons.bug_report_outlined, size: 20),
+                icon: const Icon(
+                  Icons.bug_report_outlined,
+                  size: kIconSizeSmall,
+                ),
                 onPressed: () {
                   final ctx = debugContext;
                   final fresh = freshlyFetched;
@@ -763,22 +787,23 @@ class _DayDetailPage extends StatelessWidget {
               if (freshlyFetched) const _NewBadge(),
             ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: kGridSpacing),
           if (isEmpty)
             HealthCard(
-              metricColor: theme.colorScheme.outline,
+              metricColor: theme.colorScheme.onSurfaceVariant,
               child: Row(
                 children: [
                   Icon(
                     CupertinoIcons.chart_bar,
+                    size: kIconSizeSmall,
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: kGridSpacing),
                   Text(
                     isToday ? 'No data today' : 'No watch data',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
+                    style: AppTextStyles.bodyMedium(
+                      context,
+                    )?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                   ),
                 ],
               ),
@@ -787,7 +812,7 @@ class _DayDetailPage extends StatelessWidget {
             HealthCard(
               icon: CupertinoIcons.heart_fill,
               title: 'Daily summary',
-              metricColor: theme.colorScheme.primary,
+              metricColor: theme.colorScheme.onSurfaceVariant,
               child: Column(
                 children: [
                   HealthListTile(
@@ -875,14 +900,14 @@ class _DayDetailPage extends StatelessWidget {
               ),
             ),
             if (displayDay.hr.isNotEmpty) ...[
-              const SizedBox(height: 12),
+              const SizedBox(height: kGridSpacing),
               HealthCard(
                 icon: CupertinoIcons.heart_fill,
                 title: 'Heart rate',
                 metricColor: _heartRed(context),
                 caption: '${avgBpm(displayDay.hr)} bpm average',
                 child: SizedBox(
-                  height: 184,
+                  height: 160,
                   child: HrLineChart(
                     samples: displayDay.hr,
                     color: _heartRed(context),
@@ -891,7 +916,7 @@ class _DayDetailPage extends StatelessWidget {
               ),
             ],
             if (displayDay.sleep.isNotEmpty) ...[
-              const SizedBox(height: 12),
+              const SizedBox(height: kGridSpacing),
               HealthCard(
                 icon: CupertinoIcons.moon_fill,
                 title: 'Sleep',
@@ -906,8 +931,8 @@ class _DayDetailPage extends StatelessWidget {
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        SleepTimeline(segments: displayDay.sleep, height: 110),
-                        const SizedBox(height: 12),
+                        SleepTimeline(segments: displayDay.sleep, height: 100),
+                        const SizedBox(height: kGridSpacing),
                         ...sessions.asMap().entries.map(
                           (e) => HealthListTile(
                             leadingIcon: CupertinoIcons.moon_fill,
@@ -927,14 +952,14 @@ class _DayDetailPage extends StatelessWidget {
               ),
             ],
             if (displayDay.stress.isNotEmpty) ...[
-              const SizedBox(height: 12),
+              const SizedBox(height: kGridSpacing),
               HealthCard(
                 icon: CupertinoIcons.bolt_fill,
                 title: 'Stress',
                 metricColor: _stressOrange(context),
                 caption: _scalarRange(displayDay.stress),
                 child: SizedBox(
-                  height: 132,
+                  height: 120,
                   child: ScalarMetricChart(
                     samples: displayDay.stress,
                     color: _stressOrange(context),
@@ -945,14 +970,14 @@ class _DayDetailPage extends StatelessWidget {
               ),
             ],
             if (displayDay.hrv.isNotEmpty) ...[
-              const SizedBox(height: 12),
+              const SizedBox(height: kGridSpacing),
               HealthCard(
                 icon: CupertinoIcons.chart_bar_fill,
                 title: 'HRV',
                 metricColor: _activityGreen(context),
                 caption: _scalarRange(displayDay.hrv, unit: 'ms'),
                 child: SizedBox(
-                  height: 132,
+                  height: 120,
                   child: ScalarMetricChart(
                     samples: displayDay.hrv,
                     color: _activityGreen(context),
@@ -961,14 +986,14 @@ class _DayDetailPage extends StatelessWidget {
               ),
             ],
             if (displayDay.bloodPressure.isNotEmpty) ...[
-              const SizedBox(height: 12),
+              const SizedBox(height: kGridSpacing),
               HealthCard(
                 icon: CupertinoIcons.waveform_path_ecg,
                 title: 'Blood pressure',
                 metricColor: _heartRed(context),
                 caption: _bpMetricDetail(displayDay.bloodPressure),
                 child: SizedBox(
-                  height: 132,
+                  height: 120,
                   child: ScalarMetricChart(
                     samples: [
                       for (final bp in displayDay.bloodPressure)
@@ -1166,17 +1191,20 @@ class _NewBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.only(right: 8),
+      padding: const EdgeInsets.only(right: kSpacingSmall),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        padding: const EdgeInsets.symmetric(
+          horizontal: kSpacingSmall,
+          vertical: kSpacingTiny,
+        ),
         decoration: BoxDecoration(
-          color: theme.colorScheme.primary.withValues(alpha: 0.12),
+          color: theme.colorScheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(8),
         ),
         child: Text(
           'New',
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: theme.colorScheme.primary,
+          style: AppTextStyles.labelSmall(context)?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
             fontWeight: FontWeight.w700,
           ),
         ),

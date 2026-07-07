@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/providers/app_providers.dart';
 import '../../core/services/app_log.dart';
 import '../../core/services/opentelemetry_service.dart';
+import '../../core/ui/ui_constants.dart';
 import '../widgets/health_widgets.dart';
 
 /// Diagnostics: live BLE/app log + copy-to-clipboard for bug reports,
@@ -23,7 +24,7 @@ class LogsScreen extends ConsumerWidget {
         title: const Text('Diagnostics'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.copy_all),
+            icon: Icon(Icons.copy_all, size: kIconSizeSmall),
             tooltip: 'Copy all',
             onPressed: () async {
               await Clipboard.setData(ClipboardData(text: log.dump()));
@@ -35,12 +36,12 @@ class LogsScreen extends ConsumerWidget {
             },
           ),
           IconButton(
-            icon: const Icon(Icons.download),
+            icon: Icon(Icons.download, size: kIconSizeSmall),
             tooltip: 'Export history',
             onPressed: () => _exportHistory(context, storeAsync.value),
           ),
           IconButton(
-            icon: const Icon(Icons.delete_sweep),
+            icon: Icon(Icons.delete_sweep, size: kIconSizeSmall),
             tooltip: 'Clear',
             onPressed: log.clear,
           ),
@@ -51,9 +52,14 @@ class LogsScreen extends ConsumerWidget {
           // OpenTelemetry status card — surfaces tracer state at a
           // glance so a failed OTLP handshake is visible without
           // scrolling through the in-memory log buffer.
-          const Padding(
-            padding: EdgeInsets.fromLTRB(18, 12, 18, 0),
-            child: _OtelStatusCard(),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              kCardPadding,
+              kSpacingSmall,
+              kCardPadding,
+              0,
+            ),
+            child: const _OtelStatusCard(),
           ),
           const HealthSectionHeader(title: 'Log stream'),
           Expanded(
@@ -62,11 +68,14 @@ class LogsScreen extends ConsumerWidget {
               builder: (context, _) {
                 final entries = log.entries;
                 if (entries.isEmpty) {
-                  return const Center(
+                  return Center(
                     child: Padding(
-                      padding: EdgeInsets.all(24),
+                      padding: const EdgeInsets.all(kCardPadding),
                       child: HealthCard(
                         icon: Icons.notes,
+                        metricColor: Theme.of(
+                          context,
+                        ).colorScheme.onSurfaceVariant,
                         title: 'No logs yet',
                         caption:
                             'Connect to your watch and try an action, '
@@ -77,17 +86,19 @@ class LogsScreen extends ConsumerWidget {
                 }
                 return ListView.builder(
                   reverse: true,
-                  padding: const EdgeInsets.all(8),
+                  padding: const EdgeInsets.all(kSpacingSmall),
                   itemCount: entries.length,
                   itemBuilder: (context, i) {
                     final e = entries[entries.length - 1 - i];
                     return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 1),
+                      padding: const EdgeInsets.symmetric(
+                        vertical: kSpacingMini,
+                      ),
                       child: SelectableText(
                         e.toString(),
                         style: TextStyle(
                           fontFamily: 'monospace',
-                          fontSize: 11.5,
+                          fontSize: kLabelSmall,
                           color: _color(context, e.level),
                         ),
                       ),
@@ -186,8 +197,8 @@ class _OtelStatusCardState extends State<_OtelStatusCard> {
     final scheme = Theme.of(context).colorScheme;
     final status = otel.statusLabel;
     final (
-      Color metricColor,
-      IconData icon,
+      Color statusColor,
+      IconData statusIcon,
       String title,
       String caption,
     ) = switch (status) {
@@ -211,13 +222,12 @@ class _OtelStatusCardState extends State<_OtelStatusCard> {
       ),
     };
     return HealthCard(
-      icon: icon,
-      metricColor: metricColor,
+      metricColor: scheme.onSurfaceVariant,
       title: title,
       value: status[0].toUpperCase() + status.substring(1),
       caption: caption,
       trailing: IconButton(
-        icon: const Icon(Icons.copy),
+        icon: Icon(Icons.copy, size: kIconSizeSmall),
         tooltip: 'Copy status',
         onPressed: () {
           final body =
@@ -233,19 +243,15 @@ class _OtelStatusCardState extends State<_OtelStatusCard> {
         },
       ),
       child: Padding(
-        padding: const EdgeInsets.only(top: 12),
+        padding: const EdgeInsets.only(top: kSpacingSmall),
         child: StatusPill(
-          icon: status == 'active'
-              ? Icons.check_circle
-              : status == 'failed'
-              ? Icons.error
-              : Icons.hourglass_empty,
+          icon: statusIcon,
           label: status == 'active'
               ? 'Exporting'
               : status == 'failed'
               ? 'Not exporting'
               : 'Initializing',
-          color: metricColor,
+          color: statusColor,
         ),
       ),
     );
