@@ -2,6 +2,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:openwatch/core/ui/ui_constants.dart';
 
 import '../../core/providers/app_providers.dart';
 import '../../core/services/settings_service.dart';
@@ -26,16 +27,13 @@ class SettingsScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
-        padding: const EdgeInsets.only(bottom: 32),
+        padding: const EdgeInsets.only(bottom: kSectionHeaderPaddingTop),
         children: [
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 18),
+            padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
             child: HealthCard(
               title: 'Status',
               icon: ready ? Icons.watch_rounded : Icons.watch_off_outlined,
-              metricColor: ready
-                  ? theme.colorScheme.primary
-                  : theme.colorScheme.error,
               caption: ready ? 'Watch connected' : 'No watch connected',
               trailing: Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
@@ -47,10 +45,10 @@ class SettingsScreen extends ConsumerWidget {
                         : Icons.bluetooth_disabled,
                     label: ready ? 'Connected' : 'Disconnected',
                     color: ready
-                        ? theme.colorScheme.secondary
-                        : theme.colorScheme.error,
+                        ? theme.colorScheme.primary
+                        : theme.colorScheme.onSurfaceVariant,
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: kSpacingTiny),
                   StatusPill(
                     icon: settings.cloudSyncEnabled
                         ? Icons.cloud_done
@@ -66,7 +64,7 @@ class SettingsScreen extends ConsumerWidget {
           ),
           const HealthSectionHeader(title: 'Device'),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 18),
+            padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
             child: Card(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -75,14 +73,12 @@ class SettingsScreen extends ConsumerWidget {
                     title: 'Find device',
                     subtitle: 'Ring the watch',
                     leadingIcon: Icons.vibration,
-                    leadingColor: theme.colorScheme.primary,
                     onTap: ready ? manager.findDevice : null,
                   ),
                   HealthListTile(
                     title: 'Sync time now',
                     subtitle: 'Local only — no network',
                     leadingIcon: Icons.access_time,
-                    leadingColor: theme.colorScheme.primary,
                     onTap: ready ? manager.syncTime : null,
                   ),
                   _SwitchTile(
@@ -104,11 +100,10 @@ class SettingsScreen extends ConsumerWidget {
                     title: 'Firmware update (OTA)',
                     subtitle: 'Local firmware images over BLE',
                     leadingIcon: Icons.system_update,
-                    leadingColor: theme.colorScheme.primary,
                     trailing: Icon(
                       CupertinoIcons.chevron_forward,
                       color: theme.colorScheme.onSurfaceVariant,
-                      size: 20,
+                      size: kIconSizeSmall,
                     ),
                     onTap: () => context.push('/firmware'),
                   ),
@@ -116,11 +111,10 @@ class SettingsScreen extends ConsumerWidget {
                     title: 'Sensor settings',
                     subtitle: 'HR interval, alarms',
                     leadingIcon: Icons.sensors,
-                    leadingColor: theme.colorScheme.primary,
                     trailing: Icon(
                       CupertinoIcons.chevron_forward,
                       color: theme.colorScheme.onSurfaceVariant,
-                      size: 20,
+                      size: kIconSizeSmall,
                     ),
                     onTap: () => context.push('/sensor-settings'),
                   ),
@@ -130,7 +124,6 @@ class SettingsScreen extends ConsumerWidget {
                         ? 'None armed'
                         : '$armedAlarmCount armed',
                     leadingIcon: Icons.alarm,
-                    leadingColor: theme.colorScheme.primary,
                     value: ready ? armedAlarmCount.toString() : null,
                     unit: ready ? 'armed' : null,
                     onTap: ready ? () => context.push('/alarms') : null,
@@ -140,11 +133,10 @@ class SettingsScreen extends ConsumerWidget {
                     subtitle:
                         'Display, theme, DND, daily goals, sedentary alarms',
                     leadingIcon: Icons.tune,
-                    leadingColor: theme.colorScheme.primary,
                     trailing: Icon(
                       CupertinoIcons.chevron_forward,
                       color: theme.colorScheme.onSurfaceVariant,
-                      size: 20,
+                      size: kIconSizeSmall,
                     ),
                     onTap: () => context.push('/preferences'),
                   ),
@@ -152,11 +144,10 @@ class SettingsScreen extends ConsumerWidget {
                     title: 'Custom watch face',
                     subtitle: 'Designer + DIY upload (Channel-B 0x3a)',
                     leadingIcon: Icons.brush_outlined,
-                    leadingColor: theme.colorScheme.primary,
                     trailing: Icon(
                       CupertinoIcons.chevron_forward,
                       color: theme.colorScheme.onSurfaceVariant,
-                      size: 20,
+                      size: kIconSizeSmall,
                     ),
                     onTap: () => context.push('/watchface'),
                   ),
@@ -164,11 +155,10 @@ class SettingsScreen extends ConsumerWidget {
                     title: 'Factory reset watch',
                     subtitle: 'Erases all data on the watch',
                     leadingIcon: Icons.restart_alt,
-                    leadingColor: theme.colorScheme.error,
                     trailing: Icon(
                       CupertinoIcons.chevron_forward,
-                      color: theme.colorScheme.error,
-                      size: 20,
+                      color: theme.colorScheme.onSurfaceVariant,
+                      size: kIconSizeSmall,
                     ),
                     onTap: ready
                         ? () => _confirmReset(context, manager.factoryReset)
@@ -181,7 +171,7 @@ class SettingsScreen extends ConsumerWidget {
           ),
           const HealthSectionHeader(title: 'Cloud sync'),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 18),
+            padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
             child: Card(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -207,7 +197,6 @@ class SettingsScreen extends ConsumerWidget {
                       title: 'Server region',
                       subtitle: 'Backend endpoint for cloud sync',
                       leadingIcon: Icons.public,
-                      leadingColor: theme.colorScheme.primary,
                       trailing: DropdownButton<CloudRegion>(
                         value: settings.region,
                         onChanged: (r) =>
@@ -227,14 +216,13 @@ class SettingsScreen extends ConsumerWidget {
                       onTap: null,
                       showDivider: false,
                     ),
-                  if (!settings.cloudSyncEnabled) const SizedBox.shrink(),
                 ],
               ),
             ),
           ),
           const HealthSectionHeader(title: 'Diagnostics'),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 18),
+            padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
             child: Card(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -243,11 +231,10 @@ class SettingsScreen extends ConsumerWidget {
                     title: 'Logs',
                     subtitle: 'BLE traffic & events — copy to share',
                     leadingIcon: Icons.bug_report_outlined,
-                    leadingColor: theme.colorScheme.primary,
                     trailing: Icon(
                       CupertinoIcons.chevron_forward,
                       color: theme.colorScheme.onSurfaceVariant,
-                      size: 20,
+                      size: kIconSizeSmall,
                     ),
                     onTap: () => context.push('/logs'),
                   ),
@@ -256,11 +243,10 @@ class SettingsScreen extends ConsumerWidget {
                     subtitle:
                         'Compact history bytes for capture correlation. See PROTOCOL.md §8.5.',
                     leadingIcon: Icons.bloodtype_outlined,
-                    leadingColor: theme.colorScheme.primary,
                     trailing: Icon(
                       CupertinoIcons.chevron_forward,
                       color: theme.colorScheme.onSurfaceVariant,
-                      size: 20,
+                      size: kIconSizeSmall,
                     ),
                     onTap: () => context.push('/bp-debug'),
                   ),
@@ -269,11 +255,10 @@ class SettingsScreen extends ConsumerWidget {
                     subtitle:
                         'Wipes HR, sleep and step data stored on this phone',
                     leadingIcon: Icons.delete_sweep,
-                    leadingColor: theme.colorScheme.error,
                     trailing: Icon(
                       CupertinoIcons.chevron_forward,
-                      color: theme.colorScheme.error,
-                      size: 20,
+                      color: theme.colorScheme.onSurfaceVariant,
+                      size: kIconSizeSmall,
                     ),
                     onTap: () => _confirmClearHistory(context, ref),
                     showDivider: false,
@@ -284,7 +269,7 @@ class SettingsScreen extends ConsumerWidget {
           ),
           const HealthSectionHeader(title: 'About'),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 18),
+            padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
             child: Card(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -293,11 +278,10 @@ class SettingsScreen extends ConsumerWidget {
                     title: 'About OpenWatch',
                     subtitle: 'Version 0.1.0',
                     leadingIcon: Icons.info_outline,
-                    leadingColor: theme.colorScheme.primary,
                     trailing: Icon(
                       CupertinoIcons.chevron_forward,
                       color: theme.colorScheme.onSurfaceVariant,
-                      size: 20,
+                      size: kIconSizeSmall,
                     ),
                     onTap: () => showAboutDialog(
                       context: context,
@@ -311,11 +295,10 @@ class SettingsScreen extends ConsumerWidget {
                     title: 'Disconnect',
                     subtitle: 'Keeps the watch paired for auto-reconnect',
                     leadingIcon: Icons.link_off,
-                    leadingColor: theme.colorScheme.error,
                     trailing: Icon(
                       CupertinoIcons.chevron_forward,
-                      color: theme.colorScheme.error,
-                      size: 20,
+                      color: theme.colorScheme.onSurfaceVariant,
+                      size: kIconSizeSmall,
                     ),
                     onTap: () async {
                       await ref.read(bleTransportProvider).disconnect();
@@ -326,11 +309,10 @@ class SettingsScreen extends ConsumerWidget {
                     title: 'Forget device',
                     subtitle: 'Disconnect and stop auto-reconnecting',
                     leadingIcon: Icons.delete_forever,
-                    leadingColor: theme.colorScheme.error,
                     trailing: Icon(
                       CupertinoIcons.chevron_forward,
-                      color: theme.colorScheme.error,
-                      size: 20,
+                      color: theme.colorScheme.onSurfaceVariant,
+                      size: kIconSizeSmall,
                     ),
                     onTap: () async {
                       await ref.read(bleTransportProvider).disconnect();
@@ -348,7 +330,7 @@ class SettingsScreen extends ConsumerWidget {
           ),
           if (settingsAsync.isLoading)
             const Padding(
-              padding: EdgeInsets.all(24),
+              padding: EdgeInsets.all(kCardPadding),
               child: Center(child: CircularProgressIndicator()),
             ),
         ],
@@ -462,12 +444,10 @@ class _SwitchTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return HealthListTile(
       title: title,
       subtitle: subtitle,
       leadingIcon: icon,
-      leadingColor: theme.colorScheme.primary,
       trailing: Switch(value: value, onChanged: onChanged),
       onTap: () => onChanged(!value),
     );

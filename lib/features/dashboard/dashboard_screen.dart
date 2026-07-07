@@ -383,7 +383,9 @@ class _SleepTrendHeader extends StatelessWidget {
           width: kIconCircleSizeSmall,
           height: kIconCircleSizeSmall,
           decoration: BoxDecoration(
-            color: theme.colorScheme.primary.withValues(alpha: kMetricTintOpacity),
+            color: theme.colorScheme.primary.withValues(
+              alpha: kMetricTintOpacity,
+            ),
             shape: BoxShape.circle,
           ),
           alignment: Alignment.center,
@@ -400,8 +402,9 @@ class _SleepTrendHeader extends StatelessWidget {
             children: [
               Text(
                 'Sleep trend',
-                style: AppTextStyles.titleSmall(context)
-                    ?.copyWith(fontWeight: FontWeight.w600),
+                style: AppTextStyles.titleSmall(
+                  context,
+                )?.copyWith(fontWeight: FontWeight.w600),
               ),
               Text(trendText, style: AppTextStyles.labelMedium(context)),
             ],
@@ -409,9 +412,9 @@ class _SleepTrendHeader extends StatelessWidget {
         ),
         Text(
           'Week avg ${_formatDuration(summary.average)}',
-          style: AppTextStyles.labelSmall(context)?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
+          style: AppTextStyles.labelSmall(
+            context,
+          )?.copyWith(color: theme.colorScheme.onSurfaceVariant),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
@@ -569,7 +572,11 @@ class _VolumeChip extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: kIconSizeTiny, color: theme.colorScheme.onSurfaceVariant),
+          Icon(
+            icon,
+            size: kIconSizeTiny,
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
           const SizedBox(width: kSpacingTiny),
           Text('$volume', style: AppTextStyles.labelMedium(context)),
         ],
