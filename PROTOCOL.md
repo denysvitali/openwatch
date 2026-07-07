@@ -176,15 +176,12 @@ The SDK transport itself sends **no** automatic bind/SetTime; those are app-leve
 - **Always** 16 bytes. No fragmentation on this channel — long data must use Channel B.
 - **Channel-A framing is built phone-side, but dispatch is implemented on both sides.** The Oudmon
   SDK builds frames, computes the additive CRC8, and dispatches responses on the phone. The H59MA
-  v14 firmware's real deferred dispatcher is `fcn.0082d32c` at `0x0082d32c`
-  (called from `qc_app_task` at `0x00827310`). The address `0x0082d2dc` is a
-  16-byte stub, not the dispatcher. All v14 Channel-A handler addresses are
-  consistently `0x50` higher than the values published in earlier
-  Ghidra/PROTOCOL.md tables (see `firmwares/GHIDRA_DECOMPILATION.md` §3 and
-  §9.1). The v13 bucket table at `0x22490` remains unreferenced dead code; the
-  v14 dispatcher uses a direct switch/case instead. **v13 ↔ v14 are
-  wire-compatible** — v14 is a debug-log strip + dead-table cleanup, no protocol
-  change.
+  v14 firmware also contains a real dispatcher at `channel_a_dispatch_queued_frame`
+  (`0x0082d2dc`) that reads the opcode from a queued 16-byte frame and calls per-opcode handlers
+  (see `firmwares/GHIDRA_DECOMPILATION.md`
+  §3). The v13 bucket table at `0x22490` remains unreferenced dead code; the v14 dispatcher uses a
+  direct switch/case instead. **v13 ↔ v14 are wire-compatible** — v14 is a debug-log strip +
+  dead-table cleanup, no protocol change.
 - TX build (`BaseReqCmd.getData`): `buf=new byte[16]; buf[0]=key; arraycopy(getSubData,0,buf,1,len); addCRC(buf)`.
 - RX dispatch (`QCBluetoothCallbackReceiver.onCharacteristicChange` on `6e400003`):
   1. len **must** == 16 else dropped.
@@ -379,7 +376,7 @@ the generic bitmap below.
 | BloodOxygenSettingReq | `0x2c` | 01/02 | →watch | w:`[02, en(0/1)]` | read: `[1]`enable | SpO2 auto-measure on/off. |
 | BpSettingReq | `0x0c` | 01/02 | →watch | r:`[01]`; w:`[02,en,sH,sM,eH,eM,intervalMinutes]` where interval is nonzero and divisible by 30 | read response is 7 bytes: `[0]=01,[1]`en,`[2]`startH,`[3]`startM,`[4]`endH,`[5]`endM,`[6]`intervalMinutes`; invalid writes ACK as `opcode|0x80` | BP auto-measure window. H59MA v14 defaults to enabled, `00:00..23:00`, interval `0x3c` (hourly). Other sub-values have no response. |
 | BpReadConformReq | `0x0e` | — | →watch | `[0x00]`=advance/read next; nonzero silently exits | response is BP history via `0x0d` | Advance the BP record cursor and emit the next compact history record. |
-| BpDataRsp (no req) | `0x0d` | — | watch→ | n/a | hdr `[0]=00`{`[1]`yr-2000,`[2]`mo,`[3]`d,`[4]`intervalMinutes,`[5..10]`48-bit presence bitmap,`[11..13]=0`}; data frames `[0]=01` + up to 13 compact one-byte BP values in ascending set-bit order; `[0]=FF`=empty/end | BP history records. H59MA v14 initializes `intervalMinutes=0x3c` (hourly) and stores 24 4-byte persistent slots. The `0x0d` stream emits **only byte 0** of each valid slot; bytes 1–3 are zeroed by the writer and never emitted. Valid values are clamped to `[0x28, 0xdc]` (40–220) before inclusion in the presence bitmap. The stored byte appears to be produced by averaging sensor reads, dividing by 5, and adding 70 (`0x46`), but the exact division register is ambiguous in the decompiler — live cuff correlation is still required for clinical mapping. OpenWatch preserves the compact bytes as-is. |
+| BpDataRsp (no req) | `0x0d` | — | watch→ | n/a | hdr `[0]=00`{`[1]`yr-2000,`[2]`mo,`[3]`d,`[4]`intervalMinutes,`[5..10]`48-bit presence bitmap,`[11..13]=0`}; data frames `[0]=01` + up to 13 compact one-byte BP values in ascending set-bit order; `[0]=FF`=empty/end | BP history records. H59MA v14 initializes `intervalMinutes=0x3c` (hourly) and stores 24 4-byte persistent slots, but the `0x0d` stream emits only the first byte of each valid slot. OpenWatch preserves those compact bytes; systolic/diastolic reconstruction remains capture work. |
 | HRVReq | `0x39` | index | →watch | `[index]` | multi-pkt (`[0]=00`{size,range=30}, `[0]=01`{offset days-back + samples}, `0xFF`=end). stride 13B. | Read HRV history for a day index. |
 | PressureReq | `0x37` | index | →watch | `[index]` | multi-pkt (same scheme as HRV). stride 13B. | Read stress history for a day index. |
 | PressureSettingReq | `0x38` | 01/02 | →watch | w:`[02,en(0/1)]` | read: `[1]`enable; response echoes `[0x38,sub,value]` | Stress/pressure auto-measure enable bit. H59MA v14 has no confirmed Channel-A HRV auto-measure setting; the old APK-era `0x38` HRV setting row is stale for this firmware. |
@@ -387,8 +384,8 @@ the generic bitmap below.
 | UVSettingReq | `0x3b` | 01/02 + guard | →watch | r:`[01,00]`; w:`[02,00,value]` | echo/status via TouchControlRsp | Alias of TouchControlReq. H59MA v14 `0x3e` is not Channel-A UV; it is used by Channel-B nap sleep responses and by the FEE7 lipids path. |
 | SugarLipidsSettingReq | `0x3a` | type+act | →watch | r:`[type,01]`; w:`[type,02,en(0/1),valLo,valHi]` | `[1]`act, if read `[0]`type,`[2]`en,`[3..4]`value LE,`[5]`supportUnit | Blood sugar/lipids reference config. (per-request waiter) |
 | MenstruationReq | `0x2b` | 01/02 | →watch | w(11B):`[02,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10]` | **MenstruationDataRsp** 16B (per GHIDRA §3.1/§3.1.1, `FUN_0082b078` lazy-init + `FUN_0082af28` read-memcpy): `[0]`sentinel (`0xCA`=present; lazy-init zeroes; quirk — `rsp[0]` is overwritten with `start_date_bcd[0]` on read, so host must re-stamp `rsp[0]=0x2B`), `[1]`startDate-yr BCD, `[2]`cycleLenDays BCD, `[3]`startDate-day BCD, `[4..5]`=`currentDay − record[4]` (u16 LE on write, low byte only returned), `[6..7]`=`currentMonth − record[6]` (u16 LE on write, low byte only returned), `[8..12]`=5B opaque `periodData` (semantics not RE-resolvable), `[13..15]`=padding (always zero on write/read-back). Decode via `MixtureState.tryParse`. | Menstrual-cycle config. |
-| HealthEcgRsp (notify) | **not present on H59MA v14** | — | watch→ | n/a | Radare2 finds no `ecg`/`ECG`/`ppg`/`PPG` strings in the v14 body. `0x69` mode `0x07` is absent from the health start-measure dispatch table and falls back to HR mode 1. No vendor/high opcode in `0x90..0xA0` matches the ECG shape. Treat as not implemented on this firmware revision. | ECG status during ECG session. Not implemented on H59MA v14. |
-| PpgDataRspCmd (notify) | **not present on H59MA v14** | — | watch→ | n/a | The only PPG/SpO2 artifacts are unused library/version strings (`vc30fx_sc`, `lib_BIODetect_V14_1`, `spo2_VC30F_S_int_limit_ed01`) with no code xrefs. No real-time PPG stream exists in the static v14 image. | Raw PPG + HR stream. Not implemented on H59MA v14. |
+| HealthEcgRsp (notify) | **needs live capture** | — | watch→ | n/a (session under `0x69` type=7) | Statically unresolvable in H59MA v14 — §10.2 unified inventory (GHIDRA §10.2 lines 6322–6396) enumerates every vendor/high opcode statically resolved and none match the `[status,ecgInterval,ppgInterval]` shape. §8.5 per-mode start dispatch (lines 5228–5236) has no mode-0x07 (ECG) entry — falls into HR-mode-1 fallback (`health_post_start_measure_event(1)`). Do not infer a payload layout from §8.5 fallback semantics. | ECG status during ECG session. Listener opcode not statically resolvable. |
+| PpgDataRspCmd (notify) | **needs live capture** | — | watch→ | n/a (ECG/PPG session) | Statically unresolvable in H59MA v14 — the only PPG-related handler is §3.10 `0x2c` SpO2 (an enable-bit + auto-measure cadence), NOT a real-time stream from a `0x69` type=7 session. Do not infer a payload layout. | Raw PPG + HR stream. Listener opcode unresolved. |
 
 **StartHeartRate type enum:** HEARTRATE=1, BLOODPRESSURE=2, BLOODOXYGEN=3, FATIGUE=4, HEALTHCHECK=5,
 REALTIMEHEARTRATE=6, ECG=7, PRESSURE=8, BLOOD_SUGAR=9, HRV=0xa, BODY_TEMPERATURE=0xb.
@@ -466,8 +463,7 @@ prefer FEE7 writes for app flows without live-capture evidence.
 | FirmwareBuildInfo | `0x93` | both | bare opcode | two frames: header self-marker `[0x93,0...,0x93]`, then ASCII version/build string in `frame[1..14]` plus checksum | Returns a printable build string such as `"1.00.14_260508"`, using blob0 overrides when enabled. Verified at v14 body offset `0x184a`. |
 | StateUpdateMode1 / StateUpdateMode3 | `0x94` / `0x95` | both | bare opcode | self-marker ACK `[opcode,0,...,opcode]` | Updates `DAT_00827e88[0]` to mode `1` or `3`; `0x95` also clears `DAT_00827e88[1]`. Verified at v14 body offsets `0x645e` / `0x6466` and callees `0x172e` / `0x1754`. |
 | ResetState | `0x96` | both | bare opcode | self-marker ACK `[0x96,0,...,0x96]` | Resets the vendor state struct to mode `4`, clears `DAT_00827e88[1]`, and drains the state worker. Verified at v14 body offset `0x646e` and callee `0x177c`. |
-| HighNoResponse | `0x97` / `0x99` / `0x9f` | →watch | bare opcode | none | Return-only stubs (`bx lr`) that queue no response. Verified at v14 body offsets `0x6476`, `0x6486`, and `0x64b6`. |
-| HighNak | `0x9d` | →watch | bare opcode | vendor NAK `[0x9d\|0x80, 0xee]` | The only high-range slot that falls through to the default vendor-NAK sender (`0x0082c79e`). Previously labelled "no response"; radare2 shows it emits a NAK. |
+| HighNoResponse | `0x97` / `0x99` / `0x9d` / `0x9f` | →watch | bare opcode | none | High-range reserved/session slots that return without queuing a frame in H59MA v14. Verified at v14 body offsets `0x6476`, `0x6486`, `0x6352`, and `0x64b6`. |
 | SessionMode1 / SessionMode2 | `0x98` / `0x9a` | both | bare opcode | self-marker ACK `[opcode, 0..., opcode]` | Stores high-range session mode `1` or `2`, commits blob0 if changed, then ACKs. Verified at v14 body offsets `0x647e` / `0x648e` and callee `0x17b8`. |
 | SessionModeStatus | `0x9b` | both | bare opcode | `[stateByte]`, `0x88` when mode `2`, otherwise `0x77` | Reads the stored high-range session mode and returns one status byte; verified at v14 body offset `0x6496` and callee `0x17f0`. |
 | FactoryStop | `0x9c` | both | bare opcode | self-marker ACK `[0x9c, 0..., 0x9c]` | Stops factory-test timer, clears related state, and calls the shared cancel path; verified at v14 body offset `0x649e` and callee `0x181e`. |
@@ -972,18 +968,14 @@ Feedback, Customer-support chat.
 - ~~**ECG/PPG notify listener opcodes** (`HealthEcgRsp`, `PpgDataRspCmd`)~~ — **resolved negative for H59MA v14.** radare2 on the v14 body confirms the live health-session notify uses Channel-A opcode `0x69` (same as `StartHeartRateReq`) and `0x6a` for stop/result. The `0x69` start dispatcher explicitly handles modes `0x03, 0x06, 0x09, 0x0B, 0x0C, 0x0D, 0x0E`; mode `0x07` (APK/SDK ECG) is absent and falls into the generic HR-mode-1 fallback. The only PPG/SpO2-related handler is §3.10 Channel-A `0x2c` (enable-bit + auto-measure cadence); there is no real-time PPG stream from a `0x69 type=7` session. No vendor/high opcode in the `0x90..0xA0` range matches the documented ECG/PPG shapes. OpenWatch therefore treats `0x69` frames as generic health-session notifies and does not expect dedicated ECG/PPG listener opcodes on H59MA v14.
 - **BP-history compact byte semantics** (`0x0d` BpDataRsp) — static firmware RE
   now resolves the wire split: the persistent table has 24 hourly 4-byte slots,
-  but the `0x0d` stream emits **only byte 0** of each valid slot after a
-  `0x01` chunk tag. Valid values are clamped to `[0x28, 0xdc]` (40–220) before
-  inclusion in the presence bitmap. The stored byte appears to be produced by
-  averaging sensor reads, dividing by 5, and adding 70 (`0x46`), but the exact
-  division register is ambiguous in the decompiler. OpenWatch stores that compact
-  byte per bitmap slot in the `bp_raw` sidecar. Do not synthesize
-  systolic/diastolic history from it. The FEE7 `0x0d` branch and the `sub==0`
-  wrapper both converge on the same compact sender (`0x5ca4` → `0xde96`), and
-  the BP descriptor pointer literal has no other v14 hits, so static RE found no
-  host-visible full-slot path for the remaining three persistent bytes.
-  Resolution path: correlate live `0x0d` compact bytes with known manual/cuff
-  readings.
+  but the `0x0d` stream emits only the first byte of each valid slot after a
+  `0x01` chunk tag. OpenWatch stores that compact byte per bitmap slot in the
+  `bp_raw` sidecar. Do not synthesize systolic/diastolic history from it. The
+  FEE7 `0x0d` branch and the `sub==0` wrapper both converge on the same compact
+  sender (`0x5ca4` → `0xde96`), and the BP descriptor pointer literal has no
+  other v14 hits, so static RE found no host-visible full-slot path for the
+  remaining three persistent bytes. Resolution path: correlate live `0x0d`
+  compact bytes with known manual/cuff readings.
 - **`@RequiresSignature` method set** — confirm which cloud endpoints sign at runtime.
 - **Legacy `bind` (`0x10` CMD_BIND_SUCCESS)** request layout — **not on H59MA Channel-A.**
   The §10.2 inventory (22 Channel-A handlers) does not list `0x10`; on Channel-B
@@ -1077,9 +1069,9 @@ flash load address).
 
 ### 9.1 Channel-A framing & firmware dispatch
 
-H59MA v14 contains a real firmware-side Channel-A deferred command dispatcher at
-**`fcn.0082d32c` (`0x0082d32c`)**, called from `qc_app_task` (`0x00827310`).
-The address `0x0082d2dc` is a 16-byte stub, not the dispatcher. The handler
+Ghidra confirms that H59MA v14 contains a real firmware-side Channel-A command
+dispatcher at **`0x0082d2dc`**, now named
+`channel_a_dispatch_queued_frame` in the saved Ghidra project. The handler
 drains `channel_a_command_queue_state` (`0x0082d440`), a ring of 16-byte queued
 requests, and dispatches on byte `0` of the copied 16-byte frame. Ring metadata
 is outside the entry at `state+0x14/+0x16`; entries start at
@@ -1099,29 +1091,29 @@ Documented v14 dispatcher targets include:
 
 | Opcode | Handler | Role |
 |---|---|---|
-| `0x01` | `0x0082bb9e` | set time / capability ack |
-| `0x06` | `0x0082d2e8` | DND read/write |
+| `0x01` | `0x0082bb4e` | set time / capability ack |
+| `0x06` | `0x0082d298` | DND read/write |
 | `0x08` | inline branch | camera / find-device / long-press |
-| `0x0e` | `0x0082cb78` | BP read confirm |
-| `0x15` | `0x0082cf98` | read heart-rate history |
-| `0x18` | `0x0082cd06` | display-clock / watch-face selection |
-| `0x1e` | `0x0082d25c` | real-time heart-rate start/stop |
-| `0x25`/`0x26` | `0x0082d2d4` / `0x0082d2a8` | sedentary config write/read |
-| `0x2b` | `0x0082baa4` | menstruation mixture container |
-| `0x2c` | `0x0082d212` | SpO2 setting |
-| `0x37`/`0x39` | `0x0082caf6` / `0x0082ca2a` | pressure/stress and HRV history records |
-| `0x38` | `0x0082caa4` | pressure/stress enable bit |
-| `0x3a`/`0x3b` | `0x0082cc6e` / `0x0082cc18` | sugar/lipids and UV/touch settings |
-| `0x43` | `0x0082d084` | detailed sport records |
-| `0x72` | `0x00829ee2` | Unicode notification text |
-| `0x77` | `0x0082ce5c` | phone-sport sub-dispatch |
-| `0x7a` | `0x0082cb8a` | Muslim/prayer config |
+| `0x0e` | `0x0082cb28` | BP read confirm |
+| `0x15` | `0x0082cf48` | read heart-rate history |
+| `0x18` | `0x0082ccb6` | display-clock / watch-face selection |
+| `0x1e` | `0x0082d20c` | real-time heart-rate start/stop |
+| `0x25`/`0x26` | `0x0082d284` / `0x0082d258` | sedentary config write/read |
+| `0x2b` | `0x0082ba54` | menstruation mixture container |
+| `0x2c` | `0x0082d1c2` | SpO2 setting |
+| `0x37`/`0x39` | `0x0082caa6` / `0x0082c9da` | pressure/stress and HRV history records |
+| `0x38` | `0x0082ca54` | pressure/stress enable bit |
+| `0x3a`/`0x3b` | `0x0082cc1e` / `0x0082cbc8` | sugar/lipids and UV/touch settings |
+| `0x43` | `0x0082d034` | detailed sport records |
+| `0x72` | `0x00829e92` | Unicode notification text |
+| `0x77` | `0x0082ce0c` | phone-sport sub-dispatch |
+| `0x7a` | `0x0082cb3a` | Muslim/prayer config |
 | `0x7d` | no handler | queued no-op; deferred worker branches `0x6f5e -> 0x6f7c` with no response |
-| `0x81` | `0x0082cdfc` | 6-byte config chunk |
-| `0xa1` | `0x00827fac` | factory/test commands |
+| `0x81` | `0x0082cdac` | 6-byte config chunk |
+| `0xa1` | `0x00827f5c` | factory/test commands |
 | `0xc6` | inline branch | reboot / restore key |
-| `0xc7` | `0x00832f0c` | vibration pattern player |
-| `0xff` | `0x0082ce38` | factory reset |
+| `0xc7` | `0x00832ebc` | vibration pattern player |
+| `0xff` | `0x0082cde8` | factory reset |
 
 The common response path uses `checksum8_additive` (`0x0082b0c4`) over bytes
 `0..14` and queues a 16-byte notify through `channel_a_queue_notify_frame`

@@ -359,15 +359,12 @@ The bucket table is not referenced from anywhere in v13 either (no pointer in th
 The radare2 pass correctly ruled out the dead v13 bucket table and the
 `0x21b58` / `0x1ff0c` literal pool as live dispatch tables, but its final
 "phone-side only" conclusion is superseded by Ghidra. H59MA v14 contains a
-real firmware deferred dispatcher at device address `0x0082d32c`
-(`fcn.0082d32c`), called from `qc_app_task` at `0x00827310`. The address
-`0x0082d2dc` is a 16-byte stub and is not the dispatcher. That routine drains a
-deferred 16-byte request ring (`channel_a_command_queue_state` at
+real firmware dispatcher at device address `0x0082d2dc`, now named
+`channel_a_dispatch_queued_frame` in the saved Ghidra project. That routine
+drains a deferred 16-byte request ring (`channel_a_command_queue_state` at
 `0x0082d440`) and dispatches byte `0` of each queued 16-byte frame to
 per-opcode handlers. Ring metadata lives outside the copied entry at
-`state+0x14/+0x16`; entries start at `state+0x18 + index*0x10`. All v14
-Channel-A handler addresses are consistently `0x50` higher than the values in
-the previous Ghidra/PROTOCOL.md tables.
+`state+0x14/+0x16`; entries start at `state+0x18 + index*0x10`.
 
 The on-wire Channel-A frame remains the SDK format documented in `PROTOCOL.md`
 (`byte 0 = opcode`, bytes `1..14 = payload`, byte `15 = additive checksum`);
@@ -642,9 +639,9 @@ listed by the earlier radare2 notes:
 
 ## 12. Open Questions / TODO
 
-1. **Algorithm behind the 32-byte `image_digest @0x1c4`.** Not SHA-256 of any contiguous window; not MD5, not CRC32; not truncated SHA-1. A 2026-07-07 radare2 pass found **no code or data references** to the digest region (`0x008261c4`) in the app body, and the OTA completion path does not validate it. Likely a vendor-proprietary keyed MAC using `signature_a` or `0x5C` GUID as key, verified by the bootloader/ROM region below `0x00826400` (not present in the OTA slice), or a build-host-only stamp. See `firmwares/_re/digest-and-boundary/evidence.md`.
+1. **Algorithm behind the 32-byte `image_digest @0x1c4`.** Not SHA-256 of any contiguous window; not MD5, not CRC32; not truncated SHA-1. Likely a vendor-proprietary keyed MAC using `signature_a` or `0x5C` GUID as key. Required to determine whether the bootloader verifies the digest or ignores it.
 2. ~~Algorithm behind the `image_chk_a @0x0c` additive byte-sum.~~ **Resolved:** it is `sum(container[0x50:]) & 0xffffffff` for both v13 and v14.
-3. ~~Exact Channel A dispatch path — phone-side vs watch-side.~~ **Resolved by radare2/Ghidra:** v14 drains an internal 16-byte queued-frame ring in `channel_a_dispatch_queued_frame` (`0x0082d32c`; `0x0082d2dc` is a 16-byte stub). The phone-side SDK still owns wire framing and response correlation.
+3. ~~Exact Channel A dispatch path — phone-side vs watch-side.~~ **Resolved by Ghidra:** v14 drains an internal 16-byte queued-frame ring in `channel_a_dispatch_queued_frame` (`0x0082d2dc`). The phone-side SDK still owns wire framing and response correlation.
 4. ~~Channel A additive 8-bit checksum algorithm.~~ **Resolved by Ghidra:** `checksum8_additive` (`0x0082b0c4`) sums caller-specified bytes; Channel-A/vendor-high responses use bytes `0..14`.
 5. ~~Channel B sub-cmd bytes that the watch accepts beyond `PROTOCOL.md` §3.2.~~ **Resolved for static firmware routing:** a 2026-07-05 radare2 pass verifies the first-stage v13/v14 dispatcher groups and the second-stage async switch/cascade (`firmwares/_re/channel-b-dispatch/evidence.md`).
    `0x01`, `0x02`, `0x21`, `0x31`, `0x35`, `0x36`, and `0x61` call the OTA-state callback before falling through to async storage; `0x10`/`0x46` bypass async storage through the cleanup helper; every other valid-CRC frame enters the async worker directly.
