@@ -262,9 +262,9 @@ class _MetricTile extends StatelessWidget {
                 const SizedBox(width: kSpacingTiny),
                 Text(
                   metric.unit!,
-                  style: AppTextStyles.bodySmall(context)?.copyWith(
-                    height: 1.0,
-                  ),
+                  style: AppTextStyles.bodySmall(
+                    context,
+                  )?.copyWith(height: 1.0),
                 ),
               ],
             ],
