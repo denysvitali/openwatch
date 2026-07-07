@@ -8,6 +8,7 @@ import '../../core/ble/ble_transport.dart';
 import '../../core/protocol/channel_a.dart';
 import '../../core/providers/app_providers.dart';
 import '../../core/services/history_sync.dart';
+import '../../core/ui/ui_constants.dart';
 import '../history/widgets/hr_chart.dart';
 import '../history/widgets/sleep_trend_chart.dart';
 import '../history/widgets/steps_chart.dart';
@@ -65,7 +66,12 @@ class DashboardScreen extends ConsumerWidget {
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 860),
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+            padding: const EdgeInsets.fromLTRB(
+              kCardPadding,
+              kSpacingSmall,
+              kCardPadding,
+              kCardPadding + kSpacingSmall,
+            ),
             children: [
               _DeviceHeroCard(
                 name: name,
@@ -79,7 +85,7 @@ class DashboardScreen extends ConsumerWidget {
               if (manager.nowPlaying != null &&
                   manager.nowPlaying!.track.isNotEmpty) ...[
                 _NowPlayingCard(music: manager.nowPlaying!),
-                const SizedBox(height: 12),
+                const SizedBox(height: kSpacingSmall),
               ],
               const HealthSectionHeader(title: 'Metrics'),
               _MetricGrid(
@@ -154,10 +160,10 @@ class _DeviceHeroCard extends StatelessWidget {
       metricColor: theme.colorScheme.primary,
       trailing: _BatteryBadge(percent: batteryPercent, charging: charging),
       child: Padding(
-        padding: const EdgeInsets.only(top: 12),
+        padding: const EdgeInsets.only(top: kSpacingSmall),
         child: Wrap(
-          spacing: 8,
-          runSpacing: 8,
+          spacing: kSpacingSmall,
+          runSpacing: kSpacingSmall,
           children: [
             StatusPill(
               icon: connected
@@ -195,10 +201,13 @@ class _BatteryBadge extends StatelessWidget {
         : theme.colorScheme.onSurface;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      padding: const EdgeInsets.symmetric(
+        horizontal: kSpacingSmall,
+        vertical: kSpacingTiny,
+      ),
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(kSpacingSmall + kSpacingTiny),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -207,13 +216,13 @@ class _BatteryBadge extends StatelessWidget {
             charging
                 ? CupertinoIcons.battery_charging
                 : CupertinoIcons.battery_100,
-            size: 18,
+            size: kIconSizeSmall,
             color: color,
           ),
-          const SizedBox(width: 6),
+          SizedBox(width: kSpacingTiny + kSpacingMini),
           Text(
             percent == null ? '-' : '$percent%',
-            style: theme.textTheme.labelLarge?.copyWith(color: color),
+            style: AppTextStyles.labelMedium(context)?.copyWith(color: color),
           ),
         ],
       ),
@@ -242,21 +251,18 @@ class _MetricGrid extends StatelessWidget {
           icon: CupertinoIcons.arrow_up_right,
           title: 'Steps',
           value: _formatInt(steps),
-          metricColor: const Color(0xFF34C759),
         ),
         HealthCard(
           icon: CupertinoIcons.heart_fill,
           title: 'Heart',
           value: heartRate == null ? '-' : '$heartRate',
           unit: heartRate == null ? null : 'bpm',
-          metricColor: const Color(0xFFFF3B30),
         ),
         HealthCard(
           icon: CupertinoIcons.flame_fill,
           title: 'Energy',
           value: _formatInt(calories),
           unit: calories == null ? null : 'kcal',
-          metricColor: const Color(0xFFFF9500),
         ),
         HealthCard(
           icon: CupertinoIcons.location_fill,
@@ -265,7 +271,6 @@ class _MetricGrid extends StatelessWidget {
               ? '-'
               : (distanceMeters! / 1000).toStringAsFixed(2),
           unit: distanceMeters == null ? null : 'km',
-          metricColor: const Color(0xFF5856D6),
         ),
       ],
     );
@@ -294,9 +299,9 @@ class _RecentActivityCard extends StatelessWidget {
             ? 'Syncing history from your watch...'
             : 'No history stored on this phone yet. Tap to open History.',
         onTap: () => context.push('/history'),
-        trailing: const Icon(
+        trailing: Icon(
           CupertinoIcons.chevron_forward,
-          color: Color(0xFF8E8E93),
+          color: theme.colorScheme.onSurfaceVariant,
         ),
       );
     }
@@ -314,16 +319,16 @@ class _RecentActivityCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SizedBox(height: 16),
+          const SizedBox(height: kCardInternalSpacing),
           if (today.hr.isNotEmpty) ...[
-            MiniHrSpark(samples: today.hr, height: 58),
-            const SizedBox(height: 14),
+            MiniHrSpark(samples: today.hr, height: 48),
+            const SizedBox(height: kSpacingSmall),
           ],
           if (sleepSummary.hasData) ...[
             _SleepTrendHeader(summary: sleepSummary),
-            const SizedBox(height: 8),
-            SleepTrendChart(days: recent, height: 104),
-            const SizedBox(height: 14),
+            const SizedBox(height: kSpacingSmall),
+            SleepTrendChart(days: recent, height: 80),
+            const SizedBox(height: kSpacingSmall),
           ],
           StepsBarChart(days: recent),
         ],
@@ -375,37 +380,36 @@ class _SleepTrendHeader extends StatelessWidget {
     return Row(
       children: [
         Container(
-          width: 38,
-          height: 38,
+          width: kIconCircleSizeSmall,
+          height: kIconCircleSizeSmall,
           decoration: BoxDecoration(
-            color: const Color(0xFF5856D6).withValues(alpha: 0.14),
+            color: theme.colorScheme.primary.withValues(alpha: kMetricTintOpacity),
             shape: BoxShape.circle,
           ),
           alignment: Alignment.center,
-          child: const Icon(
+          child: Icon(
             CupertinoIcons.moon_fill,
-            size: 20,
-            color: Color(0xFF5856D6),
+            size: kIconSizeSmall,
+            color: theme.colorScheme.primary,
           ),
         ),
-        const SizedBox(width: 12),
+        const SizedBox(width: kGridSpacing),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
                 'Sleep trend',
-                style: theme.textTheme.bodyLarge?.copyWith(
-                  fontWeight: FontWeight.w600,
-                ),
+                style: AppTextStyles.titleSmall(context)
+                    ?.copyWith(fontWeight: FontWeight.w600),
               ),
-              Text(trendText, style: theme.textTheme.bodySmall),
+              Text(trendText, style: AppTextStyles.labelMedium(context)),
             ],
           ),
         ),
         Text(
           'Week avg ${_formatDuration(summary.average)}',
-          style: theme.textTheme.labelMedium?.copyWith(
+          style: AppTextStyles.labelSmall(context)?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
           ),
           maxLines: 1,
@@ -453,8 +457,8 @@ class _QuickActions extends StatelessWidget {
         final wide = constraints.maxWidth >= 560;
         return GridView.count(
           crossAxisCount: wide ? 4 : 2,
-          crossAxisSpacing: 10,
-          mainAxisSpacing: 10,
+          crossAxisSpacing: kGridSpacing,
+          mainAxisSpacing: kGridSpacing,
           childAspectRatio: wide ? 2.55 : 3.2,
           physics: const NeverScrollableScrollPhysics(),
           shrinkWrap: true,
@@ -497,11 +501,12 @@ class _AlarmsSummary extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final time = next.labelTime;
+    final theme = Theme.of(context);
     return HealthListTile(
       title: 'Clock alarms',
       subtitle: '$count armed — next at $time',
       leadingIcon: Icons.alarm,
-      leadingColor: const Color(0xFF34C759),
+      leadingColor: theme.colorScheme.primary,
       value: '$count',
       onTap: () => GoRouter.of(context).push('/alarms'),
     );
@@ -553,17 +558,20 @@ class _VolumeChip extends StatelessWidget {
         ? CupertinoIcons.volume_down
         : CupertinoIcons.volume_up;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(
+        horizontal: kSpacingSmall,
+        vertical: kSpacingTiny,
+      ),
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(kPillRadius),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 16, color: theme.colorScheme.onSurfaceVariant),
-          const SizedBox(width: 4),
-          Text('$volume', style: theme.textTheme.labelMedium),
+          Icon(icon, size: kIconSizeTiny, color: theme.colorScheme.onSurfaceVariant),
+          const SizedBox(width: kSpacingTiny),
+          Text('$volume', style: AppTextStyles.labelMedium(context)),
         ],
       ),
     );
