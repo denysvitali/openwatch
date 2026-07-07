@@ -24,9 +24,9 @@ class HealthSectionHeader extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(
-        kCardPadding,
+        kSectionHeaderPaddingH,
         kSectionHeaderPaddingTop,
-        kCardPadding,
+        kSectionHeaderPaddingH,
         kSectionHeaderPaddingBottom,
       ),
       child: Row(
