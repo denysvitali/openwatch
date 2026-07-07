@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:openwatch/core/ui/ui_constants.dart';
 
 /// The primary call-to-action button used across health screens.
 ///
-/// Minimum height 54dp, 16dp border radius, primary-accent background, white
-/// foreground, optional leading icon, and a soft matching shadow.
+/// Compact height, rounded corners, primary-accent background, white
+/// foreground, optional leading icon in a subtle tinted circle, and no colored
+/// shadow.
 class PrimaryHealthButton extends StatelessWidget {
   const PrimaryHealthButton({
     super.key,
@@ -22,31 +24,38 @@ class PrimaryHealthButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final primary = theme.colorScheme.primary;
+    final onPrimary = theme.colorScheme.onPrimary;
 
     return FilledButton.icon(
       onPressed: onPressed,
       icon: icon != null
-          ? SizedBox(
-              width: 48,
-              child: Icon(icon, size: 24, color: theme.colorScheme.onPrimary),
+          ? Container(
+              width: kIconCircleSizeSmall,
+              height: kIconCircleSizeSmall,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: onPrimary.withValues(alpha: kMetricTintOpacity),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, size: kIconSizeSmall, color: onPrimary),
             )
           : const SizedBox.shrink(),
       label: Text(label),
       style: FilledButton.styleFrom(
-        minimumSize: const Size(0, 54),
-        padding: const EdgeInsets.symmetric(horizontal: 24),
+        minimumSize: Size(0, kIconCircleSizeSmall + kListTilePaddingV),
+        padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
         backgroundColor: primary,
-        foregroundColor: theme.colorScheme.onPrimary,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        shadowColor: elevated
-            ? primary.withValues(alpha: 0.16)
-            : Colors.transparent,
-        elevation: elevated ? 4 : 0,
-        textStyle: theme.textTheme.labelLarge?.copyWith(
-          fontSize: 16,
+        foregroundColor: onPrimary,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(kCardRadius),
+        ),
+        shadowColor: Colors.transparent,
+        elevation: elevated ? 2 : 0,
+        textStyle: theme.textTheme.labelMedium?.copyWith(
+          fontSize: kLabelMedium,
           fontWeight: FontWeight.w600,
           height: 1.25,
-          color: theme.colorScheme.onPrimary,
+          color: onPrimary,
         ),
       ),
     );

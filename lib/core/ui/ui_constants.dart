@@ -47,10 +47,8 @@ const double kGridChildAspectRatio = 1.05;
 // Status pill -------------------------------------------------------------
 
 const double kPillHeight = 22;
-const double kPillPaddingH = 8;
 const double kPillRadius = 10;
 const double kPillIconSize = 12;
-const double kPillSpacing = 4;
 
 // Semantic tints / opacity values -----------------------------------------
 
