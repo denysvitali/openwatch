@@ -51,7 +51,7 @@ class HealthCard extends StatelessWidget {
         children: [
           if (title != null || icon != null || trailing != null)
             Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 if (icon != null) ...[
                   Container(
@@ -75,11 +75,7 @@ class HealthCard extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                if (trailing != null)
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 40),
-                    child: trailing,
-                  ),
+                ?trailing,
               ],
             ),
           if (title != null || icon != null || trailing != null)
@@ -96,9 +92,10 @@ class HealthCard extends StatelessWidget {
                 if (unit != null)
                   Text(
                     unit!,
-                    style: AppTextStyles.labelMedium(
-                      context,
-                    )?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                    style: AppTextStyles.labelMedium(context)?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                      height: 1.0,
+                    ),
                   ),
               ],
             ),

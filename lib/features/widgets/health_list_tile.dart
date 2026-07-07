@@ -7,7 +7,8 @@ import '../../core/ui/ui_constants.dart';
 ///
 /// Features a circular leading icon tinted with the metric color, title /
 /// subtitle, a trailing value+unit+chevron row, and an optional indented
-/// divider.
+/// divider. A dedicated [control] slot is provided for switches, dropdowns,
+/// and other controls that should be baseline-aligned with the title.
 class HealthListTile extends StatelessWidget {
   const HealthListTile({
     super.key,
@@ -18,6 +19,7 @@ class HealthListTile extends StatelessWidget {
     this.leadingIcon,
     this.leadingColor,
     this.trailing,
+    this.control,
     this.onTap,
     this.showDivider = true,
     this.contentPadding = const EdgeInsets.symmetric(
@@ -33,6 +35,7 @@ class HealthListTile extends StatelessWidget {
   final IconData? leadingIcon;
   final Color? leadingColor;
   final Widget? trailing;
+  final Widget? control;
   final VoidCallback? onTap;
   final bool showDivider;
   final EdgeInsetsGeometry contentPadding;
@@ -42,14 +45,18 @@ class HealthListTile extends StatelessWidget {
     final theme = Theme.of(context);
     final color = leadingColor ?? theme.colorScheme.primary;
 
+    final Widget? controlWidget = control ?? _controlFromTrailing(trailing);
+    final Widget? trailingWidget = controlWidget == null ? trailing : null;
+
     Widget tile = Padding(
       padding: contentPadding,
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           if (leadingIcon != null)
             Container(
-              width: kIconCircleSizeSmall,
-              height: kIconCircleSizeSmall,
+              width: kIconCircleSizeListTile,
+              height: kIconCircleSizeListTile,
               decoration: BoxDecoration(
                 color: color.withValues(alpha: kMetricTintOpacity),
                 shape: BoxShape.circle,
@@ -76,7 +83,15 @@ class HealthListTile extends StatelessWidget {
               ],
             ),
           ),
-          _buildTrailing(context),
+          if (controlWidget != null)
+            Baseline(
+              baseline:
+                  AppTextStyles.bodyMedium(context)?.fontSize ?? kBodyMedium,
+              baselineType: TextBaseline.alphabetic,
+              child: controlWidget,
+            )
+          else
+            _buildTrailing(context, trailingWidget),
         ],
       ),
     );
@@ -91,7 +106,7 @@ class HealthListTile extends StatelessWidget {
         tile,
         if (showDivider)
           Divider(
-            indent: kListTilePaddingH + kIconCircleSizeSmall,
+            indent: kListTilePaddingH + kIconCircleSizeListTile + kGridSpacing,
             height: 1,
             thickness: 1,
             color: theme.dividerColor,
@@ -100,11 +115,13 @@ class HealthListTile extends StatelessWidget {
     );
   }
 
-  Widget _buildTrailing(BuildContext context) {
+  Widget _buildTrailing(BuildContext context, Widget? trailingWidget) {
     final theme = Theme.of(context);
-    if (trailing != null) return trailing!;
+    if (trailingWidget != null) return trailingWidget;
     if (value == null && unit == null) return const SizedBox.shrink();
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.baseline,
+      textBaseline: TextBaseline.alphabetic,
       mainAxisSize: MainAxisSize.min,
       children: [
         if (value != null)
@@ -124,5 +141,17 @@ class HealthListTile extends StatelessWidget {
         ),
       ],
     );
+  }
+
+  /// Returns [trailing] if it is a control widget that should be baseline
+  /// aligned with the title, otherwise `null`. This lets existing callers pass
+  /// a [Switch] or [DropdownButton] as [trailing] without breaking the
+  /// baseline contract.
+  Widget? _controlFromTrailing(Widget? widget) {
+    if (widget == null) return null;
+    if (widget is Switch || widget is Checkbox || widget is DropdownButton) {
+      return widget;
+    }
+    return null;
   }
 }

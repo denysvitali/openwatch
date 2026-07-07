@@ -37,6 +37,7 @@ const double kSpacingSmall = 8;
 
 const double kIconCircleSizeLarge = 48;
 const double kIconCircleSizeSmall = 36;
+const double kIconCircleSizeListTile = 28;
 
 const double kIconSizeLarge = 28;
 const double kIconSizeSmall = 20;
@@ -69,48 +70,51 @@ class AppTextStyles {
 
   static TextTheme _theme(BuildContext context) => Theme.of(context).textTheme;
 
+  static TextStyle? _style(TextStyle? base, double fontSize) =>
+      base?.copyWith(fontSize: fontSize, height: 1.2, letterSpacing: 0);
+
   static TextStyle? displayLarge(BuildContext context) =>
-      _theme(context).displayLarge?.copyWith(fontSize: kDisplayLarge);
+      _style(_theme(context).displayLarge, kDisplayLarge);
 
   static TextStyle? displayMedium(BuildContext context) =>
-      _theme(context).displayMedium?.copyWith(fontSize: kDisplayMedium);
+      _style(_theme(context).displayMedium, kDisplayMedium);
 
   static TextStyle? displaySmall(BuildContext context) =>
-      _theme(context).displaySmall?.copyWith(fontSize: kDisplaySmall);
+      _style(_theme(context).displaySmall, kDisplaySmall);
 
   static TextStyle? headlineLarge(BuildContext context) =>
-      _theme(context).headlineLarge?.copyWith(fontSize: kHeadlineLarge);
+      _style(_theme(context).headlineLarge, kHeadlineLarge);
 
   static TextStyle? headlineMedium(BuildContext context) =>
-      _theme(context).headlineMedium?.copyWith(fontSize: kHeadlineMedium);
+      _style(_theme(context).headlineMedium, kHeadlineMedium);
 
   static TextStyle? headlineSmall(BuildContext context) =>
-      _theme(context).headlineSmall?.copyWith(fontSize: kHeadlineSmall);
+      _style(_theme(context).headlineSmall, kHeadlineSmall);
 
   static TextStyle? titleLarge(BuildContext context) =>
-      _theme(context).titleLarge?.copyWith(fontSize: kTitleLarge);
+      _style(_theme(context).titleLarge, kTitleLarge);
 
   static TextStyle? titleMedium(BuildContext context) =>
-      _theme(context).titleMedium?.copyWith(fontSize: kTitleMedium);
+      _style(_theme(context).titleMedium, kTitleMedium);
 
   static TextStyle? titleSmall(BuildContext context) =>
-      _theme(context).titleSmall?.copyWith(fontSize: kTitleSmall);
+      _style(_theme(context).titleSmall, kTitleSmall);
 
   static TextStyle? bodyLarge(BuildContext context) =>
-      _theme(context).bodyLarge?.copyWith(fontSize: kBodyLarge);
+      _style(_theme(context).bodyLarge, kBodyLarge);
 
   static TextStyle? bodyMedium(BuildContext context) =>
-      _theme(context).bodyMedium?.copyWith(fontSize: kBodyMedium);
+      _style(_theme(context).bodyMedium, kBodyMedium);
 
   static TextStyle? bodySmall(BuildContext context) =>
-      _theme(context).bodySmall?.copyWith(fontSize: kBodySmall);
+      _style(_theme(context).bodySmall, kBodySmall);
 
   static TextStyle? labelLarge(BuildContext context) =>
-      _theme(context).labelLarge?.copyWith(fontSize: kLabelLarge);
+      _style(_theme(context).labelLarge, kLabelLarge);
 
   static TextStyle? labelMedium(BuildContext context) =>
-      _theme(context).labelMedium?.copyWith(fontSize: kLabelMedium);
+      _style(_theme(context).labelMedium, kLabelMedium);
 
   static TextStyle? labelSmall(BuildContext context) =>
-      _theme(context).labelSmall?.copyWith(fontSize: kLabelSmall);
+      _style(_theme(context).labelSmall, kLabelSmall);
 }

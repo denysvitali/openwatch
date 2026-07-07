@@ -51,12 +51,18 @@ class PrimaryHealthButton extends StatelessWidget {
         ),
         shadowColor: Colors.transparent,
         elevation: elevated ? 2 : 0,
-        textStyle: theme.textTheme.labelMedium?.copyWith(
-          fontSize: kLabelMedium,
-          fontWeight: FontWeight.w600,
-          height: 1.25,
-          color: onPrimary,
-        ),
+        textStyle:
+            AppTextStyles.labelLarge(context)?.copyWith(
+              fontWeight: FontWeight.w600,
+              height: 1.25,
+              color: onPrimary,
+            ) ??
+            theme.textTheme.labelLarge?.copyWith(
+              fontSize: kLabelLarge,
+              fontWeight: FontWeight.w600,
+              height: 1.25,
+              color: onPrimary,
+            ),
       ),
     );
   }

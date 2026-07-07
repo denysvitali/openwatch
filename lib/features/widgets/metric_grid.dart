@@ -3,9 +3,10 @@ import 'package:openwatch/core/ui/ui_constants.dart';
 
 /// A responsive metric grid that wraps [HealthCard]-style tiles.
 ///
-/// Uses a [GridView.extent] layout so tiles reflow naturally while honoring
-/// the design system's 220dp max cross-axis extent, [kGridSpacing] spacing,
-/// and [kGridChildAspectRatio] child aspect ratio.
+/// Uses a [Wrap] layout so tiles take their intrinsic height while still
+/// reflowing across the available width. The [maxCrossAxisExtent] is applied
+/// as a max-width constraint on each child; [crossAxisSpacing] and
+/// [mainAxisSpacing] map to Wrap's spacing and runSpacing, respectively.
 class MetricGrid extends StatelessWidget {
   const MetricGrid({
     super.key,
@@ -30,15 +31,24 @@ class MetricGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GridView.extent(
-      maxCrossAxisExtent: maxCrossAxisExtent,
-      crossAxisSpacing: crossAxisSpacing,
-      mainAxisSpacing: mainAxisSpacing,
-      childAspectRatio: childAspectRatio,
-      shrinkWrap: shrinkWrap,
-      physics: physics,
-      padding: padding,
-      children: children,
+    final wrap = Wrap(
+      spacing: crossAxisSpacing,
+      runSpacing: mainAxisSpacing,
+      alignment: WrapAlignment.start,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: children
+          .map(
+            (child) => ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: maxCrossAxisExtent),
+              child: child,
+            ),
+          )
+          .toList(),
     );
+
+    if (padding != null) {
+      return Padding(padding: padding!, child: wrap);
+    }
+    return wrap;
   }
 }

@@ -37,6 +37,8 @@ class StatusPill extends StatelessWidget {
             style: AppTextStyles.labelSmall(
               context,
             )?.copyWith(color: statusColor),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
         ],
       ),
