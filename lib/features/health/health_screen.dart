@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/providers/app_providers.dart';
+import '../../core/ui/ui_constants.dart';
 import '../widgets/health_widgets.dart';
 
 /// Health metrics. Heart rate is wired to the live-measure commands; the
@@ -11,14 +12,12 @@ import '../widgets/health_widgets.dart';
 class HealthScreen extends ConsumerWidget {
   const HealthScreen({super.key});
 
-  static const Color _heartRed = Color(0xFFFF3B30);
-  static const Color _sleepPurple = Color(0xFF5856D6);
-  static const Color _activityGreen = Color(0xFF34C759);
-  static const Color _nutritionOrange = Color(0xFFFF9500);
-  static const Color _hydrationBlue = Color(0xFF32ADE6);
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final metricColor = colorScheme.primary;
+
     final manager = ref.watch(watchManagerProvider);
     final ready = manager.isReady;
     final caps = manager.capabilities;
@@ -36,7 +35,7 @@ class HealthScreen extends ConsumerWidget {
           title: 'Blood oxygen',
           value: '-',
           unit: '%',
-          tint: _hydrationBlue,
+          tint: metricColor,
           onTap: () => context.push('/history'),
         ),
       if (caps.bloodPressure)
@@ -45,7 +44,7 @@ class HealthScreen extends ConsumerWidget {
           title: 'Blood pressure',
           value: bpValue,
           unit: 'mmHg',
-          tint: _heartRed,
+          tint: metricColor,
           ready: ready,
           measuring: manager.measuringBloodPressure,
           start: manager.startBloodPressure,
@@ -56,7 +55,7 @@ class HealthScreen extends ConsumerWidget {
           icon: CupertinoIcons.moon_fill,
           title: 'Sleep',
           value: 'History',
-          tint: _sleepPurple,
+          tint: metricColor,
           onTap: () => context.push('/history'),
         ),
       if (caps.stress)
@@ -64,7 +63,7 @@ class HealthScreen extends ConsumerWidget {
           icon: CupertinoIcons.bolt_fill,
           title: 'Stress',
           value: manager.lastStress?.toString() ?? '-',
-          tint: _nutritionOrange,
+          tint: metricColor,
           ready: ready,
           measuring: manager.measuringStress,
           start: manager.startStress,
@@ -76,7 +75,7 @@ class HealthScreen extends ConsumerWidget {
           title: 'HRV',
           value: manager.lastHrv?.toString() ?? '-',
           unit: 'ms',
-          tint: _activityGreen,
+          tint: metricColor,
           ready: ready,
           measuring: manager.measuringHrv,
           start: manager.startHrv,
@@ -88,7 +87,7 @@ class HealthScreen extends ConsumerWidget {
           title: 'Temperature',
           value: '-',
           unit: '°C',
-          tint: _nutritionOrange,
+          tint: metricColor,
           onTap: () => context.push('/history'),
         ),
     ];
@@ -96,7 +95,12 @@ class HealthScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Health')),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
+        padding: const EdgeInsets.fromLTRB(
+          kCardPadding,
+          kSpacingSmall,
+          kCardPadding,
+          kSectionHeaderPaddingTop,
+        ),
         children: [
           _HeartRateHero(
             bpm: manager.lastHeartRate,
@@ -105,6 +109,7 @@ class HealthScreen extends ConsumerWidget {
             measuring: manager.measuringHeartRate,
             start: manager.startHeartRate,
             stop: manager.stopHeartRate,
+            metricColor: metricColor,
           ),
           const HealthSectionHeader(title: 'Available metrics'),
           _MetricList(metrics: metrics),
@@ -122,6 +127,7 @@ class _HeartRateHero extends StatelessWidget {
     required this.measuring,
     required this.start,
     required this.stop,
+    required this.metricColor,
   });
 
   final int? bpm;
@@ -130,6 +136,7 @@ class _HeartRateHero extends StatelessWidget {
   final bool measuring;
   final VoidCallback start;
   final VoidCallback stop;
+  final Color metricColor;
 
   @override
   Widget build(BuildContext context) {
@@ -150,15 +157,15 @@ class _HeartRateHero extends StatelessWidget {
       unit: bpm == null ? null : 'bpm',
       caption: statusText,
       icon: CupertinoIcons.heart_fill,
-      metricColor: HealthScreen._heartRed,
+      metricColor: metricColor,
       trailing: AnimatedHeartBadge(
-        color: HealthScreen._heartRed,
+        color: metricColor,
         isAnimating: supported && ready && measuring,
-        size: 40,
-        iconSize: 24,
+        size: kIconCircleSizeSmall,
+        iconSize: kIconSizeSmall,
       ),
       child: Padding(
-        padding: const EdgeInsets.only(top: 16),
+        padding: const EdgeInsets.only(top: kCardInternalSpacing),
         child: Row(
           children: [
             Expanded(
@@ -168,7 +175,7 @@ class _HeartRateHero extends StatelessWidget {
                 onPressed: ready && supported && !measuring ? start : null,
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: kGridSpacing),
             Expanded(
               child: PrimaryHealthButton(
                 label: 'Stop',
@@ -224,6 +231,7 @@ class _MetricTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final effectiveValue = metric.measuring && metric.value == '-'
         ? 'Measuring'
         : metric.value;
@@ -235,16 +243,15 @@ class _MetricTile extends StatelessWidget {
         children: [
           Text(
             effectiveValue,
-            style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-              fontSize: 20,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
+            style: AppTextStyles.titleLarge(
+              context,
+            )?.copyWith(color: theme.colorScheme.onSurfaceVariant),
           ),
           if (metric.unit != null) ...[
-            const SizedBox(width: 4),
-            Text(metric.unit!, style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(width: kSpacingTiny),
+            Text(metric.unit!, style: AppTextStyles.bodySmall(context)),
           ],
-          const SizedBox(width: 8),
+          const SizedBox(width: kSpacingSmall),
           IconButton(
             tooltip: 'Start ${metric.title}',
             icon: Icon(CupertinoIcons.play_fill, color: metric.tint),
