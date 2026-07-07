@@ -340,6 +340,61 @@ void main() {
       d.dispose();
     });
 
+    test(
+      'H59MA sleep record with a midnight-crossing pair is split across days',
+      () async {
+        // Regression for the user's 2026-07-06 export: the firmware
+        // emitted a single deep pair spanning 23:59–00:30, and without
+        // splitting the entire 31-minute segment was filed under the
+        // start day (2026-07-06). After the fix the minute before
+        // midnight stays on the bedtime day and the minutes after
+        // midnight move to the wake-up day.
+        final t = FakeBleTransport();
+        final d = ChannelADispatcher(t);
+        final bParser = ChannelBParser(t);
+        d.bind();
+        bParser.bind();
+        final now = DateTime(2026, 7, 7, 12);
+        final sync = _testSync(t, d, bParser: bParser, clock: () => now);
+        final today = DateOnly.fromDateTime(now);
+        final yesterday = today.addDays(-1);
+
+        // H59MA record-list payload: one record for today that starts
+        // at 23:59 yesterday and ends at 00:30 today, encoded as a
+        // single deep 31-minute pair.
+        final payload = Uint8List.fromList([
+          0x01, // record count
+          0x00, // dayDelta = 0 (today)
+          0x06, // blockLen = 4 header bytes + 2 pair bytes
+          0x9F, 0x05, // startMin LE = 1439 (23:59)
+          0x1E, 0x00, // endMin LE = 30 (00:30)
+          0x02, 0x1F, // deep, 31 min
+        ]);
+        t.inB.add(Codec.buildChannelB(OpB.sleepNew, payload));
+
+        // Give the Channel-B parser + HistorySync time to process.
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+
+        final yesterdayHistory = sync.dayOf(yesterday);
+        final todayHistory = sync.dayOf(today);
+        expect(yesterdayHistory, isNotNull);
+        expect(todayHistory, isNotNull);
+        expect(yesterdayHistory!.sleep, hasLength(1));
+        expect(todayHistory!.sleep, hasLength(1));
+        expect(
+          yesterdayHistory.sleep.single.start,
+          DateTime(2026, 7, 6, 23, 59),
+        );
+        expect(yesterdayHistory.sleep.single.duration.inMinutes, 1);
+        expect(todayHistory.sleep.single.start, DateTime(2026, 7, 7, 0, 0));
+        expect(todayHistory.sleep.single.duration.inMinutes, 30);
+
+        sync.dispose();
+        d.dispose();
+        bParser.dispose();
+      },
+    );
+
     test('loadFromStore drops days removed from disk', () async {
       final t = FakeBleTransport();
       final d = ChannelADispatcher(t);

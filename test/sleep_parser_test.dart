@@ -1023,4 +1023,75 @@ void main() {
       );
     });
   });
+
+  group('SleepParser — splitAtMidnight', () {
+    test('returns the same segment when it does not cross midnight', () {
+      final s = SleepSegment(
+        DateTime(2026, 7, 6, 23, 0),
+        const Duration(minutes: 58),
+        SleepStage.deep,
+      );
+      final split = SleepParser.splitAtMidnight(s);
+      expect(split, [s]);
+    });
+
+    test('splits a segment that crosses midnight into two days', () {
+      // Regression: the user's 2026-07-06 export showed a single
+      // `23:59-00:30 deep 31m` segment because the firmware emitted
+      // one (stage, durMin) pair that straddled midnight.
+      final s = SleepSegment(
+        DateTime(2026, 7, 6, 23, 59),
+        const Duration(minutes: 31),
+        SleepStage.deep,
+      );
+      final split = SleepParser.splitAtMidnight(s);
+      expect(split, hasLength(2));
+      expect(split[0].start, DateTime(2026, 7, 6, 23, 59));
+      expect(split[0].duration.inMinutes, 1);
+      expect(split[0].stage, SleepStage.deep);
+      expect(split[1].start, DateTime(2026, 7, 7, 0, 0));
+      expect(split[1].duration.inMinutes, 30);
+      expect(split[1].stage, SleepStage.deep);
+    });
+
+    test('splits a segment that spans multiple calendar days', () {
+      final s = SleepSegment(
+        DateTime(2026, 7, 6, 23, 0),
+        const Duration(hours: 26),
+        SleepStage.light,
+      );
+      final split = SleepParser.splitAtMidnight(s);
+      expect(split, hasLength(3));
+      expect(split[0].duration.inMinutes, 60);
+      expect(split[1].duration.inMinutes, 24 * 60);
+      expect(split[2].duration.inMinutes, 60);
+      for (final part in split) {
+        expect(part.stage, SleepStage.light);
+      }
+    });
+
+    test('preserves a segment that ends exactly at midnight', () {
+      final s = SleepSegment(
+        DateTime(2026, 7, 6, 23, 30),
+        const Duration(minutes: 30),
+        SleepStage.rem,
+      );
+      final split = SleepParser.splitAtMidnight(s);
+      expect(split, hasLength(1));
+      expect(split.single.start, DateTime(2026, 7, 6, 23, 30));
+      expect(split.single.duration.inMinutes, 30);
+    });
+
+    test('preserves a segment that starts exactly at midnight', () {
+      final s = SleepSegment(
+        DateTime(2026, 7, 7, 0, 0),
+        const Duration(minutes: 30),
+        SleepStage.awake,
+      );
+      final split = SleepParser.splitAtMidnight(s);
+      expect(split, hasLength(1));
+      expect(split.single.start, DateTime(2026, 7, 7, 0, 0));
+      expect(split.single.duration.inMinutes, 30);
+    });
+  });
 }

@@ -485,6 +485,42 @@ class SleepParser {
   }
 
   static int _u16le(Uint8List b, int off) => b[off] | (b[off + 1] << 8);
+
+  /// Splits a [SleepSegment] that crosses a local calendar-day boundary
+  /// into two or more day-contained segments.
+  ///
+  /// The firmware emits each sleep stage as a contiguous (stage, durMin)
+  /// pair. Most pairs are short enough to stay inside one day, but a pair
+  /// that straddles midnight (e.g. 23:59–00:30) would otherwise be filed
+  /// entirely on its start day by callers that bucket by
+  /// `DateOnly.fromDateTime(segment.start)`. Splitting at each local
+  /// midnight keeps every minute on the calendar day it actually belongs to.
+  ///
+  /// Returns a list containing [segment] unchanged when it does not cross
+  /// a day boundary.
+  static List<SleepSegment> splitAtMidnight(SleepSegment segment) {
+    final end = segment.start.add(segment.duration);
+    final startDay = DateTime(
+      segment.start.year,
+      segment.start.month,
+      segment.start.day,
+    );
+    final endDay = DateTime(end.year, end.month, end.day);
+    if (startDay.isAtSameMomentAs(endDay)) return [segment];
+
+    final out = <SleepSegment>[];
+    var cursor = segment.start;
+    while (cursor.isBefore(end)) {
+      final cursorDay = DateTime(cursor.year, cursor.month, cursor.day);
+      final nextMidnight = cursorDay.add(const Duration(days: 1));
+      final segmentEnd = end.isBefore(nextMidnight) ? end : nextMidnight;
+      out.add(
+        SleepSegment(cursor, segmentEnd.difference(cursor), segment.stage),
+      );
+      cursor = segmentEnd;
+    }
+    return out;
+  }
 }
 
 class _SleepPair {

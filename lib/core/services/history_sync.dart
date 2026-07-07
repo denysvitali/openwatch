@@ -1683,6 +1683,10 @@ class HistorySync extends ChangeNotifier {
         payload,
         anchor: anchor,
       );
+      // A single (stage, durMin) pair can straddle midnight (e.g.
+      // 23:59–00:30). Split those so each minute lands on the calendar
+      // day it belongs to before we bucket by segment.start.
+      final split = added.expand(SleepParser.splitAtMidnight).toList();
       final replaceDays = <DateOnly>{};
       if (isH59maRecordList) {
         for (final offset in SleepParser.h59maNightRecordDayDeltas(payload)) {
@@ -1716,7 +1720,7 @@ class HistorySync extends ChangeNotifier {
       // under the wake-up day even though its start timestamp
       // belongs to the previous calendar date.
       final addedByDay = <DateOnly, List<SleepSegment>>{};
-      for (final s in added) {
+      for (final s in split) {
         final d = DateOnly.fromDateTime(s.start);
         addedByDay.putIfAbsent(d, () => []).add(s);
       }
@@ -1798,13 +1802,16 @@ class HistorySync extends ChangeNotifier {
         payload,
         anchor: anchor,
       );
-      if (added.isEmpty) return 0;
+      // Same midnight-split as night sleep: a single pair can span
+      // a day boundary, so split before bucketing by start date.
+      final split = added.expand(SleepParser.splitAtMidnight).toList();
+      if (split.isEmpty) return 0;
       // Re-bucket by segment start date (same logic as night) so
       // a nap that ends after midnight lands under the bedtime
       // day. Lunch/nap is normally < 90 min so this is rare, but
       // the parser supports it.
       final addedByDay = <DateOnly, List<SleepSegment>>{};
-      for (final s in added) {
+      for (final s in split) {
         final d = DateOnly.fromDateTime(s.start);
         addedByDay.putIfAbsent(d, () => []).add(s);
       }
