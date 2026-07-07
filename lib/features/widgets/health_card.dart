@@ -117,8 +117,12 @@ class HealthCard extends StatelessWidget {
       content = InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(kCardRadius),
-        splashColor: theme.colorScheme.onSurface.withValues(alpha: kMetricTintOpacity),
-        highlightColor: theme.colorScheme.onSurface.withValues(alpha: kPillTintOpacity),
+        splashColor: theme.colorScheme.onSurface.withValues(
+          alpha: kMetricTintOpacity,
+        ),
+        highlightColor: theme.colorScheme.onSurface.withValues(
+          alpha: kPillTintOpacity,
+        ),
         child: content,
       );
     }
