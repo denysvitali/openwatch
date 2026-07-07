@@ -1,10 +1,12 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
+import '../../core/ui/ui_constants.dart';
+
 /// A Cupertino-informed list row used for health metrics and settings rows.
 ///
 /// Features a circular leading icon tinted with the metric color, title /
-/// subtitle, a trailing value+unit+chevron row, and an optional 56dp-indented
+/// subtitle, a trailing value+unit+chevron row, and an optional indented
 /// divider.
 class HealthListTile extends StatelessWidget {
   const HealthListTile({
@@ -19,8 +21,8 @@ class HealthListTile extends StatelessWidget {
     this.onTap,
     this.showDivider = true,
     this.contentPadding = const EdgeInsets.symmetric(
-      horizontal: 18,
-      vertical: 16,
+      horizontal: kListTilePaddingH,
+      vertical: kListTilePaddingV,
     ),
   });
 
@@ -46,16 +48,16 @@ class HealthListTile extends StatelessWidget {
         children: [
           if (leadingIcon != null)
             Container(
-              width: 38,
-              height: 38,
+              width: kIconCircleSizeSmall,
+              height: kIconCircleSizeSmall,
               decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.14),
+                color: color.withValues(alpha: kMetricTintOpacity),
                 shape: BoxShape.circle,
               ),
               alignment: Alignment.center,
-              child: Icon(leadingIcon, size: 20, color: color),
+              child: Icon(leadingIcon, size: kIconSizeTiny, color: color),
             ),
-          if (leadingIcon != null) const SizedBox(width: 14),
+          if (leadingIcon != null) const SizedBox(width: kGridSpacing),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -63,18 +65,18 @@ class HealthListTile extends StatelessWidget {
               children: [
                 Text(
                   title,
-                  style: theme.textTheme.bodyLarge?.copyWith(
+                  style: AppTextStyles.bodyMedium(context)?.copyWith(
                     fontWeight: FontWeight.w600,
                   ),
                 ),
                 if (subtitle != null) ...[
                   const SizedBox(height: 2),
-                  Text(subtitle!, style: theme.textTheme.bodySmall),
+                  Text(subtitle!, style: AppTextStyles.bodySmall(context)),
                 ],
               ],
             ),
           ),
-          _buildTrailing(theme),
+          _buildTrailing(context),
         ],
       ),
     );
@@ -89,7 +91,7 @@ class HealthListTile extends StatelessWidget {
         tile,
         if (showDivider)
           Divider(
-            indent: 56,
+            indent: kListTilePaddingH + kIconCircleSizeSmall,
             height: 1,
             thickness: 1,
             color: theme.dividerColor,
@@ -98,7 +100,8 @@ class HealthListTile extends StatelessWidget {
     );
   }
 
-  Widget _buildTrailing(ThemeData theme) {
+  Widget _buildTrailing(BuildContext context) {
+    final theme = Theme.of(context);
     if (trailing != null) return trailing!;
     if (value == null && unit == null) return const SizedBox.shrink();
     return Row(
@@ -107,17 +110,16 @@ class HealthListTile extends StatelessWidget {
         if (value != null)
           Text(
             value!,
-            style: theme.textTheme.headlineMedium?.copyWith(
-              fontSize: 20,
+            style: AppTextStyles.titleLarge(context)?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
             ),
           ),
         if (value != null && unit != null) const SizedBox(width: 4),
-        if (unit != null) Text(unit!, style: theme.textTheme.bodySmall),
+        if (unit != null) Text(unit!, style: AppTextStyles.bodySmall(context)),
         const SizedBox(width: 4),
         Icon(
           CupertinoIcons.chevron_forward,
-          size: 20,
+          size: kIconSizeSmall,
           color: theme.colorScheme.onSurfaceVariant,
         ),
       ],
