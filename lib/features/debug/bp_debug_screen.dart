@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../../core/providers/app_providers.dart';
 import '../../core/services/bp_raw_store.dart';
 import '../../core/services/history_store.dart' show DateOnly;
+import '../../core/ui/ui_constants.dart';
 import '../widgets/health_widgets.dart';
 
 /// Debug-only screen that dumps the compact raw BP bytes the watch emitted so
@@ -89,7 +90,7 @@ class _DayCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.only(bottom: kGridSpacing),
       child: HealthCard(
         icon: Icons.bloodtype_outlined,
         metricColor: theme.colorScheme.error,
@@ -99,7 +100,7 @@ class _DayCard extends StatelessWidget {
           builder: (context, snapshot) {
             if (snapshot.connectionState != ConnectionState.done) {
               return const Padding(
-                padding: EdgeInsets.only(top: 12),
+                padding: EdgeInsets.only(top: kGridSpacing),
                 child: SizedBox(
                   height: 48,
                   child: Center(child: CircularProgressIndicator()),
@@ -109,7 +110,7 @@ class _DayCard extends StatelessWidget {
             final raw = snapshot.data;
             if (raw == null || raw.isEmpty) {
               return const Padding(
-                padding: EdgeInsets.only(top: 12),
+                padding: EdgeInsets.only(top: kGridSpacing),
                 child: Text('No raw bytes for this day'),
               );
             }
@@ -117,7 +118,7 @@ class _DayCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Padding(
-                  padding: const EdgeInsets.only(top: 6, bottom: 8),
+                  padding: const EdgeInsets.only(bottom: kSpacingSmall),
                   child: StatusPill(
                     icon: Icons.access_time,
                     label:

@@ -354,6 +354,8 @@ class _FirmwareImageCard extends StatelessWidget {
       trailing: IconButton(
         icon: const Icon(Icons.delete_outline),
         tooltip: 'Delete',
+        iconSize: kIconSizeSmall,
+        color: theme.colorScheme.onSurfaceVariant,
         onPressed: busy ? null : onDelete,
       ),
       child: Column(

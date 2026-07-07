@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:openwatch/core/ui/ui_constants.dart';
@@ -213,6 +214,7 @@ class _AlarmRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final a = alarm;
     final time = a?.labelTime ?? '--:--';
     final subtitle = a == null
@@ -226,10 +228,16 @@ class _AlarmRow extends StatelessWidget {
       subtitle: subtitle,
       showDivider: showDivider,
       trailing: a == null
-          ? const Icon(Icons.chevron_right)
+          ? Icon(
+              CupertinoIcons.chevron_forward,
+              size: kIconSizeSmall,
+              color: theme.colorScheme.onSurfaceVariant,
+            )
           : IconButton(
               icon: const Icon(Icons.delete_outline),
               tooltip: 'Clear',
+              iconSize: kIconSizeSmall,
+              color: theme.colorScheme.onSurfaceVariant,
               onPressed: onDelete,
             ),
       onTap: onEdit,
@@ -335,21 +343,24 @@ class _AlarmEditorState extends State<_AlarmEditor> {
                 ),
               ),
               const SizedBox(height: kCardPadding),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  for (var i = 0; i < _dayLabels.length; i++)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: kSpacingMini,
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    for (var i = 0; i < _dayLabels.length; i++)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: kSpacingMini,
+                        ),
+                        child: ChoiceChip(
+                          label: Text(_dayLabels[i]),
+                          selected: _days[i],
+                          onSelected: (sel) => setState(() => _days[i] = sel),
+                        ),
                       ),
-                      child: ChoiceChip(
-                        label: Text(_dayLabels[i]),
-                        selected: _days[i],
-                        onSelected: (sel) => setState(() => _days[i] = sel),
-                      ),
-                    ),
-                ],
+                  ],
+                ),
               ),
               const SizedBox(height: kCardPadding),
               Row(
