@@ -22,7 +22,7 @@ class StatusPill extends StatelessWidget {
 
     return Container(
       height: kPillHeight,
-      padding: const EdgeInsets.symmetric(horizontal: kPillPaddingH),
+      padding: const EdgeInsets.symmetric(horizontal: kSpacingSmall),
       decoration: BoxDecoration(
         color: statusColor.withValues(alpha: kPillTintOpacity),
         borderRadius: BorderRadius.circular(kPillRadius),
@@ -31,7 +31,7 @@ class StatusPill extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, size: kPillIconSize, color: statusColor),
-          const SizedBox(width: kPillSpacing),
+          const SizedBox(width: kSpacingTiny),
           Text(
             label,
             style: AppTextStyles.labelSmall(context)

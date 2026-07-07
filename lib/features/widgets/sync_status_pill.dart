@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/services/history_sync.dart';
+import '../../core/ui/ui_constants.dart';
 
 /// Compact status pill summarizing [HistorySync]'s syncing/error/last-synced
 /// state. Shared between the dashboard and history screens.
@@ -38,19 +39,20 @@ class SyncStatusPill extends StatelessWidget {
     };
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      height: kPillHeight,
+      padding: const EdgeInsets.symmetric(horizontal: kSpacingSmall),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(8),
+        color: color.withValues(alpha: kPillTintOpacity),
+        borderRadius: BorderRadius.circular(kPillRadius),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 14, color: color),
-          const SizedBox(width: 4),
+          Icon(icon, size: kPillIconSize, color: color),
+          const SizedBox(width: kSpacingTiny),
           Text(
             label,
-            style: theme.textTheme.labelSmall?.copyWith(color: color),
+            style: AppTextStyles.labelSmall(context)?.copyWith(color: color),
           ),
         ],
       ),
