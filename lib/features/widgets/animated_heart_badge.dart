@@ -1,5 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:openwatch/core/ui/ui_constants.dart';
 
 /// A pulsing heart badge used to indicate an active heart-rate measurement.
 ///
@@ -8,8 +9,8 @@ class AnimatedHeartBadge extends StatefulWidget {
   const AnimatedHeartBadge({
     super.key,
     this.color,
-    this.size = 48,
-    this.iconSize = 28,
+    this.size = kIconCircleSizeSmall,
+    this.iconSize = kIconSizeSmall,
     this.isAnimating = true,
   });
 
@@ -71,7 +72,7 @@ class _AnimatedHeartBadgeState extends State<AnimatedHeartBadge>
         width: widget.size,
         height: widget.size,
         decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.14),
+          color: color.withValues(alpha: kMetricTintOpacity),
           shape: BoxShape.circle,
         ),
         alignment: Alignment.center,
