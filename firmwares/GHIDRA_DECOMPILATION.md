@@ -14,8 +14,8 @@ output:
 
 | Address | New name | Role |
 |---|---|---|
-| `0x0082d2dc` | `channel_a_dispatch_queued_frame` | Drains the deferred 16-byte Channel-A/vendor-high command ring. |
-| `0x0082c944` | `vendor_high_dispatch_command` | Channel-A-reachable 16-byte vendor/high dispatcher; earlier notes mislabeled its GATT entry as FEE7. |
+| `0x0082d32c` | `channel_a_dispatch_queued_frame` | Drains the deferred 16-byte Channel-A/vendor-high command ring. The address `0x0082d2dc` is a 16-byte stub, not the dispatcher. |
+| `0x0082c646` | `vendor_high_dispatch_command` | Channel-A-reachable 16-byte vendor/high dispatcher body. The guarded GATT entry wrapper is at `0x0082c994`; `0x0082c944` is an interior OTA-control branch, not the dispatcher entry. |
 | `0x0082efea` | `channel_b_parse_reassembly_frame` | Parses and reassembles Channel-B `0xBC` frames. |
 | `0x0082eee6` | `channel_b_dispatch_complete_frame` | Verifies CRC and routes complete Channel-B frames. |
 | `0x0082ece0` | `channel_b_queue_notify_frame` | Builds and MTU-slices Channel-B notify frames. |
@@ -83,7 +83,7 @@ Third pass added correction and sensor coverage:
 | `0x00840568` / `0x00840774` | `cfg_update_mac_item` / `cfg_write_to_flash_preserve_sector` | Config item `0x33` writer and sector-preserving flash rewrite. |
 | `0x00829360` / `0x00829408` / `0x008293d2` | `flash_erase_sector_locked` / `flash_write_locked` / `flash_read_locked` | Locked flash erase/write/read wrappers. |
 | `0x0082ef50` | `channel_b_fragment_timeout_cb` | Channel-B reassembly/OTA timeout callback. |
-| `0x0082bb4e`..`0x0082cde8` | `channel_a_handle_*` names | High-confidence Channel-A handler names from the dispatcher. |
+| `0x0082bb9e`..`0x0082ce38` | `channel_a_handle_*` names | High-confidence Channel-A handler names from the dispatcher. |
 | `0x008332dc`..`0x00832dd6` | `gsensor_*` names | Accelerometer probe/config/FIFO/service-state flow. |
 | `0x0082c2f4` / `0x0082c1e2` / `0x00833770` | `health_handle_start_measure` / `health_handle_stop_measure` / `health_module_event_dispatch` | Shared health measurement start/stop event path. |
 
@@ -175,7 +175,7 @@ persistent-history names:
 
 New data aliases from this pass: `fee7_low_switch_default_index`
 (`0x0082c61c`), `fee7_low_switch8_table` (`0x0082c61d`),
-`fee7_high_switch_default_index` (`0x0082c6e0`),
+`fee7_high_switch_default_index` (`0x0082c730`),
 `fee7_high_switch8_table` (`0x0082c6e1`),
 `PTR_fee7_test_state_plus2` (`0x00827e88`), `factory_test_state_ptr`
 (`0x00828108`), and the persistent-history descriptors
@@ -197,7 +197,7 @@ soft-float runtime, and GPIO/AON/NVIC names:
 | `0x008299cc` / `0x00829a7c` | `alert_start_timed` / `alert_force_stop_outputs` | Timed alert start and unconditional output stop path. |
 | `0x00829cfe` | `notification_render_or_alert_by_category` | Channel-A `0x72` notification renderer/alert dispatcher. |
 | `0x0082a460` / `0x0082a5b2` / `0x0082a5c8` / `0x0082a5cc` | `ui_start_delay_if_idle_home`, `ui_overlay_start_if_dnd_clear`, `ui_overlay_start_forced`, `ui_overlay_cancel_current` | UI overlay/timer wrappers used by notification, find-device, and vendor alert paths. |
-| `0x0082ccb6` / `0x0082e42c` | `channel_a_handle_watchface_display_clock_18` / `watchface_label_commit_ble_name_refresh` | Channel-A `0x18` watch-face label handler and BLE-name/profile refresh helper. |
+| `0x0082cd06` / `0x0082e42c` | `channel_a_handle_watchface_display_clock_18` / `watchface_label_commit_ble_name_refresh` | Channel-A `0x18` watch-face label handler and BLE-name/profile refresh helper. |
 | `0x008279e4` | `notification_show_pattern1_if_config_bit_set` | Notification follow-up helper gated by a settings bit. |
 | `0x00827516` / `0x0082757e` / `0x008275b6` | `find_device_start_alert_sequence` / `find_device_transition_ack_or_button` / `find_device_cancel_ble_reinit_timer` | Find-device start, transition, and cancel/reinit paths. |
 | `0x00839ac4` / `0x00839e4e` / `0x0083a116` | `ancs_get_app_attr` / `ancs_add_client` / `ancs_client_cb` | ANCS control-point app-attribute requestor, client registration, and lifecycle callback. |
@@ -1272,9 +1272,10 @@ than the request-cmd is the firmware's convention for
 "stream this list" operations.
 
 Channel A frames are fixed 16 bytes. The main command dispatcher is
-`channel_a_dispatch_queued_frame` (`0x0082d2dc`) **in the firmware** — this
+`channel_a_dispatch_queued_frame` (`0x0082d32c`) **in the firmware** — this
 routine processes a circular queue of incoming 16-byte frames and dispatches
-on the queued frame's byte `0` opcode. Earlier notes in
+on the queued frame's byte `0` opcode. The address `0x0082d2dc` is a 16-byte
+stub, not the dispatcher. Earlier notes in
 `R2_ANALYSIS.md`/`PROTOCOL.md` claimed Channel-A dispatch was APK-only; that
 claim is incorrect for v14.
 
@@ -1291,32 +1292,32 @@ like "+2" in decompiled pointer arithmetic, but handlers receive the copied
 
 | Opcode | Dart name (from `lib/core/protocol/opcodes.dart`) | Handler address | Handler summary |
 |---|---|---|---|
-| `0x01` | `setTime` | `0x0082bb4e` | Converts BCD date/time fields, updates RTC, sends `0x2f` packet-length notify, then a 14-byte `0x01` ack — see §3.4. |
-| `0x06` | `dnd` | `0x0082d298` | Sub-opcode `0x01` reads DND state, `0x02` sets it — see §3.7. |
+| `0x01` | `setTime` | `0x0082bb9e` | Converts BCD date/time fields, updates RTC, sends `0x2f` packet-length notify, then a 14-byte `0x01` ack — see §3.4. |
+| `0x06` | `dnd` | `0x0082d2e8` | Sub-opcode `0x01` reads DND state, `0x02` sets it — see §3.7. |
 | `0x08` | *(special)* | `0x00827516`, `0x008275b6`, `0x00827ba6`, `0x008280fe` | Camera/find-device/long-press branch — see §3.15. |
 | `0x0c` | `bpSetting` | `0x0082c0de` | Sub `0x01` reads BP auto-measure config, `0x02` writes it with interval-minute validation — see §3.18.1. |
-| `0x0e` | `bpReadConform` | `0x0082cb28` | If sub-byte `0` → `FUN_00834410()` + `FUN_0082c0a4()` — see §3.19. |
-| `0x15` | `readHeartRate` | `0x0082cf48` | Reads heart-rate record by index; returns `0x15` multi-frame data or `0xff15` error — see §3.12. |
-| `0x18` | `displayClock` | `0x0082ccb6` | Sets watch-face / clock display — see §3.5. |
-| `0x1e` | `realTimeHeartRate` | `0x0082d20c` | Sub `0x01` starts 60s HR measurement, `0x02` stops, `0x03` resets timer — see §3.13. |
-| `0x25` | `setSitLong` | `0x0082d284` | Writes sedentary config — see §3.9. |
-| `0x26` | `readSitLong` | `0x0082d258` | Reads sedentary config — see §3.9. |
-| `0x2b` | `menstruation` (mixture container) | `0x0082ba54` | Sub `0x01`/`0x02` read/write mixture data; cycle-phase detector + notification sender — see §3.1. |
-| `0x2c` | `bloodOxygenSetting` | `0x0082d1c2` | Sub `0x01` reads SpO2 setting, `0x02` writes it — see §3.10. |
-| `0x37` | `pressureHistory` | `0x0082caa6` | Reads pressure/stress history records; uses `FUN_008344fe` — see §3.20. |
-| `0x38` | `pressureSetting` | `0x0082ca54` | Sub `0x01` reads the pressure/stress enable bit, else writes it — see §3.17. |
-| `0x39` | `hrvHistory` | `0x0082c9da` | Reads HRV history records; uses `FUN_0083468e` — see §3.21. |
-| `0x3a` | `sugarLipidsSetting` | `0x0082cc1e` | Sub `0x03`/`0x04` read/write sugar/lipids settings — see §3.22. |
-| `0x3b` | `uvSetting` / `touchControl` | `0x0082cbc8` | Read/write UV/touch config byte at `DAT_0082cfe8 + 8` — see §3.18. |
-| `0x43` | `readDetailSport` | `0x0082d034` | Reads detailed sport records by date range — see §3.6. |
-| `0x72` | `pushMsgUint` | `0x00829e92` | Buffers a notification/emoji Unicode string for display — see §3.3. |
-| `0x77` | `phoneSport` | `0x0082ce0c` | Jump-table dispatch on sub-byte. |
-| `0x7a` | `muslim` | `0x0082cb3a` | Sub `0x01` reads Muslim prayer config, `0x02 0x01` resets it — see §3.11. |
-| `0x81` | — | `0x0082cdac` | Stores 6-byte config chunk and calls `FUN_00840568` (flash/config write). |
-| `0xa1` | — | `0x00827f5c` | Factory/test mode commands (`0x01`–`0x06`): reset, read logs, power off, etc. |
+| `0x0e` | `bpReadConform` | `0x0082cb78` | If sub-byte `0` → `FUN_00834410()` + `FUN_0082c0a4()` — see §3.19. |
+| `0x15` | `readHeartRate` | `0x0082cf98` | Reads heart-rate record by index; returns `0x15` multi-frame data or `0xff15` error — see §3.12. |
+| `0x18` | `displayClock` | `0x0082cd06` | Sets watch-face / clock display — see §3.5. |
+| `0x1e` | `realTimeHeartRate` | `0x0082d25c` | Sub `0x01` starts 60s HR measurement, `0x02` stops, `0x03` resets timer — see §3.13. |
+| `0x25` | `setSitLong` | `0x0082d2d4` | Writes sedentary config — see §3.9. |
+| `0x26` | `readSitLong` | `0x0082d2a8` | Reads sedentary config — see §3.9. |
+| `0x2b` | `menstruation` (mixture container) | `0x0082baa4` | Sub `0x01`/`0x02` read/write mixture data; cycle-phase detector + notification sender — see §3.1. |
+| `0x2c` | `bloodOxygenSetting` | `0x0082d212` | Sub `0x01` reads SpO2 setting, `0x02` writes it — see §3.10. |
+| `0x37` | `pressureHistory` | `0x0082caf6` | Reads pressure/stress history records; uses `FUN_008344fe` — see §3.20. |
+| `0x38` | `pressureSetting` | `0x0082caa4` | Sub `0x01` reads the pressure/stress enable bit, else writes it — see §3.17. |
+| `0x39` | `hrvHistory` | `0x0082ca2a` | Reads HRV history records; uses `FUN_0083468e` — see §3.21. |
+| `0x3a` | `sugarLipidsSetting` | `0x0082cc6e` | Sub `0x03`/`0x04` read/write sugar/lipids settings — see §3.22. |
+| `0x3b` | `uvSetting` / `touchControl` | `0x0082cc18` | Read/write UV/touch config byte at `DAT_0082cfe8 + 8` — see §3.18. |
+| `0x43` | `readDetailSport` | `0x0082d084` | Reads detailed sport records by date range — see §3.6. |
+| `0x72` | `pushMsgUint` | `0x00829ee2` | Buffers a notification/emoji Unicode string for display — see §3.3. |
+| `0x77` | `phoneSport` | `0x0082ce5c` | Jump-table dispatch on sub-byte. |
+| `0x7a` | `muslim` | `0x0082cb8a` | Sub `0x01` reads Muslim prayer config, `0x02 0x01` resets it — see §3.11. |
+| `0x81` | — | `0x0082cdfc` | Stores 6-byte config chunk and calls `FUN_00840568` (flash/config write). |
+| `0xa1` | — | `0x00827fac` | Factory/test mode commands (`0x01`–`0x06`): reset, read logs, power off, etc. |
 | `0xc6` | `restoreKey` | special | Reboot sequence — see §3.14. |
-| `0xc7` | — | `0x00832ebc` | Vibration/motor pattern player — see §3.2. |
-| `0xff` | — | `0x0082cde8` | Factory reset — see §3.8. |
+| `0xc7` | — | `0x00832f0c` | Vibration/motor pattern player — see §3.2. |
+| `0xff` | — | `0x0082ce38` | Factory reset — see §3.8. |
 
 `0x7d` is intentionally absent from the handler table. The deferred worker
 does compare it (`cmp r1, 0x7d` at v14 body `0x6f5e`), but the equal branch
@@ -4744,9 +4745,11 @@ The Channel-A write handler is the protocol entry point.
 
 ### 8.1 Vendor/high dispatcher (`fee7_dispatch_vendor_command`)
 
-The actual opcode table for this high/vendor path. The function is
-called from `channel_a_gatt_write_handler` with
-`(frame_ptr, frame_length)`.
+The actual opcode table for this high/vendor path. The dispatcher body is at
+`0x0082c646`; the guarded GATT entry wrapper is at `0x0082c994`, called from
+`channel_a_gatt_write_handler` (`0x0082e87a`) with `(frame_ptr, frame_length)`.
+The address `0x0082c944` is an interior OTA-control branch, not the dispatcher
+entry.
 
 #### Top-level guards
 
@@ -4766,7 +4769,7 @@ The pre-dispatch helper skips `0x43 'C'` and `0x48 'H'`; for other commands it
 aborts any active Channel-B OTA state `2`/`3` before accepting vendor traffic
 and marks the Channel-B receive side busy.
 
-#### Opcode → handler map (reverse-engineered from `FUN_0082c944`)
+#### Opcode → handler map (reverse-engineered from `fee7_dispatch_vendor_command`)
 
 | Opcode(s) | Handler | Notes |
 |---|---|---|
@@ -4878,9 +4881,9 @@ Both tables use the shared `__ARM_common_switch8` helper at
 `target = (return_address + 2 * offset) & ~1`. Offsets are
 **unsigned**.
 
-##### Low-range table (`fee7_low_switch_default_index`, `0x82c61c`) — opcodes `0x00..0x2a`
+##### Low-range table (`fee7_low_switch_default_index`, `0x0082c66c`) — opcodes `0x00..0x2a`
 
-Count byte at `0x82c61c` is `0x27` (39 cases); cases
+Count byte at `0x0082c66c` is `0x27` (39 cases); cases
 `0x27..0x2a` fall through to the default offset and are treated as
 NAK.
 
@@ -4920,9 +4923,9 @@ The "deferred" entries in this range are the same opcodes handled
 by the Channel-A deferred path (`FUN_0082be64`), so the FEE7
 service can also be used to trigger them.
 
-##### High-range table (`fee7_high_switch_default_index`, `0x82c6e0`) — opcodes `0x97..0xa0`
+##### High-range table (`fee7_high_switch_default_index`, `0x0082c730`) — opcodes `0x97..0xa0`
 
-Count byte at `0x82c6e0` is `0x0a` (10 cases); the default slot
+Count byte at `0x0082c730` is `0x0a` (10 cases); the default slot
 also points to the vendor-NAK path.
 
 | Opcode | Handler | Notes |
@@ -4953,7 +4956,7 @@ that `FUN_0082be64`'s worker eventually invokes.
 
 ### Wire format
 
-`FUN_0082c944` expects 16-byte writes and uses the same framing as Channel A:
+`fee7_dispatch_vendor_command` expects 16-byte writes and uses the same framing as Channel A:
 
 ```
 byte 0      opcode
@@ -4970,7 +4973,7 @@ Responses are built with `checksum8_additive` and queued through
 ring used by Channel A. Many commands are simply copied into the deferred
 command ring (`enqueue_deferred_command_frame`) and processed later.
 
-### Opcode → handler map (from `FUN_0082c944`)
+### Opcode → handler map (from `fee7_dispatch_vendor_command`)
 
 Immediate / explicitly routed opcodes, including the non-default
 entries decoded from the two `switch8` tables:
@@ -5011,7 +5014,7 @@ entries decoded from the two `switch8` tables:
 | `0x9a` | `fee7_set_session_mode2_ack_9a` | Sets state to `2`, sends self-marker ACK `[0x9a,0...,0x9a]` |
 | `0x9b` | `fee7_send_session_mode_status_9b` | Sends `[0x9b, state_byte]` |
 | `0x9c` | `fee7_stop_factory_test_9c` | Sends self-marker ACK `[0x9c,0...,0x9c]`, stops timer / power-off related |
-| `0x9d` | — | Dispatcher return; no response |
+| `0x9d` | `fee7_send_vendor_nak` | Falls through to the default vendor-NAK sender (`0x0082c79e`); response is `[0x9d\|0x80, 0xee]`. Previously labelled "no response". |
 | `0x9e` | `fee7_send_model_name_9e` | Conditional 10-byte copy from `DAT_00827e8c + 0x7a` or `"H59MA_V1.0"` |
 | `0x9f` | `fee7_noop_9f` | No response |
 | `0xa0` | `fee7_send_status_frame_a0` | Multi-byte status frame builder |
@@ -6218,7 +6221,7 @@ between Channel-A and 0xFEE7 — the dispatcher for both
 tables lands on the same handler. The host SDK can call it
 from either transport.
 
-### 8.13 0xfe synthetic sleep-history record (inline in `FUN_0082c944`)
+### 8.13 0xfe synthetic sleep-history record (inline in `fee7_dispatch_vendor_command`)
 
 The only 0xFEE7 opcode in this range that is **fire-and-forget** with
 **no response frame at all**. The dispatcher inline-calls
@@ -6289,7 +6292,7 @@ Most 0xFEE7 handlers are routed through `enqueue_deferred_command_frame`
 needs the duration field and can hand it directly to the sleep-record
 generator without occupying a deferred command slot.
 
-### 8.14 0xc1 one-shot health result poll (inline in `FUN_0082c944`)
+### 8.14 0xc1 one-shot health result poll (inline in `fee7_dispatch_vendor_command`)
 
 `0xc1` is inline in the dispatcher and ignores the request payload. It calls
 the one-shot health helper and immediately sends one byte from
@@ -7257,7 +7260,7 @@ version/date payload frame uses the normal additive checksum.
 
 ### 8.20 0x97-0xa0 high-range session/status summary
 
-The high-range switch8 at `0x82c6e0` (§8.1) dispatches ten
+The high-range switch8 at `0x0082c730` (§8.1) dispatches ten
 opcodes (`0x97..0xA0`). A later radare2 pass corrected the
 earlier default-slot interpretation: the range contains a mix
 of no-response placeholders and real session/model/status
@@ -7273,7 +7276,7 @@ is in `firmwares/_re/fee7-high/evidence.md`.
 | `0x9a` | `0x648e` | `0x17ec` -> `0x17b8` | Set high-range session mode `2`; self-marker ACK `[0x9a, 0..., 0x9a]`. |
 | `0x9b` | `0x6496` | `0x17f0` | Send `[0x9b, state_byte, ..., checksum]`; `state_byte` is `0x88` for mode `2`, else `0x77`. |
 | `0x9c` | `0x649e` | `0x181e` | Self-marker ACK, stop factory-test timer, clear related state, call shared cancel path. |
-| `0x9d` | `0x6352` | — | Dispatcher return; no response. |
+| `0x9d` | `0x6352` | `fee7_send_vendor_nak` | Falls through to the default vendor-NAK sender; response is `[0x9d\|0x80, 0xee]`. Previously labelled "no response". |
 | `0x9e` | `0x64a6` | `0x18c8` | Send ASCII model string, default `"H59MA_V1.0"` unless blob0 custom-name flag is enabled. |
 | `0x9f` | `0x64b6` | `0x1716` | Return only; no response. |
 | `0xa0` | `0x64ae` | `0x191a` | Send opaque high-status frame; bytes 1..9 are populated from runtime helpers and persistent state. |
@@ -7569,3 +7572,40 @@ etc.) can be added as new per-handler sections without
 needing further synthesis — the per-section docs are
 sufficiently granular that the host SDK can read them
 directly.
+
+## 11. Radare2 helper-function symbol pass
+
+The following auto-named `fcn.*` / `FUN_*` functions were identified in
+`firmwares/H59MA_1.00.14_260508.bin` (load base `0x00826000`) during the
+2026-07-07 ultracode radare2 pass and given descriptive names. They are not
+present in the saved 2026-06-23 Ghidra symbol pass.
+
+| Address | Proposed name | Role |
+|---|---|---|
+| `0x0082b114` | `channel_a_checksum` | 26-byte additive byte-sum helper used by frame builders and health event loggers. |
+| `0x0082ec2c` | `health_event_log_append` | Appends a 16-byte record to the RAM ring at `0x20a058`. |
+| `0x0082d51e` | `health_post_measure_event` | Generic health-measurement event builder for codes `0x12/0x0c/0x25/0x27/0x2e`. |
+| `0x0082681c` | `app_event_ring_pop_advance` | Advances read/write pointers in the `0x20db70` event queue. |
+| `0x008268e8` | `app_post_event` | Posts a message to the OS event queue at `0x208d78`. |
+| `0x0082b988` | `health_log_multipart_record` | Chunks data into ≤14-byte records and appends to event log. |
+| `0x0082b9d6` | `health_log_status_marker` | Writes a single-byte status record into the event log. |
+| `0x0082b158` | `activity_step_event_handler` | Builds the `'x'` (0x78) sport/step/calorie event record. |
+| `0x00832f0c` | `channel_a_handle_motor_vibrate_c7` | Channel-A `0xc7` motor/vibration pattern player. |
+| `0x0082e0b8` | `ble_build_gap_name_and_adv_data` | Constructs BLE advertising data and device name strings. |
+| `0x0082999c` | `app_timer_arm_oneshot` | Arms a one-shot `0x64` ms timer. |
+| `0x008298a6` | `app_timer_control` | Stops/fires/restarts the timer at `0x209de4`. |
+| `0x00829c74` | `qc_timer_create_or_restart` | Low-level OS timer create/restart. |
+| `0x00829ca0` | `qc_timer_stop_delete` | Low-level OS timer stop/delete. |
+| `0x0083366c` | `sensor_bus_write_reg` | I2C write-transaction wrapper. |
+| `0x00833738` | `sensor_bus_read_reg` | I2C read-transaction wrapper. |
+| `0x008335e4` | `i2c_master_write` | Low-level I2C master write. |
+| `0x00838cae` | `i2c_fifo_write_bytes` | Writes bytes into the I2C data register. |
+| `0x00838d82` | `i2c_fifo_read_bytes` | Reads bytes from the I2C data register. |
+| `0x00838c6e` | `i2c_wait_status_or_error` | Polls I2C status and returns bus error flags. |
+| `0x00833a56` | `i2c_status_test_flag` | Tests a bit mask in the I2C status register. |
+| `0x00833a42` | `i2c_control_set_field` | Sets a field in the I2C control register. |
+| `0x00837fac` | `sensor_bus_packet_alloc` | Allocates a sensor-bus packet buffer. |
+| `0x00838058` | `sensor_bus_packet_free` | Frees a sensor-bus packet buffer. |
+
+These names are proposals for the next Ghidra symbol pass; the existing code
+uses them only as documentation.
