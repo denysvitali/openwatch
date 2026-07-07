@@ -70,7 +70,7 @@ class HealthListTile extends StatelessWidget {
                   )?.copyWith(fontWeight: FontWeight.w600),
                 ),
                 if (subtitle != null) ...[
-                  const SizedBox(height: 2),
+                  const SizedBox(height: kSpacingMini),
                   Text(subtitle!, style: AppTextStyles.bodySmall(context)),
                 ],
               ],
@@ -114,9 +114,9 @@ class HealthListTile extends StatelessWidget {
               context,
             )?.copyWith(color: theme.colorScheme.onSurfaceVariant),
           ),
-        if (value != null && unit != null) const SizedBox(width: 4),
+        if (value != null && unit != null) const SizedBox(width: kSpacingTiny),
         if (unit != null) Text(unit!, style: AppTextStyles.bodySmall(context)),
-        const SizedBox(width: 4),
+        const SizedBox(width: kSpacingTiny),
         Icon(
           CupertinoIcons.chevron_forward,
           size: kIconSizeSmall,
