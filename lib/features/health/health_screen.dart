@@ -208,6 +208,11 @@ class _MetricList extends StatelessWidget {
 
     return Card(
       margin: EdgeInsets.zero,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(kCardRadius),
+      ),
+      clipBehavior: Clip.antiAlias,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -240,17 +245,30 @@ class _MetricTile extends StatelessWidget {
     if (metric.start != null) {
       trailing = Row(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Text(
-            effectiveValue,
-            style: AppTextStyles.titleLarge(
-              context,
-            )?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Text(
+                effectiveValue,
+                style: AppTextStyles.titleLarge(
+                  context,
+                )?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              ),
+              if (metric.unit != null) ...[
+                const SizedBox(width: kSpacingTiny),
+                Text(
+                  metric.unit!,
+                  style: AppTextStyles.bodySmall(context)?.copyWith(
+                    height: 1.0,
+                  ),
+                ),
+              ],
+            ],
           ),
-          if (metric.unit != null) ...[
-            const SizedBox(width: kSpacingTiny),
-            Text(metric.unit!, style: AppTextStyles.bodySmall(context)),
-          ],
           const SizedBox(width: kSpacingSmall),
           IconButton(
             tooltip: 'Start ${metric.title}',
