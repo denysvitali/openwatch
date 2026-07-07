@@ -225,29 +225,25 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
                           metricColor: theme.colorScheme.error,
                           title: 'Something went wrong',
                           caption: _error!,
-                          padding: const EdgeInsets.all(kGridSpacing),
                         ),
                         const SizedBox(height: kGridSpacing),
                       ],
-                      Center(
-                        child: HealthCard(
-                          icon: bluetoothReady
-                              ? Icons.bluetooth_searching
-                              : Icons.bluetooth_disabled,
-                          title: 'OpenWatch',
-                          value: statusTitle,
-                          caption: statusCaption,
-                          trailing: scanning
-                              ? const SizedBox(
-                                  width: kIconSizeLarge,
-                                  height: kIconSizeLarge,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2.5,
-                                  ),
-                                )
-                              : null,
-                          padding: const EdgeInsets.all(kGridSpacing),
-                        ),
+                      HealthCard(
+                        icon: bluetoothReady
+                            ? Icons.bluetooth_searching
+                            : Icons.bluetooth_disabled,
+                        title: 'OpenWatch',
+                        value: statusTitle,
+                        caption: statusCaption,
+                        trailing: scanning
+                            ? const SizedBox(
+                                width: kIconSizeLarge,
+                                height: kIconSizeLarge,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.5,
+                                ),
+                              )
+                            : null,
                       ),
                       const SizedBox(height: kGridSpacing),
                       PrimaryHealthButton(
@@ -266,6 +262,11 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
                         const HealthSectionHeader(title: 'Nearby watches'),
                         Card(
                           margin: EdgeInsets.zero,
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(kCardRadius),
+                          ),
+                          clipBehavior: Clip.antiAlias,
                           child: Column(
                             children: [
                               for (final r in results)
@@ -339,10 +340,6 @@ class _DeviceTile extends StatelessWidget {
       ),
       onTap: connecting ? null : onConnect,
       showDivider: true,
-      contentPadding: const EdgeInsets.symmetric(
-        horizontal: kListTilePaddingH,
-        vertical: kSpacingSmall,
-      ),
     );
   }
 }
@@ -362,12 +359,11 @@ class _EmptyScanState extends StatelessWidget {
           : 'Tap Scan and keep the watch close to this phone.',
       trailing: scanning
           ? const SizedBox(
-              width: kIconSizeSmall,
-              height: kIconSizeSmall,
+              width: kIconSizeLarge,
+              height: kIconSizeLarge,
               child: CircularProgressIndicator(strokeWidth: 2.5),
             )
           : null,
-      padding: const EdgeInsets.all(kGridSpacing),
     );
   }
 }
