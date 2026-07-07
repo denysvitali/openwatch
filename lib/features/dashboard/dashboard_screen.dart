@@ -13,6 +13,7 @@ import '../history/widgets/hr_chart.dart';
 import '../history/widgets/sleep_trend_chart.dart';
 import '../history/widgets/steps_chart.dart';
 import '../widgets/health_widgets.dart';
+import '../widgets/max_width_container.dart';
 import '../widgets/sync_status_pill.dart';
 
 /// Summary overview: connection state, device info, live metrics, and quick
@@ -62,57 +63,54 @@ class DashboardScreen extends ConsumerWidget {
           ),
         ],
       ),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 860),
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(
-              kCardPadding,
-              kSpacingSmall,
-              kCardPadding,
-              kCardPadding + kSpacingSmall,
-            ),
-            children: [
-              _DeviceHeroCard(
-                name: name,
-                status: _describe(link),
-                connected: link == LinkState.ready,
-                batteryPercent: manager.batteryPercent,
-                charging: manager.charging,
-                firmware: manager.firmwareRevision,
-                hardware: manager.hardwareRevision,
-              ),
-              if (manager.nowPlaying != null &&
-                  manager.nowPlaying!.track.isNotEmpty) ...[
-                _NowPlayingCard(music: manager.nowPlaying!),
-                const SizedBox(height: kSpacingSmall),
-              ],
-              const HealthSectionHeader(title: 'Metrics'),
-              _MetricGrid(
-                steps: manager.todaySteps ?? today?.steps,
-                calories: manager.todayCalories ?? today?.energyKcal,
-                heartRate: heartRate == 0 ? null : heartRate,
-                distanceMeters: today?.distanceMeters,
-              ),
-              const HealthSectionHeader(title: 'Recent Activity'),
-              _RecentActivityCard(sync: sync),
-              const HealthSectionHeader(title: 'Actions'),
-              _QuickActions(
-                ready: link == LinkState.ready,
-                syncingHistory: sync.syncing,
-                findDevice: manager.findDevice,
-                syncTime: manager.syncTime,
-                syncHistory: sync.syncAll,
-              ),
-              if (armedAlarms.isNotEmpty) ...[
-                const HealthSectionHeader(title: 'Alarms', onShowAll: null),
-                _AlarmsSummary(
-                  count: armedAlarms.length,
-                  next: armedAlarms.first,
-                ),
-              ],
-            ],
+      body: MaxWidthContainer(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(
+            kCardPadding,
+            kSpacingSmall,
+            kCardPadding,
+            kCardPadding + kSpacingSmall,
           ),
+          children: [
+            _DeviceHeroCard(
+              name: name,
+              status: _describe(link),
+              connected: link == LinkState.ready,
+              batteryPercent: manager.batteryPercent,
+              charging: manager.charging,
+              firmware: manager.firmwareRevision,
+              hardware: manager.hardwareRevision,
+            ),
+            if (manager.nowPlaying != null &&
+                manager.nowPlaying!.track.isNotEmpty) ...[
+              _NowPlayingCard(music: manager.nowPlaying!),
+              const SizedBox(height: kSpacingSmall),
+            ],
+            const HealthSectionHeader(title: 'Metrics'),
+            _MetricGrid(
+              steps: manager.todaySteps ?? today?.steps,
+              calories: manager.todayCalories ?? today?.energyKcal,
+              heartRate: heartRate == 0 ? null : heartRate,
+              distanceMeters: today?.distanceMeters,
+            ),
+            const HealthSectionHeader(title: 'Recent Activity'),
+            _RecentActivityCard(sync: sync),
+            const HealthSectionHeader(title: 'Actions'),
+            _QuickActions(
+              ready: link == LinkState.ready,
+              syncingHistory: sync.syncing,
+              findDevice: manager.findDevice,
+              syncTime: manager.syncTime,
+              syncHistory: sync.syncAll,
+            ),
+            if (armedAlarms.isNotEmpty) ...[
+              const HealthSectionHeader(title: 'Alarms', onShowAll: null),
+              _AlarmsSummary(
+                count: armedAlarms.length,
+                next: armedAlarms.first,
+              ),
+            ],
+          ],
         ),
       ),
     );

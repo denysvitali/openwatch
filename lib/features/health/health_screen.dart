@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/providers/app_providers.dart';
 import '../../core/ui/ui_constants.dart';
 import '../widgets/health_widgets.dart';
+import '../widgets/max_width_container.dart';
 
 /// Health metrics. Heart rate is wired to the live-measure commands; the
 /// remaining metrics are gated on device capabilities.
@@ -94,26 +95,28 @@ class HealthScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Health')),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(
-          kCardPadding,
-          kSpacingSmall,
-          kCardPadding,
-          kSectionHeaderPaddingTop,
-        ),
-        children: [
-          _HeartRateHero(
-            bpm: manager.lastHeartRate,
-            supported: hrSupported,
-            ready: ready,
-            measuring: manager.measuringHeartRate,
-            start: manager.startHeartRate,
-            stop: manager.stopHeartRate,
-            metricColor: metricColor,
+      body: MaxWidthContainer(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(
+            kCardPadding,
+            kSpacingSmall,
+            kCardPadding,
+            kSectionHeaderPaddingTop,
           ),
-          const HealthSectionHeader(title: 'Available metrics'),
-          _MetricList(metrics: metrics),
-        ],
+          children: [
+            _HeartRateHero(
+              bpm: manager.lastHeartRate,
+              supported: hrSupported,
+              ready: ready,
+              measuring: manager.measuringHeartRate,
+              start: manager.startHeartRate,
+              stop: manager.stopHeartRate,
+              metricColor: metricColor,
+            ),
+            const HealthSectionHeader(title: 'Available metrics'),
+            _MetricList(metrics: metrics),
+          ],
+        ),
       ),
     );
   }

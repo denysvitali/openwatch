@@ -9,6 +9,7 @@ import '../../core/services/app_log.dart';
 import '../../core/services/opentelemetry_service.dart';
 import '../../core/ui/ui_constants.dart';
 import '../widgets/health_widgets.dart';
+import '../widgets/max_width_container.dart';
 
 /// Diagnostics: live BLE/app log + copy-to-clipboard for bug reports,
 /// plus a JSON export of every persisted history day.
@@ -47,68 +48,70 @@ class LogsScreen extends ConsumerWidget {
           ),
         ],
       ),
-      body: Column(
-        children: [
-          // OpenTelemetry status card — surfaces tracer state at a
-          // glance so a failed OTLP handshake is visible without
-          // scrolling through the in-memory log buffer.
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              kCardPadding,
-              kSpacingSmall,
-              kCardPadding,
-              0,
+      body: MaxWidthContainer(
+        child: Column(
+          children: [
+            // OpenTelemetry status card — surfaces tracer state at a
+            // glance so a failed OTLP handshake is visible without
+            // scrolling through the in-memory log buffer.
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                kCardPadding,
+                kSpacingSmall,
+                kCardPadding,
+                0,
+              ),
+              child: const _OtelStatusCard(),
             ),
-            child: const _OtelStatusCard(),
-          ),
-          const HealthSectionHeader(title: 'Log stream'),
-          Expanded(
-            child: AnimatedBuilder(
-              animation: log,
-              builder: (context, _) {
-                final entries = log.entries;
-                if (entries.isEmpty) {
-                  return Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(kCardPadding),
-                      child: HealthCard(
-                        icon: Icons.notes,
-                        metricColor: Theme.of(
-                          context,
-                        ).colorScheme.onSurfaceVariant,
-                        title: 'No logs yet',
-                        caption:
-                            'Connect to your watch and try an action, '
-                            'then copy the log here and share it.',
-                      ),
-                    ),
-                  );
-                }
-                return ListView.builder(
-                  reverse: true,
-                  padding: const EdgeInsets.all(kSpacingSmall),
-                  itemCount: entries.length,
-                  itemBuilder: (context, i) {
-                    final e = entries[entries.length - 1 - i];
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(
-                        vertical: kSpacingMini,
-                      ),
-                      child: SelectableText(
-                        e.toString(),
-                        style: TextStyle(
-                          fontFamily: 'monospace',
-                          fontSize: kLabelSmall,
-                          color: _color(context, e.level),
+            const HealthSectionHeader(title: 'Log stream'),
+            Expanded(
+              child: AnimatedBuilder(
+                animation: log,
+                builder: (context, _) {
+                  final entries = log.entries;
+                  if (entries.isEmpty) {
+                    return Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(kCardPadding),
+                        child: HealthCard(
+                          icon: Icons.notes,
+                          metricColor: Theme.of(
+                            context,
+                          ).colorScheme.onSurfaceVariant,
+                          title: 'No logs yet',
+                          caption:
+                              'Connect to your watch and try an action, '
+                              'then copy the log here and share it.',
                         ),
                       ),
                     );
-                  },
-                );
-              },
+                  }
+                  return ListView.builder(
+                    reverse: true,
+                    padding: const EdgeInsets.all(kSpacingSmall),
+                    itemCount: entries.length,
+                    itemBuilder: (context, i) {
+                      final e = entries[entries.length - 1 - i];
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(
+                          vertical: kSpacingMini,
+                        ),
+                        child: SelectableText(
+                          e.toString(),
+                          style: TextStyle(
+                            fontFamily: 'monospace',
+                            fontSize: kLabelSmall,
+                            color: _color(context, e.level),
+                          ),
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

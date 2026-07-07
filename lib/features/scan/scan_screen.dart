@@ -9,6 +9,7 @@ import '../../core/providers/app_providers.dart';
 import '../../core/services/app_log.dart';
 import '../../core/ui/ui_constants.dart';
 import '../widgets/health_widgets.dart';
+import '../widgets/max_width_container.dart';
 
 /// Scans for nearby Oudmon watches and connects to the chosen one.
 class ScanScreen extends ConsumerStatefulWidget {
@@ -208,79 +209,77 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
             ),
           Expanded(
             child: SafeArea(
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 520),
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(
-                      kSectionHeaderPaddingH,
-                      kCardPadding,
-                      kSectionHeaderPaddingH,
-                      96,
-                    ),
-                    children: [
-                      if (_error != null) ...[
-                        HealthCard(
-                          icon: Icons.error_outline,
-                          metricColor: theme.colorScheme.error,
-                          title: 'Something went wrong',
-                          caption: _error!,
-                        ),
-                        const SizedBox(height: kGridSpacing),
-                      ],
+              child: MaxWidthContainer(
+                maxWidth: kMaxWidthContainerScan,
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(
+                    kSectionHeaderPaddingH,
+                    kCardPadding,
+                    kSectionHeaderPaddingH,
+                    96,
+                  ),
+                  children: [
+                    if (_error != null) ...[
                       HealthCard(
-                        icon: bluetoothReady
-                            ? Icons.bluetooth_searching
-                            : Icons.bluetooth_disabled,
-                        title: 'OpenWatch',
-                        value: statusTitle,
-                        caption: statusCaption,
-                        trailing: scanning
-                            ? const SizedBox(
-                                width: kIconSizeLarge,
-                                height: kIconSizeLarge,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2.5,
-                                ),
-                              )
-                            : null,
+                        icon: Icons.error_outline,
+                        metricColor: theme.colorScheme.error,
+                        title: 'Something went wrong',
+                        caption: _error!,
                       ),
                       const SizedBox(height: kGridSpacing),
-                      PrimaryHealthButton(
-                        label: scanning ? 'Stop scanning' : 'Scan for watches',
-                        icon: scanning ? Icons.stop : Icons.search,
-                        onPressed: _connecting
-                            ? null
-                            : scanning
-                            ? FlutterBluePlus.stopScan
-                            : _startScan,
-                      ),
-                      if (results.isEmpty) ...[
-                        const SizedBox(height: kCardPadding),
-                        _EmptyScanState(scanning: scanning),
-                      ] else ...[
-                        const HealthSectionHeader(title: 'Nearby watches'),
-                        Card(
-                          margin: EdgeInsets.zero,
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(kCardRadius),
-                          ),
-                          clipBehavior: Clip.antiAlias,
-                          child: Column(
-                            children: [
-                              for (final r in results)
-                                _DeviceTile(
-                                  result: r,
-                                  connecting: _connecting,
-                                  onConnect: () => _connect(r.device),
-                                ),
-                            ],
-                          ),
-                        ),
-                      ],
                     ],
-                  ),
+                    HealthCard(
+                      icon: bluetoothReady
+                          ? Icons.bluetooth_searching
+                          : Icons.bluetooth_disabled,
+                      title: 'OpenWatch',
+                      value: statusTitle,
+                      caption: statusCaption,
+                      trailing: scanning
+                          ? const SizedBox(
+                              width: kIconSizeLarge,
+                              height: kIconSizeLarge,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.5,
+                              ),
+                            )
+                          : null,
+                    ),
+                    const SizedBox(height: kGridSpacing),
+                    PrimaryHealthButton(
+                      label: scanning ? 'Stop scanning' : 'Scan for watches',
+                      icon: scanning ? Icons.stop : Icons.search,
+                      onPressed: _connecting
+                          ? null
+                          : scanning
+                          ? FlutterBluePlus.stopScan
+                          : _startScan,
+                    ),
+                    if (results.isEmpty) ...[
+                      const SizedBox(height: kCardPadding),
+                      _EmptyScanState(scanning: scanning),
+                    ] else ...[
+                      const HealthSectionHeader(title: 'Nearby watches'),
+                      Card(
+                        margin: EdgeInsets.zero,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(kCardRadius),
+                        ),
+                        clipBehavior: Clip.antiAlias,
+                        child: Column(
+                          children: [
+                            for (final r in results)
+                              _DeviceTile(
+                                result: r,
+                                connecting: _connecting,
+                                onConnect: () => _connect(r.device),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ),
             ),

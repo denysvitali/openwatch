@@ -7,6 +7,7 @@ import '../../core/providers/app_providers.dart';
 import '../../core/services/settings_service.dart';
 import '../widgets/health_widgets.dart';
 import '../widgets/inset_card.dart';
+import '../widgets/max_width_container.dart';
 
 /// Device + app settings, including the offline-first cloud toggle.
 class SettingsScreen extends ConsumerWidget {
@@ -26,270 +27,274 @@ class SettingsScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
-      body: ListView(
-        padding: const EdgeInsets.only(bottom: kCardPadding),
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
-            child: HealthCard(
-              title: 'Status',
-              icon: ready ? Icons.watch_rounded : Icons.watch_off_outlined,
-              caption: ready ? 'Watch connected' : 'No watch connected',
-              trailing: Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  StatusPill(
-                    icon: ready
-                        ? Icons.bluetooth_connected
-                        : Icons.bluetooth_disabled,
-                    label: ready ? 'Connected' : 'Disconnected',
-                    color: ready
-                        ? theme.colorScheme.primary
-                        : theme.colorScheme.onSurfaceVariant,
-                  ),
-                  const SizedBox(height: kSpacingTiny),
-                  StatusPill(
-                    icon: settings.cloudSyncEnabled
-                        ? Icons.cloud_done
-                        : Icons.cloud_off,
-                    label: settings.cloudSyncEnabled ? 'Cloud on' : 'Cloud off',
-                    color: settings.cloudSyncEnabled
-                        ? theme.colorScheme.primary
-                        : theme.colorScheme.onSurfaceVariant,
-                  ),
-                ],
+      body: MaxWidthContainer(
+        child: ListView(
+          padding: const EdgeInsets.only(bottom: kCardPadding),
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
+              child: HealthCard(
+                title: 'Status',
+                icon: ready ? Icons.watch_rounded : Icons.watch_off_outlined,
+                caption: ready ? 'Watch connected' : 'No watch connected',
+                trailing: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    StatusPill(
+                      icon: ready
+                          ? Icons.bluetooth_connected
+                          : Icons.bluetooth_disabled,
+                      label: ready ? 'Connected' : 'Disconnected',
+                      color: ready
+                          ? theme.colorScheme.primary
+                          : theme.colorScheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(height: kSpacingTiny),
+                    StatusPill(
+                      icon: settings.cloudSyncEnabled
+                          ? Icons.cloud_done
+                          : Icons.cloud_off,
+                      label: settings.cloudSyncEnabled
+                          ? 'Cloud on'
+                          : 'Cloud off',
+                      color: settings.cloudSyncEnabled
+                          ? theme.colorScheme.primary
+                          : theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-          const HealthSectionHeader(title: 'Device'),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
-            child: InsetCard(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  HealthListTile(
-                    title: 'Find device',
-                    subtitle: 'Ring the watch',
-                    leadingIcon: Icons.vibration,
-                    onTap: ready ? manager.findDevice : null,
-                  ),
-                  HealthListTile(
-                    title: 'Sync time now',
-                    subtitle: 'Local only — no network',
-                    leadingIcon: Icons.access_time,
-                    onTap: ready ? manager.syncTime : null,
-                  ),
-                  _SwitchTile(
-                    title: 'Auto-sync time on connect',
-                    subtitle: 'Local only — no network',
-                    icon: Icons.update_disabled,
-                    value: settings.autoSyncTimeOnConnect,
-                    onChanged: settingsNotifier.setAutoSyncTime,
-                  ),
-                  _SwitchTile(
-                    title: 'Auto-sync history on connect',
-                    subtitle:
-                        'Fetch missing days from the watch each time it becomes ready',
-                    icon: Icons.history_toggle_off,
-                    value: settings.autoSyncHistoryOnConnect,
-                    onChanged: settingsNotifier.setAutoSyncHistory,
-                  ),
-                  HealthListTile(
-                    title: 'Firmware update (OTA)',
-                    subtitle: 'Local firmware images over BLE',
-                    leadingIcon: Icons.system_update,
-                    trailingChevron: true,
-                    onTap: () => context.push('/firmware'),
-                  ),
-                  HealthListTile(
-                    title: 'Sensor settings',
-                    subtitle: 'HR interval, alarms',
-                    leadingIcon: Icons.sensors,
-                    trailingChevron: true,
-                    onTap: () => context.push('/sensor-settings'),
-                  ),
-                  HealthListTile(
-                    title: 'Clock alarms',
-                    subtitle: armedAlarmCount == 0
-                        ? 'None armed'
-                        : '$armedAlarmCount armed',
-                    leadingIcon: Icons.alarm,
-                    value: ready ? armedAlarmCount.toString() : null,
-                    unit: ready ? 'armed' : null,
-                    onTap: ready ? () => context.push('/alarms') : null,
-                  ),
-                  HealthListTile(
-                    title: 'Watch preferences',
-                    subtitle:
-                        'Display, theme, DND, daily goals, sedentary alarms',
-                    leadingIcon: Icons.tune,
-                    trailingChevron: true,
-                    onTap: () => context.push('/preferences'),
-                  ),
-                  HealthListTile(
-                    title: 'Custom watch face',
-                    subtitle: 'Designer + DIY upload (Channel-B 0x3a)',
-                    leadingIcon: Icons.brush_outlined,
-                    trailingChevron: true,
-                    onTap: () => context.push('/watchface'),
-                  ),
-                  HealthListTile(
-                    title: 'Factory reset watch',
-                    subtitle: 'Erases all data on the watch',
-                    leadingIcon: Icons.restart_alt,
-                    trailingChevron: true,
-                    onTap: ready
-                        ? () => _confirmReset(context, manager.factoryReset)
-                        : null,
-                    showDivider: false,
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const HealthSectionHeader(title: 'Cloud sync'),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
-            child: InsetCard(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _SwitchTile(
-                    title: 'Enable cloud integration',
-                    subtitle: settings.cloudSyncEnabled
-                        ? 'Health & watch-face sync with QC Wireless servers'
-                        : 'Off — OpenWatch runs fully offline',
-                    icon: settings.cloudSyncEnabled
-                        ? Icons.cloud_done
-                        : Icons.cloud_off,
-                    value: settings.cloudSyncEnabled,
-                    onChanged: (enabled) => enabled
-                        ? _confirmCloud(
-                            context,
-                            () => settingsNotifier.setCloudSync(true),
-                          )
-                        : settingsNotifier.setCloudSync(false),
-                  ),
-                  if (settings.cloudSyncEnabled)
+            const HealthSectionHeader(title: 'Device'),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
+              child: InsetCard(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
                     HealthListTile(
-                      title: 'Server region',
-                      subtitle: 'Backend endpoint for cloud sync',
-                      leadingIcon: Icons.public,
-                      trailing: DropdownButton<CloudRegion>(
-                        value: settings.region,
-                        onChanged: (r) =>
-                            r == null ? null : settingsNotifier.setRegion(r),
-                        underline: const SizedBox.shrink(),
-                        items: const [
-                          DropdownMenuItem(
-                            value: CloudRegion.international,
-                            child: Text('International'),
-                          ),
-                          DropdownMenuItem(
-                            value: CloudRegion.china,
-                            child: Text('China'),
-                          ),
-                        ],
-                      ),
-                      onTap: null,
+                      title: 'Find device',
+                      subtitle: 'Ring the watch',
+                      leadingIcon: Icons.vibration,
+                      onTap: ready ? manager.findDevice : null,
+                    ),
+                    HealthListTile(
+                      title: 'Sync time now',
+                      subtitle: 'Local only — no network',
+                      leadingIcon: Icons.access_time,
+                      onTap: ready ? manager.syncTime : null,
+                    ),
+                    _SwitchTile(
+                      title: 'Auto-sync time on connect',
+                      subtitle: 'Local only — no network',
+                      icon: Icons.update_disabled,
+                      value: settings.autoSyncTimeOnConnect,
+                      onChanged: settingsNotifier.setAutoSyncTime,
+                    ),
+                    _SwitchTile(
+                      title: 'Auto-sync history on connect',
+                      subtitle:
+                          'Fetch missing days from the watch each time it becomes ready',
+                      icon: Icons.history_toggle_off,
+                      value: settings.autoSyncHistoryOnConnect,
+                      onChanged: settingsNotifier.setAutoSyncHistory,
+                    ),
+                    HealthListTile(
+                      title: 'Firmware update (OTA)',
+                      subtitle: 'Local firmware images over BLE',
+                      leadingIcon: Icons.system_update,
+                      trailingChevron: true,
+                      onTap: () => context.push('/firmware'),
+                    ),
+                    HealthListTile(
+                      title: 'Sensor settings',
+                      subtitle: 'HR interval, alarms',
+                      leadingIcon: Icons.sensors,
+                      trailingChevron: true,
+                      onTap: () => context.push('/sensor-settings'),
+                    ),
+                    HealthListTile(
+                      title: 'Clock alarms',
+                      subtitle: armedAlarmCount == 0
+                          ? 'None armed'
+                          : '$armedAlarmCount armed',
+                      leadingIcon: Icons.alarm,
+                      value: ready ? armedAlarmCount.toString() : null,
+                      unit: ready ? 'armed' : null,
+                      onTap: ready ? () => context.push('/alarms') : null,
+                    ),
+                    HealthListTile(
+                      title: 'Watch preferences',
+                      subtitle:
+                          'Display, theme, DND, daily goals, sedentary alarms',
+                      leadingIcon: Icons.tune,
+                      trailingChevron: true,
+                      onTap: () => context.push('/preferences'),
+                    ),
+                    HealthListTile(
+                      title: 'Custom watch face',
+                      subtitle: 'Designer + DIY upload (Channel-B 0x3a)',
+                      leadingIcon: Icons.brush_outlined,
+                      trailingChevron: true,
+                      onTap: () => context.push('/watchface'),
+                    ),
+                    HealthListTile(
+                      title: 'Factory reset watch',
+                      subtitle: 'Erases all data on the watch',
+                      leadingIcon: Icons.restart_alt,
+                      trailingChevron: true,
+                      onTap: ready
+                          ? () => _confirmReset(context, manager.factoryReset)
+                          : null,
                       showDivider: false,
                     ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
-          const HealthSectionHeader(title: 'Diagnostics'),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
-            child: InsetCard(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  HealthListTile(
-                    title: 'Logs',
-                    subtitle: 'BLE traffic & events — copy to share',
-                    leadingIcon: Icons.bug_report_outlined,
-                    trailingChevron: true,
-                    onTap: () => context.push('/logs'),
-                  ),
-                  HealthListTile(
-                    title: 'BP raw bytes',
-                    subtitle:
-                        'Compact history bytes for capture correlation. See PROTOCOL.md §8.5.',
-                    leadingIcon: Icons.bloodtype_outlined,
-                    trailingChevron: true,
-                    onTap: () => context.push('/bp-debug'),
-                  ),
-                  HealthListTile(
-                    title: 'Clear stored history',
-                    subtitle:
-                        'Wipes HR, sleep and step data stored on this phone',
-                    leadingIcon: Icons.delete_sweep,
-                    trailingChevron: true,
-                    onTap: () => _confirmClearHistory(context, ref),
-                    showDivider: false,
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const HealthSectionHeader(title: 'About'),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
-            child: InsetCard(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  HealthListTile(
-                    title: 'About OpenWatch',
-                    subtitle: 'Version 0.1.0',
-                    leadingIcon: Icons.info_outline,
-                    trailingChevron: true,
-                    onTap: () => showAboutDialog(
-                      context: context,
-                      applicationName: 'OpenWatch',
-                      applicationVersion: '0.1.0',
-                      applicationLegalese:
-                          'Open-source, offline-first manager for Oudmon-based BLE smartwatches.',
+            const HealthSectionHeader(title: 'Cloud sync'),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
+              child: InsetCard(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _SwitchTile(
+                      title: 'Enable cloud integration',
+                      subtitle: settings.cloudSyncEnabled
+                          ? 'Health & watch-face sync with QC Wireless servers'
+                          : 'Off — OpenWatch runs fully offline',
+                      icon: settings.cloudSyncEnabled
+                          ? Icons.cloud_done
+                          : Icons.cloud_off,
+                      value: settings.cloudSyncEnabled,
+                      onChanged: (enabled) => enabled
+                          ? _confirmCloud(
+                              context,
+                              () => settingsNotifier.setCloudSync(true),
+                            )
+                          : settingsNotifier.setCloudSync(false),
                     ),
-                  ),
-                  HealthListTile(
-                    title: 'Disconnect',
-                    subtitle: 'Keeps the watch paired for auto-reconnect',
-                    leadingIcon: Icons.link_off,
-                    trailingChevron: true,
-                    onTap: () async {
-                      await ref.read(bleTransportProvider).disconnect();
-                      if (context.mounted) context.go('/scan');
-                    },
-                  ),
-                  HealthListTile(
-                    title: 'Forget device',
-                    subtitle: 'Disconnect and stop auto-reconnecting',
-                    leadingIcon: Icons.delete_forever,
-                    trailingChevron: true,
-                    onTap: () async {
-                      await ref.read(bleTransportProvider).disconnect();
-                      final svc = await ref.read(
-                        settingsServiceProvider.future,
-                      );
-                      await svc.clearLastDevice();
-                      if (context.mounted) context.go('/scan');
-                    },
-                    showDivider: false,
-                  ),
-                ],
+                    if (settings.cloudSyncEnabled)
+                      HealthListTile(
+                        title: 'Server region',
+                        subtitle: 'Backend endpoint for cloud sync',
+                        leadingIcon: Icons.public,
+                        trailing: DropdownButton<CloudRegion>(
+                          value: settings.region,
+                          onChanged: (r) =>
+                              r == null ? null : settingsNotifier.setRegion(r),
+                          underline: const SizedBox.shrink(),
+                          items: const [
+                            DropdownMenuItem(
+                              value: CloudRegion.international,
+                              child: Text('International'),
+                            ),
+                            DropdownMenuItem(
+                              value: CloudRegion.china,
+                              child: Text('China'),
+                            ),
+                          ],
+                        ),
+                        onTap: null,
+                        showDivider: false,
+                      ),
+                  ],
+                ),
               ),
             ),
-          ),
-          if (settingsAsync.isLoading)
-            const Padding(
-              padding: EdgeInsets.all(kCardPadding),
-              child: Center(child: CircularProgressIndicator()),
+            const HealthSectionHeader(title: 'Diagnostics'),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
+              child: InsetCard(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    HealthListTile(
+                      title: 'Logs',
+                      subtitle: 'BLE traffic & events — copy to share',
+                      leadingIcon: Icons.bug_report_outlined,
+                      trailingChevron: true,
+                      onTap: () => context.push('/logs'),
+                    ),
+                    HealthListTile(
+                      title: 'BP raw bytes',
+                      subtitle:
+                          'Compact history bytes for capture correlation. See PROTOCOL.md §8.5.',
+                      leadingIcon: Icons.bloodtype_outlined,
+                      trailingChevron: true,
+                      onTap: () => context.push('/bp-debug'),
+                    ),
+                    HealthListTile(
+                      title: 'Clear stored history',
+                      subtitle:
+                          'Wipes HR, sleep and step data stored on this phone',
+                      leadingIcon: Icons.delete_sweep,
+                      trailingChevron: true,
+                      onTap: () => _confirmClearHistory(context, ref),
+                      showDivider: false,
+                    ),
+                  ],
+                ),
+              ),
             ),
-        ],
+            const HealthSectionHeader(title: 'About'),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
+              child: InsetCard(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    HealthListTile(
+                      title: 'About OpenWatch',
+                      subtitle: 'Version 0.1.0',
+                      leadingIcon: Icons.info_outline,
+                      trailingChevron: true,
+                      onTap: () => showAboutDialog(
+                        context: context,
+                        applicationName: 'OpenWatch',
+                        applicationVersion: '0.1.0',
+                        applicationLegalese:
+                            'Open-source, offline-first manager for Oudmon-based BLE smartwatches.',
+                      ),
+                    ),
+                    HealthListTile(
+                      title: 'Disconnect',
+                      subtitle: 'Keeps the watch paired for auto-reconnect',
+                      leadingIcon: Icons.link_off,
+                      trailingChevron: true,
+                      onTap: () async {
+                        await ref.read(bleTransportProvider).disconnect();
+                        if (context.mounted) context.go('/scan');
+                      },
+                    ),
+                    HealthListTile(
+                      title: 'Forget device',
+                      subtitle: 'Disconnect and stop auto-reconnecting',
+                      leadingIcon: Icons.delete_forever,
+                      trailingChevron: true,
+                      onTap: () async {
+                        await ref.read(bleTransportProvider).disconnect();
+                        final svc = await ref.read(
+                          settingsServiceProvider.future,
+                        );
+                        await svc.clearLastDevice();
+                        if (context.mounted) context.go('/scan');
+                      },
+                      showDivider: false,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            if (settingsAsync.isLoading)
+              const Padding(
+                padding: EdgeInsets.all(kCardPadding),
+                child: Center(child: CircularProgressIndicator()),
+              ),
+          ],
+        ),
       ),
     );
   }

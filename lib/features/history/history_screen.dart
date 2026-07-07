@@ -10,6 +10,7 @@ import '../../core/providers/app_providers.dart';
 import '../../core/services/history_debug_export.dart';
 import '../../core/services/history_sync.dart';
 import '../widgets/health_widgets.dart';
+import '../widgets/max_width_container.dart';
 import '../widgets/sync_status_pill.dart' show formatRelativeTime;
 import 'sleep_session_summary.dart';
 import 'widgets/hr_chart.dart';
@@ -90,58 +91,55 @@ class HistoryScreen extends ConsumerWidget {
           ),
         ],
       ),
-      body: RefreshIndicator(
-        onRefresh: () => _runHistorySync(context, sync, ready),
-        child: ListView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(
-            kCardPadding,
-            kSpacingSmall,
-            kCardPadding,
-            kSectionHeaderPaddingTop,
-          ),
-          children: [
-            Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 860),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const HealthSectionHeader(title: 'Local history'),
-                    _HistoryOverviewCard(
-                      ready: ready,
-                      linkState: linkState,
-                      sync: sync,
-                      storeReady: store != null,
-                      days: days,
-                      onSync: () => _runHistorySync(context, sync, ready),
-                    ),
-                    if (sync.lastSyncError != null) ...[
-                      const SizedBox(height: kGridSpacing),
-                      _SyncErrorBanner(message: sync.lastSyncError!),
-                    ],
-                    if (days.isNotEmpty) ...[
-                      const HealthSectionHeader(title: 'Last 7 days'),
-                      _HistoryTrendCard(days: _recentDays(days)),
-                      const HealthSectionHeader(title: 'Daily detail'),
-                      _DailyDetailSelector(
-                        days: days.reversed.toList(),
-                        sync: sync,
-                        debugContext: ctx,
-                      ),
-                    ] else ...[
-                      const SizedBox(height: kGridSpacing),
-                      _EmptyState(ready: ready, syncing: sync.syncing),
-                    ],
-                    if (store == null) ...[
-                      const SizedBox(height: kCardInternalSpacing),
-                      _StoreWarning(),
-                    ],
-                  ],
-                ),
-              ),
+      body: MaxWidthContainer(
+        child: RefreshIndicator(
+          onRefresh: () => _runHistorySync(context, sync, ready),
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(
+              kCardPadding,
+              kSpacingSmall,
+              kCardPadding,
+              kSectionHeaderPaddingTop,
             ),
-          ],
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const HealthSectionHeader(title: 'Local history'),
+                  _HistoryOverviewCard(
+                    ready: ready,
+                    linkState: linkState,
+                    sync: sync,
+                    storeReady: store != null,
+                    days: days,
+                    onSync: () => _runHistorySync(context, sync, ready),
+                  ),
+                  if (sync.lastSyncError != null) ...[
+                    const SizedBox(height: kGridSpacing),
+                    _SyncErrorBanner(message: sync.lastSyncError!),
+                  ],
+                  if (days.isNotEmpty) ...[
+                    const HealthSectionHeader(title: 'Last 7 days'),
+                    _HistoryTrendCard(days: _recentDays(days)),
+                    const HealthSectionHeader(title: 'Daily detail'),
+                    _DailyDetailSelector(
+                      days: days.reversed.toList(),
+                      sync: sync,
+                      debugContext: ctx,
+                    ),
+                  ] else ...[
+                    const SizedBox(height: kGridSpacing),
+                    _EmptyState(ready: ready, syncing: sync.syncing),
+                  ],
+                  if (store == null) ...[
+                    const SizedBox(height: kCardInternalSpacing),
+                    _StoreWarning(),
+                  ],
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );

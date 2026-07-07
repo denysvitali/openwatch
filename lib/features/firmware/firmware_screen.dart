@@ -11,6 +11,7 @@ import '../../core/services/app_log.dart';
 import '../../core/services/firmware_service.dart';
 import '../../core/ui/ui_constants.dart';
 import '../widgets/health_widgets.dart';
+import '../widgets/max_width_container.dart';
 
 /// Firmware management: fetch the latest image from the cloud (explicit, opt-in)
 /// and flash a locally-stored image over the air — offline-capable.
@@ -201,60 +202,33 @@ class _FirmwareScreenState extends ConsumerState<FirmwareScreen> {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Firmware (OTA)')),
-      body: ListView(
-        padding: const EdgeInsets.only(bottom: kCardPadding),
-        children: [
-          if (manager.firmwareRevision.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                kCardPadding,
-                kSpacingSmall,
-                kCardPadding,
-                0,
-              ),
-              child: HealthCard(
-                icon: Icons.watch_outlined,
-                metricColor: mutedColor,
-                title: 'Current device firmware',
-                value: currentVer.isStructured
-                    ? '${currentVer.hardwareId} v${currentVer.version}'
-                    : currentVer.raw,
-                caption: 'Installed on the connected watch',
-                trailing: StatusPill(
-                  icon: cloudOn ? Icons.update : Icons.cloud_off,
-                  label: _updateLabel(cloudOn),
-                  color: mutedColor,
+      body: MaxWidthContainer(
+        child: ListView(
+          padding: const EdgeInsets.only(bottom: kCardPadding),
+          children: [
+            if (manager.firmwareRevision.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  kCardPadding,
+                  kSpacingSmall,
+                  kCardPadding,
+                  0,
+                ),
+                child: HealthCard(
+                  icon: Icons.watch_outlined,
+                  metricColor: mutedColor,
+                  title: 'Current device firmware',
+                  value: currentVer.isStructured
+                      ? '${currentVer.hardwareId} v${currentVer.version}'
+                      : currentVer.raw,
+                  caption: 'Installed on the connected watch',
+                  trailing: StatusPill(
+                    icon: cloudOn ? Icons.update : Icons.cloud_off,
+                    label: _updateLabel(cloudOn),
+                    color: mutedColor,
+                  ),
                 ),
               ),
-            ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              kCardPadding,
-              kSpacingSmall,
-              kCardPadding,
-              0,
-            ),
-            child: HealthCard(
-              icon: cloudOn ? Icons.cloud_download : Icons.cloud_off,
-              metricColor: mutedColor,
-              title: 'Fetch latest firmware',
-              caption: cloudOn
-                  ? 'Download the newest image to this device for offline flashing.'
-                  : 'Requires cloud integration in Settings.',
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const SizedBox(height: kSpacingSmall),
-                  PrimaryHealthButton(
-                    icon: Icons.download,
-                    label: 'Fetch',
-                    onPressed: _busy || !cloudOn ? null : _fetchLatest,
-                  ),
-                ],
-              ),
-            ),
-          ),
-          if (_busy)
             Padding(
               padding: const EdgeInsets.fromLTRB(
                 kCardPadding,
@@ -263,58 +237,87 @@ class _FirmwareScreenState extends ConsumerState<FirmwareScreen> {
                 0,
               ),
               child: HealthCard(
-                icon: Icons.system_update,
+                icon: cloudOn ? Icons.cloud_download : Icons.cloud_off,
                 metricColor: mutedColor,
-                title: 'OTA progress',
-                value: _progress == null
-                    ? '–'
-                    : (_progress! * 100).toStringAsFixed(0),
-                unit: '%',
-                caption: _status ?? 'Working…',
+                title: 'Fetch latest firmware',
+                caption: cloudOn
+                    ? 'Download the newest image to this device for offline flashing.'
+                    : 'Requires cloud integration in Settings.',
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     const SizedBox(height: kSpacingSmall),
-                    LinearProgressIndicator(value: _progress),
+                    PrimaryHealthButton(
+                      icon: Icons.download,
+                      label: 'Fetch',
+                      onPressed: _busy || !cloudOn ? null : _fetchLatest,
+                    ),
                   ],
                 ),
               ),
             ),
-          const HealthSectionHeader(title: 'Stored images (offline)'),
-          if (_local.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
-              child: HealthCard(
-                icon: Icons.sd_card_alert_outlined,
-                metricColor: mutedColor,
-                title: 'No firmware downloaded',
-                caption:
-                    'Tap Fetch to download the newest image for offline flashing.',
+            if (_busy)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  kCardPadding,
+                  kSpacingSmall,
+                  kCardPadding,
+                  0,
+                ),
+                child: HealthCard(
+                  icon: Icons.system_update,
+                  metricColor: mutedColor,
+                  title: 'OTA progress',
+                  value: _progress == null
+                      ? '–'
+                      : (_progress! * 100).toStringAsFixed(0),
+                  unit: '%',
+                  caption: _status ?? 'Working…',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const SizedBox(height: kSpacingSmall),
+                      LinearProgressIndicator(value: _progress),
+                    ],
+                  ),
+                ),
               ),
-            )
-          else
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  for (final fw in _local)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: kSpacingSmall),
-                      child: _FirmwareImageCard(
-                        fw: fw,
-                        busy: _busy,
-                        onFlash: () => _flash(fw),
-                        onDelete: () async {
-                          await ref.read(firmwareServiceProvider).delete(fw);
-                          await _reloadLocal();
-                        },
+            const HealthSectionHeader(title: 'Stored images (offline)'),
+            if (_local.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
+                child: HealthCard(
+                  icon: Icons.sd_card_alert_outlined,
+                  metricColor: mutedColor,
+                  title: 'No firmware downloaded',
+                  caption:
+                      'Tap Fetch to download the newest image for offline flashing.',
+                ),
+              )
+            else
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (final fw in _local)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: kSpacingSmall),
+                        child: _FirmwareImageCard(
+                          fw: fw,
+                          busy: _busy,
+                          onFlash: () => _flash(fw),
+                          onDelete: () async {
+                            await ref.read(firmwareServiceProvider).delete(fw);
+                            await _reloadLocal();
+                          },
+                        ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }
