@@ -88,7 +88,7 @@ class SensorSettingsScreen extends ConsumerWidget {
                     title: 'Measurement interval',
                     subtitle: '${settings.hrIntervalMinutes} minutes',
                     leadingIcon: Icons.timer,
-                    control: SizedBox(
+                    trailing: SizedBox(
                       width: 180,
                       child: Slider(
                         value: settings.hrIntervalMinutes.toDouble(),
