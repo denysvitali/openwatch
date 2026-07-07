@@ -1,4 +1,3 @@
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -105,22 +104,14 @@ class SettingsScreen extends ConsumerWidget {
                     title: 'Firmware update (OTA)',
                     subtitle: 'Local firmware images over BLE',
                     leadingIcon: Icons.system_update,
-                    trailing: Icon(
-                      CupertinoIcons.chevron_forward,
-                      color: theme.colorScheme.onSurfaceVariant,
-                      size: kIconSizeSmall,
-                    ),
+                    trailingChevron: true,
                     onTap: () => context.push('/firmware'),
                   ),
                   HealthListTile(
                     title: 'Sensor settings',
                     subtitle: 'HR interval, alarms',
                     leadingIcon: Icons.sensors,
-                    trailing: Icon(
-                      CupertinoIcons.chevron_forward,
-                      color: theme.colorScheme.onSurfaceVariant,
-                      size: kIconSizeSmall,
-                    ),
+                    trailingChevron: true,
                     onTap: () => context.push('/sensor-settings'),
                   ),
                   HealthListTile(
@@ -138,33 +129,21 @@ class SettingsScreen extends ConsumerWidget {
                     subtitle:
                         'Display, theme, DND, daily goals, sedentary alarms',
                     leadingIcon: Icons.tune,
-                    trailing: Icon(
-                      CupertinoIcons.chevron_forward,
-                      color: theme.colorScheme.onSurfaceVariant,
-                      size: kIconSizeSmall,
-                    ),
+                    trailingChevron: true,
                     onTap: () => context.push('/preferences'),
                   ),
                   HealthListTile(
                     title: 'Custom watch face',
                     subtitle: 'Designer + DIY upload (Channel-B 0x3a)',
                     leadingIcon: Icons.brush_outlined,
-                    trailing: Icon(
-                      CupertinoIcons.chevron_forward,
-                      color: theme.colorScheme.onSurfaceVariant,
-                      size: kIconSizeSmall,
-                    ),
+                    trailingChevron: true,
                     onTap: () => context.push('/watchface'),
                   ),
                   HealthListTile(
                     title: 'Factory reset watch',
                     subtitle: 'Erases all data on the watch',
                     leadingIcon: Icons.restart_alt,
-                    trailing: Icon(
-                      CupertinoIcons.chevron_forward,
-                      color: theme.colorScheme.onSurfaceVariant,
-                      size: kIconSizeSmall,
-                    ),
+                    trailingChevron: true,
                     onTap: ready
                         ? () => _confirmReset(context, manager.factoryReset)
                         : null,
@@ -246,11 +225,7 @@ class SettingsScreen extends ConsumerWidget {
                     title: 'Logs',
                     subtitle: 'BLE traffic & events — copy to share',
                     leadingIcon: Icons.bug_report_outlined,
-                    trailing: Icon(
-                      CupertinoIcons.chevron_forward,
-                      color: theme.colorScheme.onSurfaceVariant,
-                      size: kIconSizeSmall,
-                    ),
+                    trailingChevron: true,
                     onTap: () => context.push('/logs'),
                   ),
                   HealthListTile(
@@ -258,11 +233,7 @@ class SettingsScreen extends ConsumerWidget {
                     subtitle:
                         'Compact history bytes for capture correlation. See PROTOCOL.md §8.5.',
                     leadingIcon: Icons.bloodtype_outlined,
-                    trailing: Icon(
-                      CupertinoIcons.chevron_forward,
-                      color: theme.colorScheme.onSurfaceVariant,
-                      size: kIconSizeSmall,
-                    ),
+                    trailingChevron: true,
                     onTap: () => context.push('/bp-debug'),
                   ),
                   HealthListTile(
@@ -270,11 +241,7 @@ class SettingsScreen extends ConsumerWidget {
                     subtitle:
                         'Wipes HR, sleep and step data stored on this phone',
                     leadingIcon: Icons.delete_sweep,
-                    trailing: Icon(
-                      CupertinoIcons.chevron_forward,
-                      color: theme.colorScheme.onSurfaceVariant,
-                      size: kIconSizeSmall,
-                    ),
+                    trailingChevron: true,
                     onTap: () => _confirmClearHistory(context, ref),
                     showDivider: false,
                   ),
@@ -298,11 +265,7 @@ class SettingsScreen extends ConsumerWidget {
                     title: 'About OpenWatch',
                     subtitle: 'Version 0.1.0',
                     leadingIcon: Icons.info_outline,
-                    trailing: Icon(
-                      CupertinoIcons.chevron_forward,
-                      color: theme.colorScheme.onSurfaceVariant,
-                      size: kIconSizeSmall,
-                    ),
+                    trailingChevron: true,
                     onTap: () => showAboutDialog(
                       context: context,
                       applicationName: 'OpenWatch',
@@ -315,11 +278,7 @@ class SettingsScreen extends ConsumerWidget {
                     title: 'Disconnect',
                     subtitle: 'Keeps the watch paired for auto-reconnect',
                     leadingIcon: Icons.link_off,
-                    trailing: Icon(
-                      CupertinoIcons.chevron_forward,
-                      color: theme.colorScheme.onSurfaceVariant,
-                      size: kIconSizeSmall,
-                    ),
+                    trailingChevron: true,
                     onTap: () async {
                       await ref.read(bleTransportProvider).disconnect();
                       if (context.mounted) context.go('/scan');
@@ -329,11 +288,7 @@ class SettingsScreen extends ConsumerWidget {
                     title: 'Forget device',
                     subtitle: 'Disconnect and stop auto-reconnecting',
                     leadingIcon: Icons.delete_forever,
-                    trailing: Icon(
-                      CupertinoIcons.chevron_forward,
-                      color: theme.colorScheme.onSurfaceVariant,
-                      size: kIconSizeSmall,
-                    ),
+                    trailingChevron: true,
                     onTap: () async {
                       await ref.read(bleTransportProvider).disconnect();
                       final svc = await ref.read(

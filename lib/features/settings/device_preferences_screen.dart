@@ -606,9 +606,7 @@ class _PreferenceTile extends StatelessWidget {
       subtitle: subtitle,
       leadingIcon: icon,
       leadingColor: theme.colorScheme.onSurfaceVariant,
-      trailing: Icon(
-        CupertinoIcons.chevron_forward,
-        size: kIconSizeSmall,
+      trailing: ChevronIcon(
         color: enabled
             ? theme.colorScheme.onSurfaceVariant
             : theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.38),

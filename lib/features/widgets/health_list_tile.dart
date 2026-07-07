@@ -3,12 +3,35 @@ import 'package:flutter/material.dart';
 
 import '../../core/ui/ui_constants.dart';
 
+/// A fixed-size, fixed-color [CupertinoIcons.chevron_forward] used by
+/// [HealthListTile] and any other row that needs a consistent disclosure
+/// indicator.
+class ChevronIcon extends StatelessWidget {
+  const ChevronIcon({super.key, this.color});
+
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Icon(
+      CupertinoIcons.chevron_forward,
+      size: kIconSizeSmall,
+      color: color ?? theme.colorScheme.onSurfaceVariant,
+    );
+  }
+}
+
 /// A Cupertino-informed list row used for health metrics and settings rows.
 ///
 /// Features a circular leading icon tinted with the metric color, title /
 /// subtitle, a trailing value+unit+chevron row, and an optional indented
 /// divider. A dedicated [control] slot is provided for switches, dropdowns,
 /// and other controls that should be baseline-aligned with the title.
+///
+/// Set [trailingChevron] to `true` to show a disclosure chevron without having
+/// to pass a [trailing] widget; this keeps size, color, and touch target
+/// consistent across the app.
 class HealthListTile extends StatelessWidget {
   const HealthListTile({
     super.key,
@@ -20,6 +43,7 @@ class HealthListTile extends StatelessWidget {
     this.leadingColor,
     this.trailing,
     this.control,
+    this.trailingChevron = false,
     this.onTap,
     this.showDivider = true,
     this.contentPadding = const EdgeInsets.symmetric(
@@ -36,6 +60,7 @@ class HealthListTile extends StatelessWidget {
   final Color? leadingColor;
   final Widget? trailing;
   final Widget? control;
+  final bool trailingChevron;
   final VoidCallback? onTap;
   final bool showDivider;
   final EdgeInsetsGeometry contentPadding;
@@ -118,7 +143,9 @@ class HealthListTile extends StatelessWidget {
   Widget _buildTrailing(BuildContext context, Widget? trailingWidget) {
     final theme = Theme.of(context);
     if (trailingWidget != null) return trailingWidget;
-    if (value == null && unit == null) return const SizedBox.shrink();
+    if (value == null && unit == null) {
+      return trailingChevron ? const ChevronIcon() : const SizedBox.shrink();
+    }
     return Row(
       crossAxisAlignment: CrossAxisAlignment.baseline,
       textBaseline: TextBaseline.alphabetic,
@@ -134,11 +161,7 @@ class HealthListTile extends StatelessWidget {
         if (value != null && unit != null) const SizedBox(width: kSpacingTiny),
         if (unit != null) Text(unit!, style: AppTextStyles.bodySmall(context)),
         const SizedBox(width: kSpacingTiny),
-        Icon(
-          CupertinoIcons.chevron_forward,
-          size: kIconSizeSmall,
-          color: theme.colorScheme.onSurfaceVariant,
-        ),
+        const ChevronIcon(),
       ],
     );
   }
