@@ -1,19 +1,20 @@
 import 'package:flutter/material.dart';
+import 'package:openwatch/core/ui/ui_constants.dart';
 
 /// A responsive metric grid that wraps [HealthCard]-style tiles.
 ///
 /// Uses a [GridView.extent] layout so tiles reflow naturally while honoring
-/// the design system's 220dp max cross-axis extent, 12dp spacing, and 1.45
-/// child aspect ratio.
+/// the design system's 220dp max cross-axis extent, [kGridSpacing] spacing,
+/// and [kGridChildAspectRatio] child aspect ratio.
 class MetricGrid extends StatelessWidget {
   const MetricGrid({
     super.key,
     required this.children,
     this.shrinkWrap = true,
     this.physics = const NeverScrollableScrollPhysics(),
-    this.crossAxisSpacing = 12,
-    this.mainAxisSpacing = 12,
-    this.childAspectRatio = 1.45,
+    this.crossAxisSpacing = kGridSpacing,
+    this.mainAxisSpacing = kGridSpacing,
+    this.childAspectRatio = kGridChildAspectRatio,
     this.maxCrossAxisExtent = 220,
     this.padding,
   });

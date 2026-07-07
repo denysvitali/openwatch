@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:openwatch/core/ui/ui_constants.dart';
 
-/// A rounded health metric card used throughout the refreshed OpenWatch UI.
+/// A compact health metric card used throughout the refreshed OpenWatch UI.
 ///
-/// The card follows the design system: 20dp radius, 18dp padding, an optional
-/// metric-tinted gradient background, a circular leading icon, hero-style
-/// value/unit pair, caption, and an optional trailing widget.
+/// The card follows the design system: [kCardRadius] radius, [kCardPadding]
+/// padding, a subtle metric-tinted gradient background, a small circular
+/// leading icon, a compact value/unit pair, caption, and an optional trailing
+/// widget.
 class HealthCard extends StatelessWidget {
   const HealthCard({
     super.key,
@@ -19,7 +21,7 @@ class HealthCard extends StatelessWidget {
     this.elevated = false,
     this.onTap,
     this.child,
-    this.padding = const EdgeInsets.all(18),
+    this.padding = const EdgeInsets.all(kCardPadding),
   });
 
   final String? title;
@@ -53,22 +55,22 @@ class HealthCard extends StatelessWidget {
               children: [
                 if (icon != null) ...[
                   Container(
-                    width: 48,
-                    height: 48,
+                    width: kIconCircleSizeSmall,
+                    height: kIconCircleSizeSmall,
                     decoration: BoxDecoration(
-                      color: color.withValues(alpha: 0.14),
+                      color: color.withValues(alpha: kMetricTintOpacity),
                       shape: BoxShape.circle,
                     ),
                     alignment: Alignment.center,
-                    child: Icon(icon, size: 28, color: color),
+                    child: Icon(icon, size: kIconSizeSmall, color: color),
                   ),
-                  const SizedBox(width: 14),
+                  const SizedBox(width: kGridSpacing),
                 ],
                 if (title != null)
                   Expanded(
                     child: Text(
                       title!,
-                      style: theme.textTheme.titleLarge,
+                      style: AppTextStyles.titleMedium(context),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -81,29 +83,30 @@ class HealthCard extends StatelessWidget {
               ],
             ),
           if (title != null || icon != null || trailing != null)
-            const SizedBox(height: 12),
+            const SizedBox(height: kSpacingSmall),
           if (value != null || unit != null)
             Row(
               crossAxisAlignment: CrossAxisAlignment.baseline,
               textBaseline: TextBaseline.alphabetic,
               children: [
                 if (value != null)
-                  Text(value!, style: theme.textTheme.headlineMedium),
-                if (value != null && unit != null) const SizedBox(width: 4),
+                  Text(value!, style: AppTextStyles.headlineSmall(context)),
+                if (value != null && unit != null)
+                  const SizedBox(width: kSpacingTiny),
                 if (unit != null)
                   Text(
                     unit!,
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
+                    style: AppTextStyles.labelMedium(
+                      context,
+                    )?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                   ),
               ],
             ),
           if (caption != null) ...[
-            const SizedBox(height: 6),
+            const SizedBox(height: kSpacingTiny),
             Text(
               caption!,
-              style: theme.textTheme.bodySmall,
+              style: AppTextStyles.bodySmall(context),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
@@ -116,26 +119,18 @@ class HealthCard extends StatelessWidget {
     if (onTap != null) {
       content = InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(kCardRadius),
         child: content,
       );
     }
 
     return Card(
       margin: EdgeInsets.zero,
+      elevation: elevated ? 2 : 0,
       child: Container(
         decoration: BoxDecoration(
           gradient: effectiveGradient,
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: elevated
-              ? [
-                  BoxShadow(
-                    color: theme.colorScheme.primary.withValues(alpha: 0.08),
-                    blurRadius: 16,
-                    offset: const Offset(0, 6),
-                  ),
-                ]
-              : null,
+          borderRadius: BorderRadius.circular(kCardRadius),
         ),
         child: content,
       ),
@@ -146,7 +141,10 @@ class HealthCard extends StatelessWidget {
     return LinearGradient(
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
-      colors: [color.withValues(alpha: 0.14), color.withValues(alpha: 0.06)],
+      colors: [
+        color.withValues(alpha: kCardGradientOpacityStart),
+        color.withValues(alpha: kCardGradientOpacityEnd),
+      ],
     );
   }
 }
