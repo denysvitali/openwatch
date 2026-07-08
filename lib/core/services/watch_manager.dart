@@ -614,8 +614,9 @@ class WatchManager extends ChangeNotifier {
     try {
       AppLog.instance.info(
         'watch',
-        'Push sensor settings: hr=${hrAutoMeasureEnabled?'on':'off'}/'
-            '${hrIntervalMinutes}m stress=${stressAutoMeasureEnabled?'on':'off'}',
+        'Push sensor settings: hr=${hrAutoMeasureEnabled ? 'on' : 'off'}/'
+            '${hrIntervalMinutes}m '
+            'stress=${stressAutoMeasureEnabled ? 'on' : 'off'}',
       );
       await applyHeartRateSettings(
         enabled: hrAutoMeasureEnabled,

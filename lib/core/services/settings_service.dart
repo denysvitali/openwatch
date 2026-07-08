@@ -26,6 +26,7 @@ class AppSettings {
     this.hrIntervalMinutes = 5,
     this.hrLowAlarm = 50,
     this.hrHighAlarm = 120,
+    this.stressAutoMeasureEnabled = true,
   });
 
   /// Master switch for the cloud integration. Default: OFF (offline-first).
@@ -60,6 +61,10 @@ class AppSettings {
   /// High HR alarm threshold, BPM (0 = disabled). Default: 120.
   final int hrHighAlarm;
 
+  /// Enable automatic stress (pressure) measurement. Default: true.
+  /// Pushed to the watch on connect via `0x38`.
+  final bool stressAutoMeasureEnabled;
+
   AppSettings copyWith({
     bool? cloudSyncEnabled,
     CloudRegion? region,
@@ -70,6 +75,7 @@ class AppSettings {
     int? hrIntervalMinutes,
     int? hrLowAlarm,
     int? hrHighAlarm,
+    bool? stressAutoMeasureEnabled,
   }) => AppSettings(
     cloudSyncEnabled: cloudSyncEnabled ?? this.cloudSyncEnabled,
     region: region ?? this.region,
@@ -81,6 +87,8 @@ class AppSettings {
     hrIntervalMinutes: hrIntervalMinutes ?? this.hrIntervalMinutes,
     hrLowAlarm: hrLowAlarm ?? this.hrLowAlarm,
     hrHighAlarm: hrHighAlarm ?? this.hrHighAlarm,
+    stressAutoMeasureEnabled:
+        stressAutoMeasureEnabled ?? this.stressAutoMeasureEnabled,
   );
 }
 
@@ -100,6 +108,7 @@ class SettingsService {
   static const _kHrInterval = 'hr_interval_minutes';
   static const _kHrLow = 'hr_low_alarm';
   static const _kHrHigh = 'hr_high_alarm';
+  static const _kStressEnabled = 'stress_auto_measure_enabled';
 
   static Future<SettingsService> create() async =>
       SettingsService(await SharedPreferences.getInstance());
@@ -129,6 +138,7 @@ class SettingsService {
     hrIntervalMinutes: _prefs.getInt(_kHrInterval) ?? 5,
     hrLowAlarm: _prefs.getInt(_kHrLow) ?? 50,
     hrHighAlarm: _prefs.getInt(_kHrHigh) ?? 120,
+    stressAutoMeasureEnabled: _prefs.getBool(_kStressEnabled) ?? true,
   );
 
   Future<void> save(AppSettings s) async {
@@ -140,6 +150,7 @@ class SettingsService {
     await _prefs.setInt(_kHrInterval, s.hrIntervalMinutes);
     await _prefs.setInt(_kHrLow, s.hrLowAlarm);
     await _prefs.setInt(_kHrHigh, s.hrHighAlarm);
+    await _prefs.setBool(_kStressEnabled, s.stressAutoMeasureEnabled);
     if (s.authToken != null) {
       await _prefs.setString(_kToken, s.authToken!);
     } else {

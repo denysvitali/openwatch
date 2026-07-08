@@ -68,6 +68,9 @@ class SettingsNotifier extends Notifier<AppSettings> {
 
   Future<void> setHrHighAlarm(int bpm) =>
       update(state.copyWith(hrHighAlarm: bpm));
+
+  Future<void> setStressAutoMeasure(bool enabled) =>
+      update(state.copyWith(stressAutoMeasureEnabled: enabled));
 }
 
 // --- BLE transport + watch manager ------------------------------------------
@@ -83,10 +86,23 @@ final watchManagerProvider = ChangeNotifierProvider<WatchManager>((ref) {
   // settingsProvider here — it rebuilds when prefs hydrate asynchronously,
   // which would spawn a second WatchManager and a duplicate handshake.
   final transport = ref.watch(bleTransportProvider);
-  final mgr = WatchManager(transport);
-  mgr.autoSyncTime = ref.read(settingsProvider).autoSyncTimeOnConnect;
+  final initial = ref.read(settingsProvider);
+  final mgr = WatchManager(
+    transport,
+    autoSyncTime: initial.autoSyncTimeOnConnect,
+    hrAutoMeasureEnabled: initial.hrAutoMeasureEnabled,
+    hrIntervalMinutes: initial.hrIntervalMinutes,
+    hrLowAlarm: initial.hrLowAlarm,
+    hrHighAlarm: initial.hrHighAlarm,
+    stressAutoMeasureEnabled: initial.stressAutoMeasureEnabled,
+  );
   ref.listen(settingsProvider, (_, next) {
     mgr.autoSyncTime = next.autoSyncTimeOnConnect;
+    mgr.hrAutoMeasureEnabled = next.hrAutoMeasureEnabled;
+    mgr.hrIntervalMinutes = next.hrIntervalMinutes;
+    mgr.hrLowAlarm = next.hrLowAlarm;
+    mgr.hrHighAlarm = next.hrHighAlarm;
+    mgr.stressAutoMeasureEnabled = next.stressAutoMeasureEnabled;
   });
   return mgr;
 });
