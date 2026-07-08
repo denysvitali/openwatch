@@ -367,7 +367,7 @@ the generic bitmap below.
 
 | Name | Opcode | Sub | Dir | Request | Response | Meaning |
 |---|---|---|---|---|---|---|
-| ReadHeartRateReq | `0x15` | — | →watch | `[1..4]`=local-day epoch seconds u32 LE (use local midnight for per-day reads; `0x00000000` asks for latest/current) | **ReadHeartRateRsp** multi-pkt per `FUN_0082cf48` (GHIDRA §3.12): hdr `pl[0]=0x18` (legacy) or `pl[0]=0x00,pl[1]=totalFrames` (H59MAX); data `pl[0]=seq(1..23)`, `pl[1..14]=13B` containing the echoed u32 LE (bytes 0..3 of the reassembled record) + 9 BPM bytes; `pl[0]=0xFF`=empty day. stride 13B. | Read stored HR history. Up to 288 5-min slots/day. The watch RTC is set from local BCD bytes, so per-day lookups must use the host-local midnight epoch, not a UTC reconstruction. Note: 0x15 has NO inner `0x01` tag byte — that scheme is for 0x0d/0x37/0x39, not `0x7d`. |
+| ReadHeartRateReq | `0x15` | — | →watch | `[1..4]`=local-day epoch seconds u32 LE (use local midnight for per-day reads; `0x00000000` asks for latest/current) | **ReadHeartRateRsp** multi-pkt per `FUN_0082cf48` (GHIDRA §3.12): header then 23×13 B data frames (`seq=1..23`). Reassembled 292 B = **u32 LE request-index echo + 288×u8 BPM** (5-min slots from 00:00; producer zeroes samples outside 40..220). Empty day: `pl[0]=0xFF`. No inner `0x01` tag (that scheme is for `0x0d`/`0x37`/`0x39`). | Read stored HR history (288 5-min slots/day). Producer: `history_desc_heart_rate_5min`. Evidence: `firmwares/_re/history-layouts/evidence.md` §4. |
 | HeartRateSettingReq | `0x16` | 01/02 | →watch | w2:`[02,en?1:2,interval]`; w5:`+[startInterval,tooLow,tooHigh]` | read: `[1]`en, `[2]`interval, `[3]`startInterval, `[4]`tooLow, `[5]`tooHigh | HR auto-measure config + hi/lo alarms. |
 | RealTimeHeartRate | `0x1e` | — | →watch | `[action]` where `01`=start 60 s, `02`=stop, `03`=reset/extend | no direct ack on H59MA; live HR arrives on notify paths | Toggle realtime HR stream. |
 | StartHeartRateReq | `0x69` | type | →watch | `[type, sub]` (type enum below) | `[0]`type `[1]`errCode `[2]`value; if len≥5 `[3]`sbp `[4]`dbp | Start a measurement session. |
@@ -377,8 +377,8 @@ the generic bitmap below.
 | BpSettingReq | `0x0c` | 01/02 | →watch | r:`[01]`; w:`[02,en,sH,sM,eH,eM,intervalMinutes]` where interval is nonzero and divisible by 30 | read response is 7 bytes: `[0]=01,[1]`en,`[2]`startH,`[3]`startM,`[4]`endH,`[5]`endM,`[6]`intervalMinutes`; invalid writes ACK as `opcode|0x80` | BP auto-measure window. H59MA v14 defaults to enabled, `00:00..23:00`, interval `0x3c` (hourly). Other sub-values have no response. |
 | BpReadConformReq | `0x0e` | — | →watch | `[0x00]`=advance/read next; nonzero silently exits | response is BP history via `0x0d` | Advance the BP record cursor and emit the next compact history record. |
 | BpDataRsp (no req) | `0x0d` | — | watch→ | n/a | hdr `[0]=00`{`[1]`yr-2000,`[2]`mo,`[3]`d,`[4]`intervalMinutes,`[5..10]`48-bit presence bitmap,`[11..13]=0`}; data frames `[0]=01` + up to 13 compact one-byte values in ascending set-bit order; `[0]=FF`=empty/end | BP history records. H59MA v14 initializes `intervalMinutes=0x3c` (hourly) and stores 24 hourly 4-byte slots as `[compact,0,0,0]`. The sole v14 writer fills `compact` from `heart_rate_current_bpm()` (auto-measure ticks 15–20) or PRNG `(r%5)+0x46` (70–74) on timeout; validity for emit is `0x28..0xdc`. The `0x0d` stream projects only that byte0. Do not invent sys/dia history from it. Live `0x69` synthetic sys/dia (`FUN_00834092`) is a separate path and is not stored in these slots. See `firmwares/_re/bp-slot-encoding/evidence.md`. |
-| HRVReq | `0x39` | index | →watch | `[index]` | multi-pkt (`[0]=00`{size,range=30}, `[0]=01`{offset days-back + samples}, `0xFF`=end). stride 13B. | Read HRV history for a day index. |
-| PressureReq | `0x37` | index | →watch | `[index]` | multi-pkt (same scheme as HRV). stride 13B. | Read stress history for a day index. |
+| HRVReq | `0x39` | day_offset | →watch | `[day_offset]` | header `0x1E050039` then 4×13 B chunks; reassembled 49 B = `[day_offset][48 × u8 half-hour samples]`. Empty → `0xFF39`. Samples `0x00`/`0xFF` forced to 0 on read. | HRV day history. Persistent body: key + 48 bytes @ 30-min stride. Auto-measure writer stores one opaque score byte (valid band ~30..50, else PRNG 30..49). **Not** multi-field RMSSD packing. Evidence: `firmwares/_re/history-layouts/evidence.md` §5. |
+| PressureReq | `0x37` | day_offset | →watch | `[day_offset]` | same fragmenter as HRV; header `0x1E050037`; body `[day_offset][48 × u8]`. | Stress/pressure day history. Same 48-slot geometry as HRV. Auto-measure valid band ~20..65 (else PRNG 30..49). Evidence: `firmwares/_re/history-layouts/evidence.md` §5. |
 | PressureSettingReq | `0x38` | 01/02 | →watch | w:`[02,en(0/1)]` | read: `[1]`enable; response echoes `[0x38,sub,value]` | Stress/pressure auto-measure enable bit. H59MA v14 has no confirmed Channel-A HRV auto-measure setting; the old APK-era `0x38` HRV setting row is stale for this firmware. |
 | UltraVioletReq | `0x7d` | index | →watch | `[index]` | **no response on H59MA v14** | Legacy/capture-only opcode. The deferred worker compares `0x7d` at body `0x6f5e`, then branches to the common queue-advance path at `0x6f7c` without a handler call or `FUN_0082c988` fragmenter. Do not use as a UV-history request on v14. |
 | UVSettingReq | `0x3b` | 01/02 + guard | →watch | r:`[01,00]`; w:`[02,00,value]` | echo/status via TouchControlRsp | Alias of TouchControlReq. H59MA v14 `0x3e` is not Channel-A UV; it is used by Channel-B nap sleep responses and by the FEE7 lipids path. |
@@ -396,13 +396,13 @@ REALTIMEHEARTRATE=6, ECG=7, PRESSURE=8, BLOOD_SUGAR=9, HRV=0xa, BODY_TEMPERATURE
 | Name | Opcode | Sub | Dir | Request | Response | Meaning |
 |---|---|---|---|---|---|---|
 | ReadBandSportReq | `0x13` | — | →watch | `[1..4]`ts u32 LE | **ReadSportRsp** multi-pkt: hdr `b0=00,b1=size`(*13); records 13B; 7×4B **BE** fields [startTime,duration,sportType,stepCount,distance,calories,hrCount] + hrCount HR bytes; `0xFF`=end | Read one stored exercise session. |
-| ReadDetailSportDataReq | `0x43` | `0x0F`@[1] | →watch | `[dayOffset,0F,startSeg,endSeg(≤0x5f),01]` | paged BleStepDetails: `0xFF`=clear, `0xF0`=init(`b2==1`⇒calorie*10); data `[0]`yr-2000,`[1]`mo,`[2]`d,`[3]`segIdx, cal/steps/dist=`bytes2Int` of swapped pairs; `b4`=page,`b5`=total; done when `b4==b5-1` | Per-slot step detail for a day. |
+| ReadDetailSportDataReq | `0x43` | — | →watch | H59MA v14: `[dayOffset, reserved, startHour, endHour, unit_flag]` (APK-era `0x0F`/segment fields are not what the v14 handler reads). | Header `0xF0`+count or `0xFF` empty; then one 16 B frame per non-empty hour: BCD y/m/d, `hour<<2`, ordinal, **dist** u16 (×10 if `unit_flag==0`), **steps** u16, **cal/100** u16. Source table = same 24×12 hourly detail as Ch-B `0x12` (`history_desc_hourly_detail_24x12`). Slot layout: `+0` stepsΔ, `+4` calΔ/100, `+6` distΔ/10 (see history-layouts evidence §2/§6). | Per-hour sport detail for one day. |
 | ReadTotalSportDataReq | `0x07` | — | →watch | `[dayOffset]` | **NOT IMPLEMENTED in H59MA v14.** The §10.2 Channel-A inventory (GHIDRA §10.2 lines 6345–6373) enumerates 22 handlers (`0x01, 0x06, 0x08, 0x0e, 0x15, 0x18, 0x1e, 0x25, 0x26, 0x2b, 0x2c, 0x37, 0x38, 0x39, 0x3a, 0x3b, 0x43, 0x72, 0x77, 0x7a, 0xa1, 0xc6, 0xc7, 0xff`); `0x07` is absent. The only `0x07` handler in the firmware is the Channel-B OTA `ota_cmd_sub_ack` table slot. The closest live data the firmware exposes is `0x48` todaySport (15B interleaved totals), `0x43` readDetailSport (292B per-day dump), and Channel-B `0x2a` activity summary (49B per-day record). The OpenWatch host code defines `OpA.readTotalSport = 0x07` (`lib/core/protocol/opcodes.dart:69`) but the request is never called; no decoder exists. Treat the `TotalSportDataRsp` entry as a legacy/SDK-era spec that v14 retired (subsumed by `0x48`/`0x2a`). | Stale/legacy. |
 | PhoneSportReq | `0x77` | — | →watch | `[status, sportType]` | **AppSportRsp**: `b0`=gpsStatus; if==6 `ts=bytesToInt(b[2..6])` u32 LE | Tell watch the phone's app-side sport status. |
 | PhoneGpsReq | `0x74` | — | →watch | gps:`[status,00]`; phoneData:`[05,00]+dist u32 LE+cal u32 LE` | **AppGpsRsp**: same shape as AppSport | GPS/outdoor-sport coordination. |
 | ReadSleepDetailsReq | `0x44` | `0x0F`@[1] | →watch | `[dayOffset,0F,startSeg,endSeg(≤0x5f)]` | paged BleSleepDetails: `0xFF`=clear, `0xF0`=init; data `[0]`yr-2000,`[1]`mo,`[2]`d,`[3]`idx, `sleepQualities[8]=b[5+i]`; `b4`/`b5` page/total | Legacy per-slot sleep detail. |
-| H59MA sleep summary | `0x11` (Ch B) | — | →watch | `[dayOffset]` | `0x11` payload `[dayOffset][100 B summary]` | Firmware-confirmed H59MA v14. Always 101 B (empty day = zero body). Summary record (shared with `0x27` source): `+0x0e/+0x10` start/end min u16 LE, `+0x13` pair count `N`, types at `+0x14..`, durs at `+0x3c..`; minute buckets for types 2/3/5 at `+0x0a/+0x08/+0x0c`. Stage labels for types need live capture. See `firmwares/_re/channel-b-payloads/evidence.md`. |
-| H59MA sleep detail | `0x12` (Ch B) | — | →watch | `[dayOffset]` | `0x12` payload `[dayOffset][288 B detail]` = 24×12 B hourly slots (key stripped); no-data/error compact NAK cmd `0x12` status=`dayOffset` | Firmware-confirmed H59MA v14. Today overlays current hour via live slot writer (fills slot bytes 0..8; 9..11 opaque). Slot field units need live capture. |
+| H59MA sleep summary | `0x11` (Ch B) | — | →watch | `[dayOffset]` | `0x11` payload `[dayOffset][100 B summary]` | Always 101 B (empty day = zero body). Summary: `+0x0e/+0x10` start/end min u16 LE, `+0x13` pair count `N` (≤40), types `+0x14..`, durs `+0x3c..`; minute buckets type2→`+0x0a`, type3→`+0x08`, type5→`+0x0c`. Types written by firmware: **`{0,2,3,4,5}`** (`0`=long-gap filler; `4` synthetic-only; **no type 1 as stage**). Clinical deep/light/REM labels **not** static-proven. Evidence: `firmwares/_re/channel-b-payloads/evidence.md`, `firmwares/_re/history-layouts/evidence.md` §1. |
+| H59MA sleep detail | `0x12` (Ch B) | — | →watch | `[dayOffset]` | `0x12` payload `[dayOffset][288 B detail]` = 24×12 B hourly slots (key stripped); compact NAK on guard fail | **Not sleep stages** — same pedometer hourly table as Ch-A `0x43`. Per slot: `+0` stepsΔ u16 LE, `+2` metric38Δ u16, `+4` calΔ/100 u16, `+6` distΔ/10 u16, `+8` elapsed-low Δ u8, `+9..11` unused by live writer. Evidence: `firmwares/_re/history-layouts/evidence.md` §2. |
 | SetAlarmReq | `0x23` | — | →watch | `[idx(0..4),en(0..2),hourBCD,minBCD, day0..day6]` (11B; 7 weekday flags from weekMask bits) | SimpleStatusRsp ack | Set clock alarm slot. |
 | ReadAlarmReq | `0x24` | — | →watch | `[idx(0..4)]` | **ReadAlarmRsp**: `weekMask=Σ(b[4+i]<<i)`; AlarmEntity(idx,en,BCD h/m,weekMask) | Read clock alarm slot. |
 | SetDrinkAlarmReq | `0x27` | — | →watch | same 11B layout as SetAlarm, idx 0..7 | ack | Drink/sedentary reminder slot. ⚠ Channel-B sleep also uses cmd `0x27`. |
@@ -415,7 +415,7 @@ REALTIMEHEARTRATE=6, ECG=7, PRESSURE=8, BLOOD_SUGAR=9, HRV=0xa, BODY_TEMPERATURE
 | TodaySportData | `0x48` | — | watch→ | (read) bare opcode | **TodaySportDataRsp**: 3B **BE** groups — totalSteps `b[0..2]`, running `b[3..5]`, calorie `b[6..8]`, walkDist `b[9..11]`, sportDur `b[12..13]`(2B) | Today's running step total. |
 | SleepNewProtoResp (night) | `0x27` (Ch B) | — | watch→ | H59MA live shape: `[recordCount, {dayDelta, blockLen, startMinLE, endMinLE, (type,durMin)*}...]`; older captures may use `[dayOffset, endMinBE, (type,durMin)*]` | `blockLen` includes the 4 start/end bytes plus pair bytes; pair durations sum to `end-start` modulo midnight | Night sleep (new protocol). |
 | SleepNewProtoReq/Resp (night+lunch) | `0x27` request, `0x27`/`0x3e` responses (Ch B) | — | both | request `[maxDayOffset, recordType?]`; maxDayOffset clamps to `6`; missing recordType defaults `0` | `recordType==1` first emits `0x3e` nap/lunch records, then firmware always emits `0x27` night records. Both are count-prefixed record lists. | H59MA v14 new sleep records. |
-| Activity summary | `0x2a` (Ch B) | — | both | request `[maxDayOffset]`, clamped to `2` | response is repeated 49-byte entries `[dayOffset][48 B body]`, max 3 entries (`2,1,0`); body = **24 × 2-byte hourly samples** (`0xFF` treated as 0). Not a u24 steps/kcal/distance header — sample units need live capture vs `0x48`/`0x43`. | Do not treat `dayOffset=0` as terminator; use Channel-B payload length. Evidence: `firmwares/_re/channel-b-payloads/evidence.md`. |
+| Activity summary | `0x2a` (Ch B) | — | both | request `[maxDayOffset]`, clamped to `2` | response is repeated 49-byte entries `[dayOffset][48 B body]`, max 3 entries (`2,1,0`); body = **24 × (max_u8, min_u8)** hourly samples (`0xFF`→0). Producer clamps/synthesises SpO2-like percent domain (≤100; timeout PRNG 93..99); **not** step/kcal/distance and **not** a u16 LE. | Parse by payload length. Evidence: `firmwares/_re/channel-b-payloads/evidence.md`, `firmwares/_re/history-layouts/evidence.md` §3. |
 | AppSport (notify) | `0x77` | — | watch→ | n/a | `b0`=gpsStatus; if==6 ts=`bytesToInt(b[2..6])` LE | Watch requests phone GPS-sport sync. |
 | AppGps (notify) | `0x74` | — | watch→ | n/a | same as AppSport | Watch GPS sync notify. |
 
@@ -469,7 +469,7 @@ prefer FEE7 writes for app flows without live-capture evidence.
 | SessionModeStatus | `0x9b` | both | bare opcode | `[stateByte]`, `0x88` when mode `2`, otherwise `0x77` | Reads the stored high-range session mode and returns one status byte; verified at v14 body offset `0x6496` and callee `0x17f0`. |
 | FactoryStop | `0x9c` | both | bare opcode | self-marker ACK `[0x9c, 0..., 0x9c]` | Stops factory-test timer, clears related state, and calls the shared cancel path; verified at v14 body offset `0x649e` and callee `0x181e`. |
 | ModelName | `0x9e` | both | bare opcode | ASCII model string in `frame[1..]`, NUL padded; default `"H59MA_V1.0"` | Uses a custom blob0 string when enabled, otherwise the built-in model literal; verified at v14 body offset `0x64a6` and callee `0x18c8`. |
-| HighStatus | `0xa0` | both | bare opcode | 9 populated status bytes in `frame[1..9]` plus checksum | Opaque high-range status frame assembled from runtime helpers and persistent state; verified at v14 body offset `0x64ae` and callee `0x191a`. OpenWatch preserves stable byte fields without assigning user-facing semantics yet. |
+| HighStatus | `0xa0` | both | bare opcode | 9 populated status bytes in `frame[1..9]` plus checksum | **Field map (H59MA v14 callee `0x00827d1a` / body `0x191a`):** `[1]=*(u8*)0x209dd0` live flag; `[2]=0x23` if mode-class helper active else `0`; `[3]=0x21` if secondary active helper else `0`; `[4]=battery%` (clamp 100); `[5..6]=s16 BE-split from *(s16*)(0x209dbc+6)`; `[7]=*(u8*)(0x2088fc+0x50)`; `[8..9]=u16 from *(u16*)(0x2088fc+0x42)` high/low; `[15]=additive cksum`. User-facing names for flag constants and the s16 channel still need live capture. Full residual write-up: `firmwares/_re/protocol-complete/evidence.md` §2.1. |
 | VendorMemWrite | `0xbf` | both | `[addr u32BE, len, bytes...]`, len clamps to `8` | self-marker ACK `[0xbf,0...,0xbf]` | Raw arbitrary-address write, verified at v14 body offset `0x5694`. OpenWatch must not call this outside explicit developer/debug tooling. |
 | VendorMemRead | `0xc0` | both | `[addr u32BE, len u32BE]`; zero len defaults to `0x10`, max `0x200` | shared fragmented streamer: each frame is `[0xc0, up to 14 copied bytes, cksum]` | Raw arbitrary-address read, verified at v14 body offset `0x570c`; the shared streamer at `0x5538` adds no wire sequence byte, so host tooling assigns arrival-order sequence numbers. |
 | HealthPoll | `0xc1` | both | bare opcode | one data byte at `frame[1]` | Calls the one-shot health helper then sends `DAT_0082caf0` through the shared streamer with length `1`; verified at v14 body offset `0x64ce`. |
@@ -501,7 +501,7 @@ dispatcher; static routing is command-specific.
 | readQrCode / E-Card | `0x2f` | →watch | `[01, type]` (no frame if type==0xFF) | H59MA v14: compact NAK code `0` | APK-era QR/e-card read; not implemented by H59MA v14. |
 | writeQrCode / E-Card | `0x2f` | →watch | `[02, type, urlLen] + UTF-8 url` (`[02,FF,00]` to query/clear) | H59MA v14: compact NAK code `0` | APK-era QR/e-card write; not implemented by H59MA v14. |
 | setDeviceNickName | `0x4a` | →watch | nickname bytes (`ACTION_AVATAR_Device`) | H59MA v14: compact NAK code `0` | APK-era nickname/avatar action; not implemented by H59MA v14. |
-| readAlarm / writeAlarm | `0x2c` | →watch | r:`[01]`; w:`[02,count,records...]` | read:`[01,count,{len,flags,minuteOfDay u16LE,labelBytes...}...]`; write ack:`[02]` | New-protocol alarms. `flags` bit 7 mirrors firmware record byte 3; bits 0..6 are weekday bits. `len` includes the four-byte record header. |
+| readAlarm / writeAlarm | `0x2c` | →watch | r:`[01]`; w:`[02,count≤10,records...]` | read:`[01,count,{len,flags,minuteOfDay u16LE,labelBytes...}...]`; write ack:`[02]` | H59MA v14 alarms (10 slots). Compact wire: `len` includes 4-byte header; `flags` bit7 = enable (internal record `+1`); bits0..6 = weekdays from internal `+4..+10`; `minuteOfDay = hour*60+minute`; label from internal `+0x0b`, max `0x1e` bytes. Internal fixed record is `0x29` B at settings blob1 `+0xf8 + i*0x29` (count at blob1 `+0xf6`). Unset slots (`+1==0xFF`) default to enabled 08:15 daily. Full map: `firmwares/_re/settings-maps/evidence.md` §5. Channel-A `0x23`/`0x24` are **not** implemented on H59MA v14. |
 | readSmsQuick / writeSmsQuick | `0x4c` | →watch | r:`[01]`; w:`[02]+SmsQuickBean` | H59MA v14: compact NAK code `0` | APK-era quick-reply SMS templates; not implemented by H59MA v14. |
 | APK LargeData action inventory | varies | both | `byte1`=action; `payload[0]`=01/02 | APK `respMap[action]`; H59MA v14 see below | APK names: `0x20` Location, `0x27` NewSleep, `0x28` ManualHeartRate, `0x29` Contacts_New, `0x2a` Blood_Oxygen, `0x2c` Alarm, `0x2d` Contact, `0x2e` BT_MAC, `0x2f` E_CARD/QrCode, `0x3a` Custom_WatchFace, `0x3e` NewSleep_Lunch, `0x47` Blood_Sugar, `0x48` GPS_Navigation, `0x49` Manual_Oxygen, `0x4a` AVATAR_Device(nickname), `0x4c` SMS_QUICK, `0x5f` Interval_Blood_Oxygen, `0x75` Interval_Heart_Rate. |
 
@@ -615,12 +615,15 @@ Channel-B command, not an APK generic large-data action:
 | `0x03` | `[03]` | Static info TLVs such as `H59MAX_`, `H59MA_V1.0`, `H59MA_`, `1.00.14_`, build `260508`. |
 | `0x04` | `[04]` | Clear blob0 device-info/config slots and commit settings blob0. |
 
-Writable TLV IDs: `1` max `0x18` custom advertised name/prefix; `2` max `6`
-BLE address override and config item `0x33` update; `3` max `0x14`, `4` max
-`0x10`, `5` max `0x10`, `6` max `0x08` device-info string slots; `7` one-byte
-name-format control. The decompiled writer clears fixed-size destinations but
-does not visibly clamp the supplied length before copy, so host code should
-enforce these maxima.
+Writable TLV IDs (destinations in settings **blob0** @ RAM `0x200088fc`): `1` →
+`+0xb6` max `0x18` custom advertised name/prefix (enable `+0xd6[1:0]==1`); `2` →
+`+0xce` max `6` BLE address override (enable `+0xd6[3:2]==1`) and config item
+`0x33` update; `3` → `+0x7a` max `0x14`, `4` → `+0x8e` max `0x10`, `5` → `+0x9e`
+max `0x10`, `6` → `+0xae` max `0x08` device-info string slots (enable pairs in
+`+0xd5`); `7` → `+0xd4` one-byte name-format control. The decompiled writer
+clears fixed-size destinations but does not visibly clamp the supplied length
+before copy, so host code should enforce these maxima. See
+`firmwares/_re/settings-maps/evidence.md` §1.
 
 OpenWatch builds all four firmware subcommands. It parses the response-bearing
 `0x01` writable-config TLVs and `0x03` static-version TLVs; `0x02` writes,
@@ -706,12 +709,18 @@ sequenceDiagram
 
 `size ≤ 0xBB8000` (12 MB). `RSP_LOW_BATTERY (6)` at any point ⇒ device refuses; abort.
 
-H59MA v14 firmware details from Ghidra:
+H59MA v14 firmware details from Ghidra / radare2 residual pass
+(`firmwares/_re/protocol-complete/evidence.md` §3):
 
-- OTA init accepts a 9-byte payload: `[type, size u32LE, crc16 u16LE, checksum u16LE]`, with `type == 0x01` or `0x04`.
-- OTA data packets are `[u16LE 1-based packetIndex] + raw bytes`; unlike generic file pockets, the data is not zlib-compressed.
+- OTA **state byte** (session object near `0x20ada4-0x18`, field `+1`):
+  `0` idle → `1` start → `2` init meta OK → `3` data in progress →
+  `4` check OK (`written_bytes == size-0x50`) → `5` end/apply.
+- OTA init accepts a 9-byte payload: `[type, size u32LE, crc16 u16LE, checksum u16LE]`, with `type == 0x01` or `0x04`. Wrong length → RSP type `2` status `1`; bad type → type `2` status `2`.
+- OTA data packets are `[u16LE 1-based packetIndex] + raw bytes` (max **`0x600`** data bytes after the index). Unlike generic file pockets, the data is not zlib-compressed. Wrong state → type `3` status `3`; index must equal `last+1`.
 - Packet 1 includes the firmware container prefix. The runtime OTA body checks the first word against bytes `e5 c3 bd 81` (little-endian `0x81bdc3e5`) and then stages file bytes from offset `0x50` onward at `0x0084e000`. This strips the transport/header prefix, not the full `0x450` on-disk header.
-- `0x00840724` is **not** OTA validation; it checks persistent config-blob magic `0x8721bee2`. The 32-byte `image_digest @0x1c4` is staged as raw image data after the `0x50` strip, but is not parsed or validated in `body.bin` (see `firmwares/_re/ota-container/evidence.md`).
+- End (`0x05`) requires state `4`; sets state `5` and runs stop-sensors / service-reset / reboot helpers. Sub-ack (`0x07`) emits RSP type `7`.
+- Host size cap `0xBB8000` (12 MB) is enforced in OpenWatch `dfu.dart` only — the OTA handlers in `body.bin` do not reference that constant.
+- `0x00840724` is **not** OTA validation; it checks persistent config-blob magic `0x8721bee2` at flash base `0x00801400`. Config item records are `[u16 id][u8 len][value][mirror]`; H59MA v14 body only upserts/reads **item `0x33` len 6 (BLE MAC)**. Separate offset-store blobs: blob0 (`0xe0`, magic `0x04`), user_config (`0xa4`, magic u32 `0xa1b2c3e5`), blob1 (`0x2b0`, magic `0x07`) — full field maps in `firmwares/_re/settings-maps/evidence.md`. The 32-byte `image_digest @0x1c4` is staged as raw image data after the `0x50` strip, but is not parsed or validated in `body.bin` (see `firmwares/_re/ota-container/evidence.md`, `digest-and-boundary/evidence.md`). Exhaustive hash/HMAC/CRC static attempts against v13/v14 digests returned **no matches**; algorithm requires a bootloader dump.
 
 ### 5.5 Health-data prefetch
 
@@ -1048,15 +1057,12 @@ Feedback, Customer-support chat.
 >   table, blob0 offsets, and the cfg_update_mac_item quirk
 >   documented in §4.8.
 > - **Channel-A `0x37`/`0x39` health-history field layouts** — both use the
->   shared `FUN_0082c988` 13-byte-chunk fragmenter (GHIDRA §3.20/§3.21 +
->   §10.2 fragmenter table). The 49-byte record body (1B slot-id echo + 48B
->   null-padded producer output from `FUN_008344fe`/`FUN_0083468e`) is split
->   into 4 chunks of 13B; no end-of-message sentinel — host must reassemble
->   by quiet-period or per-record marker. `0x7d` UV history is a queued no-op
->   on H59MA v14: the deferred worker compares it at body `0x6f5e`, then
->   branches to the common queue-advance path at `0x6f7c` without a handler
->   call or `FUN_0082c988` fragmenter. The fragmenter table at GHIDRA §10.2
->   lists `0x37/0x39/0x7a` only.
+>   shared 13-byte-chunk fragmenter (GHIDRA §3.20/§3.21). Reassembled body is
+>   `[day_offset][48 × u8 half-hour scores]` from
+>   `pressure_history_read_day` / `hrv_history_read_day` (`0x00`/`0xFF`→0).
+>   Producer-side ranges and PRNG fallbacks:
+>   `firmwares/_re/history-layouts/evidence.md` §5. `0x7d` UV history remains a
+>   queued no-op on H59MA v14.
 > - **Channel-A `0x0d` BP-history wire split** — `FUN_00834296` builds a
 >   tagged 14-byte header and compact body frames. Header byte 4 is the interval
 >   in minutes (`0x3c` default = hourly), bytes 5..10 are a 48-bit presence
@@ -1255,6 +1261,6 @@ layout. Key take-aways relevant to protocol work:
 | `0x10` | `version_string` | e.g. `H59MA_1.00.13_251230` |
 | `0x58` | `body_size` | exact body length |
 | `0x6c` | `flash_app_start` | `0x00826400` (both builds) |
-| `0x1c4` | `image_digest` | 32-byte per-build digest/signature field. The runtime OTA body stages this region but does not parse or validate it; algorithm and bootloader/apply-path validation remain unresolved. |
+| `0x1c4` | `image_digest` | 32-byte per-build digest/signature field. The runtime OTA body stages this region but does not parse or validate it. Exhaustive static attempts (MD5/SHA-*/HMAC with header keys, CRC16/32, additive, RSA/ASN.1 structure) against v13/v14 containers found **no** algorithm match; digests appear only at this slot. Bootloader/apply-path validation remains unresolved (no lower-flash image in-tree). See `firmwares/_re/protocol-complete/evidence.md` §5. |
 | `0x228` | `const_228` | `0x0e85d101`, duplicated as the first word of the marker at the `flash_app_end` boundary. |
 | `0x22c` | `flash_app_end` | Per-build pointer into the loaded image (`0x00847860` v13, `0x00845c14` v14). It maps to a unique `0x0e85d101,0x00000001` marker before the linked runtime tail, not to the physical end of `body.bin`; bootloader use remains unresolved. |

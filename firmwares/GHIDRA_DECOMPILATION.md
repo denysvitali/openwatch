@@ -1858,12 +1858,12 @@ uint FUN_008344fe(int slot_id, u32 *out) {
 }
 ```
 
-So the pressure record is 4 bytes of header + 48 bytes of
-string-like body, stored in a record table indexed by
-`month_offset` from today. The body is *null-terminated in
-the response* even when the source record is `-1`-padded
-(presumably to keep the body length consistent across
-uninitialised records).
+So the pressure record is 4 bytes of day key + 48 bytes of
+**half-hour score samples** (not a C string). Reader maps
+`0x00`/`0xFF` → `0`. Writer `FUN_008344c8` stores one u8 at
+`minute_of_day/30 + 4`. Auto-measure timer `FUN_0083455e` keeps
+scores in ~20..65 or substitutes PRNG `(prng%20)+30`. See
+`firmwares/_re/history-layouts/evidence.md` §5.
 
 #### Response layout (mirrors 0x7a)
 
@@ -3061,11 +3061,13 @@ for (i = 0; i < 292; i += 13) {
 The first u32 of the response data (`data[0]`) is **overwritten
 with the request index** before fragmentation (`local_138[0] =
 local_13c`), so the host sees its own `index` echoed back as the
-4-byte prefix of the payload. The remaining 72 u32s
-(`data[1..72]`) are the raw HR record: typically 24 hours × 3
-fields (HR value, RR-interval, motion flag) packed into u32s,
-but the producer side is owned by `FUN_00833c92` and not detailed
-in the firmware body.
+4-byte prefix of the payload. The remaining **288 bytes** are
+one BPM sample per 5-minute slot (`history_desc_heart_rate_5min`).
+Producer `FUN_00833c54` stores a single u8 at
+`offset = (seconds % 86400) / 300 + 4`; reader `FUN_00833c92`
+zeroes samples outside `0x28..0xdc` (40..220). Earlier notes that
+described “72 × u32 (HR/RR/motion)” were incorrect — see
+`firmwares/_re/history-layouts/evidence.md` §4.
 
 #### Frame layout per chunk
 
@@ -4233,27 +4235,33 @@ prefix/change/suffix back.
 
 #### Offset-store settings blobs
 
-The firmware also has two offset-store settings blobs outside the `0x8721bee2`
+The firmware also has three offset-store settings blobs outside the `0x8721bee2`
 config item store:
 
 | Blob | RAM base | Flash offset | Length | Magic | Commit helper | Role |
 |---|---:|---:|---:|---:|---|---|
-| blob0 | `0x200088fc` | `0x0000` | `0xe0` | `0x04` | `settings_blob0_commit` | BLE identity, advertised name, Channel-B `0x5a` TLV slots. |
-| blob1 | `0x200089dc` | `0x0400` | `0x2b0` | `0x07` | `settings_blob1_commit` | User settings: DND, health feature bits, sedentary, menstruation, touch/UV config. |
+| blob0 | `0x200088fc` | `0x0000` | `0xe0` | `0x04` | `settings_blob0_commit` | BLE identity, advertised name, Channel-B `0x5a` TLV slots, session mode at `+4`. |
+| blob1 | `0x200089dc` | `0x0400` | `0x2b0` | `0x07` | `settings_blob1_commit` | User settings: DND, health feature bits, alarms (10×`0x29`), sedentary, menstruation, touch/UV config. |
+| user_config | `0x20008c8c` | `0x0200` | `0xa4` | u32 `0xa1b2c3e5` | `user_config_block_commit` | Clock/session tick block (`+4` seconds, `+8` RTC snap, `+0xd` time-set latch); **not** DND/alarm storage. |
+
+Full byte-level maps: `firmwares/_re/settings-maps/evidence.md`.
 
 Stable blob1 fields confirmed from Channel-A handlers:
 
 | Field | Meaning | Writers |
 |---:|---|---|
 | `+0x2d` bit `1` (`0x02`) | SpO2 enabled | `settings_set_spo2_enabled_commit_if_changed`; commits blob1 when changed. |
+| `+0x2d` bit `2` (`0x04`) | HR auto enable | `FUN_0082769a`; Channel-A `0x36`. |
 | `+0x2d` bit `3` (`0x08`) | Pressure/stress enabled | `settings_set_pressure_enabled_ram`; RAM-only in this path. |
 | `+0x2d` bit `5` (`0x20`) | Blood-sugar flag | `settings_set_sugar_flag_ram`; subcmd `0x3a/3`. |
 | `+0x2d` bit `7` (`0x80`) | Lipids flag | `settings_set_lipids_flag_ram`; subcmd `0x3a/4`. |
 | `+0x2e` | Sugar/lipids init sentinel | Sugar write sets this to `0x1e` if it was zero. |
 | `+0xc8` | Touch/UV config byte | Channel-A `0x3b`, guarded by request byte `2 == 0`. |
 | `+0xee..+0xf3` | DND schedule | `[enable, runtime, startMin u16LE, endMin u16LE]`. |
-| `+0x294..+0x299` | Sedentary config | `[start_h,start_m,end_h,end_m,enable,duration]`; times are BCD on Channel A and stored as decoded bytes. |
-| `+0x29a..+0x2a6` | Menstruation config | Marker `0xca`, copied fields, and current-day-relative u16 values. |
+| `+0xf6` | Alarm count (0..10) | `alarm_module_init` / Ch-B `0x2c`. |
+| `+0xf8 + i*0x29` | Alarm record `i` | Internal layout: `+0` len/flags, `+1` enable (`0xFF`=unset→08:15 daily), `+2` hour, `+3` min, `+4..+0xa` weekdays, `+0xb..` label ≤`0x1e`. |
+| `+0x294..+0x299` | Sedentary config | `[start_h,start_m,end_h,end_m,weekday_mask,interval_min]`; times are BCD on Channel A and stored as decoded bytes. |
+| `+0x29a..+0x2a9` | Menstruation config | Marker `0xca`, BCD start, day/month anchors, 5 B `period_data` (see period-data evidence). |
 
 #### Persistent-history descriptor rings
 
@@ -4288,16 +4296,19 @@ Record bodies are compact and fixed-width:
 
 | Descriptor | Body layout |
 |---|---|
-| `history_desc_hourly_detail_24x12` | key at `+0`, then 24 hourly slots x 12 bytes at `+4`. |
-| `history_desc_sleep_summary_100b` / `history_desc_sleep_nap_100b` | 100-byte payload copied from offset `0`, so the copied source includes the key/header. |
-| `history_desc_activity_daily_24x2` | key at `+0`, then 24 activity samples x 2 bytes at `+4`; Channel-B `0x2a` sends the 48-byte body. |
-| `history_desc_heart_rate_5min` | key at `+0`, then 288 5-minute HR samples at `+4`; out-of-range values outside `0x28..0xdc` are zeroed before the `0x15` response. |
+| `history_desc_hourly_detail_24x12` | key at `+0`, then 24 hourly slots × 12 bytes at `+4`. **Producer slot** (`sleep_write_live_detail_slot`): `+0` stepsΔ u16, `+2` state`+0x38`Δ u16, `+4` cal_rawΔ/100 u16, `+6` distΔ/10 u16, `+8` elapsed-low Δ u8, `+9..11` not live-written. Shared by Ch-A `0x43` and Ch-B `0x12` (not sleep-stage curve). |
+| `history_desc_sleep_summary_100b` / `history_desc_sleep_nap_100b` | 100-byte payload copied from offset `0` (includes key). Types at `+0x14`, durs at `+0x3c`, count `+0x13`. Stage ids written: `{0,2,3,4,5}`; minute buckets only for types 2/3/5. Live default type `5`; gap≥120 min → type `0`. Clinical stage names not static-proven. |
+| `history_desc_activity_daily_24x2` | key at `+0`, then 24 × `(max_u8, min_u8)` at `+4`. Producer is SpO2-like percent max/min for the hour (`FUN_00833a56`); clamp ≤100; `0xFF`→0 on read. Ch-B `0x2a` sends the 48-byte body. **Not** step totals. |
+| `history_desc_heart_rate_5min` | key at `+0` (`seconds/86400`), then **288 × u8 BPM** at `+4` (5-min slots). Writer rejects outside ~40..220; reader zeroes outside `0x28..0xdc`. Ch-A `0x15` overwrites first 4 B with request index before fragmenting. |
 | `history_desc_bp_hourly` | key at `+0`, then 24 hourly 4-byte slots at `+4` as `[compact,0,0,0]` under the sole v14 writer; compact comes from HR bpm or timeout PRNG 70–74; `0x0d` emits only byte0 when `0x28..0xdc`. |
-| `history_desc_pressure_30min` / `history_desc_hrv_30min` | key at `+0`, then 48 half-hour one-byte samples at `+4`; responses send `[day_offset] + 48 samples` after the `0x1e050037` / `0x1e050039` header. |
+| `history_desc_pressure_30min` / `history_desc_hrv_30min` | key at `+0`, then 48 half-hour one-byte **score** samples at `+4`. Pressure auto-measure valid ~20..65; HRV ~30..50; else PRNG 30..49. Responses: header `0x1e050037`/`0x1e050039` then `[day_offset]+48 samples`. |
 
-No SpO2 history descriptor was found in this cluster. Channel-A `0x2c` only
-reads/writes the SpO2 enable bit in blob1, while `spo2_current_value` reports
-the current live measurement value for stop/result frames.
+Full producer-side layouts: `firmwares/_re/history-layouts/evidence.md`.
+
+`history_desc_activity_daily_24x2` is the SpO2-like max/min day table consumed by
+Channel-B `0x2a`. Channel-A `0x2c` only reads/writes the SpO2 enable bit in
+blob1; `spo2_current_value` reports the live measurement used to update the
+hourly max/min pair.
 
 #### Channel-B `0x5a` TLV storage
 
@@ -4942,7 +4953,7 @@ also points to the vendor-NAK path.
 | `0x9d` | `fee7_send_vendor_nak` | Vendor NAK `[0x9d\|0x80, 0xee, …]`; switch8 offset `0x37` → body `0x634e` (not the epilogue at `0x6352`). See `firmwares/_re/vendor-high-audit/evidence.md`. |
 | `0x9e` | `fee7_send_model_name_9e` | Sends custom blob0 string at `DAT_00827e8c + 0x7a` when enabled, otherwise literal `"H59MA_V1.0"`. |
 | `0x9f` | `fee7_noop_9f` | No response. |
-| `0xa0` | `fee7_send_status_frame_a0` | Multi-byte status frame built from battery/sensor/session state and fields from `DAT_00827e8c`. |
+| `0xa0` | `fee7_send_status_frame_a0` | Multi-byte status frame. Byte map (v14 `0x00827d1a`): `[1]=*(u8*)0x209dd0`, `[2]=0x23|0` mode-class flag, `[3]=0x21|0` secondary active, `[4]=battery%≤100`, `[5..6]=s16@0x209dbc+6`, `[7]=*(u8*)(0x2088fc+0x50)`, `[8..9]=u16@0x2088fc+0x42`, `[15]=cksum`. See `firmwares/_re/protocol-complete/evidence.md` §2.1. |
 
 A host should treat both ranges as *reserved* unless it can match
 a specific response shape from the watch.
@@ -6278,9 +6289,12 @@ sleep history without an acknowledgement or confirmation step.
 | 0x14.. | segment stages | Up to 40 generated sleep-stage entries. |
 | 0x3c.. | segment durations | Corresponding segment durations. |
 
-The exact stage-value meaning still needs live validation against host-decoded
-sleep graphs, but the storage path is clearly the sleep ring, not the alert or
-motor subsystem.
+Synthetic type distribution (from `fee7_generate_synthetic_sleep_record`):
+types **`2,3,4,5,0`** via `prng%100` bands; live path defaults to type **`5`**
+and uses type **`0`** for gaps ≥ 120 minutes. Minute buckets only sum types
+**2/3/5**. Clinical deep/light/REM labels still need live validation against
+host-decoded sleep graphs. Full producer notes:
+`firmwares/_re/history-layouts/evidence.md` §1.
 
 #### Why no response
 
@@ -7282,7 +7296,7 @@ is in `firmwares/_re/fee7-high/evidence.md`.
 | `0x9d` | `0x634e` | `0x58ba` (`fee7_send_vendor_nak`) | Vendor NAK `[0x9d\|0x80, 0xee, …]`. Earlier notes misread the shared epilogue at `0x6352` as the `0x9d` target. |
 | `0x9e` | `0x64a6` | `0x18c8` | Send ASCII model string, default `"H59MA_V1.0"` unless blob0 custom-name flag is enabled. |
 | `0x9f` | `0x64b6` | `0x1716` | Return only; no response. |
-| `0xa0` | `0x64ae` | `0x191a` | Send opaque high-status frame; bytes 1..9 are populated from runtime helpers and persistent state. |
+| `0xa0` | `0x64ae` | `0x191a` | High-status frame with mapped sources: live flag `0x209dd0`, mode markers `0x23`/`0x21`, battery%, s16 sensor word, blob0 bytes at `0x2088fc+0x50/+0x42` (see protocol-complete §2.1). |
 
 #### Cross-reference: ECG/PPG open question
 
