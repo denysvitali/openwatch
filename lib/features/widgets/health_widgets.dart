@@ -1,7 +1,15 @@
 export 'animated_heart_badge.dart';
+export 'confirm_dialog.dart';
+export 'empty_state.dart';
+export 'experimental_banner.dart';
 export 'health_card.dart';
 export 'health_list_tile.dart';
 export 'health_section_header.dart';
+export 'inset_card.dart';
+export 'loading_indicator.dart';
+export 'max_width_container.dart';
 export 'metric_grid.dart';
 export 'primary_health_button.dart';
+export 'settings_group.dart';
 export 'status_pill.dart';
+export 'sync_status_pill.dart';

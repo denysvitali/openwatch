@@ -7,8 +7,6 @@ import '../../core/protocol/channel_a.dart';
 import '../../core/providers/app_providers.dart';
 import '../../core/services/watch_manager.dart';
 import '../widgets/health_widgets.dart';
-import '../widgets/inset_card.dart';
-import '../widgets/max_width_container.dart';
 
 /// Clock-alarm management screen.
 ///
@@ -121,27 +119,16 @@ class AlarmsScreen extends ConsumerWidget {
     WidgetRef ref,
     Alarm alarm,
   ) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Clear alarm at ${alarm.labelTime}?'),
-        content: const Text(
+    final ok = await showConfirmDialog(
+      context,
+      title: 'Clear alarm at ${alarm.labelTime}?',
+      message:
           'The slot is disabled and can be re-armed any time without '
           're-entering the time.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Clear'),
-          ),
-        ],
-      ),
+      confirmLabel: 'Clear',
+      destructive: true,
     );
-    if (ok != true) return;
+    if (!ok) return;
     await ref.read(watchManagerProvider).deleteAlarm(slot: alarm.slot);
   }
 
@@ -456,15 +443,10 @@ class _NotReady extends StatelessWidget {
   const _NotReady();
   @override
   Widget build(BuildContext context) {
-    return const Center(
-      child: Padding(
-        padding: EdgeInsets.all(kSectionHeaderPaddingTop),
-        child: HealthCard(
-          icon: Icons.bluetooth_disabled,
-          title: 'Connect your watch',
-          caption: 'Connect your watch to manage alarms.',
-        ),
-      ),
+    return const EmptyState(
+      icon: Icons.bluetooth_disabled,
+      title: 'Connect your watch',
+      caption: 'Connect your watch to manage alarms.',
     );
   }
 }
@@ -473,15 +455,10 @@ class _Unsupported extends StatelessWidget {
   const _Unsupported();
   @override
   Widget build(BuildContext context) {
-    return const Center(
-      child: Padding(
-        padding: EdgeInsets.all(kSectionHeaderPaddingTop),
-        child: HealthCard(
-          icon: Icons.notifications_off_outlined,
-          title: 'Not supported',
-          caption: 'This watch does not advertise clock-alarm support.',
-        ),
-      ),
+    return const EmptyState(
+      icon: Icons.notifications_off_outlined,
+      title: 'Not supported',
+      caption: 'This watch does not advertise clock-alarm support.',
     );
   }
 }

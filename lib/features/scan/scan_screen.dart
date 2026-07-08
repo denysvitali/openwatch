@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,9 +8,9 @@ import 'package:permission_handler/permission_handler.dart';
 import '../../core/ble/ble_constants.dart';
 import '../../core/providers/app_providers.dart';
 import '../../core/services/app_log.dart';
+import '../../core/ui/app_colors.dart';
 import '../../core/ui/ui_constants.dart';
 import '../widgets/health_widgets.dart';
-import '../widgets/max_width_container.dart';
 
 /// Scans for nearby Oudmon watches and connects to the chosen one.
 class ScanScreen extends ConsumerStatefulWidget {
@@ -24,6 +25,7 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
   bool _connecting = false;
   bool _reconnecting = false;
   String? _reconnectName;
+  String? _connectingId;
 
   @override
   void initState() {
@@ -31,8 +33,6 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _maybeAutoReconnect());
   }
 
-  /// Tries to silently reconnect to the last paired watch on launch, so the
-  /// user doesn't have to scan & pair every time.
   Future<void> _maybeAutoReconnect() async {
     final svc = await ref.read(settingsServiceProvider.future);
     final id = svc.lastDeviceId;
@@ -99,10 +99,6 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
   }
 
   Future<bool> _ensurePermissions() async {
-    // Android 12+ (API 31+): the "Nearby devices" prompt covers BLUETOOTH_SCAN
-    // and BLUETOOTH_CONNECT. We declare BLUETOOTH_SCAN with `neverForLocation`,
-    // so location is NOT required (and ACCESS_FINE_LOCATION isn't even declared
-    // above SDK 30, so requesting it just returns denied).
     final scan = await Permission.bluetoothScan.request();
     final connect = await Permission.bluetoothConnect.request();
     final bleGranted =
@@ -110,8 +106,6 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
         (connect.isGranted || connect.isLimited);
     if (bleGranted) return true;
 
-    // Pre-Android-12: the Bluetooth permissions are normal-level (auto-granted)
-    // and a location grant is what actually gates BLE scanning.
     final loc = await Permission.locationWhenInUse.request();
     return loc.isGranted || loc.isLimited;
   }
@@ -119,6 +113,7 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
   Future<void> _connect(BluetoothDevice device) async {
     setState(() {
       _connecting = true;
+      _connectingId = device.remoteId.str;
       _error = null;
     });
     try {
@@ -129,7 +124,12 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
     } catch (e) {
       if (mounted) setState(() => _error = 'Connection failed: $e');
     } finally {
-      if (mounted) setState(() => _connecting = false);
+      if (mounted) {
+        setState(() {
+          _connecting = false;
+          _connectingId = null;
+        });
+      }
     }
   }
 
@@ -150,6 +150,7 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = AppColors.of(context);
     final adapter = ref.watch(adapterStateProvider).value;
     final scanning = ref.watch(isScanningProvider).value ?? false;
     final results =
@@ -169,7 +170,7 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
         ? 'Using your saved watch, then you can scan manually.'
         : bluetoothReady
         ? (results.isEmpty
-              ? 'Keep the watch nearby and awake for the best BLE signal.'
+              ? 'Keep the watch nearby and awake for the best signal.'
               : '${results.length} compatible ${results.length == 1 ? "watch" : "watches"} found.')
         : 'Turn on Bluetooth before scanning.';
 
@@ -181,10 +182,8 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
               content: Text(
                 'Reconnecting to ${_reconnectName ?? "your watch"}…',
               ),
-              leading: const SizedBox(
-                width: kIconSizeSmall,
-                height: kIconSizeSmall,
-                child: CircularProgressIndicator(strokeWidth: 2),
+              leading: const AppLoadingIndicator(
+                size: AppLoadingIndicatorSize.small,
               ),
               actions: [
                 TextButton(
@@ -213,12 +212,48 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
                 maxWidth: kMaxWidthContainerScan,
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(
-                    kSectionHeaderPaddingH,
+                    kScreenPaddingH,
                     kCardPadding,
-                    kSectionHeaderPaddingH,
+                    kScreenPaddingH,
                     96,
                   ),
                   children: [
+                    // Brand hero
+                    Center(
+                      child: Column(
+                        children: [
+                          Container(
+                            width: 72,
+                            height: 72,
+                            decoration: BoxDecoration(
+                              color: colors.accent.withValues(
+                                alpha: kMetricTintOpacity,
+                              ),
+                              shape: BoxShape.circle,
+                            ),
+                            alignment: Alignment.center,
+                            child: Icon(
+                              Icons.watch_rounded,
+                              size: 36,
+                              color: colors.accent,
+                            ),
+                          ),
+                          const SizedBox(height: kCardInternalSpacing),
+                          Text(
+                            'Connect your watch',
+                            style: AppTextStyles.headlineSmall(context),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: kSpacingTiny),
+                          Text(
+                            'OpenWatch talks to your Oudmon-based watch over Bluetooth — fully offline by default.',
+                            style: AppTextStyles.bodySmall(context),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: kSpacingXLarge),
                     if (_error != null) ...[
                       HealthCard(
                         icon: Icons.error_outline,
@@ -232,23 +267,23 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
                       icon: bluetoothReady
                           ? Icons.bluetooth_searching
                           : Icons.bluetooth_disabled,
-                      title: 'OpenWatch',
-                      value: statusTitle,
+                      title: statusTitle,
                       caption: statusCaption,
+                      metricColor: bluetoothReady
+                          ? colors.accent
+                          : theme.colorScheme.error,
                       trailing: scanning
-                          ? const SizedBox(
-                              width: kIconSizeLarge,
-                              height: kIconSizeLarge,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2.5,
-                              ),
+                          ? const AppLoadingIndicator(
+                              size: AppLoadingIndicatorSize.medium,
                             )
                           : null,
                     ),
                     const SizedBox(height: kGridSpacing),
                     PrimaryHealthButton(
                       label: scanning ? 'Stop scanning' : 'Scan for watches',
-                      icon: scanning ? Icons.stop : Icons.search,
+                      icon: scanning
+                          ? CupertinoIcons.stop_fill
+                          : CupertinoIcons.search,
                       onPressed: _connecting
                           ? null
                           : scanning
@@ -257,23 +292,32 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
                     ),
                     if (results.isEmpty) ...[
                       const SizedBox(height: kCardPadding),
-                      _EmptyScanState(scanning: scanning),
+                      EmptyState(
+                        icon: scanning ? Icons.radar : Icons.watch_outlined,
+                        title: scanning
+                            ? 'Searching for watches'
+                            : 'No watches found yet',
+                        caption: scanning
+                            ? 'Results appear as compatible devices advertise.'
+                            : 'Tap Scan and keep the watch close to this phone.',
+                        iconColor: colors.accent,
+                        action: scanning ? const AppLoadingIndicator() : null,
+                      ),
                     ] else ...[
                       const HealthSectionHeader(title: 'Nearby watches'),
-                      Card(
-                        margin: EdgeInsets.zero,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(kCardRadius),
-                        ),
-                        clipBehavior: Clip.antiAlias,
+                      InsetCard(
+                        padding: EdgeInsets.zero,
                         child: Column(
                           children: [
-                            for (final r in results)
+                            for (var i = 0; i < results.length; i++)
                               _DeviceTile(
-                                result: r,
+                                result: results[i],
                                 connecting: _connecting,
-                                onConnect: () => _connect(r.device),
+                                isThisConnecting:
+                                    _connectingId ==
+                                    results[i].device.remoteId.str,
+                                onConnect: () => _connect(results[i].device),
+                                showDivider: i != results.length - 1,
                               ),
                           ],
                         ),
@@ -284,7 +328,7 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
               ),
             ),
           ),
-          if (_connecting) const LinearProgressIndicator(),
+          if (_connecting) const LinearProgressIndicator(minHeight: 2),
         ],
       ),
     );
@@ -295,12 +339,16 @@ class _DeviceTile extends StatelessWidget {
   const _DeviceTile({
     required this.result,
     required this.connecting,
+    required this.isThisConnecting,
     required this.onConnect,
+    required this.showDivider,
   });
 
   final ScanResult result;
   final bool connecting;
+  final bool isThisConnecting;
   final VoidCallback onConnect;
+  final bool showDivider;
 
   @override
   Widget build(BuildContext context) {
@@ -331,38 +379,16 @@ class _DeviceTile extends StatelessWidget {
     return HealthListTile(
       leadingIcon: Icons.watch_rounded,
       title: name,
-      subtitle: result.device.remoteId.str,
-      trailing: StatusPill(
-        icon: signalIcon,
-        label: signalLabel,
-        color: signalColor,
-      ),
+      subtitle: isThisConnecting ? 'Connecting…' : 'Signal $signalLabel',
+      trailing: isThisConnecting
+          ? const AppLoadingIndicator(size: AppLoadingIndicatorSize.small)
+          : StatusPill(
+              icon: signalIcon,
+              label: signalLabel,
+              color: signalColor,
+            ),
       onTap: connecting ? null : onConnect,
-      showDivider: true,
-    );
-  }
-}
-
-class _EmptyScanState extends StatelessWidget {
-  const _EmptyScanState({required this.scanning});
-
-  final bool scanning;
-
-  @override
-  Widget build(BuildContext context) {
-    return HealthCard(
-      icon: scanning ? Icons.radar : Icons.watch_outlined,
-      title: scanning ? 'Searching for watches' : 'No watches found yet',
-      caption: scanning
-          ? 'Results appear here as compatible devices advertise.'
-          : 'Tap Scan and keep the watch close to this phone.',
-      trailing: scanning
-          ? const SizedBox(
-              width: kIconSizeLarge,
-              height: kIconSizeLarge,
-              child: CircularProgressIndicator(strokeWidth: 2.5),
-            )
-          : null,
+      showDivider: showDivider,
     );
   }
 }

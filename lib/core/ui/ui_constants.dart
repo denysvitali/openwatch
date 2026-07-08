@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'app_colors.dart';
+
 // Text sizes -------------------------------------------------------------
 
 const double kDisplayLarge = 40;
@@ -24,7 +26,7 @@ const double kCardPadding = 16;
 const double kCardRadius = 20;
 const double kCardInternalSpacing = 16;
 
-const double kSectionHeaderPaddingH = 20;
+const double kSectionHeaderPaddingH = 4;
 const double kSectionHeaderPaddingTop = 24;
 const double kSectionHeaderPaddingBottom = 12;
 
@@ -34,6 +36,9 @@ const double kListTilePaddingV = 12;
 const double kSpacingMini = 2;
 const double kSpacingTiny = 4;
 const double kSpacingSmall = 8;
+const double kSpacingMedium = 12;
+const double kSpacingLarge = 20;
+const double kSpacingXLarge = 24;
 
 const double kIconCircleSizeLarge = 48;
 const double kIconCircleSizeSmall = 36;
@@ -60,7 +65,7 @@ const double kChipPaddingV = 6;
 
 // Screen layout ------------------------------------------------------------
 
-const double kScreenPaddingH = 18;
+const double kScreenPaddingH = 16;
 const double kScreenPaddingTop = 8;
 const double kScreenPaddingBottom = 24;
 const double kEmptyStatePadding = 24;
@@ -74,32 +79,19 @@ const double kCardGradientOpacityEnd = 0.02;
 
 // Chart / metric colors ----------------------------------------------------
 //
-// These are functional data colors used by charts and metric highlights.
-// Each returns the appropriate light/dark variant.
+// Prefer [AppColors.of]; these helpers remain for chart code.
 
-Color kHeartRed(BuildContext context) {
-  return Theme.of(context).brightness == Brightness.dark
-      ? const Color(0xFFFF453A)
-      : const Color(0xFFFF3B30);
-}
+Color kHeartRed(BuildContext context) => AppColors.of(context).heart;
 
-Color kSleepPurple(BuildContext context) {
-  return Theme.of(context).brightness == Brightness.dark
-      ? const Color(0xFF5E5CE6)
-      : const Color(0xFF5856D6);
-}
+Color kSleepPurple(BuildContext context) => AppColors.of(context).sleep;
 
-Color kActivityGreen(BuildContext context) {
-  return Theme.of(context).brightness == Brightness.dark
-      ? const Color(0xFF30D158)
-      : const Color(0xFF34C759);
-}
+Color kActivityGreen(BuildContext context) => AppColors.of(context).activity;
 
-Color kStressOrange(BuildContext context) {
-  return Theme.of(context).brightness == Brightness.dark
-      ? const Color(0xFFFF9F0A)
-      : const Color(0xFFFF9500);
-}
+Color kStressOrange(BuildContext context) => AppColors.of(context).stress;
+
+Color kSpo2Blue(BuildContext context) => AppColors.of(context).spo2;
+
+Color kHrvTeal(BuildContext context) => AppColors.of(context).hrv;
 
 /// Convenience wrappers around [TextTheme] that use the UI constants above.
 ///

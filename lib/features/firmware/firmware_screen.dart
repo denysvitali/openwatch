@@ -11,7 +11,6 @@ import '../../core/services/app_log.dart';
 import '../../core/services/firmware_service.dart';
 import '../../core/ui/ui_constants.dart';
 import '../widgets/health_widgets.dart';
-import '../widgets/max_width_container.dart';
 
 /// Firmware management: fetch the latest image from the cloud (explicit, opt-in)
 /// and flash a locally-stored image over the air — offline-capable.
@@ -94,31 +93,16 @@ class _FirmwareScreenState extends ConsumerState<FirmwareScreen> {
       _toast('Connect to the watch first.');
       return;
     }
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(
-          'Flash firmware?',
-          style: AppTextStyles.titleLarge(context),
-        ),
-        content: Text(
+    final confirm = await showConfirmDialog(
+      context,
+      title: 'Flash firmware?',
+      message:
           'Install ${fw.name}? Keep the watch close and charged. '
-          'Interrupting an OTA can brick the device.',
-          style: AppTextStyles.bodyMedium(context),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Flash'),
-          ),
-        ],
-      ),
+          'Interrupting an OTA can brick the device. Stay in the app until flash completes.',
+      confirmLabel: 'Flash',
+      destructive: true,
     );
-    if (confirm != true) return;
+    if (!confirm) return;
 
     setState(() {
       _busy = true;
@@ -308,6 +292,15 @@ class _FirmwareScreenState extends ConsumerState<FirmwareScreen> {
                           busy: _busy,
                           onFlash: () => _flash(fw),
                           onDelete: () async {
+                            final ok = await showConfirmDialog(
+                              context,
+                              title: 'Delete firmware image?',
+                              message:
+                                  'Remove ${fw.name} from local storage. You can download it again later if cloud is enabled.',
+                              confirmLabel: 'Delete',
+                              destructive: true,
+                            );
+                            if (!ok) return;
                             await ref.read(firmwareServiceProvider).delete(fw);
                             await _reloadLocal();
                           },

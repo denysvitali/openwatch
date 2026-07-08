@@ -10,8 +10,6 @@ import '../../core/providers/app_providers.dart';
 import '../../core/services/history_debug_export.dart';
 import '../../core/services/history_sync.dart';
 import '../widgets/health_widgets.dart';
-import '../widgets/max_width_container.dart';
-import '../widgets/sync_status_pill.dart' show formatRelativeTime;
 import 'sleep_session_summary.dart';
 import 'widgets/hr_chart.dart';
 import 'widgets/scalar_chart.dart';
@@ -212,9 +210,9 @@ class _HistoryOverviewCard extends StatelessWidget {
 
     return HealthCard(
       icon: CupertinoIcons.chart_bar_alt_fill,
-      title: 'Local history',
+      title: 'History on this phone',
       metricColor: theme.colorScheme.primary,
-      trailing: _SyncStatusPill(sync: sync),
+      trailing: SyncStatusPill(sync: sync),
       caption: latest == null
           ? _describeLink(linkState)
           : 'Latest ${_formatDayTab(latest.day)}',
@@ -232,82 +230,50 @@ class _HistoryOverviewCard extends StatelessWidget {
             )?.copyWith(color: theme.colorScheme.onSurfaceVariant),
           ),
           const SizedBox(height: kGridSpacing),
-          MetricGrid(
+          Wrap(
+            spacing: kSpacingSmall,
+            runSpacing: kSpacingSmall,
             children: [
-              HealthCard(
+              StatusPill(
                 icon: CupertinoIcons.calendar,
-                value: '${days.length}',
-                unit: days.length == 1 ? 'day' : 'days',
-                caption: 'on phone',
-                metricColor: theme.colorScheme.onSurfaceVariant,
+                label: '${days.length} ${days.length == 1 ? 'day' : 'days'}',
               ),
-              HealthCard(
+              StatusPill(
                 icon: CupertinoIcons.clock,
-                value: sync.lastSyncedAt == null
-                    ? 'Never'
-                    : formatRelativeTime(sync.lastSyncedAt!),
-                caption: storeReady ? 'local watermark' : 'storage starting',
-                metricColor: theme.colorScheme.onSurfaceVariant,
+                label: sync.lastSyncedAt == null
+                    ? 'Never synced'
+                    : 'Synced ${formatRelativeTime(sync.lastSyncedAt!)}',
+                color: theme.colorScheme.secondary,
               ),
-              HealthCard(
-                icon: CupertinoIcons.waveform_path,
-                value: sync.watchDaysWithData.isEmpty
-                    ? 'Unknown'
-                    : '${sync.watchDaysWithData.length}',
-                caption: 'reported last sync',
-                metricColor: theme.colorScheme.onSurfaceVariant,
-              ),
-              HealthCard(
-                icon: CupertinoIcons.sparkles,
-                value: '${sync.fetchedDays.length}',
-                unit: sync.fetchedDays.length == 1 ? 'day' : 'days',
-                caption: 'new this sync',
-                metricColor: theme.colorScheme.onSurfaceVariant,
-              ),
+              if (sync.watchDaysWithData.isNotEmpty)
+                StatusPill(
+                  icon: CupertinoIcons.waveform_path,
+                  label: '${sync.watchDaysWithData.length} on watch',
+                ),
+              if (sync.fetchedDays.isNotEmpty)
+                StatusPill(
+                  icon: CupertinoIcons.sparkles,
+                  label: '+${sync.fetchedDays.length} this sync',
+                  color: theme.colorScheme.secondary,
+                ),
             ],
           ),
+          if (!storeReady) ...[
+            const SizedBox(height: kSpacingSmall),
+            Text(
+              'Preparing local storage…',
+              style: AppTextStyles.bodySmall(context),
+            ),
+          ],
           const SizedBox(height: kCardInternalSpacing),
           PrimaryHealthButton(
-            label: sync.syncing ? 'Syncing' : 'Sync history',
+            label: sync.syncing ? 'Syncing…' : 'Sync history',
             icon: sync.syncing ? null : CupertinoIcons.arrow_2_circlepath,
             onPressed: ready && !sync.syncing ? onSync : null,
           ),
         ],
       ),
     );
-  }
-}
-
-class _SyncStatusPill extends StatelessWidget {
-  const _SyncStatusPill({required this.sync});
-
-  final HistorySync sync;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    late final String label;
-    late final Color color;
-    late final IconData icon;
-    if (sync.syncing) {
-      label = 'Syncing';
-      color = theme.colorScheme.primary;
-      icon = Icons.sync;
-    } else if (sync.lastSyncError != null) {
-      label = 'Error';
-      color = theme.colorScheme.error;
-      icon = CupertinoIcons.exclamationmark_circle;
-    } else if (sync.lastSyncedAt == null) {
-      label = 'No sync';
-      color = theme.colorScheme.outline;
-      icon = Icons.cloud_off_rounded;
-    } else {
-      label = formatRelativeTime(sync.lastSyncedAt!);
-      color = theme.colorScheme.secondary;
-      icon = CupertinoIcons.checkmark_circle_fill;
-    }
-
-    return StatusPill(icon: icon, label: label, color: color);
   }
 }
 
@@ -337,7 +303,7 @@ class _HistoryTrendCard extends StatelessWidget {
           if (latest?.hr.isNotEmpty == true) ...[
             _TrendHeader(
               icon: CupertinoIcons.heart_fill,
-              title: 'Heart rate',
+              title: "Today's heart rate",
               detail: '${avgBpm(latest!.hr)} bpm avg',
               tint: kHeartRed(context),
             ),
@@ -508,43 +474,15 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final message = syncing
         ? 'Fetching history from your watch.'
         : ready
-        ? 'Use Sync history to pull local watch data.'
+        ? 'Use Sync history above to pull local watch data.'
         : 'Connect your watch, then sync history.';
-    return Padding(
-      padding: const EdgeInsets.symmetric(
-        vertical: kSectionHeaderPaddingTop * 2,
-      ),
-      child: Column(
-        children: [
-          Container(
-            width: kIconCircleSizeLarge + kSpacingSmall * 2,
-            height: kIconCircleSizeLarge + kSpacingSmall * 2,
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(kCardRadius),
-            ),
-            child: Icon(
-              CupertinoIcons.chart_bar,
-              size: kIconSizeLarge,
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: kCardInternalSpacing),
-          Text('No history yet', style: AppTextStyles.titleMedium(context)),
-          const SizedBox(height: kSpacingTiny),
-          Text(
-            message,
-            textAlign: TextAlign.center,
-            style: AppTextStyles.bodySmall(
-              context,
-            )?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-          ),
-        ],
-      ),
+    return EmptyState(
+      icon: CupertinoIcons.chart_bar,
+      title: 'No history yet',
+      caption: message,
     );
   }
 }

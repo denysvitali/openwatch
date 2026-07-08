@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:openwatch/core/ui/ui_constants.dart';
 
-/// A section header used to group cards and list rows.
+/// Section header for grouping cards and list rows.
 ///
-/// Horizontal padding [kSectionHeaderPaddingH], top [kSectionHeaderPaddingTop],
-/// bottom [kSectionHeaderPaddingBottom]. Title uses [kHeadlineSmall].
-/// An optional "Show All" text button can be provided.
+/// Only applies **vertical** padding so horizontal alignment matches the parent
+/// list's [kCardPadding] / [kScreenPaddingH]. Optional action button on the right.
 class HealthSectionHeader extends StatelessWidget {
   const HealthSectionHeader({
     super.key,
@@ -23,11 +22,9 @@ class HealthSectionHeader extends StatelessWidget {
     final theme = Theme.of(context);
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        kSectionHeaderPaddingH,
-        kSectionHeaderPaddingTop,
-        kSectionHeaderPaddingH,
-        kSectionHeaderPaddingBottom,
+      padding: const EdgeInsets.only(
+        top: kSectionHeaderPaddingTop,
+        bottom: kSectionHeaderPaddingBottom,
       ),
       child: Row(
         children: [

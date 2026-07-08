@@ -4,21 +4,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/providers/app_providers.dart';
+import '../../core/ui/app_colors.dart';
 import '../../core/ui/ui_constants.dart';
 import '../widgets/health_widgets.dart';
-import '../widgets/max_width_container.dart';
 
-/// Health metrics. Heart rate is wired to the live-measure commands; the
-/// remaining metrics are gated on device capabilities.
+/// Live measure hub. Heart rate is the hero; other metrics are capability-gated.
 class HealthScreen extends ConsumerWidget {
   const HealthScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    final metricColor = colorScheme.primary;
-
+    final colors = AppColors.of(context);
     final manager = ref.watch(watchManagerProvider);
     final ready = manager.isReady;
     final caps = manager.capabilities;
@@ -26,7 +22,7 @@ class HealthScreen extends ConsumerWidget {
     final bpSystolic = manager.lastBloodPressureSystolic;
     final bpDiastolic = manager.lastBloodPressureDiastolic;
     final bpValue = bpSystolic == null || bpDiastolic == null
-        ? '-'
+        ? '—'
         : '$bpSystolic/$bpDiastolic';
 
     final metrics = <_HealthMetric>[
@@ -34,10 +30,11 @@ class HealthScreen extends ConsumerWidget {
         _HealthMetric(
           icon: CupertinoIcons.drop_fill,
           title: 'Blood oxygen',
-          value: '-',
+          value: '—',
           unit: '%',
-          tint: metricColor,
-          onTap: () => context.push('/history'),
+          tint: colors.spo2,
+          subtitle: 'View trends in History',
+          onTap: () => context.go('/history'),
         ),
       if (caps.bloodPressure)
         _HealthMetric(
@@ -45,7 +42,7 @@ class HealthScreen extends ConsumerWidget {
           title: 'Blood pressure',
           value: bpValue,
           unit: 'mmHg',
-          tint: metricColor,
+          tint: colors.heart,
           ready: ready,
           measuring: manager.measuringBloodPressure,
           start: manager.startBloodPressure,
@@ -55,16 +52,18 @@ class HealthScreen extends ConsumerWidget {
         _HealthMetric(
           icon: CupertinoIcons.moon_fill,
           title: 'Sleep',
-          value: 'History',
-          tint: metricColor,
-          onTap: () => context.push('/history'),
+          value: 'View',
+          unit: 'history',
+          tint: colors.sleep,
+          subtitle: 'Stages and sessions',
+          onTap: () => context.go('/history'),
         ),
       if (caps.stress)
         _HealthMetric(
           icon: CupertinoIcons.bolt_fill,
           title: 'Stress',
-          value: manager.lastStress?.toString() ?? '-',
-          tint: metricColor,
+          value: manager.lastStress?.toString() ?? '—',
+          tint: colors.stress,
           ready: ready,
           measuring: manager.measuringStress,
           start: manager.startStress,
@@ -74,9 +73,9 @@ class HealthScreen extends ConsumerWidget {
         _HealthMetric(
           icon: CupertinoIcons.chart_bar_fill,
           title: 'HRV',
-          value: manager.lastHrv?.toString() ?? '-',
+          value: manager.lastHrv?.toString() ?? '—',
           unit: 'ms',
-          tint: metricColor,
+          tint: colors.hrv,
           ready: ready,
           measuring: manager.measuringHrv,
           start: manager.startHrv,
@@ -86,10 +85,11 @@ class HealthScreen extends ConsumerWidget {
         _HealthMetric(
           icon: CupertinoIcons.thermometer,
           title: 'Temperature',
-          value: '-',
+          value: '—',
           unit: '°C',
-          tint: metricColor,
-          onTap: () => context.push('/history'),
+          tint: colors.nutrition,
+          subtitle: 'View trends in History',
+          onTap: () => context.go('/history'),
         ),
     ];
 
@@ -97,12 +97,7 @@ class HealthScreen extends ConsumerWidget {
       appBar: AppBar(title: const Text('Health')),
       body: MaxWidthContainer(
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(
-            kCardPadding,
-            kSpacingSmall,
-            kCardPadding,
-            kSectionHeaderPaddingTop,
-          ),
+          padding: kScreenListPadding,
           children: [
             _HeartRateHero(
               bpm: manager.lastHeartRate,
@@ -111,7 +106,8 @@ class HealthScreen extends ConsumerWidget {
               measuring: manager.measuringHeartRate,
               start: manager.startHeartRate,
               stop: manager.stopHeartRate,
-              metricColor: metricColor,
+              metricColor: colors.heart,
+              onViewHistory: () => context.go('/history'),
             ),
             const HealthSectionHeader(title: 'Available metrics'),
             _MetricList(metrics: metrics),
@@ -131,6 +127,7 @@ class _HeartRateHero extends StatelessWidget {
     required this.start,
     required this.stop,
     required this.metricColor,
+    required this.onViewHistory,
   });
 
   final int? bpm;
@@ -140,6 +137,7 @@ class _HeartRateHero extends StatelessWidget {
   final VoidCallback start;
   final VoidCallback stop;
   final Color metricColor;
+  final VoidCallback onViewHistory;
 
   @override
   Widget build(BuildContext context) {
@@ -156,7 +154,7 @@ class _HeartRateHero extends StatelessWidget {
 
     return HealthCard(
       title: 'Heart rate',
-      value: bpm == null ? '-' : '$bpm',
+      value: bpm == null ? '—' : '$bpm',
       unit: bpm == null ? null : 'bpm',
       caption: statusText,
       icon: CupertinoIcons.heart_fill,
@@ -169,23 +167,33 @@ class _HeartRateHero extends StatelessWidget {
       ),
       child: Padding(
         padding: const EdgeInsets.only(top: kCardInternalSpacing),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Expanded(
-              child: PrimaryHealthButton(
-                label: 'Start',
-                icon: CupertinoIcons.play_fill,
-                onPressed: ready && supported && !measuring ? start : null,
-              ),
+            Row(
+              children: [
+                Expanded(
+                  child: PrimaryHealthButton(
+                    label: measuring ? 'Measuring…' : 'Start',
+                    icon: CupertinoIcons.play_fill,
+                    onPressed: ready && supported && !measuring ? start : null,
+                  ),
+                ),
+                const SizedBox(width: kGridSpacing),
+                Expanded(
+                  child: PrimaryHealthButton(
+                    label: 'Stop',
+                    icon: CupertinoIcons.stop_fill,
+                    onPressed: ready && supported && measuring ? stop : null,
+                    elevated: false,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(width: kGridSpacing),
-            Expanded(
-              child: PrimaryHealthButton(
-                label: 'Stop',
-                icon: CupertinoIcons.stop_fill,
-                onPressed: ready && supported && measuring ? stop : null,
-                elevated: false,
-              ),
+            const SizedBox(height: kSpacingSmall),
+            TextButton(
+              onPressed: onViewHistory,
+              child: const Text('See history charts'),
             ),
           ],
         ),
@@ -209,22 +217,16 @@ class _MetricList extends StatelessWidget {
       );
     }
 
-    return Card(
-      margin: EdgeInsets.zero,
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(kCardRadius),
-      ),
-      clipBehavior: Clip.antiAlias,
+    return InsetCard(
+      padding: EdgeInsets.zero,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          for (var i = 0; i < metrics.length; i++) ...[
+          for (var i = 0; i < metrics.length; i++)
             _MetricTile(
               metric: metrics[i],
               showDivider: i != metrics.length - 1,
             ),
-          ],
         ],
       ),
     );
@@ -240,7 +242,8 @@ class _MetricTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final effectiveValue = metric.measuring && metric.value == '-'
+    final effectiveValue =
+        metric.measuring && (metric.value == '—' || metric.value == '-')
         ? 'Measuring'
         : metric.value;
 
@@ -289,9 +292,12 @@ class _MetricTile extends StatelessWidget {
 
     return HealthListTile(
       title: metric.title,
-      subtitle: metric.unit,
+      subtitle: metric.subtitle ?? metric.unit,
       value: metric.start == null ? effectiveValue : null,
-      unit: metric.start == null ? null : metric.unit,
+      unit:
+          metric.start == null && metric.unit != null && metric.subtitle == null
+          ? metric.unit
+          : null,
       leadingIcon: metric.icon,
       leadingColor: metric.tint,
       trailing: trailing,
@@ -308,6 +314,7 @@ class _HealthMetric {
     required this.value,
     required this.tint,
     this.unit,
+    this.subtitle,
     this.ready = false,
     this.measuring = false,
     this.start,
@@ -320,6 +327,7 @@ class _HealthMetric {
   final String value;
   final Color tint;
   final String? unit;
+  final String? subtitle;
   final bool ready;
   final bool measuring;
   final VoidCallback? start;

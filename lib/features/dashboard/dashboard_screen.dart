@@ -8,17 +8,14 @@ import '../../core/ble/ble_transport.dart';
 import '../../core/protocol/channel_a.dart';
 import '../../core/providers/app_providers.dart';
 import '../../core/services/history_sync.dart';
+import '../../core/ui/app_colors.dart';
 import '../../core/ui/ui_constants.dart';
 import '../history/widgets/hr_chart.dart';
 import '../history/widgets/sleep_trend_chart.dart';
 import '../history/widgets/steps_chart.dart';
 import '../widgets/health_widgets.dart';
-import '../widgets/max_width_container.dart';
-import '../widgets/sync_status_pill.dart';
 
-/// Summary overview: connection state, device info, live metrics, and quick
-/// actions. This screen was previously called "Dashboard" and has been
-/// refreshed to match the Apple Health-like design system.
+/// Summary overview: connection, live metrics, recent activity, quick actions.
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
 
@@ -38,6 +35,7 @@ class DashboardScreen extends ConsumerWidget {
         final ah = a.hour.compareTo(b.hour);
         return ah != 0 ? ah : a.minute.compareTo(b.minute);
       });
+    final colors = AppColors.of(context);
 
     return Scaffold(
       appBar: AppBar(
@@ -53,61 +51,241 @@ class DashboardScreen extends ConsumerWidget {
                   }
                 : null,
           ),
-          IconButton(
-            icon: const Icon(CupertinoIcons.xmark_circle),
-            tooltip: 'Disconnect',
-            onPressed: () async {
-              await ref.read(bleTransportProvider).disconnect();
-              if (context.mounted) context.go('/scan');
+          PopupMenuButton<_SummaryMenu>(
+            tooltip: 'More',
+            icon: const Icon(CupertinoIcons.ellipsis_circle),
+            onSelected: (action) async {
+              switch (action) {
+                case _SummaryMenu.find:
+                  manager.findDevice();
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Watch will ring shortly')),
+                    );
+                  }
+                case _SummaryMenu.syncTime:
+                  manager.syncTime();
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Watch clock updated')),
+                    );
+                  }
+                case _SummaryMenu.disconnect:
+                  final ok = await showConfirmDialog(
+                    context,
+                    title: 'Disconnect watch?',
+                    message: 'You can reconnect anytime from the scan screen.',
+                    confirmLabel: 'Disconnect',
+                    destructive: true,
+                  );
+                  if (!ok || !context.mounted) return;
+                  await ref.read(bleTransportProvider).disconnect();
+                  if (context.mounted) context.go('/scan');
+              }
             },
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: _SummaryMenu.find,
+                enabled: link == LinkState.ready,
+                child: const Text('Find watch'),
+              ),
+              PopupMenuItem(
+                value: _SummaryMenu.syncTime,
+                enabled: link == LinkState.ready,
+                child: const Text('Sync time'),
+              ),
+              const PopupMenuDivider(),
+              const PopupMenuItem(
+                value: _SummaryMenu.disconnect,
+                child: Text('Disconnect'),
+              ),
+            ],
           ),
         ],
       ),
       body: MaxWidthContainer(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(
-            kCardPadding,
-            kSpacingSmall,
-            kCardPadding,
-            kCardPadding + kSpacingSmall,
-          ),
-          children: [
-            _DeviceHeroCard(
-              name: name,
-              status: _describe(link),
-              connected: link == LinkState.ready,
-              batteryPercent: manager.batteryPercent,
-              charging: manager.charging,
-              firmware: manager.firmwareRevision,
-              hardware: manager.hardwareRevision,
-            ),
-            if (manager.nowPlaying != null &&
-                manager.nowPlaying!.track.isNotEmpty) ...[
-              _NowPlayingCard(music: manager.nowPlaying!),
-              const SizedBox(height: kSpacingSmall),
+        child: RefreshIndicator(
+          onRefresh: () async {
+            if (link == LinkState.ready) {
+              manager.refreshSteps();
+              manager.refreshBattery();
+              await sync.syncAll();
+            }
+          },
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: kScreenListPadding,
+            children: [
+              _DeviceHeroCard(
+                name: name,
+                status: _describe(link),
+                connected: link == LinkState.ready,
+                connecting:
+                    link == LinkState.connecting ||
+                    link == LinkState.discovering ||
+                    link == LinkState.readingDeviceInfo,
+                batteryPercent: manager.batteryPercent,
+                charging: manager.charging,
+                onReconnect: link != LinkState.ready
+                    ? () => context.go('/scan')
+                    : null,
+              ),
+              if (manager.nowPlaying != null &&
+                  manager.nowPlaying!.track.isNotEmpty) ...[
+                const SizedBox(height: kGridSpacing),
+                _NowPlayingCard(music: manager.nowPlaying!),
+              ],
+              const HealthSectionHeader(title: 'Today'),
+              _MetricGrid(
+                steps: manager.todaySteps ?? today?.steps,
+                calories: manager.todayCalories ?? today?.energyKcal,
+                heartRate: heartRate == 0 ? null : heartRate,
+                distanceMeters: today?.distanceMeters,
+                colors: colors,
+              ),
+              HealthSectionHeader(
+                title: 'Recent activity',
+                onShowAll: () => context.go('/history'),
+                actionLabel: 'History',
+              ),
+              _RecentActivityCard(sync: sync),
+              const HealthSectionHeader(title: 'Quick actions'),
+              _QuickActions(
+                ready: link == LinkState.ready,
+                syncingHistory: sync.syncing,
+                findDevice: () {
+                  manager.findDevice();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Watch will ring shortly')),
+                  );
+                },
+                syncTime: () {
+                  manager.syncTime();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Watch clock updated')),
+                  );
+                },
+                syncHistory: () => sync.syncAll(),
+              ),
+              HealthSectionHeader(
+                title: 'Alarms',
+                onShowAll: link == LinkState.ready
+                    ? () => context.push('/alarms')
+                    : null,
+                actionLabel: 'Manage',
+              ),
+              if (armedAlarms.isNotEmpty)
+                _AlarmsSummary(
+                  count: armedAlarms.length,
+                  next: armedAlarms.first,
+                )
+              else
+                HealthCard(
+                  icon: CupertinoIcons.alarm,
+                  title: 'No alarms armed',
+                  caption: link == LinkState.ready
+                      ? 'Tap to set a wake-up alarm on the watch.'
+                      : 'Connect your watch to manage alarms.',
+                  metricColor: colors.accent,
+                  onTap: link == LinkState.ready
+                      ? () => context.push('/alarms')
+                      : null,
+                ),
             ],
-            const HealthSectionHeader(title: 'Metrics'),
-            _MetricGrid(
-              steps: manager.todaySteps ?? today?.steps,
-              calories: manager.todayCalories ?? today?.energyKcal,
-              heartRate: heartRate == 0 ? null : heartRate,
-              distanceMeters: today?.distanceMeters,
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _describe(LinkState s) => switch (s) {
+    LinkState.ready => 'Connected',
+    LinkState.connecting => 'Connecting…',
+    LinkState.disconnected => 'Disconnected',
+    LinkState.discovering => 'Discovering…',
+    LinkState.readingDeviceInfo => 'Reading device…',
+  };
+}
+
+enum _SummaryMenu { find, syncTime, disconnect }
+
+class _DeviceHeroCard extends StatelessWidget {
+  const _DeviceHeroCard({
+    required this.name,
+    required this.status,
+    required this.connected,
+    required this.connecting,
+    required this.batteryPercent,
+    required this.charging,
+    this.onReconnect,
+  });
+
+  final String name;
+  final String status;
+  final bool connected;
+  final bool connecting;
+  final int? batteryPercent;
+  final bool charging;
+  final VoidCallback? onReconnect;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = AppColors.of(context);
+    final statusColor = connected
+        ? colors.activity
+        : connecting
+        ? colors.stress
+        : theme.colorScheme.onSurfaceVariant;
+
+    return HealthCard(
+      title: name,
+      caption: status,
+      icon: Icons.watch_rounded,
+      metricColor: colors.accent,
+      trailing: StatusPill(
+        icon: charging
+            ? CupertinoIcons.battery_charging
+            : _batteryIcon(batteryPercent),
+        label: batteryPercent == null ? '—' : '$batteryPercent%',
+        color: charging
+            ? colors.activity
+            : (batteryPercent != null && batteryPercent! <= 20)
+            ? colors.heart
+            : theme.colorScheme.onSurface,
+      ),
+      child: Padding(
+        padding: const EdgeInsets.only(top: kCardInternalSpacing),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Wrap(
+              spacing: kSpacingSmall,
+              runSpacing: kSpacingSmall,
+              children: [
+                StatusPill(
+                  icon: connected
+                      ? CupertinoIcons.checkmark_circle_fill
+                      : connecting
+                      ? CupertinoIcons.arrow_2_circlepath
+                      : CupertinoIcons.xmark_circle_fill,
+                  label: status,
+                  color: statusColor,
+                ),
+                if (charging)
+                  StatusPill(
+                    icon: CupertinoIcons.bolt_fill,
+                    label: 'Charging',
+                    color: colors.activity,
+                  ),
+              ],
             ),
-            const HealthSectionHeader(title: 'Recent Activity'),
-            _RecentActivityCard(sync: sync),
-            const HealthSectionHeader(title: 'Actions'),
-            _QuickActions(
-              ready: link == LinkState.ready,
-              syncingHistory: sync.syncing,
-              findDevice: manager.findDevice,
-              syncTime: manager.syncTime,
-              syncHistory: sync.syncAll,
-            ),
-            if (armedAlarms.isNotEmpty) ...[
-              const HealthSectionHeader(title: 'Alarms', onShowAll: null),
-              _AlarmsSummary(
-                count: armedAlarms.length,
-                next: armedAlarms.first,
+            if (onReconnect != null) ...[
+              const SizedBox(height: kCardInternalSpacing),
+              PrimaryHealthButton(
+                label: 'Reconnect',
+                icon: Icons.bluetooth,
+                onPressed: onReconnect,
               ),
             ],
           ],
@@ -116,80 +294,12 @@ class DashboardScreen extends ConsumerWidget {
     );
   }
 
-  String _describe(LinkState s) => switch (s) {
-    LinkState.ready => 'Connected',
-    LinkState.connecting => 'Connecting',
-    LinkState.disconnected => 'Disconnected',
-    LinkState.discovering => 'Discovering services',
-    LinkState.readingDeviceInfo => 'Reading device info',
-  };
-}
-
-class _DeviceHeroCard extends StatelessWidget {
-  const _DeviceHeroCard({
-    required this.name,
-    required this.status,
-    required this.connected,
-    required this.batteryPercent,
-    required this.charging,
-    required this.firmware,
-    required this.hardware,
-  });
-
-  final String name;
-  final String status;
-  final bool connected;
-  final int? batteryPercent;
-  final bool charging;
-  final String firmware;
-  final String hardware;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final statusColor = connected
-        ? theme.colorScheme.secondary
-        : theme.colorScheme.onSurfaceVariant;
-
-    return HealthCard(
-      title: name,
-      caption: status,
-      icon: Icons.watch_rounded,
-      metricColor: theme.colorScheme.primary,
-      trailing: StatusPill(
-        icon: charging
-            ? CupertinoIcons.battery_charging
-            : CupertinoIcons.battery_100,
-        label: batteryPercent == null ? '-' : '$batteryPercent%',
-        color: charging
-            ? theme.colorScheme.secondary
-            : theme.colorScheme.onSurface,
-      ),
-      child: Padding(
-        padding: const EdgeInsets.only(top: kCardInternalSpacing),
-        child: Wrap(
-          spacing: kSpacingSmall,
-          runSpacing: kSpacingSmall,
-          children: [
-            StatusPill(
-              icon: connected
-                  ? CupertinoIcons.checkmark_circle_fill
-                  : CupertinoIcons.xmark_circle_fill,
-              label: status,
-              color: statusColor,
-            ),
-            StatusPill(
-              icon: CupertinoIcons.square_stack_3d_up,
-              label: firmware.isEmpty ? 'Firmware -' : 'Firmware $firmware',
-            ),
-            StatusPill(
-              icon: Icons.memory_rounded,
-              label: hardware.isEmpty ? 'Hardware -' : 'Hardware $hardware',
-            ),
-          ],
-        ),
-      ),
-    );
+  IconData _batteryIcon(int? percent) {
+    if (percent == null) return CupertinoIcons.battery_empty;
+    if (percent <= 15) return CupertinoIcons.battery_empty;
+    if (percent <= 40) return CupertinoIcons.battery_25;
+    if (percent <= 70) return CupertinoIcons.battery_25;
+    return CupertinoIcons.battery_full;
   }
 }
 
@@ -199,12 +309,14 @@ class _MetricGrid extends StatelessWidget {
     required this.calories,
     required this.heartRate,
     required this.distanceMeters,
+    required this.colors,
   });
 
   final int? steps;
   final int? calories;
   final int? heartRate;
   final int? distanceMeters;
+  final AppColors colors;
 
   @override
   Widget build(BuildContext context) {
@@ -220,26 +332,30 @@ class _MetricGrid extends StatelessWidget {
               icon: CupertinoIcons.arrow_up_right,
               title: 'Steps',
               value: _formatInt(steps),
+              metricColor: colors.activity,
             ),
             HealthCard(
               icon: CupertinoIcons.heart_fill,
               title: 'Heart',
-              value: heartRate == null ? '-' : '$heartRate',
+              value: heartRate == null ? '—' : '$heartRate',
               unit: heartRate == null ? null : 'bpm',
+              metricColor: colors.heart,
             ),
             HealthCard(
               icon: CupertinoIcons.flame_fill,
               title: 'Energy',
               value: _formatInt(calories),
               unit: calories == null ? null : 'kcal',
+              metricColor: colors.nutrition,
             ),
             HealthCard(
               icon: CupertinoIcons.location_fill,
               title: 'Distance',
               value: distanceMeters == null
-                  ? '-'
+                  ? '—'
                   : (distanceMeters! / 1000).toStringAsFixed(2),
               unit: distanceMeters == null ? null : 'km',
+              metricColor: colors.accent,
             ),
           ],
         );
@@ -248,13 +364,11 @@ class _MetricGrid extends StatelessWidget {
   }
 
   static String _formatInt(int? value) {
-    if (value == null) return '-';
+    if (value == null) return '—';
     return NumberFormat.compact().format(value);
   }
 }
 
-/// Surfaces the most-recent locally-stored activity without forcing the
-/// user to navigate to `/history`.
 class _RecentActivityCard extends StatelessWidget {
   const _RecentActivityCard({required this.sync});
   final HistorySync sync;
@@ -262,18 +376,16 @@ class _RecentActivityCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = AppColors.of(context);
     if (sync.days.isEmpty) {
       return HealthCard(
         icon: CupertinoIcons.chart_bar,
         title: 'Activity',
         caption: sync.syncing
-            ? 'Syncing history from your watch...'
-            : 'No history stored on this phone yet. Tap to open History.',
-        onTap: () => context.push('/history'),
-        trailing: Icon(
-          CupertinoIcons.chevron_forward,
-          color: theme.colorScheme.onSurfaceVariant,
-        ),
+            ? 'Syncing history from your watch…'
+            : 'No history on this phone yet. Open History to sync.',
+        onTap: () => context.go('/history'),
+        trailing: const ChevronIcon(),
       );
     }
 
@@ -281,14 +393,14 @@ class _RecentActivityCard extends StatelessWidget {
     final sleepSummary = SleepTrendSummary.fromDays(recent);
     final trendText = sleepSummary.trendMinutes == null
         ? 'Daily sleep time'
-        : '${sleepSummary.trendMinutes! >= 0 ? '+' : '-'}${_formatTrendMinutes(sleepSummary.trendMinutes!.abs())} vs prior';
+        : '${sleepSummary.trendMinutes! >= 0 ? '+' : '−'}${_formatTrendMinutes(sleepSummary.trendMinutes!.abs())} vs prior';
     final today = sync.days.last;
 
     return HealthCard(
       icon: CupertinoIcons.chart_bar_alt_fill,
       title: 'Activity',
       caption: _subtitle(today),
-      metricColor: theme.colorScheme.primary,
+      metricColor: colors.accent,
       trailing: SyncStatusPill(sync: sync),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -301,7 +413,7 @@ class _RecentActivityCard extends StatelessWidget {
           if (sleepSummary.hasData) ...[
             HealthListTile(
               leadingIcon: CupertinoIcons.moon_fill,
-              leadingColor: theme.colorScheme.primary,
+              leadingColor: colors.sleep,
               title: 'Sleep trend',
               subtitle: trendText,
               control: Text(
@@ -386,46 +498,42 @@ class _QuickActions extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final wide = constraints.maxWidth >= 560;
-        return GridView.count(
-          crossAxisCount: wide ? 4 : 2,
-          crossAxisSpacing: kGridSpacing,
-          mainAxisSpacing: kGridSpacing,
-          childAspectRatio: wide ? 2.55 : 3.2,
-          physics: const NeverScrollableScrollPhysics(),
-          shrinkWrap: true,
-          children: [
-            PrimaryHealthButton(
-              label: 'Find',
-              icon: CupertinoIcons.waveform,
-              onPressed: ready ? findDevice : null,
-            ),
-            PrimaryHealthButton(
-              label: 'Time',
-              icon: CupertinoIcons.clock,
-              onPressed: ready ? syncTime : null,
-            ),
-            PrimaryHealthButton(
-              label: syncingHistory ? 'Syncing' : 'Sync',
-              icon: syncingHistory ? null : CupertinoIcons.arrow_2_circlepath,
-              onPressed: ready && !syncingHistory ? syncHistory : null,
-            ),
-            PrimaryHealthButton(
-              label: 'History',
-              icon: CupertinoIcons.chart_bar,
-              onPressed: () => context.push('/history'),
-            ),
-          ],
-        );
-      },
+    return InsetCard(
+      padding: EdgeInsets.zero,
+      child: Column(
+        children: [
+          HealthListTile(
+            title: 'Find watch',
+            subtitle: 'Ring the watch so you can locate it',
+            leadingIcon: CupertinoIcons.waveform,
+            onTap: ready ? findDevice : null,
+          ),
+          HealthListTile(
+            title: 'Sync time',
+            subtitle: 'Set the watch clock to this phone',
+            leadingIcon: CupertinoIcons.clock,
+            onTap: ready ? syncTime : null,
+          ),
+          HealthListTile(
+            title: syncingHistory ? 'Syncing history…' : 'Sync history',
+            subtitle: 'Pull missing days onto this phone',
+            leadingIcon: CupertinoIcons.arrow_2_circlepath,
+            onTap: ready && !syncingHistory ? syncHistory : null,
+          ),
+          HealthListTile(
+            title: 'Open history',
+            subtitle: 'Charts, sleep, and daily detail',
+            leadingIcon: CupertinoIcons.chart_bar,
+            trailingChevron: true,
+            onTap: () => context.go('/history'),
+            showDivider: false,
+          ),
+        ],
+      ),
     );
   }
 }
 
-/// Compact row showing how many clock alarms the user has set and the
-/// earliest one. Tapping the row opens the alarms editor.
 class _AlarmsSummary extends StatelessWidget {
   const _AlarmsSummary({required this.count, required this.next});
 
@@ -435,27 +543,22 @@ class _AlarmsSummary extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final time = next.labelTime;
-    final theme = Theme.of(context);
-    return HealthListTile(
-      title: 'Clock alarms',
-      subtitle: '$count armed — next at $time',
-      leadingIcon: CupertinoIcons.alarm,
-      leadingColor: theme.colorScheme.primary,
-      value: '$count',
-      onTap: () => GoRouter.of(context).push('/alarms'),
+    final colors = AppColors.of(context);
+    return InsetCard(
+      padding: EdgeInsets.zero,
+      child: HealthListTile(
+        title: 'Clock alarms',
+        subtitle: '$count armed — next at $time',
+        leadingIcon: CupertinoIcons.alarm,
+        leadingColor: colors.accent,
+        value: '$count',
+        onTap: () => GoRouter.of(context).push('/alarms'),
+        showDivider: false,
+      ),
     );
   }
 }
 
-/// Surfaces the watch's now-playing push (`0x1d`) without taking over
-/// the screen — a compact card that sits between the hero card and the
-/// metric grid.
-///
-/// Only rendered when [WatchManager.nowPlaying] is non-null AND
-/// carries a non-empty track name. The `MusicRsp` decoder emits an
-/// empty `track` when the wire bytes don't include one, so hiding
-/// the card on `track.isEmpty` keeps a malformed push from showing
-/// as a blank row.
 class _NowPlayingCard extends StatelessWidget {
   const _NowPlayingCard({required this.music});
 
@@ -464,9 +567,12 @@ class _NowPlayingCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = AppColors.of(context);
     final tint = music.isPlaying
-        ? theme.colorScheme.primary
+        ? colors.accent
         : theme.colorScheme.onSurfaceVariant;
+    // Wire volume is 0..255; show as percent for humans.
+    final volPct = ((music.volume.clamp(0, 255) / 255) * 100).round();
     return HealthCard(
       icon: music.isPlaying
           ? CupertinoIcons.music_note_2
@@ -475,12 +581,12 @@ class _NowPlayingCard extends StatelessWidget {
       caption: music.track,
       metricColor: tint,
       trailing: StatusPill(
-        icon: music.volume == 0
+        icon: volPct == 0
             ? CupertinoIcons.volume_off
-            : music.volume < 64
+            : volPct < 40
             ? CupertinoIcons.volume_down
             : CupertinoIcons.volume_up,
-        label: '${music.volume}',
+        label: '$volPct%',
         color: theme.colorScheme.onSurfaceVariant,
       ),
     );

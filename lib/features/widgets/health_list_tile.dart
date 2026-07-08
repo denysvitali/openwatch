@@ -143,8 +143,10 @@ class HealthListTile extends StatelessWidget {
   Widget _buildTrailing(BuildContext context, Widget? trailingWidget) {
     final theme = Theme.of(context);
     if (trailingWidget != null) return trailingWidget;
+    // Chevron only when explicitly requested or the row is tappable.
+    final showChevron = trailingChevron || onTap != null;
     if (value == null && unit == null) {
-      return trailingChevron ? const ChevronIcon() : const SizedBox.shrink();
+      return showChevron ? const ChevronIcon() : const SizedBox.shrink();
     }
     return Row(
       crossAxisAlignment: CrossAxisAlignment.baseline,
@@ -160,8 +162,10 @@ class HealthListTile extends StatelessWidget {
           ),
         if (value != null && unit != null) const SizedBox(width: kSpacingTiny),
         if (unit != null) Text(unit!, style: AppTextStyles.bodySmall(context)),
-        const SizedBox(width: kSpacingTiny),
-        const ChevronIcon(),
+        if (showChevron) ...[
+          const SizedBox(width: kSpacingTiny),
+          const ChevronIcon(),
+        ],
       ],
     );
   }

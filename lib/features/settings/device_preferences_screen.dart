@@ -6,7 +6,6 @@ import '../../core/providers/app_providers.dart';
 import '../../core/services/watch_manager.dart';
 import '../../core/ui/ui_constants.dart';
 import '../widgets/health_widgets.dart';
-import '../widgets/inset_card.dart';
 
 /// Watch-side preferences surfaced from `PROTOCOL.md` §4.2.
 ///
@@ -25,173 +24,179 @@ class DevicePreferencesScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Watch preferences')),
-      body: ListView(
-        padding: const EdgeInsets.only(bottom: kCardPadding),
-        children: [
-          if (!ready)
-            Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: kCardPadding,
-                vertical: kSpacingTiny,
-              ),
-              child: HealthCard(
-                icon: Icons.bluetooth_disabled,
-                metricColor: theme.colorScheme.error,
-                caption: 'Connect a watch to change device-side preferences',
-                trailing: StatusPill(
-                  icon: Icons.info_outline,
-                  label: 'Disconnected',
-                  color: theme.colorScheme.error,
+      body: MaxWidthContainer(
+        child: ListView(
+          padding: const EdgeInsets.only(bottom: kScreenPaddingBottom),
+          children: [
+            if (!ready)
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: kCardPadding,
+                  vertical: kSpacingTiny,
+                ),
+                child: HealthCard(
+                  icon: Icons.bluetooth_disabled,
+                  metricColor: theme.colorScheme.error,
+                  caption: 'Connect a watch to change device-side preferences',
+                  trailing: StatusPill(
+                    icon: Icons.info_outline,
+                    label: 'Disconnected',
+                    color: theme.colorScheme.error,
+                  ),
                 ),
               ),
-            ),
-          const HealthSectionHeader(title: 'Display'),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
-            child: InsetCard(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _PreferenceTile(
-                    icon: Icons.access_time_filled,
-                    title: 'Time format',
-                    subtitle: '12-hour vs 24-hour',
-                    enabled: ready,
-                    onTap: () => _pickTimeFormat(context, manager),
-                  ),
-                  _PreferenceTile(
-                    icon: Icons.thermostat,
-                    title: 'Temperature unit',
-                    subtitle: 'Celsius / Fahrenheit',
-                    enabled: ready,
-                    onTap: () => _pickTemperatureUnit(context, manager),
-                  ),
-                  _PreferenceTile(
-                    icon: Icons.auto_awesome,
-                    title: 'Display clock',
-                    subtitle: 'Always-on face when idle',
-                    enabled: ready,
-                    onTap: () => _toggleDisplayClock(context, manager),
-                  ),
-                  _PreferenceTile(
-                    icon: Icons.palette,
-                    title: 'Theme',
-                    subtitle: 'Pick a vendor theme id (0..N)',
-                    enabled: ready,
-                    onTap: () => _pickId(context, 'Theme id', manager.setTheme),
-                  ),
-                  _PreferenceTile(
-                    icon: Icons.wallpaper,
-                    title: 'Wallpaper',
-                    subtitle: 'Pick a vendor wallpaper id (0..N)',
-                    enabled: ready,
-                    onTap: () =>
-                        _pickId(context, 'Wallpaper id', manager.setWallpaper),
-                    showDivider: false,
-                  ),
-                ],
-              ),
-            ),
-          ),
-          if (caps.bloodPressure || caps.stress || caps.bloodOxygen)
-            const HealthSectionHeader(title: 'Auto-measure'),
-          if (caps.bloodPressure || caps.stress || caps.bloodOxygen)
+            const HealthSectionHeader(title: 'Display'),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
               child: InsetCard(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (caps.bloodOxygen)
-                      _PreferenceTile(
-                        icon: CupertinoIcons.drop_fill,
-                        title: 'Blood-oxygen auto-measure',
-                        subtitle: 'Periodic SpO2 sampling',
-                        enabled: ready,
-                        onTap: () => _toggleAutoMeasure(
-                          context,
-                          'Blood-oxygen auto-measure',
-                          manager.setBloodOxygenSetting,
-                        ),
+                    _PreferenceTile(
+                      icon: Icons.access_time_filled,
+                      title: 'Time format',
+                      subtitle: '12-hour vs 24-hour',
+                      enabled: ready,
+                      onTap: () => _pickTimeFormat(context, manager),
+                    ),
+                    _PreferenceTile(
+                      icon: Icons.thermostat,
+                      title: 'Temperature unit',
+                      subtitle: 'Celsius / Fahrenheit',
+                      enabled: ready,
+                      onTap: () => _pickTemperatureUnit(context, manager),
+                    ),
+                    _PreferenceTile(
+                      icon: Icons.auto_awesome,
+                      title: 'Display clock',
+                      subtitle: 'Always-on face when idle',
+                      enabled: ready,
+                      onTap: () => _toggleDisplayClock(context, manager),
+                    ),
+                    _PreferenceTile(
+                      icon: Icons.palette,
+                      title: 'Theme',
+                      subtitle: 'Pick a vendor theme id (0..N)',
+                      enabled: ready,
+                      onTap: () =>
+                          _pickId(context, 'Theme id', manager.setTheme),
+                    ),
+                    _PreferenceTile(
+                      icon: Icons.wallpaper,
+                      title: 'Wallpaper',
+                      subtitle: 'Pick a vendor wallpaper id (0..N)',
+                      enabled: ready,
+                      onTap: () => _pickId(
+                        context,
+                        'Wallpaper id',
+                        manager.setWallpaper,
                       ),
-                    if (caps.stress)
-                      _PreferenceTile(
-                        icon: CupertinoIcons.bolt_fill,
-                        title: 'Stress auto-measure',
-                        subtitle: 'Periodic pressure (stress) sampling',
-                        enabled: ready,
-                        onTap: () => _toggleAutoMeasure(
-                          context,
-                          'Stress auto-measure',
-                          manager.setPressureSetting,
-                        ),
-                      ),
-                    if (caps.bloodPressure)
-                      _PreferenceTile(
-                        icon: CupertinoIcons.waveform_path_ecg,
-                        title: 'Blood-pressure window',
-                        subtitle: 'Schedule BP measurement window',
-                        enabled: ready,
-                        onTap: () => _pickBpWindow(context, manager),
-                        showDivider: false,
-                      ),
+                      showDivider: false,
+                    ),
                   ],
                 ),
               ),
             ),
-          const HealthSectionHeader(title: 'Reminders'),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
-            child: InsetCard(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _PreferenceTile(
-                    icon: Icons.do_not_disturb_on,
-                    title: 'Do not disturb',
-                    subtitle: 'Configure a daily quiet window',
-                    enabled: ready,
-                    onTap: () => _pickDndWindow(context, manager),
+            if (caps.bloodPressure || caps.stress || caps.bloodOxygen)
+              const HealthSectionHeader(title: 'Auto-measure'),
+            if (caps.bloodPressure || caps.stress || caps.bloodOxygen)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
+                child: InsetCard(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (caps.bloodOxygen)
+                        _PreferenceTile(
+                          icon: CupertinoIcons.drop_fill,
+                          title: 'Blood-oxygen auto-measure',
+                          subtitle: 'Periodic SpO2 sampling',
+                          enabled: ready,
+                          onTap: () => _toggleAutoMeasure(
+                            context,
+                            'Blood-oxygen auto-measure',
+                            manager.setBloodOxygenSetting,
+                          ),
+                        ),
+                      if (caps.stress)
+                        _PreferenceTile(
+                          icon: CupertinoIcons.bolt_fill,
+                          title: 'Stress auto-measure',
+                          subtitle: 'Periodic pressure (stress) sampling',
+                          enabled: ready,
+                          onTap: () => _toggleAutoMeasure(
+                            context,
+                            'Stress auto-measure',
+                            manager.setPressureSetting,
+                          ),
+                        ),
+                      if (caps.bloodPressure)
+                        _PreferenceTile(
+                          icon: CupertinoIcons.waveform_path_ecg,
+                          title: 'Blood-pressure window',
+                          subtitle: 'Schedule BP measurement window',
+                          enabled: ready,
+                          onTap: () => _pickBpWindow(context, manager),
+                          showDivider: false,
+                        ),
+                    ],
                   ),
-                  _PreferenceTile(
-                    icon: Icons.airline_seat_recline_normal,
-                    title: 'Sit reminder',
-                    subtitle: 'Sedentary alert cadence',
-                    enabled: ready,
-                    onTap: () => _pickSitReminder(context, manager),
-                  ),
-                  _PreferenceTile(
-                    icon: Icons.local_drink,
-                    title: 'Drink alarm',
-                    subtitle: 'Stay-hydrated reminder',
-                    enabled: ready,
-                    onTap: () => _pickDrinkAlarm(context, manager),
-                    showDivider: false,
-                  ),
-                ],
+                ),
+              ),
+            const HealthSectionHeader(title: 'Reminders'),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
+              child: InsetCard(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _PreferenceTile(
+                      icon: Icons.do_not_disturb_on,
+                      title: 'Do not disturb',
+                      subtitle: 'Configure a daily quiet window',
+                      enabled: ready,
+                      onTap: () => _pickDndWindow(context, manager),
+                    ),
+                    _PreferenceTile(
+                      icon: Icons.airline_seat_recline_normal,
+                      title: 'Sit reminder',
+                      subtitle: 'Sedentary alert cadence',
+                      enabled: ready,
+                      onTap: () => _pickSitReminder(context, manager),
+                    ),
+                    _PreferenceTile(
+                      icon: Icons.local_drink,
+                      title: 'Drink alarm',
+                      subtitle: 'Stay-hydrated reminder',
+                      enabled: ready,
+                      onTap: () => _pickDrinkAlarm(context, manager),
+                      showDivider: false,
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-          const HealthSectionHeader(title: 'Goals'),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
-            child: InsetCard(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _PreferenceTile(
-                    icon: Icons.flag,
-                    title: 'Daily goals',
-                    subtitle: 'Steps / calories / distance targets',
-                    enabled: ready,
-                    onTap: () => _pickTarget(context, manager),
-                    showDivider: false,
-                  ),
-                ],
+            const HealthSectionHeader(title: 'Goals'),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
+              child: InsetCard(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _PreferenceTile(
+                      icon: Icons.flag,
+                      title: 'Daily goals',
+                      subtitle: 'Steps / calories / distance targets',
+                      enabled: ready,
+                      onTap: () => _pickTarget(context, manager),
+                      showDivider: false,
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

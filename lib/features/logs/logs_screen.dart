@@ -9,7 +9,6 @@ import '../../core/services/app_log.dart';
 import '../../core/services/opentelemetry_service.dart';
 import '../../core/ui/ui_constants.dart';
 import '../widgets/health_widgets.dart';
-import '../widgets/max_width_container.dart';
 
 /// Diagnostics: live BLE/app log + copy-to-clipboard for bug reports,
 /// plus a JSON export of every persisted history day.

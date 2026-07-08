@@ -66,6 +66,18 @@ class _WatchFaceDesignerScreenState
       ),
       body: Column(
         children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(
+              kCardPadding,
+              kSpacingSmall,
+              kCardPadding,
+              0,
+            ),
+            child: ExperimentalBanner(
+              message:
+                  'Experimental / diagnostic only. Custom face upload (Channel-B 0x3a) is not implemented on H59MA v14 — send may fail even if the app accepts it.',
+            ),
+          ),
           Expanded(
             child: Center(
               child: AspectRatio(

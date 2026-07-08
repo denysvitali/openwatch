@@ -2,14 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:openwatch/core/ui/ui_constants.dart';
 
 import '../widgets/health_widgets.dart';
-import '../widgets/inset_card.dart';
-import '../widgets/max_width_container.dart';
 
 /// App-notification relay config (ANCS-style push to the watch).
 ///
-/// Currently a placeholder: the watch protocol supports push messages but the
-/// companion-side enablement toggles are not yet wired, so all switches are
-/// disabled.
+/// Placeholder: protocol supports push messages but companion-side enablement
+/// is not wired yet — switches stay disabled.
 class NotificationsScreen extends StatelessWidget {
   const NotificationsScreen({super.key});
 
@@ -22,57 +19,56 @@ class NotificationsScreen extends StatelessWidget {
       appBar: AppBar(title: const Text('Notifications')),
       body: MaxWidthContainer(
         child: ListView(
+          padding: const EdgeInsets.only(bottom: kScreenPaddingBottom),
           children: [
-            const HealthSectionHeader(title: 'Push to watch'),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
+              padding: const EdgeInsets.fromLTRB(
+                kCardPadding,
+                kSpacingSmall,
+                kCardPadding,
+                0,
+              ),
               child: HealthCard(
                 icon: Icons.info_outline,
                 metricColor: colorScheme.primary,
                 title: 'Notification relay',
                 caption:
                     'Forward calls, messages, and app alerts to the watch. '
-                    'This feature requires companion-side support and is not yet enabled.',
+                    'Companion-side enablement is not wired yet — toggles stay off.',
                 trailing: StatusPill(
                   icon: Icons.pending,
                   label: 'Coming soon',
-                  color: colorScheme.primary,
+                  color: colorScheme.tertiary,
                 ),
               ),
             ),
-            const HealthSectionHeader(title: 'Categories'),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
-              child: InsetCard(
-                child: Column(
-                  children: [
-                    HealthListTile(
-                      leadingIcon: Icons.call,
-                      leadingColor: colorScheme.primary,
-                      title: 'Incoming calls',
-                      subtitle: 'Ring and caller ID on the watch',
-                      control: const Switch(value: false, onChanged: null),
-                    ),
-                    HealthListTile(
-                      leadingIcon: Icons.sms,
-                      leadingColor: colorScheme.primary,
-                      title: 'Messages',
-                      subtitle: 'SMS and messaging apps',
-                      control: const Switch(value: false, onChanged: null),
-                    ),
-                    HealthListTile(
-                      leadingIcon: Icons.apps,
-                      leadingColor: colorScheme.primary,
-                      title: 'App notifications',
-                      subtitle: 'Other app alerts',
-                      control: const Switch(value: false, onChanged: null),
-                      showDivider: false,
-                    ),
-                  ],
+            SettingsGroup(
+              title: 'Categories',
+              children: [
+                HealthListTile(
+                  leadingIcon: Icons.call,
+                  leadingColor: colorScheme.primary,
+                  title: 'Incoming calls',
+                  subtitle: 'Ring and caller ID on the watch',
+                  control: Switch.adaptive(value: false, onChanged: null),
                 ),
-              ),
+                HealthListTile(
+                  leadingIcon: Icons.sms,
+                  leadingColor: colorScheme.primary,
+                  title: 'Messages',
+                  subtitle: 'SMS and messaging apps',
+                  control: Switch.adaptive(value: false, onChanged: null),
+                ),
+                HealthListTile(
+                  leadingIcon: Icons.apps,
+                  leadingColor: colorScheme.primary,
+                  title: 'App notifications',
+                  subtitle: 'Other app alerts',
+                  control: Switch.adaptive(value: false, onChanged: null),
+                  showDivider: false,
+                ),
+              ],
             ),
-            const SizedBox(height: kCardPadding),
           ],
         ),
       ),

@@ -3,10 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/services/history_sync.dart';
-import '../../core/ui/ui_constants.dart';
+import 'status_pill.dart';
 
-/// Compact status pill summarizing [HistorySync]'s syncing/error/last-synced
-/// state. Shared between the dashboard and history screens.
+/// Compact status pill summarizing [HistorySync] state.
+///
+/// Shared by Summary and History — composes [StatusPill].
 class SyncStatusPill extends StatelessWidget {
   const SyncStatusPill({super.key, required this.sync});
 
@@ -27,7 +28,7 @@ class SyncStatusPill extends StatelessWidget {
         CupertinoIcons.exclamationmark_circle,
       ),
       (false, null, _) => (
-        'No sync',
+        'Not synced',
         theme.colorScheme.outline,
         Icons.cloud_off_rounded,
       ),
@@ -38,25 +39,7 @@ class SyncStatusPill extends StatelessWidget {
       ),
     };
 
-    return Container(
-      height: kPillHeight,
-      padding: const EdgeInsets.symmetric(horizontal: kSpacingSmall),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: kPillTintOpacity),
-        borderRadius: BorderRadius.circular(kPillRadius),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: kPillIconSize, color: color),
-          const SizedBox(width: kSpacingTiny),
-          Text(
-            label,
-            style: AppTextStyles.labelSmall(context)?.copyWith(color: color),
-          ),
-        ],
-      ),
-    );
+    return StatusPill(icon: icon, label: label, color: color);
   }
 }
 

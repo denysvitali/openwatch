@@ -5,7 +5,6 @@ import '../../core/providers/app_providers.dart';
 import '../../core/services/watch_manager.dart';
 import '../../core/ui/ui_constants.dart';
 import '../widgets/health_widgets.dart';
-import '../widgets/inset_card.dart';
 
 /// Wristband sensor settings: HR auto-measure interval, enable toggle,
 /// and optional low/high alarm thresholds.
@@ -26,125 +25,96 @@ class SensorSettingsScreen extends ConsumerWidget {
     final theme = Theme.of(context);
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          'Sensor settings',
-          style: AppTextStyles.titleLarge(context),
-        ),
-        actions: [
-          TextButton.icon(
-            onPressed: (ready && hrSupported)
-                ? () => _applyToDevice(context, ref, manager)
-                : null,
-            icon: const Icon(Icons.watch, size: kIconSizeSmall),
-            label: const Text('Apply'),
-          ),
-        ],
-      ),
-      body: ListView(
-        padding: const EdgeInsets.only(bottom: kCardPadding),
-        children: [
-          if (!hrSupported)
-            Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: kCardPadding,
-                vertical: kSpacingSmall,
+      appBar: AppBar(title: const Text('Sensor settings')),
+      body: MaxWidthContainer(
+        child: ListView(
+          padding: const EdgeInsets.only(bottom: kScreenPaddingBottom),
+          children: [
+            if (!hrSupported)
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: kCardPadding,
+                  vertical: kSpacingSmall,
+                ),
+                child: HealthCard(
+                  icon: Icons.info_outline,
+                  metricColor: theme.colorScheme.error,
+                  caption: 'Heart rate not supported on this device',
+                  trailing: StatusPill(
+                    icon: Icons.error_outline,
+                    label: 'Unsupported',
+                    color: theme.colorScheme.error,
+                  ),
+                ),
               ),
-              child: HealthCard(
-                icon: Icons.info_outline,
-                metricColor: theme.colorScheme.error,
-                caption: 'Heart rate not supported on this device',
-                trailing: StatusPill(
-                  icon: Icons.error_outline,
-                  label: 'Unsupported',
-                  color: theme.colorScheme.error,
+            const HealthSectionHeader(title: 'Heart rate'),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
+              child: InsetCard(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    HealthListTile(
+                      title: 'Auto-measure',
+                      subtitle: 'Periodic background readings',
+                      leadingIcon: Icons.favorite,
+                      trailing: Switch(
+                        value: settings.hrAutoMeasureEnabled,
+                        onChanged: settingsNotifier.setHrAutoMeasure,
+                      ),
+                      onTap: () => settingsNotifier.setHrAutoMeasure(
+                        !settings.hrAutoMeasureEnabled,
+                      ),
+                    ),
+                    HealthListTile(
+                      title: 'Measurement interval',
+                      subtitle: '${settings.hrIntervalMinutes} minutes',
+                      leadingIcon: Icons.timer,
+                      trailing: SizedBox(
+                        width: 180,
+                        child: Slider(
+                          value: settings.hrIntervalMinutes.toDouble(),
+                          min: 1,
+                          max: 60,
+                          divisions: 59,
+                          label: '${settings.hrIntervalMinutes} min',
+                          onChanged: settings.hrAutoMeasureEnabled
+                              ? (v) => settingsNotifier.setHrInterval(v.round())
+                              : null,
+                        ),
+                      ),
+                      onTap: null,
+                    ),
+                  ],
                 ),
               ),
             ),
-          const HealthSectionHeader(title: 'Heart rate'),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
-            child: InsetCard(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  HealthListTile(
-                    title: 'Auto-measure',
-                    subtitle: 'Periodic background readings',
-                    leadingIcon: Icons.favorite,
-                    trailing: Switch(
-                      value: settings.hrAutoMeasureEnabled,
-                      onChanged: settingsNotifier.setHrAutoMeasure,
+            const HealthSectionHeader(title: 'Alarm thresholds'),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
+              child: InsetCard(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _AlarmFieldTile(
+                      title: 'Low HR alarm',
+                      subtitle: '0 = disabled',
+                      icon: Icons.trending_down,
+                      value: settings.hrLowAlarm,
+                      onSubmitted: settingsNotifier.setHrLowAlarm,
                     ),
-                    onTap: () => settingsNotifier.setHrAutoMeasure(
-                      !settings.hrAutoMeasureEnabled,
+                    _AlarmFieldTile(
+                      title: 'High HR alarm',
+                      subtitle: '0 = disabled',
+                      icon: Icons.trending_up,
+                      value: settings.hrHighAlarm,
+                      onSubmitted: settingsNotifier.setHrHighAlarm,
+                      showDivider: false,
                     ),
-                  ),
-                  HealthListTile(
-                    title: 'Measurement interval',
-                    subtitle: '${settings.hrIntervalMinutes} minutes',
-                    leadingIcon: Icons.timer,
-                    trailing: SizedBox(
-                      width: 180,
-                      child: Slider(
-                        value: settings.hrIntervalMinutes.toDouble(),
-                        min: 1,
-                        max: 60,
-                        divisions: 59,
-                        label: '${settings.hrIntervalMinutes} min',
-                        onChanged: settings.hrAutoMeasureEnabled
-                            ? (v) => settingsNotifier.setHrInterval(v.round())
-                            : null,
-                      ),
-                    ),
-                    onTap: null,
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
-          const HealthSectionHeader(title: 'Alarm thresholds'),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
-            child: InsetCard(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _AlarmFieldTile(
-                    title: 'Low HR alarm',
-                    subtitle: '0 = disabled',
-                    icon: Icons.trending_down,
-                    value: settings.hrLowAlarm,
-                    onSubmitted: settingsNotifier.setHrLowAlarm,
-                  ),
-                  _AlarmFieldTile(
-                    title: 'High HR alarm',
-                    subtitle: '0 = disabled',
-                    icon: Icons.trending_up,
-                    value: settings.hrHighAlarm,
-                    onSubmitted: settingsNotifier.setHrHighAlarm,
-                    showDivider: false,
-                  ),
-                ],
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              kCardPadding,
-              kGridSpacing,
-              kCardPadding,
-              0,
-            ),
-            child: PrimaryHealthButton(
-              label: 'Apply to device now',
-              icon: Icons.watch,
-              onPressed: (ready && hrSupported)
-                  ? () => _applyToDevice(context, ref, manager)
-                  : null,
-            ),
-          ),
-          if (!ready)
             Padding(
               padding: const EdgeInsets.fromLTRB(
                 kCardPadding,
@@ -152,27 +122,44 @@ class SensorSettingsScreen extends ConsumerWidget {
                 kCardPadding,
                 0,
               ),
-              child: StatusPill(
-                icon: Icons.bluetooth_disabled,
-                label: 'Connect a watch first',
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            )
-          else if (!hrSupported)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                kCardPadding,
-                kGridSpacing,
-                kCardPadding,
-                0,
-              ),
-              child: StatusPill(
-                icon: Icons.error_outline,
-                label: 'HR not supported on this device',
-                color: theme.colorScheme.error,
+              child: PrimaryHealthButton(
+                label: 'Apply to device now',
+                icon: Icons.watch,
+                onPressed: (ready && hrSupported)
+                    ? () => _applyToDevice(context, ref, manager)
+                    : null,
               ),
             ),
-        ],
+            if (!ready)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  kCardPadding,
+                  kGridSpacing,
+                  kCardPadding,
+                  0,
+                ),
+                child: StatusPill(
+                  icon: Icons.bluetooth_disabled,
+                  label: 'Connect a watch first',
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              )
+            else if (!hrSupported)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  kCardPadding,
+                  kGridSpacing,
+                  kCardPadding,
+                  0,
+                ),
+                child: StatusPill(
+                  icon: Icons.error_outline,
+                  label: 'HR not supported on this device',
+                  color: theme.colorScheme.error,
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }

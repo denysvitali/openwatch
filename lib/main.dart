@@ -11,6 +11,7 @@ import 'package:flutter_user_certificates_android/flutter_user_certificates_andr
 
 import 'core/routing/app_router.dart';
 import 'core/services/opentelemetry_service.dart';
+import 'core/ui/app_colors.dart';
 import 'core/ui/ui_constants.dart';
 
 /// Converts a DER-encoded certificate to PEM format.
@@ -76,53 +77,37 @@ class OpenWatchApp extends ConsumerWidget {
 
 ThemeData _buildTheme(Brightness brightness) {
   final isDark = brightness == Brightness.dark;
-
-  // Design-system semantic health colors.
-  final primaryAccent = isDark
-      ? const Color(0xFF0A84FF)
-      : const Color(0xFF007AFF);
-  final heartRed = isDark ? const Color(0xFFFF453A) : const Color(0xFFFF3B30);
-  final activityGreen = isDark
-      ? const Color(0xFF30D158)
-      : const Color(0xFF34C759);
-  final nutritionOrange = isDark
-      ? const Color(0xFFFF9F0A)
-      : const Color(0xFFFF9500);
-  final pageBackground = isDark
-      ? const Color(0xFF000000)
-      : const Color(0xFFF5F5F7);
-  final cardSurface = isDark
-      ? const Color(0xFF1C1C1E)
-      : const Color(0xFFFFFFFF);
-  final cardSurfaceElevated = isDark
-      ? const Color(0xFF2C2C2E)
-      : const Color(0xFFFFFFFF);
-  final divider = isDark ? const Color(0xFF38383A) : const Color(0xFFE5E5EA);
-  final secondaryText = const Color(0xFF8E8E93);
+  final colors = isDark ? AppColors.dark : AppColors.light;
 
   final scheme =
       ColorScheme.fromSeed(
-        seedColor: primaryAccent,
+        seedColor: colors.accent,
         brightness: brightness,
       ).copyWith(
-        primary: primaryAccent,
-        secondary: activityGreen,
-        tertiary: nutritionOrange,
-        error: heartRed,
-        surface: cardSurface,
-        surfaceContainerHighest: cardSurfaceElevated,
-        onSurfaceVariant: secondaryText,
-        outline: divider,
-        outlineVariant: divider,
+        primary: colors.accent,
+        secondary: colors.activity,
+        tertiary: colors.nutrition,
+        error: colors.heart,
+        surface: colors.cardSurface,
+        surfaceContainerHighest: colors.cardSurfaceElevated,
+        onSurfaceVariant: colors.secondaryText,
+        outline: colors.divider,
+        outlineVariant: colors.divider,
       );
 
   final base = ThemeData(
     colorScheme: scheme,
     useMaterial3: true,
     brightness: brightness,
-    scaffoldBackgroundColor: pageBackground,
+    scaffoldBackgroundColor: colors.pageBackground,
     fontFamily: 'Roboto',
+    extensions: <ThemeExtension<dynamic>>[colors],
   );
+
+  final pageBackground = colors.pageBackground;
+  final cardSurface = colors.cardSurface;
+  final divider = colors.divider;
+  final secondaryText = colors.secondaryText;
 
   final textTheme = base.textTheme.copyWith(
     displayLarge: base.textTheme.displayLarge?.copyWith(
@@ -350,6 +335,68 @@ ThemeData _buildTheme(Brightness brightness) {
         fontSize: kBodySmall,
         color: secondaryText,
       ),
+    ),
+    dialogTheme: DialogThemeData(
+      backgroundColor: cardSurface,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(kCardRadius),
+      ),
+      titleTextStyle: textTheme.titleLarge?.copyWith(color: scheme.onSurface),
+      contentTextStyle: textTheme.bodyMedium?.copyWith(
+        color: scheme.onSurfaceVariant,
+        height: 1.4,
+      ),
+    ),
+    switchTheme: SwitchThemeData(
+      thumbColor: WidgetStateProperty.resolveWith((states) {
+        if (states.contains(WidgetState.selected)) return scheme.onPrimary;
+        return scheme.outline;
+      }),
+      trackColor: WidgetStateProperty.resolveWith((states) {
+        if (states.contains(WidgetState.selected)) return scheme.primary;
+        return scheme.surfaceContainerHighest;
+      }),
+      trackOutlineColor: WidgetStateProperty.resolveWith((states) {
+        if (states.contains(WidgetState.selected)) return Colors.transparent;
+        return divider;
+      }),
+    ),
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(kChipRadius + 4),
+        borderSide: BorderSide(color: divider),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(kChipRadius + 4),
+        borderSide: BorderSide(color: divider),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(kChipRadius + 4),
+        borderSide: BorderSide(color: scheme.primary, width: 1.5),
+      ),
+      contentPadding: const EdgeInsets.symmetric(
+        horizontal: kCardPadding,
+        vertical: kListTilePaddingV,
+      ),
+    ),
+    bottomSheetTheme: BottomSheetThemeData(
+      backgroundColor: cardSurface,
+      elevation: 0,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(kCardRadius)),
+      ),
+      showDragHandle: true,
+    ),
+    popupMenuTheme: PopupMenuThemeData(
+      color: cardSurface,
+      elevation: 4,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(kChipRadius + 4),
+      ),
+      textStyle: textTheme.bodyMedium,
     ),
   );
 }
