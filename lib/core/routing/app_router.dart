@@ -62,12 +62,6 @@ final appRouterProvider = Provider<GoRouter>(
         builder: (context, state) => const AlarmsScreen(),
       ),
       GoRoute(
-        path: '/history',
-        name: 'history',
-        parentNavigatorKey: _rootNavigatorKey,
-        builder: (context, state) => const HistoryScreen(),
-      ),
-      GoRoute(
         path: '/notifications',
         name: 'notifications',
         parentNavigatorKey: _rootNavigatorKey,
