@@ -639,7 +639,7 @@ listed by the earlier radare2 notes:
 
 ## 12. Open Questions / TODO
 
-1. **Algorithm behind the 32-byte `image_digest @0x1c4`.** Not SHA-256 of any contiguous window; not MD5, not CRC32; not truncated SHA-1. Likely a vendor-proprietary keyed MAC using `signature_a` or `0x5C` GUID as key. Required to determine whether the bootloader verifies the digest or ignores it.
+1. **Algorithm behind the 32-byte `image_digest @0x1c4`.** Not SHA-256 of any contiguous window; not MD5, not CRC32; not truncated SHA-1. Likely a vendor-proprietary keyed MAC using `signature_a` or `0x5C` GUID as key. Required to determine whether the bootloader verifies the digest or ignores it. (App body stages but does not validate — 2026-07-07 digest-and-boundary pass.)
 2. ~~Algorithm behind the `image_chk_a @0x0c` additive byte-sum.~~ **Resolved:** it is `sum(container[0x50:]) & 0xffffffff` for both v13 and v14.
 3. ~~Exact Channel A dispatch path — phone-side vs watch-side.~~ **Resolved by Ghidra:** v14 drains an internal 16-byte queued-frame ring in `channel_a_dispatch_queued_frame` (`0x0082d2dc`). The phone-side SDK still owns wire framing and response correlation.
 4. ~~Channel A additive 8-bit checksum algorithm.~~ **Resolved by Ghidra:** `checksum8_additive` (`0x0082b0c4`) sums caller-specified bytes; Channel-A/vendor-high responses use bytes `0..14`.
@@ -714,6 +714,11 @@ python3 firmwares/_re/ble-hunt/scan.py
 | `firmwares/_re/channel-b-dispatch/evidence.md` | radare2 evidence for Channel-B first-stage routing and the corrected low-command switch table shape |
 | `firmwares/_re/gatt-table/evidence.md` | radare2 evidence for Realtek-style GATT record fields, 128-bit service UUID pointers, and service callback triples |
 | `firmwares/_re/fee7-high/evidence.md` | radare2 evidence for high FEE7 routing, raw memory commands, OTA control, health poll, and the corrected `0xfe` synthetic sleep-history command |
+| `firmwares/_re/ch-a-dispatch-audit/evidence.md` | 2026-07-08 audit: rejects +0x50 Channel-A dispatcher address claim; documents real entry `0x0082d2dc` |
+| `firmwares/_re/vendor-high-audit/evidence.md` | 2026-07-08 audit: vendor/high guard+dispatcher addresses, `0x9d` vendor NAK, ECG/PPG negative |
+| `firmwares/_re/bp-slot-encoding/evidence.md` | 2026-07-08: BP history 4-byte slot = `[compact,0,0,0]`; compact = HR bpm or PRNG 70–74 |
+| `firmwares/_re/channel-b-payloads/evidence.md` | 2026-07-08: Channel-B `0x11`/`0x12`/`0x27`/`0x2a` wire layouts |
+| `firmwares/_re/period-data/evidence.md` | 2026-07-08: menstruation `periodData[8..12]` store/echo only; phase detector ignores it |
 | `firmwares/RE_FIRMWARE.md` | superseded by this document (initial RE notes; many field-level errors) |
 | `firmwares/R2_ANALYSIS.md` | superseded by this document (r2 deep-dive; itself corrects RE_FIRMWARE.md) |
 | `PROTOCOL.md` | APK-derived protocol spec that this firmware corroborates |

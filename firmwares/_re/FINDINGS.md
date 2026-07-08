@@ -291,6 +291,11 @@ All raw outputs live under `firmwares/_re/`:
 | `dispatch-tables/` | (relocated into `ble-hunt/key_regions.txt`) |
 | `strings-mining/` | `findings.txt` + per-category grep files (`ota.txt`, `cmd_proto.txt`, `paths.txt`, `hex_uuid.txt`, `watchface.txt`, `vendors.txt`, `ble.txt`, `uuids.txt`, `mac_hex.txt`, `ble_full.txt`, `vendors_full.txt`, `paths2.txt`, `commands.txt`) |
 | `diff/` | `fwtool_compare.txt`, `large_divergent_regions.txt`, `large_identical_regions.txt`, `regions_collapsed.txt`, `strings_only_in_v13.txt`, `strings_only_in_v14.txt`, `feature_words_v14.txt`, `v{13,14}_{real,natural_strings,real_only}.txt` |
+| `ch-a-dispatch-audit/` | Channel-A deferred dispatcher address audit (rejects +0x50 claim) |
+| `vendor-high-audit/` | vendor/high guard+dispatcher, `0x9d` NAK, ECG/PPG negative |
+| `bp-slot-encoding/` | BP history 4-byte slot write path + compact-byte source |
+| `channel-b-payloads/` | Channel-B sleep/activity response field layouts |
+| `period-data/` | menstruation `periodData` store/echo-only analysis |
 
 To reproduce:
 
