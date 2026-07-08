@@ -646,19 +646,21 @@ void main() {
     );
 
     test(
-      'syncAll skips persisted past days that were confirmed empty for stress',
+      'syncAll skips older days that were confirmed empty for stress',
       () async {
         final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final sync = _testSync(t, d);
         final today = DateOnly.today();
-        final yesterday = today.addDays(-1);
+        // Yesterday is always re-fetched; confirmed-empty skip only
+        // applies to older days (offset >= 2).
+        final twoDaysAgo = today.addDays(-2);
         await sync.bindStore(
           _FakeHistoryStore(
             seed: {
-              yesterday: DailyHistory(
-                day: yesterday,
+              twoDaysAgo: DailyHistory(
+                day: twoDaysAgo,
                 // Empty stress, but the metric was synced earlier (watch
                 // returned an empty 0x37 record). It must be skipped now.
                 syncedMetrics: const {'stress'},
@@ -667,53 +669,58 @@ void main() {
           ),
         );
 
-        await sync.syncAll(daysBack: 2);
+        await sync.syncAll(daysBack: 3);
 
         final stressReads = t.sentA
             .where((f) => f.isNotEmpty && f[0] == OpA.pressure)
             .toList();
+        // today (0) + yesterday (1); day-2 confirmed empty is skipped.
         expect(
           stressReads,
-          hasLength(1),
-          reason: 'confirmed-empty stress day should be skipped',
+          hasLength(2),
+          reason: 'confirmed-empty older stress day should be skipped',
         );
-        expect(stressReads.first[1], 0x00); // today only
+        final offsets = stressReads.map((f) => f[1]).toSet();
+        expect(offsets, containsAll([0x00, 0x01]));
+        expect(offsets, isNot(contains(0x02)));
         sync.dispose();
         d.dispose();
       },
     );
 
     test(
-      'syncAll skips persisted past days that were confirmed empty for HRV',
+      'syncAll skips older days that were confirmed empty for HRV',
       () async {
         final t = FakeBleTransport();
         final d = ChannelADispatcher(t);
         d.bind();
         final sync = _testSync(t, d);
         final today = DateOnly.today();
-        final yesterday = today.addDays(-1);
+        final twoDaysAgo = today.addDays(-2);
         await sync.bindStore(
           _FakeHistoryStore(
             seed: {
-              yesterday: DailyHistory(
-                day: yesterday,
+              twoDaysAgo: DailyHistory(
+                day: twoDaysAgo,
                 syncedMetrics: const {'hrv'},
               ),
             },
           ),
         );
 
-        await sync.syncAll(daysBack: 2);
+        await sync.syncAll(daysBack: 3);
 
         final hrvReads = t.sentA
             .where((f) => f.isNotEmpty && f[0] == OpA.hrv)
             .toList();
         expect(
           hrvReads,
-          hasLength(1),
-          reason: 'confirmed-empty HRV day should be skipped',
+          hasLength(2),
+          reason: 'confirmed-empty older HRV day should be skipped',
         );
-        expect(hrvReads.first[1], 0x00); // today only
+        final offsets = hrvReads.map((f) => f[1]).toSet();
+        expect(offsets, containsAll([0x00, 0x01]));
+        expect(offsets, isNot(contains(0x02)));
         sync.dispose();
         d.dispose();
       },
