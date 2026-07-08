@@ -82,7 +82,7 @@ Resolved v14 target/callee map:
 | `0x9a` | `0x648e` | `0x17ec` → `0x17b8` | Store high-range session mode `2`; self-marker ACK. |
 | `0x9b` | `0x6496` | `0x17f0` | One-byte session-mode status (`0x88` for mode 2, else `0x77`) plus checksum. |
 | `0x9c` | `0x649e` | `0x181e` | Self-marker ACK, factory-test timer cleanup, cancel helper. |
-| `0x9d` | `0x6352` | — | Dispatcher return; no response. |
+| `0x9d` | `0x634e` | `0x58ba` | **Superseded:** vendor NAK via `fee7_send_vendor_nak` (not no-response). Prior row used epilogue `0x6352` from an off-by-one switch decode. See `firmwares/_re/vendor-high-audit/evidence.md`. |
 | `0x9e` | `0x64a6` | `0x18c8` | ASCII model-name response, default `"H59MA_V1.0"`. |
 | `0x9f` | `0x64b6` | `0x1716` | Return only; no response. |
 | `0xa0` | `0x64ae` | `0x191a` | Opaque high-status frame populated in bytes 1..9 plus checksum. |

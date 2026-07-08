@@ -2071,9 +2071,11 @@ String _labelForFee7(int opcode) {
     case Fee7.highNoop92:
     case Fee7.highNoop97:
     case Fee7.highNoop99:
-    case Fee7.highNoop9d:
     case Fee7.highNoop9f:
       return 'noResponsePlaceholder';
+    case Fee7.highNoop9d:
+      // High-range switch8 slot for 0x9d is fee7_send_vendor_nak, not a silent return.
+      return 'vendorNak';
     case Fee7.syntheticSleep:
       return 'syntheticSleep';
     default:

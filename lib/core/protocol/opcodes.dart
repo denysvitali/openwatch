@@ -346,7 +346,9 @@ class Fee7 {
   static const int sessionMode2Ack = 0x9a; // Sets session mode 2, self-marker
   static const int sessionModeStatus = 0x9b; // [stateByte]
   static const int factoryStop = 0x9c; // Self-marker + factory-test cleanup
-  static const int highNoop9d = 0x9d; // No response / default return
+  /// Vendor NAK path (`[0x9d|0x80, 0xee, …]`), not a silent no-op.
+  /// Kept name for API stability; prefer treating as unknown/NAK.
+  static const int highNoop9d = 0x9d;
   static const int modelName = 0x9e; // ASCII model string response
   static const int highNoop9f = 0x9f; // No response
   static const int highStatusFrame = 0xa0; // Opaque multi-byte status frame

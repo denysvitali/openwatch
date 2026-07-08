@@ -1012,7 +1012,6 @@ void main() {
         Fee7.highNoop92,
         Fee7.highNoop97,
         Fee7.highNoop99,
-        Fee7.highNoop9d,
         Fee7.highNoop9f,
       ]) {
         final frame = Codec.buildChannelA(opcode);
@@ -1027,6 +1026,19 @@ void main() {
         expect(decoded.details['label'], 'noResponsePlaceholder');
         expect(decoded.title, contains('noResponsePlaceholder'));
       }
+    });
+
+    test('labels FEE7 0x9d as vendor NAK (not no-response)', () {
+      final frame = Codec.buildChannelA(Fee7.highNoop9d);
+      final decoded = const WatchLogDecoder().decodeHex(
+        frame.map((b) => b.toRadixString(16).padLeft(2, '0')).join('-'),
+        uuid: _fee7,
+      );
+
+      expect(decoded.valid, isTrue);
+      expect(decoded.channel, WatchLogChannel.fee7);
+      expect(decoded.details['label'], 'vendorNak');
+      expect(decoded.title, contains('vendorNak'));
     });
 
     test('labels FEE7 vendor debug opcodes from reversed firmware', () {
