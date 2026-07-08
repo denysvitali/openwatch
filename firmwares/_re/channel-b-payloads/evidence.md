@@ -99,16 +99,18 @@ Fields recovered from live-buffer producer (`0x1df28`) + `0x27` packer
 | `+0x3c` | `N` | stage **duration minutes** | packer: dur @ `rec+0x3c+i` |
 | mid gap `+0x14+N .. +0x3b` | | unused / reserved for max `N` | max scan uses `0x28` |
 
-Type codes seen in firmware (not full Oudmon 1..4 map):
+Type codes from producers (see `firmwares/_re/history-layouts/evidence.md` §1):
 
 | Type | Accumulator | Notes |
 |---:|---|---|
-| 2 | `+0x0a` | summed by live finalizer |
-| 3 | `+0x08` | summed by live finalizer |
-| 5 | `+0x0c` | **default** new-segment type written at `0x1ea3e` |
+| 0 | — | long-gap filler (gap ≥ 120 min); also synthetic |
+| 2 | `+0x0a` | synthetic + live; summed by finalizer |
+| 3 | `+0x08` | synthetic + live; summed by finalizer |
+| 4 | — | **synthetic only** (no minute bucket) |
+| 5 | `+0x0c` | **default** live new-segment type (`0x1ea3e`) |
 
 Human labels (deep/light/REM) **not** proven from static strings — leave as
-type ids. Live capture needed to map 2/3/5 → stages.
+type ids. Live capture needed to map 2/3/4/5 → stages.
 
 ### Opaque remainder
 
@@ -161,21 +163,21 @@ Matches GHIDRA §2.2 / §2.10 (**289 B**). NAK path uses compact
 History desc `history_desc_hourly_detail_24x12` (`0x00845a44`): key @ `+0`,
 24 × 12 B slots @ `+4`. Response strips the key (memcpy from `body+4`).
 
-### 12-byte hourly slot (live overlay writer `0xb1ba`) — **medium**
+### 12-byte hourly slot (live overlay writer `0xb1ba`) — **high** (sources)
 
-`sleep_write_live_detail_slot` writes into the current hour’s slot:
+`sleep_write_live_detail_slot` writes into the current hour’s slot from the
+**sport_state** block at `0x20bfec` (same table as Ch-A `0x43`):
 
-| Slot off | Size | Compute |
-|---:|---:|---|
-| 0..1 | u16 LE | `state+4 − state+8` |
-| 2..3 | u16 LE | `state+0x38 − state+0x3c` |
-| 4..5 | u16 LE | `(state+0x1c − state+0x20) / 100` |
-| 6..7 | u16 LE | `(state+0x14 − state+0x18) / 10` |
-| 8 | u8 | `state+0x30 − state+0x34` |
-| 9..11 | 3 | **not written** by this helper (left from flash copy / zero) |
+| Slot off | Size | Compute | Source |
+|---:|---:|---|---|
+| 0..1 | u16 LE | `+0x04 − +0x08` | **steps** (`sport_state_get_steps`) |
+| 2..3 | u16 LE | `+0x38 − +0x3c` | metric38 (unnamed) |
+| 4..5 | u16 LE | `(+0x1c − +0x20) / 100` | **calories/100** |
+| 6..7 | u16 LE | `(+0x14 − +0x18) / 10` | **distance/10** |
+| 8 | u8 | low-byte `(+0x30 − +0x34)` | elapsed-seconds related |
+| 9..11 | 3 | **not written** by this helper | flash/zero |
 
-Semantic names (steps/cal/HR/…) **not** recovered — only delta math against
-the live sleep-detail state block at `0x20c02c − 0x40`.
+Full producer notes: `firmwares/_re/history-layouts/evidence.md` §2.
 
 ### Opaque remainder
 
@@ -283,7 +285,7 @@ Repeated entries, total length `0x31 * k` for `k ∈ 0..3`:
 `day_offset == 0` is valid (today). Parse by **payload length**, not zero
 terminator. Max payload **0x93** (147 B). Matches GHIDRA §2.4 / §2.8.
 
-### 48-byte body — **high confidence structure**, **low confidence sample units**
+### 48-byte body — **high** structure, **med-high** SpO2-like units
 
 Reader `activity_read_day_summary_record` @ `0xd742` (`0x00833b42`):
 
@@ -291,26 +293,26 @@ Reader `activity_read_day_summary_record` @ `0xd742` (`0x00833b42`):
 2. Ring lookup `history_desc_activity_daily_24x2` (`0x00845a98`).
 3. If found: copy 52 B, then for `i in 0..23`: if body byte `out[4+2*i] == 0xFF`
    or `out[5+2*i] == 0xFF`, replace with `0` (FF→0 hole fill).
-4. Live overlay from `activity_state+0xc` when day matches: writes 2 sample
-   bytes into slot `slotIndex`.
+4. Live overlay: `(max,min)` from `activity_state+0x10/+0x11` at hour
+   `activity_state+0xe` when day matches.
 5. Returns 1 on success / cache hit; 0 → day omitted from response.
 
-History desc body: **key @ +0**, **24 samples × 2 B @ +4**. Channel-B sends
-only the 48 B sample array.
+History desc body: **key @ +0**, **24 × (max_u8, min_u8) @ +4**. Channel-B
+sends only the 48 B sample array.
 
 | Body off | Size | Field |
 |---:|---:|---|
-| `0 + 2*h` | 2 | hour `h` sample pair (raw); `0xFF` means empty → host should treat as 0 |
+| `0 + 2*h` | 1 | hour `h` **max** sample (SpO2-like %; clamp ≤100) |
+| `1 + 2*h` | 1 | hour `h` **min** sample |
 
-**Not** a u24 steps/kcal/distance header. Host-side
-`_activityTotalsFromBody` u24-BE guess is **not** supported by static RE;
-needs live correlation against Channel-A `0x48` / `0x43` or pedometer state.
+Producer `FUN_00833a56` tracks running max/min; timeout PRNG yields 93..99.
+**Not** a u16 steps value and **not** related to Ch-A `0x43` 12 B sport slots.
+Details: `firmwares/_re/history-layouts/evidence.md` §3.
 
 ### Opaque remainder
 
-- Meaning of each sample’s 2 bytes (steps low/high? intensity? flags?).
-- Endianness if interpreted as u16.
-- How samples relate to Channel-A `0x43` 12 B hourly sport slots.
+- Clinical confirmation that UI “SpO2 history” is this table (static names
+  point that way; live capture still ideal).
 
 ---
 
