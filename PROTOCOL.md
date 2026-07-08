@@ -383,7 +383,7 @@ the generic bitmap below.
 | UltraVioletReq | `0x7d` | index | →watch | `[index]` | **no response on H59MA v14** | Legacy/capture-only opcode. The deferred worker compares `0x7d` at body `0x6f5e`, then branches to the common queue-advance path at `0x6f7c` without a handler call or `FUN_0082c988` fragmenter. Do not use as a UV-history request on v14. |
 | UVSettingReq | `0x3b` | 01/02 + guard | →watch | r:`[01,00]`; w:`[02,00,value]` | echo/status via TouchControlRsp | Alias of TouchControlReq. H59MA v14 `0x3e` is not Channel-A UV; it is used by Channel-B nap sleep responses and by the FEE7 lipids path. |
 | SugarLipidsSettingReq | `0x3a` | type+act | →watch | r:`[type,01]`; w:`[type,02,en(0/1),valLo,valHi]` | `[1]`act, if read `[0]`type,`[2]`en,`[3..4]`value LE,`[5]`supportUnit | Blood sugar/lipids reference config. (per-request waiter) |
-| MenstruationReq | `0x2b` | 01/02 | →watch | w(11B):`[02,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10]` | **MenstruationDataRsp** 16B (per GHIDRA §3.1/§3.1.1, `FUN_0082b078` lazy-init + `FUN_0082af28` read-memcpy): `[0]`sentinel (`0xCA`=present; lazy-init zeroes; quirk — `rsp[0]` is overwritten with `start_date_bcd[0]` on read, so host must re-stamp `rsp[0]=0x2B`), `[1]`startDate-yr BCD, `[2]`cycleLenDays BCD, `[3]`startDate-day BCD, `[4..5]`=`currentDay − record[4]` (u16 LE on write, low byte only returned), `[6..7]`=`currentMonth − record[6]` (u16 LE on write, low byte only returned), `[8..12]`=5B opaque `periodData` (semantics not RE-resolvable), `[13..15]`=padding (always zero on write/read-back). Decode via `MixtureState.tryParse`. | Menstrual-cycle config. |
+| MenstruationReq | `0x2b` | 01/02 | →watch | w(11B):`[02,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10]` | **MenstruationDataRsp** 16B (per GHIDRA §3.1/§3.1.1 + `firmwares/_re/period-data/evidence.md`): internal mixture record `[0]`sentinel `0xCA`, `[1..3]`start BCD (yr/cycleLen/day), `[4..5]`/`[6..7]` day/month anchors (u16; write stores `today−offset`, read returns low-byte deltas), **`[8..12]`=5B `periodData` host blob — firmware only memcpy store/echo + zero on lazy-init; phase detector and notifications never read it**, `[13..15]` padding. Read quirk: encode remaps to wire `[0..2]=BCD`, `[3..4]=deltas`, **`[5..9]=periodData`**, and clobbers pre-stamped `rsp[0]=0x2B` with BCD yr. Decode via `MixtureState.tryParse`. | Menstrual-cycle config. |
 | HealthEcgRsp (notify) | **needs live capture** | — | watch→ | n/a (session under `0x69` type=7) | Statically unresolvable in H59MA v14 — §10.2 unified inventory (GHIDRA §10.2 lines 6322–6396) enumerates every vendor/high opcode statically resolved and none match the `[status,ecgInterval,ppgInterval]` shape. §8.5 per-mode start dispatch (lines 5228–5236) has no mode-0x07 (ECG) entry — falls into HR-mode-1 fallback (`health_post_start_measure_event(1)`). Do not infer a payload layout from §8.5 fallback semantics. | ECG status during ECG session. Listener opcode not statically resolvable. |
 | PpgDataRspCmd (notify) | **needs live capture** | — | watch→ | n/a (ECG/PPG session) | Statically unresolvable in H59MA v14 — the only PPG-related handler is §3.10 `0x2c` SpO2 (an enable-bit + auto-measure cadence), NOT a real-time stream from a `0x69` type=7 session. Do not infer a payload layout. | Raw PPG + HR stream. Listener opcode unresolved. |
 
@@ -401,8 +401,8 @@ REALTIMEHEARTRATE=6, ECG=7, PRESSURE=8, BLOOD_SUGAR=9, HRV=0xa, BODY_TEMPERATURE
 | PhoneSportReq | `0x77` | — | →watch | `[status, sportType]` | **AppSportRsp**: `b0`=gpsStatus; if==6 `ts=bytesToInt(b[2..6])` u32 LE | Tell watch the phone's app-side sport status. |
 | PhoneGpsReq | `0x74` | — | →watch | gps:`[status,00]`; phoneData:`[05,00]+dist u32 LE+cal u32 LE` | **AppGpsRsp**: same shape as AppSport | GPS/outdoor-sport coordination. |
 | ReadSleepDetailsReq | `0x44` | `0x0F`@[1] | →watch | `[dayOffset,0F,startSeg,endSeg(≤0x5f)]` | paged BleSleepDetails: `0xFF`=clear, `0xF0`=init; data `[0]`yr-2000,`[1]`mo,`[2]`d,`[3]`idx, `sleepQualities[8]=b[5+i]`; `b4`/`b5` page/total | Legacy per-slot sleep detail. |
-| H59MA sleep summary | `0x11` (Ch B) | — | →watch | `[dayOffset]` | `0x11` payload `[dayOffset][100 B summary]` | Firmware-confirmed H59MA v14 sleep summary. No clamp seen. |
-| H59MA sleep detail | `0x12` (Ch B) | — | →watch | `[dayOffset]` | `0x12` payload `[dayOffset][288 B detail]`; no-data/error returns compact NAK for cmd `0x12` with status=`dayOffset` | Firmware-confirmed H59MA v14 detail; today overlays current hourly slot before send. |
+| H59MA sleep summary | `0x11` (Ch B) | — | →watch | `[dayOffset]` | `0x11` payload `[dayOffset][100 B summary]` | Firmware-confirmed H59MA v14. Always 101 B (empty day = zero body). Summary record (shared with `0x27` source): `+0x0e/+0x10` start/end min u16 LE, `+0x13` pair count `N`, types at `+0x14..`, durs at `+0x3c..`; minute buckets for types 2/3/5 at `+0x0a/+0x08/+0x0c`. Stage labels for types need live capture. See `firmwares/_re/channel-b-payloads/evidence.md`. |
+| H59MA sleep detail | `0x12` (Ch B) | — | →watch | `[dayOffset]` | `0x12` payload `[dayOffset][288 B detail]` = 24×12 B hourly slots (key stripped); no-data/error compact NAK cmd `0x12` status=`dayOffset` | Firmware-confirmed H59MA v14. Today overlays current hour via live slot writer (fills slot bytes 0..8; 9..11 opaque). Slot field units need live capture. |
 | SetAlarmReq | `0x23` | — | →watch | `[idx(0..4),en(0..2),hourBCD,minBCD, day0..day6]` (11B; 7 weekday flags from weekMask bits) | SimpleStatusRsp ack | Set clock alarm slot. |
 | ReadAlarmReq | `0x24` | — | →watch | `[idx(0..4)]` | **ReadAlarmRsp**: `weekMask=Σ(b[4+i]<<i)`; AlarmEntity(idx,en,BCD h/m,weekMask) | Read clock alarm slot. |
 | SetDrinkAlarmReq | `0x27` | — | →watch | same 11B layout as SetAlarm, idx 0..7 | ack | Drink/sedentary reminder slot. ⚠ Channel-B sleep also uses cmd `0x27`. |
@@ -415,7 +415,7 @@ REALTIMEHEARTRATE=6, ECG=7, PRESSURE=8, BLOOD_SUGAR=9, HRV=0xa, BODY_TEMPERATURE
 | TodaySportData | `0x48` | — | watch→ | (read) bare opcode | **TodaySportDataRsp**: 3B **BE** groups — totalSteps `b[0..2]`, running `b[3..5]`, calorie `b[6..8]`, walkDist `b[9..11]`, sportDur `b[12..13]`(2B) | Today's running step total. |
 | SleepNewProtoResp (night) | `0x27` (Ch B) | — | watch→ | H59MA live shape: `[recordCount, {dayDelta, blockLen, startMinLE, endMinLE, (type,durMin)*}...]`; older captures may use `[dayOffset, endMinBE, (type,durMin)*]` | `blockLen` includes the 4 start/end bytes plus pair bytes; pair durations sum to `end-start` modulo midnight | Night sleep (new protocol). |
 | SleepNewProtoReq/Resp (night+lunch) | `0x27` request, `0x27`/`0x3e` responses (Ch B) | — | both | request `[maxDayOffset, recordType?]`; maxDayOffset clamps to `6`; missing recordType defaults `0` | `recordType==1` first emits `0x3e` nap/lunch records, then firmware always emits `0x27` night records. Both are count-prefixed record lists. | H59MA v14 new sleep records. |
-| Activity summary | `0x2a` (Ch B) | — | both | request `[maxDayOffset]`, clamped to `2` | response is repeated 49-byte entries `[dayOffset][48 B activity body]`, max 3 entries (`2,1,0`) | Do not treat `dayOffset=0` as terminator; use Channel-B payload length. |
+| Activity summary | `0x2a` (Ch B) | — | both | request `[maxDayOffset]`, clamped to `2` | response is repeated 49-byte entries `[dayOffset][48 B body]`, max 3 entries (`2,1,0`); body = **24 × 2-byte hourly samples** (`0xFF` treated as 0). Not a u24 steps/kcal/distance header — sample units need live capture vs `0x48`/`0x43`. | Do not treat `dayOffset=0` as terminator; use Channel-B payload length. Evidence: `firmwares/_re/channel-b-payloads/evidence.md`. |
 | AppSport (notify) | `0x77` | — | watch→ | n/a | `b0`=gpsStatus; if==6 ts=`bytesToInt(b[2..6])` LE | Watch requests phone GPS-sport sync. |
 | AppGps (notify) | `0x74` | — | watch→ | n/a | same as AppSport | Watch GPS sync notify. |
 
@@ -1024,9 +1024,16 @@ Feedback, Customer-support chat.
 >   `FUN_0082b078` (lazy-init) + `FUN_0082af28` (read-memcpy) +
 >   `FUN_0082aee4` (write) per GHIDRA §3.1/§3.1.1; documented in §4.3 with
 >   the byte-0 sentinel quirk (read-back overwrites `rsp[0]` with
->   `start_date_bcd[0]`, so host must re-stamp `rsp[0]=0x2B`). The 5B
->   `periodData` at `[8..12]` remains semantically opaque — needs live capture
->   with at least 3 known cycle dates to decode.
+>   `start_date_bcd[0]`, so host must re-stamp `rsp[0]=0x2B`). Static RE of
+>   H59MA v14 shows the 5B `periodData` (internal `[8..12]`) is
+>   **store-and-echo only** — no phase/notify consumer
+>   (`firmwares/_re/period-data/evidence.md`). Host/APK meaning still needs
+>   app-side or live capture if UI fields are desired.
+> - **Channel-B sleep/activity bodies** — `0x11`/`0x12`/`0x27`/`0x2a` frame
+>   lengths and structural layouts pinned in
+>   `firmwares/_re/channel-b-payloads/evidence.md` (`0x2a` = 24×2 hourly
+>   samples; `0x27` pairs from summary `+0x14`/`+0x3c`). Stage labels and
+>   activity sample units remain live-capture needs.
 > - **Channel-A `0x3c` capability** — H59MA routes the opcode through the
 >   `0x39 < uVar2 < 0x43` chain to the FEE7 `fee7_send_fixed_capability_3c`
 >   handler (GHIDRA §8.12 lines 6055–6057); the §3 Channel-A table has no
