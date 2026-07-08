@@ -1757,10 +1757,16 @@ the tag are therefore one compact value per present slot, not 13-byte per-slot
 records.
 
 The persistent BP descriptor (§persistent-history descriptor rings) stores the
-day key plus 24 hourly 4-byte slots. This `0x0D` history response validates the
-slot's first byte (`0x28..0xDC`) and emits only that byte. The remaining three
-persistent bytes are not exposed by this opcode, so the host must not invent
-systolic/diastolic history values from the compact stream.
+day key plus 24 hourly 4-byte slots. Under the sole v14 writer
+(`FUN_0083412c` / body `0xdd2c`), each slot is `[compact, 0, 0, 0]`. The compact
+byte is produced by auto-measure tick `FUN_00834180`: `heart_rate_current_bpm()`
+on ticks 15–20, or `(prng_next31() % 5) + 0x46` (70–74) when the tick reaches
+21. This `0x0D` history response validates the slot's first byte
+(`0x28..0xDC`) and emits only that byte. Bytes 1–3 are zero on the v14 write
+path and are never projected on-wire. Live synthetic systolic/diastolic from
+`FUN_00834092` (entry `0x00834092`; mid-address `0x008340e2` is inside that
+function) feed only `0x69`/`0x6a` notify packing — they are never stored into
+these history slots. See `firmwares/_re/bp-slot-encoding/evidence.md`.
 
 #### Why the request/response opcode split
 
@@ -4286,7 +4292,7 @@ Record bodies are compact and fixed-width:
 | `history_desc_sleep_summary_100b` / `history_desc_sleep_nap_100b` | 100-byte payload copied from offset `0`, so the copied source includes the key/header. |
 | `history_desc_activity_daily_24x2` | key at `+0`, then 24 activity samples x 2 bytes at `+4`; Channel-B `0x2a` sends the 48-byte body. |
 | `history_desc_heart_rate_5min` | key at `+0`, then 288 5-minute HR samples at `+4`; out-of-range values outside `0x28..0xdc` are zeroed before the `0x15` response. |
-| `history_desc_bp_hourly` | key at `+0`, then 24 hourly 4-byte BP slots at `+4`; current reader emits the first byte of each slot in compact `0x0d` fragments. |
+| `history_desc_bp_hourly` | key at `+0`, then 24 hourly 4-byte slots at `+4` as `[compact,0,0,0]` under the sole v14 writer; compact comes from HR bpm or timeout PRNG 70–74; `0x0d` emits only byte0 when `0x28..0xdc`. |
 | `history_desc_pressure_30min` / `history_desc_hrv_30min` | key at `+0`, then 48 half-hour one-byte samples at `+4`; responses send `[day_offset] + 48 samples` after the `0x1e050037` / `0x1e050039` header. |
 
 No SpO2 history descriptor was found in this cluster. Channel-A `0x2c` only
@@ -4933,7 +4939,7 @@ also points to the vendor-NAK path.
 | `0x9a` | `fee7_set_session_mode2_ack_9a` | Sets session mode `2`, commits blob0 if changed, sends self-marker ACK `[0x9a,0...,0x9a]`. |
 | `0x9b` | `fee7_send_session_mode_status_9b` | Sends `[0x9b, state_byte]`; `state_byte` is `0x88` in mode `2`, otherwise `0x77`. |
 | `0x9c` | `fee7_stop_factory_test_9c` | Sends self-marker ACK `[0x9c,0...,0x9c]`, stops factory-test timer, clears related state, and calls the `0x08` cancel path. |
-| `0x9d` | Dispatcher return | No response. |
+| `0x9d` | `fee7_send_vendor_nak` | Vendor NAK `[0x9d\|0x80, 0xee, …]`; switch8 offset `0x37` → body `0x634e` (not the epilogue at `0x6352`). See `firmwares/_re/vendor-high-audit/evidence.md`. |
 | `0x9e` | `fee7_send_model_name_9e` | Sends custom blob0 string at `DAT_00827e8c + 0x7a` when enabled, otherwise literal `"H59MA_V1.0"`. |
 | `0x9f` | `fee7_noop_9f` | No response. |
 | `0xa0` | `fee7_send_status_frame_a0` | Multi-byte status frame built from battery/sensor/session state and fields from `DAT_00827e8c`. |
@@ -5011,7 +5017,7 @@ entries decoded from the two `switch8` tables:
 | `0x9a` | `fee7_set_session_mode2_ack_9a` | Sets state to `2`, sends self-marker ACK `[0x9a,0...,0x9a]` |
 | `0x9b` | `fee7_send_session_mode_status_9b` | Sends `[0x9b, state_byte]` |
 | `0x9c` | `fee7_stop_factory_test_9c` | Sends self-marker ACK `[0x9c,0...,0x9c]`, stops timer / power-off related |
-| `0x9d` | — | Dispatcher return; no response |
+| `0x9d` | `fee7_send_vendor_nak` | Vendor NAK `[0x9d\|0x80, 0xee, …]` (switch8 default-style slot) |
 | `0x9e` | `fee7_send_model_name_9e` | Conditional 10-byte copy from `DAT_00827e8c + 0x7a` or `"H59MA_V1.0"` |
 | `0x9f` | `fee7_noop_9f` | No response |
 | `0xa0` | `fee7_send_status_frame_a0` | Multi-byte status frame builder |
@@ -7273,7 +7279,7 @@ is in `firmwares/_re/fee7-high/evidence.md`.
 | `0x9a` | `0x648e` | `0x17ec` -> `0x17b8` | Set high-range session mode `2`; self-marker ACK `[0x9a, 0..., 0x9a]`. |
 | `0x9b` | `0x6496` | `0x17f0` | Send `[0x9b, state_byte, ..., checksum]`; `state_byte` is `0x88` for mode `2`, else `0x77`. |
 | `0x9c` | `0x649e` | `0x181e` | Self-marker ACK, stop factory-test timer, clear related state, call shared cancel path. |
-| `0x9d` | `0x6352` | — | Dispatcher return; no response. |
+| `0x9d` | `0x634e` | `0x58ba` (`fee7_send_vendor_nak`) | Vendor NAK `[0x9d\|0x80, 0xee, …]`. Earlier notes misread the shared epilogue at `0x6352` as the `0x9d` target. |
 | `0x9e` | `0x64a6` | `0x18c8` | Send ASCII model string, default `"H59MA_V1.0"` unless blob0 custom-name flag is enabled. |
 | `0x9f` | `0x64b6` | `0x1716` | Return only; no response. |
 | `0xa0` | `0x64ae` | `0x191a` | Send opaque high-status frame; bytes 1..9 are populated from runtime helpers and persistent state. |

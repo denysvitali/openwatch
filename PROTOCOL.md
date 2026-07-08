@@ -376,7 +376,7 @@ the generic bitmap below.
 | BloodOxygenSettingReq | `0x2c` | 01/02 | →watch | w:`[02, en(0/1)]` | read: `[1]`enable | SpO2 auto-measure on/off. |
 | BpSettingReq | `0x0c` | 01/02 | →watch | r:`[01]`; w:`[02,en,sH,sM,eH,eM,intervalMinutes]` where interval is nonzero and divisible by 30 | read response is 7 bytes: `[0]=01,[1]`en,`[2]`startH,`[3]`startM,`[4]`endH,`[5]`endM,`[6]`intervalMinutes`; invalid writes ACK as `opcode|0x80` | BP auto-measure window. H59MA v14 defaults to enabled, `00:00..23:00`, interval `0x3c` (hourly). Other sub-values have no response. |
 | BpReadConformReq | `0x0e` | — | →watch | `[0x00]`=advance/read next; nonzero silently exits | response is BP history via `0x0d` | Advance the BP record cursor and emit the next compact history record. |
-| BpDataRsp (no req) | `0x0d` | — | watch→ | n/a | hdr `[0]=00`{`[1]`yr-2000,`[2]`mo,`[3]`d,`[4]`intervalMinutes,`[5..10]`48-bit presence bitmap,`[11..13]=0`}; data frames `[0]=01` + up to 13 compact one-byte BP values in ascending set-bit order; `[0]=FF`=empty/end | BP history records. H59MA v14 initializes `intervalMinutes=0x3c` (hourly) and stores 24 4-byte persistent slots, but the `0x0d` stream emits only the first byte of each valid slot. OpenWatch preserves those compact bytes; systolic/diastolic reconstruction remains capture work. |
+| BpDataRsp (no req) | `0x0d` | — | watch→ | n/a | hdr `[0]=00`{`[1]`yr-2000,`[2]`mo,`[3]`d,`[4]`intervalMinutes,`[5..10]`48-bit presence bitmap,`[11..13]=0`}; data frames `[0]=01` + up to 13 compact one-byte values in ascending set-bit order; `[0]=FF`=empty/end | BP history records. H59MA v14 initializes `intervalMinutes=0x3c` (hourly) and stores 24 hourly 4-byte slots as `[compact,0,0,0]`. The sole v14 writer fills `compact` from `heart_rate_current_bpm()` (auto-measure ticks 15–20) or PRNG `(r%5)+0x46` (70–74) on timeout; validity for emit is `0x28..0xdc`. The `0x0d` stream projects only that byte0. Do not invent sys/dia history from it. Live `0x69` synthetic sys/dia (`FUN_00834092`) is a separate path and is not stored in these slots. See `firmwares/_re/bp-slot-encoding/evidence.md`. |
 | HRVReq | `0x39` | index | →watch | `[index]` | multi-pkt (`[0]=00`{size,range=30}, `[0]=01`{offset days-back + samples}, `0xFF`=end). stride 13B. | Read HRV history for a day index. |
 | PressureReq | `0x37` | index | →watch | `[index]` | multi-pkt (same scheme as HRV). stride 13B. | Read stress history for a day index. |
 | PressureSettingReq | `0x38` | 01/02 | →watch | w:`[02,en(0/1)]` | read: `[1]`enable; response echoes `[0x38,sub,value]` | Stress/pressure auto-measure enable bit. H59MA v14 has no confirmed Channel-A HRV auto-measure setting; the old APK-era `0x38` HRV setting row is stale for this firmware. |
@@ -463,7 +463,8 @@ prefer FEE7 writes for app flows without live-capture evidence.
 | FirmwareBuildInfo | `0x93` | both | bare opcode | two frames: header self-marker `[0x93,0...,0x93]`, then ASCII version/build string in `frame[1..14]` plus checksum | Returns a printable build string such as `"1.00.14_260508"`, using blob0 overrides when enabled. Verified at v14 body offset `0x184a`. |
 | StateUpdateMode1 / StateUpdateMode3 | `0x94` / `0x95` | both | bare opcode | self-marker ACK `[opcode,0,...,opcode]` | Updates `DAT_00827e88[0]` to mode `1` or `3`; `0x95` also clears `DAT_00827e88[1]`. Verified at v14 body offsets `0x645e` / `0x6466` and callees `0x172e` / `0x1754`. |
 | ResetState | `0x96` | both | bare opcode | self-marker ACK `[0x96,0,...,0x96]` | Resets the vendor state struct to mode `4`, clears `DAT_00827e88[1]`, and drains the state worker. Verified at v14 body offset `0x646e` and callee `0x177c`. |
-| HighNoResponse | `0x97` / `0x99` / `0x9d` / `0x9f` | →watch | bare opcode | none | High-range reserved/session slots that return without queuing a frame in H59MA v14. Verified at v14 body offsets `0x6476`, `0x6486`, `0x6352`, and `0x64b6`. |
+| HighNoResponse | `0x97` / `0x99` / `0x9f` | →watch | bare opcode | none | High-range reserved slots that return without queuing a frame in H59MA v14 (`bx lr` callees). Verified at v14 body offsets `0x6476`, `0x6486`, and `0x64b6`. **`0x9d` is not in this set** — see VendorHighNak. |
+| VendorHighNak | `0x9d` (and other unmapped high opcodes) | both | bare / any | `[opcode\|0x80, 0xee, …]` | High-range switch8 slot for `0x9d` lands on the shared default path `bl fee7_send_vendor_nak` (body `0x634e` → `0x58ba`), not the pure epilogue at `0x6352`. Confirmed in `firmwares/_re/vendor-high-audit/evidence.md`. |
 | SessionMode1 / SessionMode2 | `0x98` / `0x9a` | both | bare opcode | self-marker ACK `[opcode, 0..., opcode]` | Stores high-range session mode `1` or `2`, commits blob0 if changed, then ACKs. Verified at v14 body offsets `0x647e` / `0x648e` and callee `0x17b8`. |
 | SessionModeStatus | `0x9b` | both | bare opcode | `[stateByte]`, `0x88` when mode `2`, otherwise `0x77` | Reads the stored high-range session mode and returns one status byte; verified at v14 body offset `0x6496` and callee `0x17f0`. |
 | FactoryStop | `0x9c` | both | bare opcode | self-marker ACK `[0x9c, 0..., 0x9c]` | Stops factory-test timer, clears related state, and calls the shared cancel path; verified at v14 body offset `0x649e` and callee `0x181e`. |
@@ -966,16 +967,16 @@ Feedback, Customer-support chat.
 ### 8.5 Gaps / TODO
 
 - ~~**ECG/PPG notify listener opcodes** (`HealthEcgRsp`, `PpgDataRspCmd`)~~ — **resolved negative for H59MA v14.** radare2 on the v14 body confirms the live health-session notify uses Channel-A opcode `0x69` (same as `StartHeartRateReq`) and `0x6a` for stop/result. The `0x69` start dispatcher explicitly handles modes `0x03, 0x06, 0x09, 0x0B, 0x0C, 0x0D, 0x0E`; mode `0x07` (APK/SDK ECG) is absent and falls into the generic HR-mode-1 fallback. The only PPG/SpO2-related handler is §3.10 Channel-A `0x2c` (enable-bit + auto-measure cadence); there is no real-time PPG stream from a `0x69 type=7` session. No vendor/high opcode in the `0x90..0xA0` range matches the documented ECG/PPG shapes. OpenWatch therefore treats `0x69` frames as generic health-session notifies and does not expect dedicated ECG/PPG listener opcodes on H59MA v14.
-- **BP-history compact byte semantics** (`0x0d` BpDataRsp) — static firmware RE
-  now resolves the wire split: the persistent table has 24 hourly 4-byte slots,
-  but the `0x0d` stream emits only the first byte of each valid slot after a
-  `0x01` chunk tag. OpenWatch stores that compact byte per bitmap slot in the
-  `bp_raw` sidecar. Do not synthesize systolic/diastolic history from it. The
-  FEE7 `0x0d` branch and the `sub==0` wrapper both converge on the same compact
-  sender (`0x5ca4` → `0xde96`), and the BP descriptor pointer literal has no
-  other v14 hits, so static RE found no host-visible full-slot path for the
-  remaining three persistent bytes. Resolution path: correlate live `0x0d`
-  compact bytes with known manual/cuff readings.
+- ~~**BP-history compact byte / 4-byte slot encoding** (`0x0d` BpDataRsp)~~ —
+  **resolved for H59MA v14 store+wire path.** Persistent slots are
+  `[compact,0,0,0]`; sole writer `FUN_0083412c` (body `0xdd2c`) is fed by auto-
+  measure timer `FUN_00834180` with `heart_rate_current_bpm()` or timeout PRNG
+  `(r%5)+0x46`. Wire `0x0d` still emits only byte0 after `0x01` tags with clamp
+  `0x28..0xdc`. Live synthetic sys/dia (`FUN_00834092`, mid-addr `0x008340e2`)
+  is notify-only and never lands in history slots. OpenWatch keeps compact
+  values as `bp_raw`. Remaining capture work: cuff correlation for live
+  `0x69` sys/dia display values only — not for history reconstruction.
+  Evidence: `firmwares/_re/bp-slot-encoding/evidence.md`.
 - **`@RequiresSignature` method set** — confirm which cloud endpoints sign at runtime.
 - **Legacy `bind` (`0x10` CMD_BIND_SUCCESS)** request layout — **not on H59MA Channel-A.**
   The §10.2 inventory (22 Channel-A handlers) does not list `0x10`; on Channel-B
