@@ -41,10 +41,9 @@ class AppSettings {
   /// Sync the watch clock to phone time right after connecting (local, no cloud).
   final bool autoSyncTimeOnConnect;
 
-  /// Trigger a one-shot incremental history sync each time the BLE link
-  /// transitions to `ready`. The sync only re-fetches days the watch
-  /// says have new data AND we don't already have on disk — no work
-  /// happens on days with nothing new.
+  /// Trigger a one-shot incremental history sync after the watch
+  /// handshake completes. Always re-pulls today + yesterday; older
+  /// days are skipped when already complete on disk.
   final bool autoSyncHistoryOnConnect;
 
   // --- Wristband sensor settings ---

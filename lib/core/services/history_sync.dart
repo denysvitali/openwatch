@@ -747,10 +747,8 @@ class HistorySync extends ChangeNotifier {
         todayD,
         metric: 'hr',
         hasData: (h) => h.hr.isNotEmpty,
-        isComplete: (h) => fixedSlotSeriesLooksComplete(
-          h.day,
-          h.hr.map((s) => s.timestamp),
-        ),
+        isComplete: (h) =>
+            fixedSlotSeriesLooksComplete(h.day, h.hr.map((s) => s.timestamp)),
         force: force,
       );
       _progressTotal = hrToFetch.length;
@@ -802,13 +800,9 @@ class HistorySync extends ChangeNotifier {
 
       if (_dispatcher != null) {
         _ensureMetricRecordListeners();
-        // Delta sync for stress + HRV: same skip rule as HR. The
-        // watch only emits fixed-slot records for completed past
-        // days, and the merge is idempotent on timestamp, so
-        // re-polling a day we already have is wasted bytes only —
-        // never a missing write. Today is always re-fetched so
-        // half-hour slots that have filled in since the previous
-        // sync are picked up.
+        // Delta sync for stress + HRV: same skip rule as HR. Today
+        // and yesterday are always re-fetched; older complete days
+        // are skipped. Merge is idempotent on timestamp.
         final stressToFetch = _daysToFetch(
           wantsDays,
           todayD,
@@ -974,7 +968,7 @@ class HistorySync extends ChangeNotifier {
   ///   * [hasData] reports samples already in the cache **and**
   ///     [isComplete] (when supplied) says the series looks full
   ///     enough for a finished day, OR
-  ///   * (only when [skipOnConfirmedEmpty] is `true`) 
+  ///   * (only when [skipOnConfirmedEmpty] is `true`)
   ///     [DailyHistory.syncedMetrics] already contains [metric]
   ///     (watch returned an empty record earlier)
   ///
