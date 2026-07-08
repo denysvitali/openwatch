@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'activity_parser.dart';
 import 'codec.dart';
 import 'device_info.dart';
 import 'hr_parser.dart';
@@ -831,8 +832,8 @@ class WatchLogDecoder {
       case OpB.activitySummary:
         final records = _parseActivitySummary(payload);
         details['records'] = records.map((r) => r.toJson()).toList();
-        return 'B 0x2a activity records=${records.length} '
-            '${records.map((r) => 'd${r.dayOffset}:steps=${r.steps ?? 'n/a'}').join(', ')}';
+        return 'B 0x2a SpO2-hour records=${records.length} '
+            '${records.map((r) => 'd${r.dayOffset}:spo2=${r.spo2Max ?? 'n/a'}/${r.spo2Min ?? 'n/a'}').join(', ')}';
       case OpB.alarm:
         return _summarizeChannelBAlarm(payload, details);
       case OpB.h59FileListResponse:
@@ -1181,21 +1182,21 @@ class ByteSeriesSummary {
 class ActivityRecordSummary {
   const ActivityRecordSummary({
     required this.dayOffset,
-    required this.steps,
-    required this.calories,
-    required this.distanceMeters,
+    required this.spo2Max,
+    required this.spo2Min,
+    required this.hoursWithData,
   });
 
   final int dayOffset;
-  final int? steps;
-  final int? calories;
-  final int? distanceMeters;
+  final int? spo2Max;
+  final int? spo2Min;
+  final int hoursWithData;
 
   Map<String, Object?> toJson() => {
     'dayOffset': dayOffset,
-    'steps': steps,
-    'calories': calories,
-    'distanceMeters': distanceMeters,
+    'spo2Max': spo2Max,
+    'spo2Min': spo2Min,
+    'hoursWithData': hoursWithData,
   };
 }
 
@@ -1584,24 +1585,16 @@ String _sleepStageLabel(int stage) {
 
 List<ActivityRecordSummary> _parseActivitySummary(Uint8List payload) {
   final out = <ActivityRecordSummary>[];
-  var offset = 0;
-  while (offset + 49 <= payload.length) {
-    final dayOffset = payload[offset];
-    final body = Uint8List.fromList([
-      for (var i = offset + 1; i < offset + 49; i++)
-        payload[i] == 0xff ? 0x00 : payload[i],
-    ]);
-    if (offset > 0 && dayOffset == 0) break;
-    final totals = _parseActivityBody(body);
+  for (final entry in ActivityParser.parsePayload(payload)) {
+    final range = ActivityParser.dayRange(entry.samples);
     out.add(
       ActivityRecordSummary(
-        dayOffset: dayOffset,
-        steps: totals.steps,
-        calories: totals.calories,
-        distanceMeters: totals.distanceMeters,
+        dayOffset: entry.dayOffset,
+        spo2Max: range.max,
+        spo2Min: range.min,
+        hoursWithData: entry.samples.where((s) => s.hasData).length,
       ),
     );
-    offset += 49;
   }
   return out;
 }
@@ -1688,21 +1681,6 @@ _H59FileListSummary _parseH59FileList(Uint8List payload) {
     records: records,
     trailingBytes: trailingBytes,
     malformed: malformed,
-  );
-}
-
-_ActivityTotals _parseActivityBody(Uint8List body) {
-  if (body.length < 12) return const _ActivityTotals();
-  final steps = Codec.readU24be(body, 0);
-  final calories = Codec.readU24be(body, 6);
-  final distance = Codec.readU24be(body, 9);
-  if (steps == 0 && calories == 0 && distance == 0) {
-    return const _ActivityTotals();
-  }
-  return _ActivityTotals(
-    steps: steps > 200000 ? null : steps,
-    calories: calories > 20000 ? null : calories,
-    distanceMeters: distance > 200000 ? null : distance,
   );
 }
 

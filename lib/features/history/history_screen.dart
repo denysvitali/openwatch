@@ -812,6 +812,19 @@ class _DayDetailPage extends StatelessWidget {
                     showDivider: true,
                   ),
                   HealthListTile(
+                    leadingIcon: CupertinoIcons.drop_fill,
+                    leadingColor: kSpo2Blue(context),
+                    title: 'Blood oxygen',
+                    subtitle: displayDay.spo2Max == null
+                        ? 'No hourly SpO2'
+                        : '${displayDay.spo2Hours.where((s) => s.hasData).length} hours',
+                    value: displayDay.spo2Max == null
+                        ? '-'
+                        : '${displayDay.spo2Min}-${displayDay.spo2Max}',
+                    unit: '%',
+                    showDivider: true,
+                  ),
+                  HealthListTile(
                     leadingIcon: CupertinoIcons.bolt_fill,
                     leadingColor: kStressOrange(context),
                     title: 'Stress',
@@ -974,6 +987,7 @@ bool _isEmpty(DailyHistory day) =>
     day.stress.isEmpty &&
     day.hrv.isEmpty &&
     day.bloodPressure.isEmpty &&
+    day.spo2Max == null &&
     day.steps == null;
 
 DailyHistory _displayDayForNow(DailyHistory day, DateTime now) {

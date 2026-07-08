@@ -73,6 +73,7 @@ void main() {
       expect(r?.type, 0x01);
       expect(r?.err, 0x00);
       expect(r?.bpm, 88);
+      expect(r?.phase, MeasureFramePhase.value);
     });
 
     test('returns bpm null when errCode != 0 (session failed)', () {
@@ -84,8 +85,7 @@ void main() {
     });
 
     test('returns bpm null for in-progress bytes (0, 1)', () {
-      // Per smali StartHeartRateRsp.acceptData, value of 0/1 means
-      // "session in progress, no reading yet".
+      // Primary 0 = progress/ACK; value 1 alone is not a plausible bpm.
       for (final v in [0, 1]) {
         final r = HrParser.parseStartMeasureReply(
           Uint8List.fromList([0x01, 0x00, v]),
@@ -103,8 +103,7 @@ void main() {
     });
 
     test('extracts sbp/dbp when present (len >= 5)', () {
-      // Per PROTOCOL.md §4.3: `[0]=type, [1]=err, [2]=value,
-      // if len≥5 [3]=sbp [4]=dbp`.
+      // H59MA BP value phase: [mode, 0, bpm, sys, dia].
       final r = HrParser.parseStartMeasureReply(
         Uint8List.fromList([0x02, 0x00, 78, 120, 80]),
       );
@@ -112,6 +111,53 @@ void main() {
       expect(r?.bpm, 78);
       expect(r?.systolic, 120);
       expect(r?.diastolic, 80);
+    });
+
+    test('parses mode-6 continuous stream without treating flag as err', () {
+      final r = HrParser.parseStartMeasureReply(
+        Uint8List.fromList([0x06, 0x01, 72]),
+      );
+      expect(r?.type, 0x06);
+      expect(r?.err, 0);
+      expect(r?.bpm, 72);
+      expect(r?.phase, MeasureFramePhase.streaming);
+    });
+
+    test('parses SpO2 value frame with ready flag', () {
+      final r = HrParser.parseStartMeasureReply(
+        Uint8List.fromList([0x03, 0x00, 97, 0x01]),
+      );
+      expect(r?.spo2, 97);
+      expect(r?.spo2Ready, isTrue);
+    });
+
+    test('parses progress frame with u16 LE progress at pl[5..6]', () {
+      final r = HrParser.parseStartMeasureReply(
+        Uint8List.fromList([0x01, 0x00, 0x00, 0, 0, 0x10, 0x00]),
+      );
+      expect(r?.phase, MeasureFramePhase.progress);
+      expect(r?.progress, 0x10);
+      expect(r?.bpm, isNull);
+    });
+  });
+
+  group('parseStopMeasureReply (0x6a)', () {
+    test('reads primary metric at pl[1] for simple modes', () {
+      final r = HrParser.parseStopMeasureReply(Uint8List.fromList([0x01, 75]));
+      expect(r?.type, 0x01);
+      expect(r?.bpm, 75);
+      expect(r?.phase, MeasureFramePhase.finalResult);
+    });
+
+    test('parses multi 0x0C stop frame', () {
+      final r = HrParser.parseStopMeasureReply(
+        Uint8List.fromList([0x0c, 0x00, 70, 40, 35, 0, 0, 0, 118, 76]),
+      );
+      expect(r?.bpm, 70);
+      expect(r?.hrv, 40);
+      expect(r?.stress, 35);
+      expect(r?.systolic, 118);
+      expect(r?.diastolic, 76);
     });
   });
 

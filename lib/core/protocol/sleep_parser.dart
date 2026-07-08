@@ -458,7 +458,19 @@ class SleepParser {
   }
 
   static SleepStage _toStage(int typeByte) {
+    // H59MA v14 live/synthetic producers emit stage ids in `{0, 2, 3, 4, 5}`
+    // (`history-layouts/evidence.md` §1.2). Clinical deep/light/REM labels
+    // are **not** static-proven; mapping is a host display heuristic that
+    // also preserves the canonical Oudmon APK ids `0x01..0x04`:
+    //   * 0 = long gap / off → awake
+    //   * 1 = Oudmon light
+    //   * 2 = H59MA long band / Oudmon deep → deep
+    //   * 3 = H59MA mid band / Oudmon rem → rem
+    //   * 4 = Oudmon awake (H59MA synthetic type 4 is rare; keep APK id)
+    //   * 5 = H59MA live default continuing segment → light
     switch (typeByte) {
+      case 0x00:
+        return SleepStage.awake;
       case 0x01:
         return SleepStage.light;
       case 0x02:
@@ -467,16 +479,10 @@ class SleepParser {
         return SleepStage.rem;
       case 0x04:
         return SleepStage.awake;
-      // Defensive default for stage bytes outside the canonical
-      // Oudmon 0x01..0x04 set. The H59MA v13 firmware uses
-      // 0x05..0x35 to encode a coarse sleep-quality score; we
-      // map by range rather than collapsing every unknown to
-      // awake (which previously made the sleep chart a solid red
-      // bar). See the [stageFor] doc-comment above for the full
-      // rationale.
-      case 0x00:
-        return SleepStage.awake;
+      case 0x05: // H59MA live default stage
+        return SleepStage.light;
       default:
+        // Defensive range map for quality-score firmwares (0x06..0x35).
         if (typeByte <= 0x0f) return SleepStage.deep;
         if (typeByte <= 0x1f) return SleepStage.light;
         if (typeByte <= 0x2f) return SleepStage.rem;

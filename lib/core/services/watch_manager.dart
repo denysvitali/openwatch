@@ -21,7 +21,16 @@ import 'protocol_hub.dart';
 ///
 /// Sits on top of [BleTransport] and is fully local — no cloud involvement.
 class WatchManager extends ChangeNotifier {
-  WatchManager(this._transport, {this.autoSyncTime = true}) {
+  WatchManager(
+    this._transport, {
+    this.autoSyncTime = true,
+    this.autoApplySensorSettings = true,
+    this.hrAutoMeasureEnabled = true,
+    this.hrIntervalMinutes = 5,
+    this.hrLowAlarm = 50,
+    this.hrHighAlarm = 120,
+    this.stressAutoMeasureEnabled = true,
+  }) {
     _transport.state.addListener(_onLinkState);
     _inboundSub = _transport.inboundA.listen(_onFrame);
     _hub = ProtocolHub(_transport);
@@ -49,6 +58,26 @@ class WatchManager extends ChangeNotifier {
 
   final WatchLink _transport;
   bool autoSyncTime;
+
+  /// When true (default), the post-connect handshake pushes the
+  /// phone's HR + stress auto-measure preferences to the band so
+  /// daytime optical sampling is not stuck on factory defaults.
+  bool autoApplySensorSettings;
+
+  /// Phone-side HR auto-measure toggle applied on connect.
+  bool hrAutoMeasureEnabled;
+
+  /// Phone-side HR auto-measure interval (minutes) applied on connect.
+  int hrIntervalMinutes;
+
+  /// Low HR alarm threshold (BPM) applied on connect; 0 = disabled.
+  int hrLowAlarm;
+
+  /// High HR alarm threshold (BPM) applied on connect; 0 = disabled.
+  int hrHighAlarm;
+
+  /// Phone-side stress auto-measure toggle applied on connect.
+  bool stressAutoMeasureEnabled;
   StreamSubscription<Uint8List>? _inboundSub;
   StreamSubscription<Fee7BatteryResponse>? _fee7BatterySub;
   StreamSubscription<StatusResponse>? _fee7StatusSub;
@@ -70,6 +99,7 @@ class WatchManager extends ChangeNotifier {
   int? lastHeartRate;
   int? lastStress;
   int? lastHrv;
+  int? lastBloodOxygen;
   int? lastBloodPressureSystolic;
   int? lastBloodPressureDiastolic;
   final Set<int> _measuringTypes = {};
@@ -132,6 +162,8 @@ class WatchManager extends ChangeNotifier {
       _measuringTypes.contains(MeasureType.heartRate.id);
   bool get measuringBloodPressure =>
       _measuringTypes.contains(MeasureType.bloodPressure.id);
+  bool get measuringBloodOxygen =>
+      _measuringTypes.contains(MeasureType.bloodOxygen.id);
   bool get measuringStress => _measuringTypes.contains(MeasureType.pressure.id);
   bool get measuringHrv => _measuringTypes.contains(MeasureType.hrv.id);
 
@@ -206,6 +238,10 @@ class WatchManager extends ChangeNotifier {
             'bp=${capabilities.bloodPressure} sleep=${capabilities.sleep} '
             'alarm=${capabilities.alarm} screen=${capabilities.screenWidth}x${capabilities.screenHeight}',
       );
+      // Push phone-side sensor prefs before declaring ready so the
+      // band starts daytime auto-measure even if the user never opened
+      // Sensor settings. Failure is non-fatal — history sync still runs.
+      await _applySensorSettingsOnConnect();
       // Fire-and-forget for the periodic stats — but wait briefly so the
       // initial replies land before we declare "ready" to the UI.
       final fresh = DateTime.now();
@@ -268,19 +304,26 @@ class WatchManager extends ChangeNotifier {
           notifyListeners();
         }
       case OpA.startMeasure:
-        // StartHeartRateRsp: [0]=type, [1]=errCode, [2]=value. Log every
-        // reply (incl. err != 0) so a "session failed" doesn't look like
-        // silence — only update lastHeartRate on err==0 with a plausible bpm.
+        // Live/start frames: H59MA packs mode/primary/sys/dia per
+        // `health-sensor/evidence.md` (not the smali-only 3-byte shape).
         final r = HrParser.parseStartMeasureReply(pl);
         AppLog.instance.debug(
           'hr',
-          '0x69 reply type=${r?.type ?? -1} err=${r?.err ?? -1} '
-              'value=${r?.value ?? '-'} bpm=${r?.bpm ?? '-'} '
-              'bp=${r?.systolic ?? '-'}/${r?.diastolic ?? '-'}',
+          '0x69 phase=${r?.phase.name ?? '-'} type=${r?.type ?? -1} '
+              'err=${r?.err ?? -1} value=${r?.value ?? '-'} '
+              'bpm=${r?.bpm ?? '-'} spo2=${r?.spo2 ?? '-'} '
+              'bp=${r?.systolic ?? '-'}/${r?.diastolic ?? '-'} '
+              'progress=${r?.progress ?? '-'}',
         );
         if (r != null) _handleMeasureReply(r);
       case OpA.stopMeasure:
-        final r = HrParser.parseStartMeasureReply(pl);
+        // Stop frames put the primary metric at pl[1] (simple modes).
+        final r = HrParser.parseStopMeasureReply(pl);
+        AppLog.instance.debug(
+          'hr',
+          '0x6a stop type=${r?.type ?? -1} value=${r?.value ?? '-'} '
+              'bpm=${r?.bpm ?? '-'} spo2=${r?.spo2 ?? '-'}',
+        );
         if (r != null) _handleMeasureReply(r, fromStop: true);
       case OpA.deviceNotify:
       case OpA.deviceSportNotify:
@@ -385,15 +428,32 @@ class WatchManager extends ChangeNotifier {
       notifyListeners();
       return;
     }
+
+    // Progress / ACK frames keep the session active without clearing it.
+    if (!fromStop &&
+        (r.phase == MeasureFramePhase.ack ||
+            r.phase == MeasureFramePhase.progress)) {
+      _measuringTypes.add(r.type);
+      lastMeasurementError = null;
+      notifyListeners();
+      return;
+    }
+
     var finalValue = false;
-    switch (MeasureType.fromId(r.type)) {
-      case MeasureType.heartRate:
-      case MeasureType.realtimeHeartRate:
-        if (r.bpm != null) {
-          lastHeartRate = r.bpm;
-          finalValue = true;
-        }
+    final kind = MeasureType.fromId(r.type);
+
+    if (r.bpm != null) {
+      lastHeartRate = r.bpm;
+      if (kind == MeasureType.heartRate ||
+          kind == MeasureType.realtimeHeartRate ||
+          kind == null) {
+        finalValue = true;
+      }
+    }
+
+    switch (kind) {
       case MeasureType.bloodPressure:
+      case MeasureType.healthCheck:
         final sbp = r.systolic;
         final dbp = r.diastolic;
         if (sbp != null &&
@@ -406,25 +466,52 @@ class WatchManager extends ChangeNotifier {
           lastBloodPressureDiastolic = dbp;
           finalValue = true;
         }
+      case MeasureType.bloodOxygen:
+        if (r.spo2 != null) {
+          lastBloodOxygen = r.spo2;
+          // Prefer ready flag when present; otherwise accept any value frame.
+          finalValue = r.spo2Ready != false;
+        }
       case MeasureType.pressure:
-        if (r.value > 1 && r.value < 100) {
-          lastStress = r.value;
+        final stress = r.stress ?? (r.value > 1 ? r.value : null);
+        if (stress != null && stress > 1 && stress < 100) {
+          lastStress = stress;
           finalValue = true;
         }
       case MeasureType.hrv:
-        if (r.value > 1 && r.value < 255) {
-          lastHrv = r.value;
+        final hrv = r.hrv ?? (r.value > 1 ? r.value : null);
+        if (hrv != null && hrv > 1 && hrv < 255) {
+          lastHrv = hrv;
           finalValue = true;
         }
+      case MeasureType.heartRate:
+      case MeasureType.realtimeHeartRate:
+        if (r.bpm != null) finalValue = true;
       default:
         break;
     }
+
+    // Continuous mode-6 streaming samples update HR but stay active.
+    if (r.phase == MeasureFramePhase.streaming) {
+      lastMeasurementError = null;
+      _measuringTypes.add(r.type);
+      notifyListeners();
+      return;
+    }
+
     if (finalValue) {
-      _measuringTypes.remove(r.type);
+      // Live value ticks keep measuring until stop; stop/settled clear it.
+      if (fromStop ||
+          r.phase == MeasureFramePhase.settled ||
+          r.phase == MeasureFramePhase.finalResult) {
+        _measuringTypes.remove(r.type);
+      } else {
+        _measuringTypes.add(r.type);
+      }
       lastMeasurementError = null;
     } else if (fromStop) {
       _measuringTypes.remove(r.type);
-    } else if (r.value <= 1) {
+    } else if (!r.hasMetricValue) {
       _measuringTypes.add(r.type);
     }
     notifyListeners();
@@ -519,6 +606,29 @@ class WatchManager extends ChangeNotifier {
     ),
   );
 
+  /// Push HR + stress auto-measure prefs during the post-connect
+  /// handshake. Gated by [autoApplySensorSettings]; errors are logged
+  /// and swallowed so a flaky settings write cannot block readiness.
+  Future<void> _applySensorSettingsOnConnect() async {
+    if (!autoApplySensorSettings) return;
+    try {
+      AppLog.instance.info(
+        'watch',
+        'Push sensor settings: hr=${hrAutoMeasureEnabled?'on':'off'}/'
+            '${hrIntervalMinutes}m stress=${stressAutoMeasureEnabled?'on':'off'}',
+      );
+      await applyHeartRateSettings(
+        enabled: hrAutoMeasureEnabled,
+        interval: hrIntervalMinutes,
+        tooLow: hrLowAlarm,
+        tooHigh: hrHighAlarm,
+      );
+      await setPressureSetting(enabled: stressAutoMeasureEnabled);
+    } catch (e) {
+      AppLog.instance.warn('watch', 'Sensor settings push failed: $e');
+    }
+  }
+
   /// Start a heart-rate measurement.
   ///
   /// Sends both the explicit session start (`0x69` type=heartRate=1) AND the
@@ -575,6 +685,16 @@ class WatchManager extends ChangeNotifier {
 
   Future<void> stopHrv() =>
       _withActionSpan('stop_hrv', () => _stopMeasure(MeasureType.hrv));
+
+  Future<void> startBloodOxygen() => _withActionSpan(
+    'start_blood_oxygen',
+    () => _startMeasure(MeasureType.bloodOxygen),
+  );
+
+  Future<void> stopBloodOxygen() => _withActionSpan(
+    'stop_blood_oxygen',
+    () => _stopMeasure(MeasureType.bloodOxygen),
+  );
 
   Future<void> _startMeasure(MeasureType type) async {
     _markMeasureStarted(type);

@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 
 import '../ble/ble_transport.dart';
+import '../protocol/activity_parser.dart';
 import '../protocol/channel_a.dart';
 import '../protocol/channel_b.dart';
 import '../protocol/codec.dart';
@@ -16,8 +17,9 @@ import 'bp_raw_store.dart';
 import 'history_store.dart';
 import 'opentelemetry_service.dart';
 
-// Re-export sleep model types so existing consumers can keep importing
-// them from `history_sync.dart` after the move to `sleep_parser.dart`.
+// Re-export model types so existing consumers can keep importing them
+// from `history_sync.dart`.
+export '../protocol/activity_parser.dart' show Spo2HourSample;
 export '../protocol/sleep_parser.dart' show SleepSegment, SleepStage;
 export 'history_store.dart' show DateOnly, DailyHistory;
 
@@ -184,25 +186,32 @@ class DailyTotals {
   final int? distanceMeters;
 }
 
-/// One raw Channel-B `0x2a` activity-summary entry (GHIDRA §2.8).
+/// One raw Channel-B `0x2a` day entry (H59MA SpO2 hourly max/min).
 @immutable
 class ActivitySummaryRecord {
   const ActivitySummaryRecord({
     required this.day,
     required this.dayOffset,
     required this.body,
-    required this.totals,
+    required this.samples,
+    this.spo2Max,
+    this.spo2Min,
   });
 
   final DateOnly day;
   final int dayOffset;
 
-  /// The 48-byte producer-owned activity body with `0xff` bytes normalised
-  /// to `0x00`, matching the firmware's compression convention.
+  /// The 48-byte body with `0xff` holes normalised to `0x00`.
   final Uint8List body;
 
-  /// Best-effort totals decoded from the first TodaySport-shaped groups.
-  final DailyTotals totals;
+  /// 24 hourly SpO2 max/min pairs (firmware producer truth).
+  final List<Spo2HourSample> samples;
+
+  /// Day-level max SpO2 % across hours that have data.
+  final int? spo2Max;
+
+  /// Day-level min SpO2 % across hours that have data.
+  final int? spo2Min;
 }
 
 /// Pulls historical data from the watch. Uses the watch's data distribution
@@ -738,6 +747,10 @@ class HistorySync extends ChangeNotifier {
         todayD,
         metric: 'hr',
         hasData: (h) => h.hr.isNotEmpty,
+        isComplete: (h) => fixedSlotSeriesLooksComplete(
+          h.day,
+          h.hr.map((s) => s.timestamp),
+        ),
         force: force,
       );
       _progressTotal = hrToFetch.length;
@@ -801,6 +814,10 @@ class HistorySync extends ChangeNotifier {
           todayD,
           metric: 'stress',
           hasData: (h) => h.stress.isNotEmpty,
+          isComplete: (h) => fixedSlotSeriesLooksComplete(
+            h.day,
+            h.stress.map((s) => s.timestamp),
+          ),
           force: force,
         );
         final hrvToFetch = _daysToFetch(
@@ -808,6 +825,10 @@ class HistorySync extends ChangeNotifier {
           todayD,
           metric: 'hrv',
           hasData: (h) => h.hrv.isNotEmpty,
+          isComplete: (h) => fixedSlotSeriesLooksComplete(
+            h.day,
+            h.hrv.map((s) => s.timestamp),
+          ),
           force: force,
         );
         // Union of days we need to hit on the wire — we always
@@ -941,15 +962,21 @@ class HistorySync extends ChangeNotifier {
   }
 
   /// Returns the subset of [wantsDays] (a set of day-offsets, 0 =
-  /// today) that we still need to fetch for [metric]. Today is
-  /// always included — its response can carry samples that
-  /// straddle midnight or that have filled in since the previous
-  /// sync. Past days are skipped when either [hasData] reports the
-  /// in-memory cache already has at least one sample of that
-  /// metric for them, OR (only when [skipOnConfirmedEmpty] is
-  /// `true`) when [DailyHistory.syncedMetrics] already contains
-  /// [metric] (meaning we fetched it earlier and the watch
-  /// returned an empty record).
+  /// today) that we still need to fetch for [metric].
+  ///
+  /// Always re-fetched:
+  ///   * **today** — slots still filling in through the evening
+  ///   * **yesterday** — a morning/partial sync can freeze a
+  ///     sleep-window-only HR/stress series; re-pull once the day
+  ///     is closed so afternoon auto-measure samples are not lost
+  ///
+  /// Older past days are skipped when:
+  ///   * [hasData] reports samples already in the cache **and**
+  ///     [isComplete] (when supplied) says the series looks full
+  ///     enough for a finished day, OR
+  ///   * (only when [skipOnConfirmedEmpty] is `true`) 
+  ///     [DailyHistory.syncedMetrics] already contains [metric]
+  ///     (watch returned an empty record earlier)
   ///
   /// Sleep passes `skipOnConfirmedEmpty: false` because an H59MA
   /// "empty" batch can mean either "no records on the watch" or
@@ -968,17 +995,26 @@ class HistorySync extends ChangeNotifier {
     required bool Function(DailyHistory) hasData,
     required bool force,
     bool skipOnConfirmedEmpty = true,
+    bool Function(DailyHistory)? isComplete,
   }) {
     final out = <int>[];
     for (final d in wantsDays) {
       final day = todayD.addDays(-d);
-      final isToday = day == todayD;
+      // Always re-pull today + yesterday. Yesterday covers the
+      // "synced at wake-up, missed the rest of the day" trap.
+      final alwaysRefresh = d <= 1;
       final existing = _days[day];
+      final completeEnough =
+          isComplete == null || (existing != null && isComplete(existing));
       final skipHasData =
-          !force && !isToday && existing != null && hasData(existing);
+          !force &&
+          !alwaysRefresh &&
+          existing != null &&
+          hasData(existing) &&
+          completeEnough;
       final skipConfirmed =
           !force &&
-          !isToday &&
+          !alwaysRefresh &&
           existing != null &&
           skipOnConfirmedEmpty &&
           existing.syncedMetrics.contains(metric);
@@ -992,6 +1028,28 @@ class HistorySync extends ChangeNotifier {
       out.add(d);
     }
     return out;
+  }
+
+  /// Fixed-slot series (HR 5-min / stress+HRV 30-min) look "complete"
+  /// for a finished past day only when the latest sample reaches
+  /// evening. Sleep-window-only series ending ~07:xx (or any morning
+  /// partial sync) return false so the day is re-polled.
+  ///
+  /// Threshold is 18:00 local — well after a typical workday afternoon
+  /// of auto-measure, without requiring a full 288/48 filled grid
+  /// (failed optical reads leave legitimate gaps).
+  static bool fixedSlotSeriesLooksComplete(
+    DateOnly day,
+    Iterable<DateTime> timestamps, {
+    Duration eveningFloor = const Duration(hours: 18),
+  }) {
+    DateTime? latest;
+    for (final t in timestamps) {
+      if (latest == null || t.isAfter(latest)) latest = t;
+    }
+    if (latest == null) return false;
+    final floor = day.midnight.add(eveningFloor);
+    return !latest.isBefore(floor);
   }
 
   /// Marks the given [days] as having an empty sleep list in
@@ -1489,73 +1547,52 @@ class HistorySync extends ChangeNotifier {
     }
   }
 
+  /// Decode Channel-B `0x2a` as H59MA SpO2 hourly max/min pairs.
+  ///
+  /// Does **not** feed step/calorie/distance totals — those come from
+  /// `0x48` todaySport and `0x43` sport detail. See
+  /// `firmwares/_re/history-layouts/evidence.md` §3.
   int _decodeActivitySummary(Uint8List payload) {
     var updated = 0;
-    var offset = 0;
     final today = DateOnly.today();
-    while (offset + 49 <= payload.length) {
-      final dayOffset = payload[offset];
-      final body = Uint8List.fromList([
-        for (var i = offset + 1; i < offset + 49; i++)
-          payload[i] == 0xff ? 0x00 : payload[i],
-      ]);
-      if (dayOffset <= 31) {
-        final day = today.addDays(-dayOffset);
-        final totals = _activityTotalsFromBody(body);
-        final rec = ActivitySummaryRecord(
-          day: day,
-          dayOffset: dayOffset,
-          body: body,
-          totals: totals,
-        );
-        _activity.removeWhere((r) => r.day == day);
-        _activity.add(rec);
-        _activity.sort((a, b) => a.day.compareTo(b.day));
-        _upsertTotals(day, totals);
-        if (day == today) onTotals(totals);
-        updated++;
+    for (final entry in ActivityParser.parsePayload(payload)) {
+      final day = today.addDays(-entry.dayOffset);
+      final range = ActivityParser.dayRange(entry.samples);
+      final body = Uint8List(ActivityParser.bodySize);
+      for (final s in entry.samples) {
+        body[s.hour * 2] = s.max;
+        body[s.hour * 2 + 1] = s.min;
       }
-      offset += 49;
+      final rec = ActivitySummaryRecord(
+        day: day,
+        dayOffset: entry.dayOffset,
+        body: body,
+        samples: entry.samples,
+        spo2Max: range.max,
+        spo2Min: range.min,
+      );
+      _activity.removeWhere((r) => r.day == day);
+      _activity.add(rec);
+      _activity.sort((a, b) => a.day.compareTo(b.day));
+      _upsertSpo2Day(day, rec);
+      updated++;
     }
     return updated;
   }
 
-  DailyTotals _activityTotalsFromBody(Uint8List body) {
-    if (body.length < 12) return const DailyTotals();
-    // Best-effort field layout: steps (u24 BE @ 0), calories (u24 BE
-    // @ 6), distance (u24 BE @ 9). The H59MA v13 firmware emits the
-    // activity body with field semantics "owned by the producer"
-    // (see `firmwares/GHIDRA_DECOMPILATION.md` §2.8) — i.e. the
-    // RE notes only pin the *frame* layout (1 B day-offset + 48 B
-    // body), not the per-byte semantics of the body. The offsets
-    // above are our best guess from live captures.
-    //
-    // Defensive clamping: on v13 the u24 BE field at body[6..8] can
-    // decode to values like 6,381,923 kcal (impossible). Until we
-    // have a RE-pinned offset for that build we clamp any value past
-    // [kMaxSaneKcalPerDay] to null so the UI doesn't show absurd numbers
-    // and so _upsertTotals knows the field is missing (not zero).
-    // The OLD app versions (before commit fd28b07) had no clamp,
-    // which produced kcal values like 108543 in the user's export;
-    // `DailyHistory.fromJson` now nulls those on read.
-    const kMaxSaneSteps = 200000; // ~2 steps/sec for 24h straight
-    const kMaxSaneKcal = 20000; // ~10x elite-athlete ceiling
-    const kMaxSaneMeters = 200000; // 200 km in a day
-    final rawSteps = Codec.readU24be(body, 0);
-    final rawKcal = Codec.readU24be(body, 6);
-    final rawMeters = Codec.readU24be(body, 9);
-    // An all-zero activity body means "the watch has no activity summary
-    // for this day yet" (e.g. freshly after midnight). Return null totals
-    // so the UI shows "no data" and _upsertTotals does not fall back to
-    // a previous day's values (HS-6).
-    if (rawSteps == 0 && rawKcal == 0 && rawMeters == 0) {
-      return const DailyTotals();
-    }
-    return DailyTotals(
-      steps: rawSteps > kMaxSaneSteps ? null : rawSteps,
-      calories: rawKcal > kMaxSaneKcal ? null : rawKcal,
-      distanceMeters: rawMeters > kMaxSaneMeters ? null : rawMeters,
+  void _upsertSpo2Day(DateOnly day, ActivitySummaryRecord rec) {
+    final previous = _days[day] ?? DailyHistory(day: day);
+    final updated = previous.copyWith(
+      spo2Hours: rec.samples,
+      spo2Max: rec.spo2Max,
+      clearSpo2Max: rec.spo2Max == null,
+      spo2Min: rec.spo2Min,
+      clearSpo2Min: rec.spo2Min == null,
+      lastUpdated: DateTime.now(),
+      syncedMetrics: {...previous.syncedMetrics, 'spo2'},
     );
+    _days[day] = updated;
+    unawaited(_store?.writeDay(updated));
   }
 
   /// Tracks the per-day "expected record count" advertised by the most

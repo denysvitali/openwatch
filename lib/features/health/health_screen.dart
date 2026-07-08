@@ -30,10 +30,16 @@ class HealthScreen extends ConsumerWidget {
         _HealthMetric(
           icon: CupertinoIcons.drop_fill,
           title: 'Blood oxygen',
-          value: '—',
+          value: manager.lastBloodOxygen?.toString() ?? '—',
           unit: '%',
           tint: colors.spo2,
-          subtitle: 'View trends in History',
+          ready: ready,
+          measuring: manager.measuringBloodOxygen,
+          start: manager.startBloodOxygen,
+          stop: manager.stopBloodOxygen,
+          subtitle: manager.lastBloodOxygen == null
+              ? 'Live measure or view History'
+              : null,
           onTap: () => context.go('/history'),
         ),
       if (caps.bloodPressure)

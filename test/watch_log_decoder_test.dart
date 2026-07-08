@@ -149,11 +149,12 @@ void main() {
       expect(decoded.details['payloadBytes'], 1);
     });
 
-    test('summarizes Channel B activity records and supports JSON output', () {
+    test('summarizes Channel B 0x2a SpO2-hour records and supports JSON', () {
       final body = List<int>.filled(48, 0);
-      body[2] = 100;
-      body[8] = 50;
-      body[11] = 80;
+      body[0] = 98; // hour 0 max
+      body[1] = 94; // hour 0 min
+      body[2] = 97;
+      body[3] = 93;
       final frame = Codec.buildChannelB(OpB.activitySummary, [1, ...body]);
 
       final report = const WatchLogDecoder().decodeNrfConnectLog(
@@ -161,11 +162,11 @@ void main() {
       );
       final json = report.toJson();
 
-      expect(report.frames.single.title, contains('activity records=1'));
+      expect(report.frames.single.title, contains('SpO2-hour records=1'));
       final encoded = jsonEncode(json);
-      expect(encoded, contains('"steps":100'));
-      expect(encoded, contains('"calories":50'));
-      expect(encoded, contains('"distanceMeters":80'));
+      expect(encoded, contains('"spo2Max":98'));
+      expect(encoded, contains('"spo2Min":93'));
+      expect(encoded, contains('"hoursWithData":2'));
     });
 
     test('decodes H59MA file-table list response TLVs', () {

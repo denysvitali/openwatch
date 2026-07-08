@@ -1734,8 +1734,8 @@ void main() {
       },
     );
 
-    test('activity summary 0x2a parses dayOffset=0 as a valid today entry '
-        'after yesterday (HS-7)', () async {
+    test('activity summary 0x2a parses dayOffset=0 as SpO2 hours, not steps '
+        '(HS-7 / RE history-layouts §3)', () async {
       final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       final bParser = ChannelBParser(t);
@@ -1745,33 +1745,20 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 20));
 
       // Firmware emits entries in descending day-offset order.
-      // A dayOffset=0 entry in the middle is today's data, not a
-      // terminator — parsing must continue to the payload end.
+      // Body is 24 × (max, min) SpO2 pairs — not u24 step totals.
       final body1 = List<int>.filled(48, 0x00);
-      body1[0] = 0x00;
-      body1[1] = 0x00;
-      body1[2] = 0x64; // steps = 100
-      body1[6] = 0x00;
-      body1[7] = 0x00;
-      body1[8] = 0x32; // calories = 50
-      body1[9] = 0x00;
-      body1[10] = 0x00;
-      body1[11] = 0x50; // distance = 80
+      body1[0] = 98; // hour 0 max
+      body1[1] = 94; // hour 0 min
 
       final body0 = List<int>.filled(48, 0x00);
-      body0[0] = 0x00;
-      body0[1] = 0x00;
-      body0[2] = 0xC8; // steps = 200
-      body0[6] = 0x00;
-      body0[7] = 0x00;
-      body0[8] = 0x64; // calories = 100
-      body0[9] = 0x00;
-      body0[10] = 0x00;
-      body0[11] = 0xA0; // distance = 160
+      body0[0] = 99;
+      body0[1] = 95;
+      body0[2] = 97;
+      body0[3] = 93;
 
       final payload = Uint8List.fromList([
-        0x01, ...body1, // yesterday with data
-        0x00, ...body0, // today with data
+        0x01, ...body1, // yesterday
+        0x00, ...body0, // today
       ]);
       t.inB.add(Codec.buildChannelB(OpB.activitySummary, payload));
 
@@ -1780,16 +1767,17 @@ void main() {
       final yesterday = DateOnly.today().addDays(-1);
       final yestHistory = sync.dayOf(yesterday);
       expect(yestHistory, isNotNull);
-      expect(yestHistory!.steps, 100);
-      expect(yestHistory.energyKcal, 50);
-      expect(yestHistory.distanceMeters, 80);
+      expect(yestHistory!.steps, isNull, reason: '0x2a must not invent steps');
+      expect(yestHistory.spo2Max, 98);
+      expect(yestHistory.spo2Min, 94);
+      expect(yestHistory.spo2Hours[0].max, 98);
 
       final today = DateOnly.today();
       final todayHistory = sync.dayOf(today);
       expect(todayHistory, isNotNull);
-      expect(todayHistory!.steps, 200);
-      expect(todayHistory.energyKcal, 100);
-      expect(todayHistory.distanceMeters, 160);
+      expect(todayHistory!.steps, isNull);
+      expect(todayHistory.spo2Max, 99);
+      expect(todayHistory.spo2Min, 93);
 
       sync.dispose();
       d.dispose();
@@ -1805,18 +1793,17 @@ void main() {
       final future = sync.syncAll(daysBack: 2);
       await Future<void>.delayed(const Duration(milliseconds: 20));
 
-      Uint8List body(int steps) {
+      Uint8List body(int maxSpo2) {
         final b = List<int>.filled(48, 0x00);
-        b[0] = 0x00;
-        b[1] = 0x00;
-        b[2] = steps;
+        b[0] = maxSpo2;
+        b[1] = maxSpo2 - 2;
         return Uint8List.fromList(b);
       }
 
       final payload = Uint8List.fromList([
-        0x02, ...body(0x10), // 2 days ago: 16 steps
-        0x01, ...body(0x20), // yesterday: 32 steps
-        0x00, ...body(0x30), // today: 48 steps
+        0x02, ...body(0x60), // 2 days ago
+        0x01, ...body(0x61), // yesterday
+        0x00, ...body(0x62), // today
       ]);
       t.inB.add(Codec.buildChannelB(OpB.activitySummary, payload));
 
@@ -1826,9 +1813,10 @@ void main() {
       final yesterday = today.addDays(-1);
       final twoDaysAgo = today.addDays(-2);
 
-      expect(sync.dayOf(today)?.steps, 0x30);
-      expect(sync.dayOf(yesterday)?.steps, 0x20);
-      expect(sync.dayOf(twoDaysAgo)?.steps, 0x10);
+      expect(sync.dayOf(today)?.spo2Max, 0x62);
+      expect(sync.dayOf(today)?.steps, isNull);
+      expect(sync.dayOf(yesterday)?.spo2Max, 0x61);
+      expect(sync.dayOf(twoDaysAgo)?.spo2Max, 0x60);
 
       sync.dispose();
       d.dispose();
@@ -1845,14 +1833,10 @@ void main() {
         final future = sync.syncAll(daysBack: 0);
         await Future<void>.delayed(const Duration(milliseconds: 20));
 
-        // Build a Channel-B 0x2a payload with one entry:
-        //   dayOffset = 0 (today), body has data
-        // The offset > 0 guard means the first entry is never treated as a
-        // terminator, even if dayOffset == 0.
+        // dayOffset = 0 (today) with SpO2 hour-0 pair — not a terminator.
         final body = List<int>.filled(48, 0x00);
-        body[0] = 0x00;
-        body[1] = 0x00;
-        body[2] = 0x64; // steps = 100
+        body[0] = 98;
+        body[1] = 94;
         final payload = Uint8List.fromList([0x00, ...body]);
         t.inB.add(Codec.buildChannelB(OpB.activitySummary, payload));
 
@@ -1861,7 +1845,9 @@ void main() {
         final today = DateOnly.today();
         final todayHistory = sync.dayOf(today);
         expect(todayHistory, isNotNull);
-        expect(todayHistory!.steps, 100);
+        expect(todayHistory!.spo2Max, 98);
+        expect(todayHistory.spo2Min, 94);
+        expect(todayHistory.steps, isNull);
 
         sync.dispose();
         d.dispose();
@@ -1872,15 +1858,15 @@ void main() {
     // HS-6: Step/calorie totals must not fallback to previous day on 0.
     // ------------------------------------------------------------------
 
-    test('activity summary 0x2a with all-zero body preserves nulls, '
-        'not previous-day totals (HS-6)', () async {
+    test('activity summary 0x2a with all-zero body leaves steps null and '
+        'does not invent SpO2 (HS-6)', () async {
       final t = FakeBleTransport();
       final d = ChannelADispatcher(t);
       final bParser = ChannelBParser(t);
       d.bind();
       final sync = _testSync(t, d, bParser: bParser);
 
-      // Pre-seed yesterday with non-zero totals via a fake store so
+      // Pre-seed yesterday with non-zero step totals via a fake store so
       // _days is hydrated before syncAll runs.
       final yesterday = DateOnly.today().addDays(-1);
       final fakeStore = _FakeHistoryStore(
@@ -1898,9 +1884,7 @@ void main() {
       final future = sync.syncAll(daysBack: 1);
       await Future<void>.delayed(const Duration(milliseconds: 20));
 
-      // Build a Channel-B 0x2a payload with one entry:
-      //   dayOffset = 0 (today)
-      //   48-byte body all zeros → genuine "no activity yet today"
+      // dayOffset = 0 (today), all-zero SpO2 body → no SpO2 data.
       final body = List<int>.filled(48, 0x00);
       final payload = Uint8List.fromList([0x00, ...body]);
       t.inB.add(Codec.buildChannelB(OpB.activitySummary, payload));
@@ -1910,25 +1894,11 @@ void main() {
       final today = DateOnly.today();
       final todayHistory = sync.dayOf(today);
       expect(todayHistory, isNotNull);
-      // The all-zero body must produce null totals, NOT fallback to
-      // yesterday's 12345/678/9876 values.
-      expect(
-        todayHistory!.steps,
-        isNull,
-        reason: 'steps must be null for all-zero body',
-      );
-      expect(
-        todayHistory.energyKcal,
-        isNull,
-        reason: 'calories must be null for all-zero body',
-      );
-      expect(
-        todayHistory.distanceMeters,
-        isNull,
-        reason: 'distance must be null for all-zero body',
-      );
+      expect(todayHistory!.steps, isNull);
+      expect(todayHistory.spo2Max, isNull);
+      expect(todayHistory.spo2Min, isNull);
 
-      // Yesterday must remain untouched.
+      // Yesterday step totals must remain untouched (0x2a is not steps).
       final yestHistory = sync.dayOf(yesterday);
       expect(yestHistory!.steps, 12345);
       expect(yestHistory.energyKcal, 678);
@@ -1938,101 +1908,46 @@ void main() {
       d.dispose();
     });
 
-    test('activity summary 0x2a with zero steps but non-zero calories '
-        'keeps steps=0 (HS-6)', () async {
-      final t = FakeBleTransport();
-      final d = ChannelADispatcher(t);
-      final bParser = ChannelBParser(t);
-      d.bind();
-      final sync = _testSync(t, d, bParser: bParser);
-      final future = sync.syncAll(daysBack: 0);
-      await Future<void>.delayed(const Duration(milliseconds: 20));
+    test(
+      'activity summary 0x2a never writes step/kcal/distance totals',
+      () async {
+        final t = FakeBleTransport();
+        final d = ChannelADispatcher(t);
+        final bParser = ChannelBParser(t);
+        d.bind();
+        final sync = _testSync(t, d, bParser: bParser);
+        final future = sync.syncAll(daysBack: 0);
+        await Future<void>.delayed(const Duration(milliseconds: 20));
 
-      // Build a Channel-B 0x2a payload:
-      //   dayOffset = 0 (today)
-      //   body: steps = 0 (u24 BE @ 0), calories = 1500 (u24 BE @ 6),
-      //         distance = 2000 (u24 BE @ 9)
-      final body = List<int>.filled(48, 0x00);
-      body[0] = 0x00;
-      body[1] = 0x00;
-      body[2] = 0x00; // steps = 0
-      body[6] = 0x00;
-      body[7] = 0x05;
-      body[8] = 0xDC; // calories = 1500 (0x05DC)
-      body[9] = 0x00;
-      body[10] = 0x07;
-      body[11] = 0xD0; // distance = 2000 (0x07D0)
-      final payload = Uint8List.fromList([0x00, ...body]);
-      t.inB.add(Codec.buildChannelB(OpB.activitySummary, payload));
+        // Bytes that would have decoded as huge u24 totals under the old
+        // parser must not become steps — they are SpO2 hour pairs only.
+        final body = List<int>.filled(48, 0x00);
+        body[0] = 0x0F;
+        body[1] = 0x42;
+        body[2] = 0x3F;
+        body[6] = 0x01;
+        body[7] = 0x86;
+        body[8] = 0x9F;
+        final payload = Uint8List.fromList([0x00, ...body]);
+        t.inB.add(Codec.buildChannelB(OpB.activitySummary, payload));
 
-      await future;
+        await future;
 
-      final today = DateOnly.today();
-      final todayHistory = sync.dayOf(today);
-      expect(todayHistory, isNotNull);
-      // steps = 0 is genuine zero activity, not "no data".
-      expect(todayHistory!.steps, 0, reason: 'steps must be 0, not null');
-      expect(todayHistory.energyKcal, 1500);
-      expect(todayHistory.distanceMeters, 2000);
+        final today = DateOnly.today();
+        final todayHistory = sync.dayOf(today);
+        expect(todayHistory, isNotNull);
+        expect(todayHistory!.steps, isNull);
+        expect(todayHistory.energyKcal, isNull);
+        expect(
+          todayHistory.distanceMeters,
+          isNull,
+          reason: 'absurd distance must clamp to null',
+        );
 
-      sync.dispose();
-      d.dispose();
-    });
-
-    test('activity summary 0x2a absurd-clamped values become null '
-        'instead of 0 (HS-6)', () async {
-      final t = FakeBleTransport();
-      final d = ChannelADispatcher(t);
-      final bParser = ChannelBParser(t);
-      d.bind();
-      final sync = _testSync(t, d, bParser: bParser);
-      final future = sync.syncAll(daysBack: 0);
-      await Future<void>.delayed(const Duration(milliseconds: 20));
-
-      // Build a Channel-B 0x2a payload with absurd values that exceed
-      // the sanity clamps in _activityTotalsFromBody.
-      final body = List<int>.filled(48, 0x00);
-      // steps = 999_999 (> 200_000 clamp)
-      body[0] = 0x0F;
-      body[1] = 0x42;
-      body[2] = 0x3F;
-      // calories = 99_999 (> 20_000 clamp)
-      body[6] = 0x01;
-      body[7] = 0x86;
-      body[8] = 0x9F;
-      // distance = 999_999 (> 200_000 clamp)
-      body[9] = 0x0F;
-      body[10] = 0x42;
-      body[11] = 0x3F;
-      final payload = Uint8List.fromList([0x00, ...body]);
-      t.inB.add(Codec.buildChannelB(OpB.activitySummary, payload));
-
-      await future;
-
-      final today = DateOnly.today();
-      final todayHistory = sync.dayOf(today);
-      expect(todayHistory, isNotNull);
-      // Clamped values must be null so the UI can show "no data"
-      // and _upsertTotals won't fall back to stale previous-day values.
-      expect(
-        todayHistory!.steps,
-        isNull,
-        reason: 'absurd steps must clamp to null',
-      );
-      expect(
-        todayHistory.energyKcal,
-        isNull,
-        reason: 'absurd calories must clamp to null',
-      );
-      expect(
-        todayHistory.distanceMeters,
-        isNull,
-        reason: 'absurd distance must clamp to null',
-      );
-
-      sync.dispose();
-      d.dispose();
-    });
+        sync.dispose();
+        d.dispose();
+      },
+    );
 
     // ------------------------------------------------------------------
     // 0x43 sport detail paging validation.

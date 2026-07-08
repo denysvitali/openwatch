@@ -106,8 +106,8 @@ class OpA {
 
   /// NOT IMPLEMENTED in H59MA v14 firmware — section 10.2 Channel-A
   /// inventory has no 0x07 row. Stale legacy spec retired (subsumed by
-  /// 0x48 todaySport / 0x43 readDetailSport / Ch-B 0x2a activity
-  /// summary). See PROTOCOL.md section 4.4.
+  /// 0x48 todaySport / 0x43 readDetailSport). Channel-B `0x2a` is SpO2
+  /// hourly max/min, not step totals. See PROTOCOL.md section 4.4.
   static const int readTotalSport = 0x07;
   static const int phoneSport = 0x77;
   static const int phoneGps = 0x74;
@@ -225,8 +225,9 @@ class OpB {
   static const int sleepNew = 0x27; // new sleep protocol (night) — Ch B
   static const int apkManualHeartRateUnsupported = 0x28;
   static const int h59Noop29 = 0x29; // H59MA Channel-B placeholder; no reply
-  static const int activitySummary =
-      0x2a; // v14 activity/sport summary — see GHIDRA §2.8
+  /// H59MA v14: 24 × (SpO2 max, min) hourly pairs — **not** step totals.
+  /// See `history-layouts/evidence.md` §3.
+  static const int activitySummary = 0x2a;
   static const int alarm = 0x2c; // Channel-B compact alarm read/write
   static const int apkContactUnsupported = 0x2d;
   static const int apkBtMacUnsupported = 0x2e;

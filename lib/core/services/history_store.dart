@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../protocol/activity_parser.dart';
 import '../protocol/sleep_parser.dart';
 import 'app_log.dart';
 import 'history_sync.dart'
@@ -118,6 +119,9 @@ class DailyHistory {
     this.stress = const [],
     this.hrv = const [],
     this.bloodPressure = const [],
+    this.spo2Hours = const [],
+    this.spo2Max,
+    this.spo2Min,
     this.steps,
     this.energyKcal,
     this.distanceMeters,
@@ -132,14 +136,26 @@ class DailyHistory {
   final List<HealthMetricSample> hrv;
   final List<BloodPressureSample> bloodPressure;
 
-  /// Today's step total (from `0x48 todaySport`). Stored alongside HR so
-  /// the day-summary card doesn't have to make a second IPC round-trip.
+  /// Hourly SpO2 max/min pairs from Channel-B `0x2a` (H59MA v14).
+  ///
+  /// Not step totals — firmware stores SpO2 percent domain samples.
+  final List<Spo2HourSample> spo2Hours;
+
+  /// Day-level max SpO2 % derived from [spo2Hours], if any hour has data.
+  final int? spo2Max;
+
+  /// Day-level min SpO2 % derived from [spo2Hours], if any hour has data.
+  final int? spo2Min;
+
+  /// Today's step total (from `0x48 todaySport` / `0x43` sport detail).
+  /// Stored alongside HR so the day-summary card doesn't have to make a
+  /// second IPC round-trip. **Not** from Channel-B `0x2a`.
   final int? steps;
 
-  /// Calories for the day (from `0x48 todaySport`).
+  /// Calories for the day (from `0x48 todaySport` / sport detail).
   final int? energyKcal;
 
-  /// Distance walked, in meters (from `0x48 todaySport`).
+  /// Distance walked, in meters (from `0x48 todaySport` / sport detail).
   final int? distanceMeters;
 
   /// When this row was last refreshed from the watch. Null for rows that
@@ -158,6 +174,11 @@ class DailyHistory {
     List<HealthMetricSample>? stress,
     List<HealthMetricSample>? hrv,
     List<BloodPressureSample>? bloodPressure,
+    List<Spo2HourSample>? spo2Hours,
+    int? spo2Max,
+    bool clearSpo2Max = false,
+    int? spo2Min,
+    bool clearSpo2Min = false,
     int? steps,
     bool clearSteps = false,
     int? energyKcal,
@@ -173,6 +194,9 @@ class DailyHistory {
     stress: stress ?? this.stress,
     hrv: hrv ?? this.hrv,
     bloodPressure: bloodPressure ?? this.bloodPressure,
+    spo2Hours: spo2Hours ?? this.spo2Hours,
+    spo2Max: clearSpo2Max ? null : spo2Max ?? this.spo2Max,
+    spo2Min: clearSpo2Min ? null : spo2Min ?? this.spo2Min,
     steps: clearSteps ? null : steps ?? this.steps,
     energyKcal: clearEnergyKcal ? null : energyKcal ?? this.energyKcal,
     distanceMeters: clearDistanceMeters
@@ -212,6 +236,12 @@ class DailyHistory {
           'dbp': b.diastolic,
         },
     ],
+    'spo2Hours': [
+      for (final s in spo2Hours)
+        if (s.hasData) {'h': s.hour, 'max': s.max, 'min': s.min},
+    ],
+    'spo2Max': spo2Max,
+    'spo2Min': spo2Min,
     'steps': steps,
     'kcal': energyKcal,
     'dist': distanceMeters,
@@ -230,17 +260,13 @@ class DailyHistory {
     final stressRaw = (j['stress'] as List?) ?? const [];
     final hrvRaw = (j['hrv'] as List?) ?? const [];
     final bpRaw = (j['bp'] as List?) ?? const [];
+    final spo2Raw = (j['spo2Hours'] as List?) ?? const [];
     final updatedRaw = j['updated'];
     // Sanitize the totals at the read boundary — old app versions
-    // (before commit fd28b07 added the WRITE-time clamp in
-    // `_activityTotalsFromBody`) may have persisted absurd values
-    // like 6,381,923 kcal from mis-reading body[6..8] as the
-    // calorie field on H59MA v13. `_upsertTotals` keeps
-    // `previous.energyKcal` when the new sync reads 0, so an
-    // absurd old value would survive forever otherwise. Same
-    // applies to steps + distance when the firmware repacks the
-    // body between builds. Out-of-range values are coerced to null
-    // (= "no data") rather than 0 so the UI can distinguish.
+    // mis-decoded Channel-B `0x2a` as u24 step/kcal/distance totals
+    // (firmware actually stores SpO2 max/min hour pairs). Out-of-range
+    // values are coerced to null (= "no data") rather than 0 so the UI
+    // can distinguish.
     const kMaxSaneSteps = 200000;
     const kMaxSaneKcal = 20000;
     const kMaxSaneMeters = 200000;
@@ -296,6 +322,16 @@ class DailyHistory {
             diastolic: (b['dbp'] as num).toInt(),
           ),
       ],
+      spo2Hours: [
+        for (final s in spo2Raw.cast<Map>())
+          Spo2HourSample(
+            hour: (s['h'] as num).toInt().clamp(0, 23),
+            max: (s['max'] as num?)?.toInt() ?? 0,
+            min: (s['min'] as num?)?.toInt() ?? 0,
+          ),
+      ],
+      spo2Max: (j['spo2Max'] as num?)?.toInt(),
+      spo2Min: (j['spo2Min'] as num?)?.toInt(),
       steps: (rawSteps != null && rawSteps > kMaxSaneSteps) ? null : rawSteps,
       energyKcal: (rawKcal != null && rawKcal > kMaxSaneKcal) ? null : rawKcal,
       distanceMeters: (rawDist != null && rawDist > kMaxSaneMeters)
