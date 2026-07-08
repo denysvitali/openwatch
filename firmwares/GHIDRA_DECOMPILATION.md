@@ -6518,12 +6518,15 @@ The host SDK should:
 
 ## 10. Open Questions / Next Steps
 
-Two of the three originally-open questions have been resolved, and the OTA
-digest question is narrowed:
+Static RE of the OTA app body is effectively complete for host-protocol work
+(~92–95%). Rollup: `firmwares/_re/FULL_RE_STATUS.md` +
+`firmwares/_re/full-opcode-inventory/inventory.md`.
 
-1. ~~Recover the exact meaning of opcode `0x2b` mixture container fields.~~ **Resolved** — see §3.1. The 16-byte `mixture_state_t` is now fully decoded; remaining unknowns are semantic (BCD field interpretation, period-data byte meanings).
-2. **Identify the 32-byte `image_digest` algorithm used for OTA and the container header digest at `0x1c4`.** Still open for the bootloader image. A 2026-07-07 radare2 pass confirmed that the app body has **no xrefs** to the digest region (`0x008261c4`), no embedded digest-value bytes, and no hash-comparison block in the OTA completion path. `body.bin` validates only the first OTA container word (`ota_container_magic` = little-endian `0x81bdc3e5`), stages bytes from file offset `0x50` onward, and checks `written_bytes == expected_size - 0x50`. The digest region is staged as raw data but not validated by this body path. The separate `0x8721bee2` magic belongs to the config blob (§5.3), not OTA. See `firmwares/_re/digest-and-boundary/evidence.md`.
+1. ~~Recover the exact meaning of opcode `0x2b` mixture container fields.~~ **Resolved** — see §3.1. The 16-byte `mixture_state_t` is now fully decoded; remaining unknowns are semantic (BCD field interpretation; `periodData` is store/echo only).
+2. **Identify the 32-byte `image_digest` algorithm used for OTA and the container header digest at `0x1c4`.** Still open for the **bootloader** image only. App body has no xrefs, no hash-compare, stages digest as raw data after `0x50` strip, validates only magic + size. Exhaustive MD5/SHA/HMAC/CRC/structure attempts against v13/v14 containers are negative (`protocol-complete/evidence.md` §5, `digest-and-boundary/evidence.md`).
 3. ~~Determine whether the `0xFEE7` vendor service has any active protocol role in the firmware.~~ **Corrected by radare2** — see §8 and `firmwares/_re/fee7-gatt/evidence.md`; the service is registered, but static routing does not connect its write callback to the 16-byte dispatcher.
+
+Remaining live-capture / out-of-image work (not missing body RE): sleep type→stage labels, `0xa0` flag product names, cuff correlation for live BP notify, APK `@RequiresSignature`, bootloader digest validation.
 
 ### 10.0 What's in this doc (final tally)
 

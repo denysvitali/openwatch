@@ -298,6 +298,10 @@ All raw outputs live under `firmwares/_re/`:
 | `period-data/` | menstruation `periodData` store/echo-only analysis |
 | `protocol-complete/` | master residual: low/high wire layouts, OTA SM, fieldIds, digest negatives, `qc_app_task` tick |
 | `full-opcode-inventory/` | tables for deferred tree, vendor/high, Ch-B, fieldIds, OTA states (~92% static coverage) |
+| `history-layouts/` | producer field layouts (sleep/activity/HR/pressure/HRV/sport) |
+| `settings-maps/` | blob0/blob1/user_config/alarm byte maps |
+| `health-sensor/` | health masks, live frames, gsensor/sensor-bus |
+| `FULL_RE_STATUS.md` | full static RE rollup + hard limits (start here) |
 
 To reproduce:
 

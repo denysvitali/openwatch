@@ -1049,9 +1049,19 @@ Feedback, Customer-support chat.
 >   app-side or live capture if UI fields are desired.
 > - **Channel-B sleep/activity bodies** — `0x11`/`0x12`/`0x27`/`0x2a` frame
 >   lengths and structural layouts pinned in
->   `firmwares/_re/channel-b-payloads/evidence.md` (`0x2a` = 24×2 hourly
->   samples; `0x27` pairs from summary `+0x14`/`+0x3c`). Stage labels and
->   activity sample units remain live-capture needs.
+>   `firmwares/_re/channel-b-payloads/evidence.md` + producer field maps in
+>   `firmwares/_re/history-layouts/evidence.md`. `0x2a` body is 24×(max,min)
+>   SpO2-like percent pairs (not steps). `0x12`/Ch-A `0x43` share 24×12 B
+>   sport-delta slots. Sleep type constants `{0,2,3,4,5}` recovered; clinical
+>   stage labels still need live capture.
+> - **Health sensor masks + `0x69`/`0x6a` frames** — full bitmask and per-mode
+>   live layouts in `firmwares/_re/health-sensor/evidence.md`.
+> - **Settings blob0/blob1/user_config + alarm `0x29` records** —
+>   `firmwares/_re/settings-maps/evidence.md`.
+> - **Full opcode inventory** — deferred + low/high vendor + Channel-B cascade
+>   in `firmwares/_re/full-opcode-inventory/inventory.md`; residual master
+>   `firmwares/_re/protocol-complete/evidence.md`. Status rollup:
+>   `firmwares/_re/FULL_RE_STATUS.md`.
 > - **Channel-A `0x3c` capability** — H59MA routes the opcode through the
 >   `0x39 < uVar2 < 0x43` chain to the FEE7 `fee7_send_fixed_capability_3c`
 >   handler (GHIDRA §8.12 lines 6055–6057); the §3 Channel-A table has no

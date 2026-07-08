@@ -719,6 +719,12 @@ python3 firmwares/_re/ble-hunt/scan.py
 | `firmwares/_re/bp-slot-encoding/evidence.md` | 2026-07-08: BP history 4-byte slot = `[compact,0,0,0]`; compact = HR bpm or PRNG 70–74 |
 | `firmwares/_re/channel-b-payloads/evidence.md` | 2026-07-08: Channel-B `0x11`/`0x12`/`0x27`/`0x2a` wire layouts |
 | `firmwares/_re/period-data/evidence.md` | 2026-07-08: menstruation `periodData[8..12]` store/echo only; phase detector ignores it |
+| `firmwares/_re/history-layouts/evidence.md` | 2026-07-08: producer layouts for sleep/activity/HR/pressure/HRV/sport slots |
+| `firmwares/_re/settings-maps/evidence.md` | 2026-07-08: blob0/blob1/user_config/alarm field maps |
+| `firmwares/_re/health-sensor/evidence.md` | 2026-07-08: health masks, `0x69`/`0x6a` frames, LIS3DH, sensor bus |
+| `firmwares/_re/protocol-complete/evidence.md` | 2026-07-08: residual protocol + OTA SM + digest negatives |
+| `firmwares/_re/full-opcode-inventory/inventory.md` | 2026-07-08: complete opcode→handler tables |
+| `firmwares/_re/FULL_RE_STATUS.md` | 2026-07-08: full static RE rollup + hard limits |
 | `firmwares/RE_FIRMWARE.md` | superseded by this document (initial RE notes; many field-level errors) |
 | `firmwares/R2_ANALYSIS.md` | superseded by this document (r2 deep-dive; itself corrects RE_FIRMWARE.md) |
 | `PROTOCOL.md` | APK-derived protocol spec that this firmware corroborates |
