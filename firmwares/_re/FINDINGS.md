@@ -338,3 +338,11 @@ us over the Android-derived spec are:
 5. **v13 → v14 is a size/bug-fix release**, not a feature release.
    Same protocol surface, 7 748 B smaller, same BLE UUIDs, same
    opcode coverage.
+6. **Residual protocol surface (2026-07-08) ~92% static coverage** —
+   low-range vendor wire layouts, high `0x91..0xa0` (incl. `0xa0`
+   field map), Channel-B OTA state machine (states 0–5, NAK codes,
+   `0x600` pocket cap), file-table fieldId offsets, exhaustive
+   `image_digest` negatives (bootloader-only), full Channel-A deferred
+   opcode tree, and `qc_app_task` tick order. Master write-up:
+   `protocol-complete/evidence.md`; tables:
+   `full-opcode-inventory/inventory.md`.
