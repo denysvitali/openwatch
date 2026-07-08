@@ -2855,13 +2855,17 @@ via `CONCAT13`.
 
 #### Why this handler is so short
 
-SpO2 on this watch is a *battery-hungry* sensor: enabling it adds a
-continuous PPG read every few minutes. The 1-bit storage means the
-state survives the `0xff` factory reset (the parent config byte is
-zeroed there) and is fast to toggle from the watch face — the
-host's only requirement is that `req[2]` for sub `0x02` be `0` or
-`1` (the handler doesn't reject other values, but the bit-mask
-write will silently coerce them to `0`/`1`).
+SpO2 on this watch is a *battery-hungry* sensor. Channel-A `0x2c`
+is **enable only** — it does **not** arm a cadence timer or emit
+SpO2 samples. When bit1 is set, the internal auto path
+`FUN_00833af8` posts health sensor mask **`0x80`**, runs a
+**1000 ms** tick (`FUN_00833a94`), stores the result via
+`FUN_00833a24` / `spo2_current_value`, and notifies with
+`channel_a_send_device_notify(3)`. Manual live SpO2 uses
+`0x69` mode `0x03` → mask `0x20` (see §7.1 and
+`firmwares/_re/health-sensor/evidence.md`). The host's only
+requirement for `0x02` is that `req[2]` be `0` or `1` (other
+values are coerced by the bit mask).
 
 ### 3.11 Opcode `0x7a` muslim (prayer config) (`FUN_0082cb3a`)
 
@@ -4572,165 +4576,231 @@ a "force reboot" on a desktop OS).
 
 ## 7. Health / Sensor Modules
 
+Full static reverse of the health event bus, sensor bitmask,
+live `0x69`/`0x6a` frames, SpO2 auto path, LIS3DH/gsensor,
+and sensor-bus device map lives in
+`firmwares/_re/health-sensor/evidence.md`. This section
+summarises the proven firmware structure.
+
 | Address | Function | Role |
 |---|---|---|
-| `0x00833770` | `FUN_00833770` | HR module dispatcher (refers to `hr_module.c`); branches on sub-command 0–3 — see §7.1 |
-| `0x00833334` | `FUN_00833334` | Accelerometer / LIS3DH SPI dispatcher |
+| `0x0083371e` / `0x00833704` | `health_post_start_measure_event` / `health_post_stop_measure_event` | Post `{0x10003,mask}` / `{0x20003,mask}` onto the app event bus via `FUN_008273d0` |
+| `0x00833770` | `health_module_event_dispatch` | Health bus consumer; sub 0..3 case table — see §7.1 |
+| `0x00837b96` / `0x00837c4e` | `health_start_sensor_mask` / `health_stop_sensor_mask` | OR / clear active sensor bitmask; power PPG/HR algo frontend `FUN_008374b4` |
+| `0x0082c2f4` / `0x0082c1e2` | `health_handle_start_measure` / `health_handle_stop_measure` | Channel-A/vendor `0x69` / `0x6a` handlers — see §8.5 |
+| `0x0082b8de` / `0x0082b298` / `0x0082b6d4` | `health_measure_timer_cb` / live packer / mode-6 packer | 500 ms tick → live `0x69` frames |
+| `0x00833334` | `lis3dh_accel_dispatch` | Accel event-bus entry (sub 0 only) → `gsensor_service_state_machine` |
+| `0x00832dd6`..`0x008325c0` | `gsensor_*` | Probe, config, FIFO→ring, service SM — see §7.2 |
+| `0x0083361c` / `0x008336e8` | `sensor_bus_write_payload` / `sensor_bus_read_payload` | Low-level device/reg bus — see §7.3 |
+| `0x0082acf4` / `0x0082acf6` | `body_temperature_*_stub` | **No-op init + always-0 getter** |
+| `0x0083486a` / `0x0083485c` / `0x008347fc` | `blood_sugar_*` | Init/current + **synthetic** value generator |
 
-Strings confirm additional algorithm libraries: `VC_HRV_16Bit_integration_6.0_addRMSSD`, `spo2_VC30F_S_int_limit_ed01`, `lib_BIODetect_V14_1`, `vc_SportMotion_Int`.
+Strings: `VC_HRV_16Bit_integration_6.0_addRMSSD`,
+`spo2_VC30F_S_int_limit_ed01`, `lib_BIODetect_V14_1`,
+`vc_SportMotion_Int`, `lis3dh_spi.c`,
+`gsensor_read_timer_id`, `gsensor_shake_flag_timer_id`.
 
-### 7.1 HR module dispatcher (`FUN_00833770`)
+### 7.1 Health event bus + sensor mask
 
-The `hr_module.c` front-end that dispatches HR-related work
-to the underlying algorithm libraries. Takes the sub-cmd in
-the **upper 16 bits** of `param_1` and a u16 mode parameter
-in `param_2`.
+#### Post helpers
 
 ```c
-void FUN_00833770(u32 param1, u16 param2) {
-    u16 sub = (u16)(param1 >> 16);
-    if (sub == 0) {
-        FUN_0083376e();                 // reset
-    } else if (sub == 1) {
-        FUN_00837b96(param2);           // start mode 1
-    } else if (sub == 2) {
-        FUN_00837c4e(param2);           // start mode 2
-    } else if (sub == 3) {
-        FUN_0083376c();                 // read/stop
-    } else {
-        // unexpected sub-cmd — assertion-fail log
-        uVar1 = func_0x00005e6a(0x23400000, "qc_code_app_module.h");
-        func_0x00005aa8(DAT_00833898, DAT_00833894, 2, uVar1, 0x1ac);
+void health_post_start_measure_event(u32 mask) {
+    u32 msg[2] = { 0x00010003, mask };  // sub=1, module=3
+    FUN_008273d0(msg, 0x17c);
+}
+void health_post_stop_measure_event(u32 mask) {
+    u32 msg[2] = { 0x00020003, mask };  // sub=2
+    FUN_008273d0(msg, 0x174);
+}
+```
+
+#### `health_module_event_dispatch` (`0x00833770`) case table
+
+```c
+void health_module_event_dispatch(u32 param1, u16 mask) {
+    switch ((u16)(param1 >> 16)) {
+    case 0: FUN_0083376e(); return;              // empty nop
+    case 1: health_start_sensor_mask(mask); return;
+    case 2: health_stop_sensor_mask(mask);  return;
+    case 3: FUN_0083376c(); return;              // empty nop
+    default: /* assert log qc_code_app_module.h:0x1ac */ ;
     }
 }
 ```
 
-The four sub-cmd branches map to the four lifecycle stages of
-a heart-rate measurement:
+| Sub | Handler | Effect |
+|---:|---|---|
+| 0 | `FUN_0083376e` | **No-op** (not a real reset) |
+| 1 | `health_start_sensor_mask` | `active \|= mask`; first-start powers algo (`FUN_008374b4`) |
+| 2 | `health_stop_sensor_mask` | `active &= ~mask`; if zero → power-down mode 5 |
+| 3 | `FUN_0083376c` | **No-op** |
 
-* **`sub 0` reset** — `FUN_0083376e` stops any running
-  measurement and clears the per-task state.
-* **`sub 1` start mode 1** — `FUN_00837b96(param2)` starts
-  the measurement with `param2` as the mode parameter
-  (the same `param2` value the §8.5 / §8.7 0x69 / 0x6a
-  mode-control opcodes pass).
-* **`sub 2` start mode 2** — `FUN_00837c4e(param2)` is the
-  second mode-start variant (probably the one-shot vs
-  continuous split from §3.13 0x1e realTimeHeartRate).
-* **`sub 3` read/stop** — `FUN_0083376c` reads the latest
-  measurement (or stops if `param2 != 0`).
+SpO2 family bits `0x20|0x80` (`0xa0`) share a special
+transition path inside start/stop (driver_mode 1 vs 0/7).
 
-The `else` branch is the **assertion-fail path** — the
-firmware logs a hard-coded module header (`0x23400000`,
-the debug-output ID for `qc_code_app_module.h`) via the
-standard `func_0x00005e6a` / `func_0x00005aa8` debug helpers.
-A host SDK that sends an unknown sub-cmd will see the watch
-*log an assertion* but otherwise no-op — the firmware doesn't
-NAK or send an error frame for this path.
+#### Sensor bitmask table (proven)
 
-#### Why sub-cmd in upper 16 bits of param1
+| Mask | Metric | Evidence |
+|---:|---|---|
+| `0x0001` | Heart rate | modes 1/6/0x0D; `heart_rate_current_bpm` |
+| `0x0002` | HR one-shot sample | `FUN_008337fa` |
+| `0x0004` | BP auto | `FUN_00834426` — see `bp-slot-encoding/evidence.md` |
+| `0x0010` | Interval-HR auto | `FUN_00833dac` / `FUN_00833eac` |
+| `0x0020` | SpO2 manual session | modes `0x03` / `0x0E` |
+| `0x0040` | Factory / special | factory start sites; pairs with `0x800` |
+| `0x0080` | SpO2 auto-measure | `FUN_00833af8` (when `0x2c` enable=1) |
+| `0x0100` | HRV | mode `0x0A`; auto `FUN_00834764` |
+| `0x0200` | Pressure / stress | mode `0x08`; auto `FUN_008345ce` |
+| `0x0400` | Blood sugar (synthetic) | mode `0x09` |
+| `0x0800` | Factory one-shot | `0xa1` sub `0x04` |
+| `0x1000` | Body temperature (**stub**) | mode `0x0B` |
+| `0x2000` | Realtime continuous HR | Channel-A `0x1e` |
+| `0x1301` | Multi composite | mode `0x0C` = `1\|0x100\|0x200\|0x1000` (`DAT_0082c57c`) |
+| `0x1701` | Extended composite | modes `0x0D`/`0x0E` stop side (`DAT_0082c580`) |
 
-The `param1` argument is a `u32` where the upper 16 bits
-encode the sub-cmd and (presumably) the lower 16 bits
-encode the *handler-id* (which HR sensor — internal vs
-external). The decompiler shows `local_a = (short)((uint)param1 >> 0x10)`
-— the `>> 0x10` shifts the high half-word down for the
-switch.
+#### Mode (`0x69` type) → mask / value getter
 
-This packing is the firmware's standard way of carrying
-two u16 fields in a single u32 parameter without using a
-struct. The `param2` u16 is the *per-sub-cmd* parameter
-(the mode value for `sub 1` / `sub 2`).
+| Mode | Start mask | Final value source |
+|---:|---:|---|
+| 1 | `0x0001` | `heart_rate_current_bpm` |
+| 2 / 5 | `0x0001` | HR + synthetic sys/dia (`FUN_00834092`) |
+| 3 | `0x0020` | `spo2_current_value` |
+| 6 | `0x0001` | continuous sub-machine (`FUN_0082b6d4`) |
+| 7 (ECG) | **absent → `0x0001`** | no ECG path on v14 |
+| 8 | `0x0200` | `pressure_current_value` |
+| 9 | `0x0400` | `blood_sugar_current_value` (synthetic) |
+| 0x0A | `0x0100` | `hrv_current_value` |
+| 0x0B | `0x1000` | stub 0 / live PRNG fill |
+| 0x0C | `0x1301` | HR+HRV+pressure+temp+sys/dia |
+| 0x0D | `0x0001` | HR (duration param path) |
+| 0x0E | `0x0020` | SpO2 (duration param path) |
 
-#### Pair with §3.13 `0x1e realTimeHeartRate`
+#### Live `0x69` / result `0x6a` frame layouts (timer path)
 
-`0x1e` is the Channel-A opcode that calls into the same
-`hr_module.c` functions. The §3.13 doc shows `0x1e` calling
-`health_post_start_measure_event(0x2000)` for "start continuous" mode — that
-`0x2000` is the `param2` value the §7.1 dispatcher passes
-into `FUN_00837b96` / `FUN_00837c4e`. The `0x1e` opcode is
-the *Channel-A entry point*; the §7.1 dispatcher is the
-*internal firmware entry point*. They share the same
-underlying worker.
+500 ms timer `health_measure_timer_cb` increments
+`state[+0xc]` then calls `FUN_0082b298` (mode≠6) or
+`FUN_0082b6d4` (mode 6).
 
-#### Pair with §7 sensors
+**Common:** byte0=`0x69`/`0x6a`, byte1=mode, byte15=checksum8.
 
-The §7 accelerometer dispatcher `FUN_00833334` follows the
-same sub-cmd convention (0..3 lifecycle), so the host SDK
-can use a single dispatcher pattern for both HR and
-accelerometer modules. The "four-stage lifecycle"
-(reset / start-1 / start-2 / read-or-stop) is a *vendor
-convention* shared across the H59MA firmware.
+| Phase | Condition | Key bytes |
+|---|---|---|
+| Start ACK | handler immediate | `[2]=0` accept / `1` busy |
+| Progress | `1 ≤ tick < 0x33` | `[6..7]`=progress u16 LE; value bytes 0 |
+| Value | `0x33 ≤ tick < 0x3c` | `[3]`=primary; mode 2/5 also `[4]=sys,[5]=dia`; mode 3 `[4]=1` when ready; mode 0x0C packs HR/HRV/pressure/temp/sys/dia at `[3]/[4]/[5]/[8]/[9]/[10]` |
+| Auto-stop | `tick ≥ 0x3c` | stop mask + cancel timer |
+| Mode 6 stream | continuous | `[2]=1` sample or `2` settled; `[3]`=bpm |
+| `0x6a` simple | stop handler | `[2]`=primary value |
+| `0x6a` multi 0x0C | stop handler | `[3]=HR,[4]=HRV,[5]=pressure,[8]=temp,[9]=sys,[10]=dia` |
+
+#### SpO2 auto vs Channel-A `0x2c`
+
+- `0x2c` only toggles settings blob1 bit `+0x2d[1]` (enable).
+- When enabled, `FUN_00833af8` posts mask **`0x80`**, arms a
+  **1000 ms** tick (`FUN_00833a94`), stores via `FUN_00833a24`
+  (clamp 91–100 / PRNG 93–96 if low), updates hour min/max,
+  and fires `channel_a_send_device_notify(3)`.
+- Body `0x6e0c` / 60 s / mask `0x2000` is **`0x1e` realtime HR**,
+  not SpO2.
+
+#### Sugar / temp stubs
+
+- **Body temp:** `body_temperature_metric_init_stub` empty;
+  `body_temperature_current_value_stub` returns **0**. No
+  history table. Live UI may PRNG-fill mode `0x0B`.
+- **Blood sugar:** no glucometer path. `FUN_008347fc`
+  synthesises a value (often from SpO2-related input) with
+  PRNG noise. Mode `0x09` still starts mask `0x400`.
+
+#### Pair with §3.13 / §8.5
+
+`0x1e` posts mask `0x2000`; `0x69` posts the per-mode masks
+above. Both funnel through this event bus into
+`health_start_sensor_mask`.
 
 ---
 
-### 7.2 Accelerometer / LIS3DH SPI dispatcher (`FUN_00833334`)
-
-The accelerometer front-end. Unlike the HR module (§7.1)
-which has a 4-stage lifecycle, the accelerometer only
-supports **one sub-cmd (0)** — the firmware is hard-wired
-to start the LIS3DH SPI peripheral without lifecycle state.
+### 7.2 Accelerometer / LIS3DH / gsensor (`lis3dh_accel_dispatch`)
 
 ```c
-void FUN_00833334(u32 param_1, u32 param_2) {
-    if ((short)((u32)param_1 >> 0x10) != 0) {
-        // Invalid sub-cmd: assertion-fail
-        uVar1 = func_0x00005e6a(0x23400000, "qc_code_app_module_g");
-        func_0x00005aa8(DAT_008333fc, DAT_008333f8, 2, uVar1,
-                         DAT_00833380 + 0x3A, param_1, param_2);
-        return;
+void lis3dh_accel_dispatch(u32 param1, u32 param2) {
+    if ((short)(param1 >> 16) != 0) {
+        /* assert log qc_code_app_module_g */ return;
     }
-    // Valid sub-cmd 0: start accelerometer
-    FUN_00832dd6();
+    gsensor_service_state_machine();
 }
 ```
 
-#### Why one sub-cmd instead of four?
+Only **sub 0** is valid. The service SM (`0x00832dd6`) handles
+enable (`+0x1d`), disable (`+0x1e`), reconfig (`+0x1f`, 800 ms
+timer), shake/click branch (`+0x20` → `FUN_00832bfc`), and
+steady-state `gsensor_poll_fifo_into_ring`.
 
-The accelerometer (LIS3DH) is a *simpler peripheral* than the
-HR sensor — it doesn't need the explicit lifecycle stages
-because the firmware handles the read/write on the SPI bus
-directly. The HR sensor uses an *algorithm library*
-(`VC_HRV_16Bit_integration_6.0_addRMSSD`, etc.) that
-requires explicit reset/start/stop calls to manage state.
+#### Chip IDs + bus devices
 
-The accelerometer just needs one "start reading" call to
-spin up the SPI bus. After that, the firmware polls the
-LIS3DH via `FUN_00832dd6` and the host SDK reads via
-`FUN_00833968` (the §7 raw SPI reader).
+| Id | Bus device | Family |
+|---|---|---|
+| `0x11` (fallback) / `0x28` | `0x19` path A | LIS3DH-like (`lis3dh_spi.c`) |
+| `0x23` `'#'` | `0x1f` | alt IMU |
+| `0x44` `'D'` | `0x19` path B | alt |
+| `0x48` `'H'` | `0x20` | alt |
 
-#### The assertion-fail path
+#### LIS3DH register map used (id `0x11`/`0x28`)
 
-Like the HR module's `else` branch (§7.1), the
-accelerometer's `if (sub != 0)` branch calls the standard
-debug-helper pair (`func_0x00005e6a` / `func_0x00005aa8`)
-to log an assertion failure. The log message uses the
-**different module name** `qc_code_app_module_g` (vs the
-HR's `qc_code_app_module_h`) — each vendor module has its
-own assertion-fail label.
+| Reg | Value(s) | Role |
+|---:|---|---|
+| `0x20` | `0x37` (run) / `0` (off) | CTRL_REG1 ODR+axes |
+| `0x22` | `0` / `0x80` | CTRL_REG3 / INT1 |
+| `0x23` | `0x90` | CTRL_REG4 BDU+FS |
+| `0x24` | `0x40` | CTRL_REG5 FIFO_EN |
+| `0x2e` | `0` then `0x80` | FIFO_CTRL |
+| `0x2f` | read | FIFO_SRC count |
+| `0xa7` | multi-read | OUT_X_L auto-inc (6 B/sample) |
+| `0x21`/`0x3a`/`0x3b`/`0x3c`/`0x38` | click cfg | shake/double-tap INT |
 
-The host SDK that sends a non-zero accelerometer sub-cmd
-will see the watch *log an assertion* but otherwise no-op.
+Ring: `chip_state+0x28`, capacity `0x1ec` bytes. Empty streak
+≥10 → reprobe. Timers: `gsensor_read_timer_id` (2000 ms),
+`gsensor_shake_flag_timer_id` (2000 ms).
 
-#### Why upper-16-bits of param_1
+#### Step counting path
 
-Both §7.1 (HR) and §7.2 (accelerometer) take the sub-cmd in
-the upper 16 bits of the u32 parameter (`>> 0x10` is the
-shift). This is the same packing convention used elsewhere
-in the firmware (e.g. §8.5 / §8.7 0x69 mode control, §6
-system reset). The host SDK can use a single dispatcher
-helper to unpack the sub-cmd + mode-param across all the
-firmware's lifecycle commands.
+```text
+gsensor_poll_fifo_into_ring
+  → FUN_00827124 / FUN_00832f1e (export XYZ)
+  → vc_SportMotion_Int
+  → sport_state_get_steps/distance/calories
+  → 0x48 today / 0x43 detail / Channel-B 0x2a hourly
+```
 
-#### Pair with §3.20 / §3.21
+Raise-to-wake / gesture thresholds are configured at init
+(`FUN_00843fbc` / `FUN_0084410c` / `FUN_00843f88`); there is no
+separate named raise-to-wake opcode. Touch wakeup is the
+DLPS/GPIO path in §6.
 
-`FUN_00833334` is the *internal* firmware entry point for
-the accelerometer. The §3 Channel-A opcodes don't have a
-direct accelerometer opcode — the accelerometer is only
-controllable via the §7.2 internal dispatch path, which is
-in turn driven by the §6.1 button / DLPS init and §7.1 HR
-module cross-talk. The accelerometer runs as a background
-service, not a user-initiated command.
+---
+
+### 7.3 Sensor bus device map
+
+```c
+sensor_bus_write_payload(device, reg, data, len)
+  // buf[0]=reg; memcpy(buf+1,data,len); FUN_00833594(device,buf,len+1)
+sensor_bus_read_payload(device, reg, out, len)
+  // FUN_0083365a(device, &reg, 1, out, len)
+```
+
+All `sensor_bus_*_reg_*` wrappers take a shared mutex
+(100 ms) around the payload call.
+
+| Device ID | Wrappers | What it addresses |
+|---:|---|---|
+| `0x19` | `…_reg_0x19_a` / `_b` | **Accelerometer** (LIS3DH-like + `'D'`); also motor **duration** pattern mode `'D'` |
+| `0x1f` | `…_reg_0x1f` | **Alt IMU** (`'#'`); also motor **pulse** pattern mode `'#'` |
+| `0x20` | `…_reg_0x20` | **Alt IMU** (`'H'`) |
+| `0x33` | `…_reg_0x33` | **Motor / vibrator** (UI alert callers) |
+
+`_a` vs `_b` for `0x19` are parallel helpers with the same
+device id (different chip branches).
 
 ---
 
@@ -5459,32 +5529,34 @@ byte  3..14: 0
 byte 15: additive checksum
 ```
 
-For the "not busy" path:
+For the "not busy" path (immediate start ACK only):
 ```
 byte  0: 0x69                (cmd)
 byte  1: state[7]             (echo of the mode just stored)
-byte  2: 0x00                (always 0 in the not-busy path)
+byte  2: 0x00                (accepted)
 byte  3..14: 0
 byte 15: additive checksum
 ```
 
-The host decodes `byte 2` as a "request status" flag:
-`0` = accepted, `1` = refused (HR busy). The mode echo in
-`byte 1` confirms which mode the request landed on
-(useful when the host's `req[1]` was outside the table —
-the handler clamps to `0x06` and the echo reflects that).
+Live value frames are **not** built here — the 500 ms timer
+(`health_measure_timer_cb` → `FUN_0082b298` / `FUN_0082b6d4`)
+emits subsequent `0x69` notifies. Exact per-mode / per-tick
+layouts, sensor bitmask table, and `0x6a` result packing are
+in §7.1 and `firmwares/_re/health-sensor/evidence.md`.
+
+The host decodes start-ACK `byte 2` as a "request status"
+flag: `0` = accepted, `1` = refused (session busy).
 
 #### Pair with `0x6a 'j'`
 
-`0x6a 'j'` (handled by `health_handle_stop_measure`) is the *continuation*
-of `0x69 'i'` — when the 500 ms timer fires, it pops the
-mode's continuation state and dispatches the next step.
-The host should treat `0x69` + `0x6a` as a single
-multi-frame transaction: `0x69` *starts* the mode,
-`0x6a` *advances* it. The split is necessary because the
-0xFEE7 16-byte frame cannot carry the full per-mode state;
-`0x6a` re-reads `DAT_0082c578` and pushes the next-step
-data on the notify ring.
+`0x6a 'j'` (`health_handle_stop_measure`) is the host-driven
+**stop / final-result** for the mode started by `0x69`. It
+requires `req[1]` to match the active mode. Simple modes put
+the primary metric in `byte2`; multi mode `0x0C` packs
+HR/HRV/pressure/temp/sys/dia (see §7.1). The 500 ms timer
+also auto-stops at tick ≥ 60 (`0x3c`) by posting
+`health_post_stop_measure_event` without requiring a host
+`0x6a`.
 
 ### 8.6 0x90 `'.'` self-marker echo (`fee7_send_test_ack_90`)
 
@@ -6481,7 +6553,7 @@ This document covers the H59MA v14 firmware in **~7,250 lines** with **17+ synth
   signature check, start/init/data/end helpers.
 * **§6 Power Management** (2 sub-sections) — button/DLPS init,
   system reset.
-* **§7 Health / Sensor Modules** (2 sub-sections) — HR
+* **§7 Health / Sensor Modules** (3 sub-sections) — health
   module dispatcher, accelerometer SPI dispatcher.
 * **§8 0xFEE7** (22 sub-sections including §8.20 reserved-
   opcode range and §8.22 wire-format synthesis) — the full
@@ -6608,8 +6680,9 @@ section number* for a given operation.
 
 | Function | § | Operation |
 |---|---|---|
-| `health_module_event_dispatch` | §7.1 | HR module dispatcher (start/stop event bus) |
-| `lis3dh_accel_dispatch` | §7.2 | accelerometer / LIS3DH SPI dispatcher (single sub-cmd) |
+| `health_module_event_dispatch` | §7.1 | health event bus (start/stop sensor mask) |
+| `lis3dh_accel_dispatch` | §7.2 | accelerometer / LIS3DH SPI dispatcher (sub 0 → gsensor SM) |
+| `sensor_bus_*_payload` / `*_reg_*` | §7.3 | sensor/motor bus device map (`0x19`/`0x1f`/`0x20`/`0x33`) |
 
 #### Boot (§1) — 2 functions
 
@@ -6644,7 +6717,7 @@ handlers are documented in the 15+ synthesis sections:
 * §3.24 — DAT_0082bfcc deferred-command ring
 * §5.1 — OTA state machine
 * §6.1 / §6.2 — power-management helpers
-* §7.1 / §7.2 — sensor dispatchers
+* §7.1 / §7.2 / §7.3 — health bus, gsensor, sensor-bus map (`health-sensor/evidence.md`)
 * §8.20 — 0x97-0xA0 high-range session/status handlers
 * §8.21 — self-marker opcode pattern
 * §8.22 — cross-section wire-format

@@ -370,10 +370,10 @@ the generic bitmap below.
 | ReadHeartRateReq | `0x15` | — | →watch | `[1..4]`=local-day epoch seconds u32 LE (use local midnight for per-day reads; `0x00000000` asks for latest/current) | **ReadHeartRateRsp** multi-pkt per `FUN_0082cf48` (GHIDRA §3.12): header then 23×13 B data frames (`seq=1..23`). Reassembled 292 B = **u32 LE request-index echo + 288×u8 BPM** (5-min slots from 00:00; producer zeroes samples outside 40..220). Empty day: `pl[0]=0xFF`. No inner `0x01` tag (that scheme is for `0x0d`/`0x37`/`0x39`). | Read stored HR history (288 5-min slots/day). Producer: `history_desc_heart_rate_5min`. Evidence: `firmwares/_re/history-layouts/evidence.md` §4. |
 | HeartRateSettingReq | `0x16` | 01/02 | →watch | w2:`[02,en?1:2,interval]`; w5:`+[startInterval,tooLow,tooHigh]` | read: `[1]`en, `[2]`interval, `[3]`startInterval, `[4]`tooLow, `[5]`tooHigh | HR auto-measure config + hi/lo alarms. |
 | RealTimeHeartRate | `0x1e` | — | →watch | `[action]` where `01`=start 60 s, `02`=stop, `03`=reset/extend | no direct ack on H59MA; live HR arrives on notify paths | Toggle realtime HR stream. |
-| StartHeartRateReq | `0x69` | type | →watch | `[type, sub]` (type enum below) | `[0]`type `[1]`errCode `[2]`value; if len≥5 `[3]`sbp `[4]`dbp | Start a measurement session. |
-| StopHeartRateReq | `0x6a` | type | →watch | `[type, p2, p3]` (factories per type) | `[0]`type `[1]`err `[2]`value; len≥5 `[3]`sbp `[4]`dbp | Stop a measurement. (per-request waiter) |
+| StartHeartRateReq | `0x69` | type | →watch | `[type, sub]` (type enum below) | **Start ACK:** `[0]=type,[1]=err(0=ok,1=busy),[2..]=0`. **Live notifies (500 ms timer):** phase A (`tick<0x33`): `[0]=0x69,[1]=mode,[2]=0,[3]=0,[6..7]=progress u16 LE`; phase B (`0x33≤tick<0x3c`): `[3]=primary` (HR/SpO2/HRV/pressure/sugar/temp); modes 2/5 also `[4]=sys,[5]=dia` (synthetic); mode 3 may set `[4]=1` when ready; mode `0x0C` multi: `[3]=HR,[4]=HRV,[5]=pressure,[8]=temp,[9]=sys,[10]=dia`; mode 6 continuous: `[2]=1|2,[3]=bpm`. Full bitmask + layouts: `firmwares/_re/health-sensor/evidence.md` + GHIDRA §7.1. | Start a measurement session / receive live progress. |
+| StopHeartRateReq | `0x6a` | type | →watch | `[type, p2, p3]` (factories per type) | Simple: `[0]=0x6a,[1]=mode,[2]=primary value`. Multi mode `0x0C`: `[3]=HR,[4]=HRV,[5]=pressure,[8]=temp,[9]=sys,[10]=dia`. Mode must match active session or no reply. Early stop with `tick<0x32` may suppress the result frame. | Stop a measurement. (per-request waiter) |
 | ReadPressureReq | `0x14` | — | →watch | `[1..4]`utcStart i32 LE `[5]=00` `[6]=0x32` | **ReadBlePressureRsp**: `[0..3]`ts i32 LE (`0xFFFFFFFF`=end), `[4]`val, `[5]`val2 → BlePressure. ≤50 records. | Read BLE-pressure measured values. |
-| BloodOxygenSettingReq | `0x2c` | 01/02 | →watch | w:`[02, en(0/1)]` | read: `[1]`enable | SpO2 auto-measure on/off. |
+| BloodOxygenSettingReq | `0x2c` | 01/02 | →watch | w:`[02, en(0/1)]` | read: `[1]`enable | SpO2 **auto-measure enable bit only** (settings blob1 `+0x2d` bit1). Does not stream SpO2. When enabled, firmware posts sensor mask `0x80` on an internal 1 s tick path (`FUN_00833af8`/`FUN_00833a94`); manual live SpO2 is `0x69` type=3 (mask `0x20`). |
 | BpSettingReq | `0x0c` | 01/02 | →watch | r:`[01]`; w:`[02,en,sH,sM,eH,eM,intervalMinutes]` where interval is nonzero and divisible by 30 | read response is 7 bytes: `[0]=01,[1]`en,`[2]`startH,`[3]`startM,`[4]`endH,`[5]`endM,`[6]`intervalMinutes`; invalid writes ACK as `opcode|0x80` | BP auto-measure window. H59MA v14 defaults to enabled, `00:00..23:00`, interval `0x3c` (hourly). Other sub-values have no response. |
 | BpReadConformReq | `0x0e` | — | →watch | `[0x00]`=advance/read next; nonzero silently exits | response is BP history via `0x0d` | Advance the BP record cursor and emit the next compact history record. |
 | BpDataRsp (no req) | `0x0d` | — | watch→ | n/a | hdr `[0]=00`{`[1]`yr-2000,`[2]`mo,`[3]`d,`[4]`intervalMinutes,`[5..10]`48-bit presence bitmap,`[11..13]=0`}; data frames `[0]=01` + up to 13 compact one-byte values in ascending set-bit order; `[0]=FF`=empty/end | BP history records. H59MA v14 initializes `intervalMinutes=0x3c` (hourly) and stores 24 hourly 4-byte slots as `[compact,0,0,0]`. The sole v14 writer fills `compact` from `heart_rate_current_bpm()` (auto-measure ticks 15–20) or PRNG `(r%5)+0x46` (70–74) on timeout; validity for emit is `0x28..0xdc`. The `0x0d` stream projects only that byte0. Do not invent sys/dia history from it. Live `0x69` synthetic sys/dia (`FUN_00834092`) is a separate path and is not stored in these slots. See `firmwares/_re/bp-slot-encoding/evidence.md`. |
@@ -388,8 +388,17 @@ the generic bitmap below.
 | PpgDataRspCmd (notify) | **needs live capture** | — | watch→ | n/a (ECG/PPG session) | Statically unresolvable in H59MA v14 — the only PPG-related handler is §3.10 `0x2c` SpO2 (an enable-bit + auto-measure cadence), NOT a real-time stream from a `0x69` type=7 session. Do not infer a payload layout. | Raw PPG + HR stream. Listener opcode unresolved. |
 
 **StartHeartRate type enum:** HEARTRATE=1, BLOODPRESSURE=2, BLOODOXYGEN=3, FATIGUE=4, HEALTHCHECK=5,
-REALTIMEHEARTRATE=6, ECG=7, PRESSURE=8, BLOOD_SUGAR=9, HRV=0xa, BODY_TEMPERATURE=0xb.
-**Action enum:** START=1, PAUSE=2, CONTINUE=3, STOP=4.
+REALTIMEHEARTRATE=6, ECG=7, PRESSURE=8, BLOOD_SUGAR=9, HRV=0xa, BODY_TEMPERATURE=0xb,
+multi/combo=`0x0C`, extended=`0x0D`/`0x0E`.
+**Action enum (mode 6 sub):** START=1, PAUSE=2, CONTINUE=3, STOP=4.
+
+**H59MA v14 sensor masks** (event-bus `health_post_*_measure_event`):
+`0x0001` HR, `0x0002` HR one-shot, `0x0004` BP auto, `0x0010` interval-HR auto,
+`0x0020` SpO2 manual, `0x0040` factory, `0x0080` SpO2 auto, `0x0100` HRV,
+`0x0200` pressure/stress, `0x0400` blood sugar (synthetic), `0x0800` factory one-shot,
+`0x1000` body temp (**stub getter=0**), `0x2000` realtime HR (`0x1e`),
+`0x1301` multi (`0x0C`), `0x1701` extended composite. ECG type=7 has **no** firmware case
+(falls through to HR mask `1`). See `firmwares/_re/health-sensor/evidence.md`.
 
 ### 4.4 Activity / sport / sleep / alarm / target
 
