@@ -2505,12 +2505,12 @@ zero-fill on miss) and writing the current RTC minute into the
 in-progress slot when querying "today", the handler scans slots
 `start_hour..end_hour` and classifies each:
 
-| Slot condition | Behavior |
+| Slot condition (12 B sport slot; see history-layouts §2) | Behavior |
 |---|---|
-| `status == 0` AND `duration == 0` | Skip (empty) |
-| `status == 0` AND `duration != 0` | Count (partial record, duration present) |
-| `status != 0` AND `status != 0xFFFF` | Count (in-progress) |
-| `status == 0xFFFF` (DAT_0082d438 sentinel) | Skip (finalized — surfaced via the `0x77` activity-summary path instead) |
+| `steps==0` AND `dist_div10==0` | Skip (empty) |
+| `steps==0` AND `dist_div10!=0` | Count (partial) |
+| `steps != 0` AND `steps != 0xFFFF` | Count |
+| `steps == 0xFFFF` (`DAT_0082d438` sentinel) | Skip |
 
 The header frame is then queued:
 
@@ -2541,11 +2541,14 @@ by `FUN_00828462(month_index, &local_7c)` — three bytes
 | 3 | `day_bcd` | via `FUN_0082ede2(day)` |
 | 4..5 | `record_idx` packed | `(record_idx) | (slot_idx << 2)` — both ≤ 24 |
 | 6..7 | 0 | reserved |
-| 8..9 | `duration_lo` (u16) | `slot.duration * (10 if unit_flag == 0 else 1)` |
-| 10..11 | `slot.aux_u16` (low byte) | second u16 of the slot (e.g. distance / calorie low) |
-| 12..13 | `slot.aux_u16 >> 8` | second u16 high byte (one byte of payload only) |
-| 14 | `duration_hi` | high byte of the duration u16 |
+| 7..8 | `dist_scaled` u16 | slot`+6` (dist/10) × (10 if `unit_flag==0` else 1) |
+| 9..10 | `steps` u16 | slot`+0` stepsΔ |
+| 11..12 | `cal_div100` u16 | slot`+4` caloriesΔ/100 |
+| 13..14 | 0 | reserved |
 | 15 | additive checksum | per §3 |
+
+Producer-side layout and packing details:
+`firmwares/_re/history-layouts/evidence.md` §6.
 
 `FUN_0082ede2(v)` is a defensive BCD encoder that returns
 `(tens<<4 | units)` for `v ∈ [0, 99]` and `0` otherwise; combined

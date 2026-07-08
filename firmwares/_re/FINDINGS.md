@@ -296,6 +296,8 @@ All raw outputs live under `firmwares/_re/`:
 | `bp-slot-encoding/` | BP history 4-byte slot write path + compact-byte source |
 | `channel-b-payloads/` | Channel-B sleep/activity response field layouts |
 | `period-data/` | menstruation `periodData` store/echo-only analysis |
+| `protocol-complete/` | master residual: low/high wire layouts, OTA SM, fieldIds, digest negatives, `qc_app_task` tick |
+| `full-opcode-inventory/` | tables for deferred tree, vendor/high, Ch-B, fieldIds, OTA states (~92% static coverage) |
 
 To reproduce:
 
