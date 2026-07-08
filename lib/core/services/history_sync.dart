@@ -1658,7 +1658,9 @@ class HistorySync extends ChangeNotifier {
   /// prefix entirely; in that case we default to the current sync day (the one
   /// we just polled) so the data still lands in the correct file.
   DateOnly _dayFromSleepPayload(Uint8List payload, {required bool isNight}) {
-    final today = DateOnly.today();
+    // Prefer the injectable clock so unit tests (and wall-clock mocks)
+    // file segments under the intended calendar day.
+    final today = DateOnly.fromDateTime(_clock());
     if (isNight && payload.isNotEmpty && payload[0] <= 31) {
       return today.addDays(-payload[0]);
     }
@@ -1674,7 +1676,7 @@ class HistorySync extends ChangeNotifier {
     );
     try {
       final isH59maRecordList = SleepParser.isH59maNightRecordPayload(payload);
-      final today = DateOnly.today();
+      final today = DateOnly.fromDateTime(_clock());
       final wakeDay = isH59maRecordList
           ? today
           : _dayFromSleepPayload(payload, isNight: true);
@@ -1795,7 +1797,7 @@ class HistorySync extends ChangeNotifier {
     try {
       final isH59maRecordList = SleepParser.isH59maNightRecordPayload(payload);
       final wakeDay = isH59maRecordList
-          ? DateOnly.today()
+          ? DateOnly.fromDateTime(_clock())
           : _dayFromSleepPayload(payload, isNight: false);
       final anchor = wakeDay.midnight;
       final added = SleepParser.parseLunchSleepSegments(
