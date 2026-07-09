@@ -208,9 +208,10 @@ ThemeData _buildTheme(Brightness brightness) {
       elevation: 0,
       margin: EdgeInsets.zero,
       color: scheme.surface,
-      shadowColor: Colors.transparent,
+      shadowColor: Colors.black.withValues(alpha: isDark ? 0.22 : 0.06),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(kCardRadius),
+        borderRadius: BorderRadius.circular(kCardRadius + 4),
+        side: BorderSide(color: divider.withValues(alpha: isDark ? 0.8 : 0.7)),
       ),
     ),
     dividerTheme: DividerThemeData(color: divider, thickness: 1, space: 1),
@@ -218,9 +219,8 @@ ThemeData _buildTheme(Brightness brightness) {
       style: FilledButton.styleFrom(
         minimumSize: Size(0, kIconCircleSizeSmall + kListTilePaddingV),
         padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(kCardRadius),
-        ),
+        elevation: 0,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         textStyle: textTheme.labelLarge?.copyWith(
           fontSize: kLabelLarge,
           color: scheme.onPrimary,
@@ -231,9 +231,7 @@ ThemeData _buildTheme(Brightness brightness) {
       style: OutlinedButton.styleFrom(
         minimumSize: Size(0, kIconCircleSizeSmall + kListTilePaddingV),
         padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(kCardRadius),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         side: BorderSide(color: divider),
         textStyle: textTheme.labelLarge?.copyWith(
           fontSize: kLabelLarge,
@@ -253,16 +251,17 @@ ThemeData _buildTheme(Brightness brightness) {
     iconButtonTheme: IconButtonThemeData(
       style: IconButton.styleFrom(
         minimumSize: const Size(44, 44),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        backgroundColor: scheme.surface.withValues(alpha: 0.72),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       ),
     ),
     navigationBarTheme: NavigationBarThemeData(
-      height: 64,
+      height: 72,
       backgroundColor: Colors.transparent,
       elevation: 0,
-      indicatorColor: scheme.primary.withValues(alpha: 0.12),
+      indicatorColor: scheme.primary.withValues(alpha: isDark ? 0.24 : 0.13),
       indicatorShape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
       ),
       labelTextStyle: WidgetStateProperty.resolveWith((states) {
         final selected = states.contains(WidgetState.selected);

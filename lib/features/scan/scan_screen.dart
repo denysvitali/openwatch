@@ -218,41 +218,7 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
                     96,
                   ),
                   children: [
-                    // Brand hero
-                    Center(
-                      child: Column(
-                        children: [
-                          Container(
-                            width: 72,
-                            height: 72,
-                            decoration: BoxDecoration(
-                              color: colors.accent.withValues(
-                                alpha: kMetricTintOpacity,
-                              ),
-                              shape: BoxShape.circle,
-                            ),
-                            alignment: Alignment.center,
-                            child: Icon(
-                              Icons.watch_rounded,
-                              size: 36,
-                              color: colors.accent,
-                            ),
-                          ),
-                          const SizedBox(height: kCardInternalSpacing),
-                          Text(
-                            'Connect your watch',
-                            style: AppTextStyles.headlineSmall(context),
-                            textAlign: TextAlign.center,
-                          ),
-                          const SizedBox(height: kSpacingTiny),
-                          Text(
-                            'OpenWatch talks to your Oudmon-based watch over Bluetooth — fully offline by default.',
-                            style: AppTextStyles.bodySmall(context),
-                            textAlign: TextAlign.center,
-                          ),
-                        ],
-                      ),
-                    ),
+                    _ConnectHero(colors: colors),
                     const SizedBox(height: kSpacingXLarge),
                     if (_error != null) ...[
                       HealthCard(
@@ -329,6 +295,94 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
             ),
           ),
           if (_connecting) const LinearProgressIndicator(minHeight: 2),
+        ],
+      ),
+    );
+  }
+}
+
+class _ConnectHero extends StatelessWidget {
+  const _ConnectHero({required this.colors});
+
+  final AppColors colors;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final onAccent = theme.colorScheme.onPrimary;
+
+    return Container(
+      padding: const EdgeInsets.all(kSpacingXLarge),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [colors.accent, colors.accent.withValues(alpha: 0.78)],
+        ),
+        borderRadius: BorderRadius.circular(kCardRadius + 8),
+        boxShadow: [
+          BoxShadow(
+            color: colors.accent.withValues(alpha: 0.22),
+            blurRadius: 28,
+            offset: const Offset(0, 12),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              color: onAccent.withValues(alpha: 0.16),
+              borderRadius: BorderRadius.circular(18),
+            ),
+            alignment: Alignment.center,
+            child: Icon(Icons.watch_rounded, size: 30, color: onAccent),
+          ),
+          const SizedBox(height: kCardInternalSpacing),
+          Text(
+            'Connect your watch',
+            style: AppTextStyles.headlineSmall(
+              context,
+            )?.copyWith(color: onAccent),
+          ),
+          const SizedBox(height: kSpacingTiny),
+          Text(
+            'Your health data stays on this phone. Pair an Oudmon-based watch over Bluetooth to get started.',
+            style: AppTextStyles.bodyMedium(
+              context,
+            )?.copyWith(color: onAccent.withValues(alpha: 0.84)),
+          ),
+          const SizedBox(height: kCardInternalSpacing),
+          Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: kChipPaddingH,
+              vertical: kChipPaddingV,
+            ),
+            decoration: BoxDecoration(
+              color: onAccent.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(kChipRadius),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.shield_outlined,
+                  size: kIconSizeTiny,
+                  color: onAccent,
+                ),
+                const SizedBox(width: kSpacingTiny),
+                Text(
+                  'Private by default',
+                  style: AppTextStyles.labelMedium(
+                    context,
+                  )?.copyWith(color: onAccent),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );

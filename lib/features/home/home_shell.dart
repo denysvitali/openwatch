@@ -26,17 +26,25 @@ class HomeShell extends StatelessWidget {
                 selectedIndex: navigationShell.currentIndex,
                 onDestinationSelected: _goBranch,
                 labelType: NavigationRailLabelType.all,
-                minWidth: 86,
+                minWidth: 92,
                 groupAlignment: -0.82,
                 leading: Padding(
                   padding: const EdgeInsets.only(
-                    top: kSpacingSmall,
+                    top: kSpacingMedium,
                     bottom: kSpacingSmall * 2 + kSpacingMini,
                   ),
-                  child: Icon(
-                    Icons.watch_rounded,
-                    color: theme.colorScheme.primary,
-                    size: kIconSizeLarge,
+                  child: Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.primary.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Icon(
+                      Icons.watch_rounded,
+                      color: theme.colorScheme.primary,
+                      size: kIconSizeLarge,
+                    ),
                   ),
                 ),
                 destinations: [
@@ -89,7 +97,7 @@ class HomeShell extends StatelessWidget {
       body: navigationShell,
       bottomNavigationBar: DecoratedBox(
         decoration: BoxDecoration(
-          color: theme.colorScheme.surface.withValues(alpha: 0.94),
+          color: theme.colorScheme.surface.withValues(alpha: 0.97),
           border: Border(
             top: BorderSide(
               color: theme.dividerColor.withValues(alpha: 0.6),
@@ -99,31 +107,34 @@ class HomeShell extends StatelessWidget {
         ),
         child: SafeArea(
           top: false,
-          child: NavigationBar(
-            selectedIndex: navigationShell.currentIndex,
-            onDestinationSelected: _goBranch,
-            destinations: const [
-              NavigationDestination(
-                icon: Icon(Icons.watch_outlined),
-                selectedIcon: Icon(Icons.watch_rounded),
-                label: 'Summary',
-              ),
-              NavigationDestination(
-                icon: Icon(Icons.favorite_outline),
-                selectedIcon: Icon(Icons.favorite),
-                label: 'Health',
-              ),
-              NavigationDestination(
-                icon: Icon(Icons.show_chart_outlined),
-                selectedIcon: Icon(Icons.show_chart),
-                label: 'History',
-              ),
-              NavigationDestination(
-                icon: Icon(Icons.settings_outlined),
-                selectedIcon: Icon(Icons.settings),
-                label: 'Settings',
-              ),
-            ],
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: kSpacingSmall),
+            child: NavigationBar(
+              selectedIndex: navigationShell.currentIndex,
+              onDestinationSelected: _goBranch,
+              destinations: const [
+                NavigationDestination(
+                  icon: Icon(Icons.watch_outlined),
+                  selectedIcon: Icon(Icons.watch_rounded),
+                  label: 'Summary',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.favorite_outline),
+                  selectedIcon: Icon(Icons.favorite),
+                  label: 'Health',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.show_chart_outlined),
+                  selectedIcon: Icon(Icons.show_chart),
+                  label: 'History',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.settings_outlined),
+                  selectedIcon: Icon(Icons.settings),
+                  label: 'Settings',
+                ),
+              ],
+            ),
           ),
         ),
       ),

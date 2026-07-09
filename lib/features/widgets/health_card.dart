@@ -130,11 +130,11 @@ class HealthCard extends StatelessWidget {
     return Card(
       clipBehavior: Clip.antiAlias,
       margin: EdgeInsets.zero,
-      elevation: elevated ? 2 : 0,
+      elevation: elevated ? 3 : 0,
       child: Container(
         decoration: BoxDecoration(
           gradient: effectiveGradient,
-          borderRadius: BorderRadius.circular(kCardRadius),
+          borderRadius: BorderRadius.circular(kCardRadius + 4),
         ),
         child: content,
       ),
@@ -146,7 +146,7 @@ class HealthCard extends StatelessWidget {
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
       colors: [
-        color.withValues(alpha: kCardGradientOpacityStart),
+        color.withValues(alpha: kCardGradientOpacityStart + 0.02),
         color.withValues(alpha: kCardGradientOpacityEnd),
       ],
     );

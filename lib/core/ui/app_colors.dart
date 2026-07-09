@@ -37,9 +37,9 @@ class AppColors extends ThemeExtension<AppColors> {
   final Color divider;
   final Color secondaryText;
 
-  /// Light palette — Apple Health–inspired.
+  /// Light palette — calm, high-contrast surfaces with expressive metrics.
   static const light = AppColors(
-    accent: Color(0xFF007AFF),
+    accent: Color(0xFF4F46E5),
     heart: Color(0xFFFF3B30),
     activity: Color(0xFF34C759),
     nutrition: Color(0xFFFF9500),
@@ -47,16 +47,16 @@ class AppColors extends ThemeExtension<AppColors> {
     stress: Color(0xFFFF9500),
     spo2: Color(0xFF32ADE6),
     hrv: Color(0xFF00C7BE),
-    pageBackground: Color(0xFFF5F5F7),
+    pageBackground: Color(0xFFF7F8FC),
     cardSurface: Color(0xFFFFFFFF),
-    cardSurfaceElevated: Color(0xFFFFFFFF),
-    divider: Color(0xFFE5E5EA),
-    secondaryText: Color(0xFF8E8E93),
+    cardSurfaceElevated: Color(0xFFF0F3FF),
+    divider: Color(0xFFE4E7F0),
+    secondaryText: Color(0xFF677085),
   );
 
   /// Dark palette.
   static const dark = AppColors(
-    accent: Color(0xFF0A84FF),
+    accent: Color(0xFFA5B4FC),
     heart: Color(0xFFFF453A),
     activity: Color(0xFF30D158),
     nutrition: Color(0xFFFF9F0A),
@@ -64,11 +64,11 @@ class AppColors extends ThemeExtension<AppColors> {
     stress: Color(0xFFFF9F0A),
     spo2: Color(0xFF64D2FF),
     hrv: Color(0xFF63E6E2),
-    pageBackground: Color(0xFF000000),
-    cardSurface: Color(0xFF1C1C1E),
-    cardSurfaceElevated: Color(0xFF2C2C2E),
-    divider: Color(0xFF38383A),
-    secondaryText: Color(0xFF8E8E93),
+    pageBackground: Color(0xFF101117),
+    cardSurface: Color(0xFF191B23),
+    cardSurfaceElevated: Color(0xFF242733),
+    divider: Color(0xFF303340),
+    secondaryText: Color(0xFFA8ADBD),
   );
 
   static AppColors of(BuildContext context) {
