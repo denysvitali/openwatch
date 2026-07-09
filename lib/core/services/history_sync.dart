@@ -800,6 +800,7 @@ class HistorySync extends ChangeNotifier {
 
       if (_dispatcher != null) {
         _ensureMetricRecordListeners();
+        await _syncBloodPressureHistory();
         // Delta sync for stress + HRV: same skip rule as HR. Today
         // and yesterday are always re-fetched; older complete days
         // are skipped. Merge is idempotent on timestamp.
@@ -952,6 +953,59 @@ class HistorySync extends ChangeNotifier {
       _progressTotal = 0;
       _syncing = false;
       notifyListeners();
+    }
+  }
+
+  /// Pull the Channel-A BP history cursor until the watch reports that it is
+  /// exhausted. `0x0e sub=0` advances the cursor and emits one tagged `0x0d`
+  /// record stream; the stream ends with a `0xff` tag. A `0xff` without a
+  /// preceding header means there are no more records. This is deliberately
+  /// bounded because the firmware does not expose a record-count field.
+  Future<void> _syncBloodPressureHistory() async {
+    final dispatcher = _dispatcher;
+    if (dispatcher == null) return;
+
+    const maxRecords = 64;
+    const responseTimeout = Duration(milliseconds: 500);
+    var sawAnyRecord = false;
+    for (var record = 0; record < maxRecords; record++) {
+      final end = Completer<bool>();
+      var sawHeader = false;
+      late final StreamSubscription<BpRecordChunk> sub;
+      sub = dispatcher.onBpRecord.listen((chunk) {
+        if (chunk.payload.isEmpty) return;
+        final tag = chunk.payload[0];
+        if (tag == 0x00) sawHeader = true;
+        if (tag == 0xff && !end.isCompleted) end.complete(sawHeader);
+      });
+      try {
+        await transport.sendA(Commands.advanceBpRecord());
+        final deadline = DateTime.now().add(responseTimeout);
+        while (!end.isCompleted && DateTime.now().isBefore(deadline)) {
+          // HR/detail frames can arrive while the watch is walking the BP
+          // cursor. Keep the normal Channel-A queue moving so this probe
+          // cannot delay an already in-flight history response.
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+          await _drainRx(Duration.zero);
+        }
+        if (!end.isCompleted) throw TimeoutException('BP history response');
+        final recordHadHeader = await end.future;
+        if (!recordHadHeader) {
+          if (!sawAnyRecord) {
+            AppLog.instance.debug('history', 'BP history is empty');
+          }
+          break;
+        }
+        sawAnyRecord = true;
+      } on TimeoutException {
+        AppLog.instance.warn(
+          'history',
+          'BP history response timed out after record $record; stopping',
+        );
+        break;
+      } finally {
+        await sub.cancel();
+      }
     }
   }
 

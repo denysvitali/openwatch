@@ -2155,6 +2155,65 @@ void main() {
     });
 
     test(
+      'syncAll advances the BP history cursor and stops at an empty record',
+      () async {
+        final t = FakeBleTransport();
+        final d = ChannelADispatcher(t);
+        d.bind();
+        final now = DateTime(2026, 6, 21, 12);
+        final sync = _testSync(t, d, clock: () => now);
+        final syncFuture = sync.syncAll(daysBack: 1);
+
+        Future<void> waitForBpRequest(int count) async {
+          for (var i = 0; i < 100; i++) {
+            final seen = t.sentA
+                .where((f) => f.isNotEmpty && f[0] == OpA.bpReadConform)
+                .length;
+            if (seen >= count) return;
+            await Future<void>.delayed(const Duration(milliseconds: 5));
+          }
+          fail('timed out waiting for BP request $count');
+        }
+
+        await waitForBpRequest(1);
+        // One hourly slot on 2026-06-21, followed by the record terminator.
+        t.inA.add(
+          Codec.buildChannelA(OpA.bpData, [
+            0x00,
+            0x1a,
+            0x06,
+            0x15,
+            0x3c,
+            0x01,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+          ]),
+        );
+        t.inA.add(Codec.buildChannelA(OpA.bpData, [0x01, 0x46]));
+        t.inA.add(Codec.buildChannelA(OpA.bpData, [0xff]));
+
+        await waitForBpRequest(2);
+        // No more records: this terminator must stop the cursor loop.
+        t.inA.add(Codec.buildChannelA(OpA.bpData, [0xff]));
+        await syncFuture;
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+
+        final history = sync.dayOf(DateOnly.fromDateTime(now));
+        expect(history, isNotNull);
+        expect(history!.bloodPressure, hasLength(1));
+        expect(history.bloodPressure.single.timestamp, DateTime(2026, 6, 21));
+        expect(history.bloodPressure.single.systolic, 0);
+        expect(history.bloodPressure.single.diastolic, 0);
+
+        sync.dispose();
+        d.dispose();
+      },
+    );
+
+    test(
       'sleep sends one 0x27 read at clamped max needed day offset',
       () async {
         final t = FakeBleTransport();
