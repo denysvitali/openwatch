@@ -118,7 +118,7 @@ class HistoryScreen extends ConsumerWidget {
                     _SyncErrorBanner(message: sync.lastSyncError!),
                   ],
                   if (days.isNotEmpty) ...[
-                    const HealthSectionHeader(title: 'Last 7 days'),
+                    const HealthSectionHeader(title: '7-day trends'),
                     _HistoryTrendCard(days: _recentDays(days)),
                     const HealthSectionHeader(title: 'Daily detail'),
                     _DailyDetailSelector(
@@ -294,27 +294,12 @@ class _HistoryTrendCard extends StatelessWidget {
 
     return HealthCard(
       icon: CupertinoIcons.chart_bar_alt_fill,
-      title: 'Last 7 days',
+      title: 'Weekly patterns',
       metricColor: theme.colorScheme.onSurfaceVariant,
       caption: subtitle,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (latest?.hr.isNotEmpty == true) ...[
-            _TrendHeader(
-              icon: CupertinoIcons.heart_fill,
-              title: "Today's heart rate",
-              detail: '${avgBpm(latest!.hr)} bpm avg',
-              tint: kHeartRed(context),
-            ),
-            const SizedBox(height: kSpacingSmall),
-            MiniHrSpark(
-              samples: latest.hr,
-              height: 48,
-              color: kHeartRed(context),
-            ),
-          ],
-          const SizedBox(height: kCardInternalSpacing),
           _TrendHeader(
             icon: CupertinoIcons.arrow_up_right,
             title: 'Steps',

@@ -10,9 +10,6 @@ import '../../core/providers/app_providers.dart';
 import '../../core/services/history_sync.dart';
 import '../../core/ui/app_colors.dart';
 import '../../core/ui/ui_constants.dart';
-import '../history/widgets/hr_chart.dart';
-import '../history/widgets/sleep_trend_chart.dart';
-import '../history/widgets/steps_chart.dart';
 import '../widgets/health_widgets.dart';
 
 /// Summary overview: connection, live metrics, recent activity, quick actions.
@@ -144,7 +141,7 @@ class DashboardScreen extends ConsumerWidget {
                 colors: colors,
               ),
               HealthSectionHeader(
-                title: 'Recent activity',
+                title: 'At a glance',
                 onShowAll: () => context.go('/history'),
                 actionLabel: 'History',
               ),
@@ -375,7 +372,6 @@ class _RecentActivityCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final colors = AppColors.of(context);
     if (sync.days.isEmpty) {
       return HealthCard(
@@ -389,16 +385,16 @@ class _RecentActivityCard extends StatelessWidget {
       );
     }
 
-    final recent = _recentWeek(sync.days);
-    final sleepSummary = SleepTrendSummary.fromDays(recent);
-    final trendText = sleepSummary.trendMinutes == null
-        ? 'Daily sleep time'
-        : '${sleepSummary.trendMinutes! >= 0 ? '+' : '−'}${_formatTrendMinutes(sleepSummary.trendMinutes!.abs())} vs prior';
     final today = sync.days.last;
+    final sleep = today.sleep.fold<Duration>(
+      Duration.zero,
+      (total, session) => total + session.duration,
+    );
+    final heartRate = avgBpm(today.hr);
 
     return HealthCard(
-      icon: CupertinoIcons.chart_bar_alt_fill,
-      title: 'Activity',
+      icon: CupertinoIcons.sparkles,
+      title: 'Today’s snapshot',
       caption: _subtitle(today),
       metricColor: colors.accent,
       trailing: SyncStatusPill(sync: sync),
@@ -406,44 +402,47 @@ class _RecentActivityCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SizedBox(height: kCardInternalSpacing),
-          if (today.hr.isNotEmpty) ...[
-            MiniHrSpark(samples: today.hr, height: 48),
-            const SizedBox(height: kSpacingSmall),
-          ],
-          if (sleepSummary.hasData) ...[
-            HealthListTile(
-              leadingIcon: CupertinoIcons.moon_fill,
-              leadingColor: colors.sleep,
-              title: 'Sleep trend',
-              subtitle: trendText,
-              control: Text(
-                'Week avg ${_formatDuration(sleepSummary.average)}',
-                style: AppTextStyles.labelSmall(
-                  context,
-                )?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+          Row(
+            children: [
+              Expanded(
+                child: _SnapshotMetric(
+                  icon: CupertinoIcons.arrow_up_right,
+                  label: 'Steps',
+                  value: today.steps == null
+                      ? '—'
+                      : NumberFormat.compact().format(today.steps),
+                  tint: colors.activity,
+                ),
               ),
-              showDivider: false,
-              contentPadding: EdgeInsets.zero,
-            ),
-            const SizedBox(height: kSpacingSmall),
-            SleepTrendChart(days: recent, height: 80),
-            const SizedBox(height: kSpacingSmall),
-          ],
-          StepsBarChart(days: recent),
+              const SizedBox(width: kGridSpacing),
+              Expanded(
+                child: _SnapshotMetric(
+                  icon: CupertinoIcons.heart_fill,
+                  label: 'Average heart',
+                  value: heartRate == 0 ? '—' : '$heartRate bpm',
+                  tint: colors.heart,
+                ),
+              ),
+              const SizedBox(width: kGridSpacing),
+              Expanded(
+                child: _SnapshotMetric(
+                  icon: CupertinoIcons.moon_fill,
+                  label: 'Sleep',
+                  value: sleep == Duration.zero ? '—' : _formatDuration(sleep),
+                  tint: colors.sleep,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: kSpacingSmall),
+          TextButton.icon(
+            onPressed: () => context.go('/history'),
+            icon: const Icon(CupertinoIcons.chart_bar_alt_fill),
+            label: const Text('Explore trends and daily charts'),
+          ),
         ],
       ),
     );
-  }
-
-  List<DailyHistory> _recentWeek(List<DailyHistory> days) {
-    final byDay = {for (final day in days) day.day: day};
-    final end = days.last.day;
-    return [
-      for (var offset = -6; offset <= 0; offset++)
-        byDay[end.addDays(offset)] ?? DailyHistory(day: end.addDays(offset)),
-    ];
   }
 
   String _subtitle(DailyHistory today) {
@@ -466,17 +465,56 @@ class _RecentActivityCard extends StatelessWidget {
   }
 }
 
+class _SnapshotMetric extends StatelessWidget {
+  const _SnapshotMetric({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.tint,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color tint;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(kSpacingSmall),
+      decoration: BoxDecoration(
+        color: tint.withValues(alpha: kMetricTintOpacity),
+        borderRadius: BorderRadius.circular(kChipRadius + kSpacingTiny),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: kIconSizeTiny, color: tint),
+          const SizedBox(height: kSpacingSmall),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: AppTextStyles.titleSmall(
+              context,
+            )?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+          ),
+          const SizedBox(height: kSpacingMini),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: AppTextStyles.bodySmall(context),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 String _formatDuration(Duration d) {
   final h = d.inMinutes ~/ 60;
   final m = d.inMinutes.remainder(60);
-  if (m == 0) return '${h}h';
-  return '${h}h ${m}m';
-}
-
-String _formatTrendMinutes(int minutes) {
-  if (minutes < 60) return '${minutes}m';
-  final h = minutes ~/ 60;
-  final m = minutes.remainder(60);
   if (m == 0) return '${h}h';
   return '${h}h ${m}m';
 }
