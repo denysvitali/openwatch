@@ -1156,7 +1156,7 @@ class HistorySync extends ChangeNotifier {
           return;
         }
         final v = Codec.readU32be(pl, 0);
-        final today = DateOnly.today();
+        final today = DateOnly.fromDateTime(_clock());
         for (var d = 0; d < 32; d++) {
           if ((v & (1 << d)) != 0) {
             _availableDays.add(d);
@@ -1222,7 +1222,7 @@ class HistorySync extends ChangeNotifier {
             calories: parsed.calories,
             distanceMeters: parsed.distanceMeters,
           );
-          _upsertTotals(DateOnly.today(), totals);
+          _upsertTotals(DateOnly.fromDateTime(_clock()), totals);
           onTotals(totals);
         }
       case OpA.readDetailSport:
@@ -1548,7 +1548,7 @@ class HistorySync extends ChangeNotifier {
   /// `firmwares/_re/history-layouts/evidence.md` §3.
   int _decodeActivitySummary(Uint8List payload) {
     var updated = 0;
-    final today = DateOnly.today();
+    final today = DateOnly.fromDateTime(_clock());
     for (final entry in ActivityParser.parsePayload(payload)) {
       final day = today.addDays(-entry.dayOffset);
       final range = ActivityParser.dayRange(entry.samples);

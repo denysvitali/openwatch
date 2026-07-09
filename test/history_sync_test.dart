@@ -1828,7 +1828,8 @@ void main() {
       final d = ChannelADispatcher(t);
       final bParser = ChannelBParser(t);
       d.bind();
-      final sync = _testSync(t, d, bParser: bParser);
+      final now = DateTime(2026, 6, 24, 12);
+      final sync = _testSync(t, d, bParser: bParser, clock: () => now);
       final future = sync.syncAll(daysBack: 1);
       await Future<void>.delayed(const Duration(milliseconds: 20));
 
@@ -1852,7 +1853,7 @@ void main() {
 
       await future;
 
-      final yesterday = DateOnly.today().addDays(-1);
+      final yesterday = DateOnly.fromDateTime(now).addDays(-1);
       final yestHistory = sync.dayOf(yesterday);
       expect(yestHistory, isNotNull);
       expect(yestHistory!.steps, isNull, reason: '0x2a must not invent steps');
@@ -1860,7 +1861,7 @@ void main() {
       expect(yestHistory.spo2Min, 94);
       expect(yestHistory.spo2Hours[0].max, 98);
 
-      final today = DateOnly.today();
+      final today = DateOnly.fromDateTime(now);
       final todayHistory = sync.dayOf(today);
       expect(todayHistory, isNotNull);
       expect(todayHistory!.steps, isNull);
