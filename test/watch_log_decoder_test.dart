@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openwatch/core/protocol/codec.dart';
 import 'package:openwatch/core/protocol/commands.dart';
@@ -95,11 +97,15 @@ void main() {
       expect(report.frames.single.details['segmentCount'], greaterThan(0));
     });
 
-    test('summarizes H59MA sleep summary frames opaquely', () {
-      final frame = Codec.buildChannelB(OpB.h59SleepSummary, [
-        0x02,
-        ...List<int>.generate(100, (i) => i & 0xff),
-      ]);
+    test('summarizes H59MA sleep summary fields', () {
+      final body = Uint8List(100);
+      body[0x0e] = 1200 & 0xff;
+      body[0x0f] = 1200 >> 8;
+      body[0x10] = 60;
+      body[0x13] = 1;
+      body[0x14] = 2;
+      body[0x3c] = 60;
+      final frame = Codec.buildChannelB(OpB.h59SleepSummary, [0x02, ...body]);
 
       final report = const WatchLogDecoder().decodeNrfConnectLog(
         _line(_chB, frame),
@@ -108,17 +114,21 @@ void main() {
 
       expect(decoded.valid, isTrue);
       expect(decoded.title, contains('H59 sleep summary dayOffset=2'));
-      expect(decoded.title, contains('bytes=100'));
+      expect(decoded.title, contains('segments=1'));
       expect(decoded.details['label'], 'h59SleepSummary');
       expect(decoded.details['dayOffset'], 2);
       expect(decoded.details['summaryBytes'], 100);
+      expect(decoded.details['startMinute'], 1200);
+      expect(decoded.details['segmentCount'], 1);
     });
 
-    test('summarizes H59MA sleep detail frames opaquely', () {
-      final frame = Codec.buildChannelB(OpB.h59SleepDetail, [
-        0x01,
-        ...List<int>.generate(288, (i) => i & 0xff),
-      ]);
+    test('summarizes H59MA sleep detail fields', () {
+      final body = Uint8List(288);
+      body[0] = 100;
+      body[4] = 50;
+      body[6] = 30;
+      body[8] = 12;
+      final frame = Codec.buildChannelB(OpB.h59SleepDetail, [0x01, ...body]);
 
       final report = const WatchLogDecoder().decodeNrfConnectLog(
         _line(_chB, frame),
@@ -127,10 +137,13 @@ void main() {
 
       expect(decoded.valid, isTrue);
       expect(decoded.title, contains('H59 sleep detail dayOffset=1'));
-      expect(decoded.title, contains('bytes=288'));
+      expect(decoded.title, contains('steps=100'));
+      expect(decoded.title, contains('distance=300m'));
       expect(decoded.details['label'], 'h59SleepDetail');
       expect(decoded.details['dayOffset'], 1);
       expect(decoded.details['detailBytes'], 288);
+      expect(decoded.details['calories'], 50);
+      expect(decoded.details['distanceMeters'], 300);
     });
 
     test('summarizes H59MA sleep detail compact status frames', () {

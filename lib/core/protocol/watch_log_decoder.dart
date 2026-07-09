@@ -5,6 +5,7 @@ import 'activity_parser.dart';
 import 'codec.dart';
 import 'device_info.dart';
 import 'hr_parser.dart';
+import 'h59_history_parser.dart';
 import 'opcodes.dart';
 
 const _channelAUuid = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
@@ -792,12 +793,24 @@ class WatchLogDecoder {
 
     switch (cmd) {
       case OpB.h59SleepSummary:
+        if (payload.isEmpty) {
+          details['firmwareBehavior'] = 'empty-payload';
+          return 'B 0x11 H59 sleep summary empty payload';
+        }
         final dayOffset = payload[0] & 0xff;
         final bodyBytes = payload.length - 1;
         details['dayOffset'] = dayOffset;
         details['summaryBytes'] = bodyBytes;
+        final summary = H59HistoryParser.parseSummary(payload);
+        if (summary != null) {
+          details['startMinute'] = summary.startMinute;
+          details['endMinute'] = summary.endMinute;
+          details['segmentCount'] = summary.segments.length;
+        } else {
+          details['layoutValid'] = false;
+        }
         return 'B 0x11 H59 sleep summary dayOffset=$dayOffset '
-            'bytes=$bodyBytes';
+            'segments=${summary?.segments.length ?? 'invalid'} bytes=$bodyBytes';
       case OpB.h59SleepDetail:
         final dayOffset = payload[0] & 0xff;
         if (payload.length == 1) {
@@ -809,8 +822,20 @@ class WatchLogDecoder {
         final bodyBytes = payload.length - 1;
         details['dayOffset'] = dayOffset;
         details['detailBytes'] = bodyBytes;
+        final detail = H59HistoryParser.parseDetail(payload);
+        if (detail != null) {
+          details.addAll({
+            'steps': detail.steps,
+            'calories': detail.calories,
+            'distanceMeters': detail.distanceMeters,
+            'durationSeconds': detail.durationSeconds,
+          });
+        } else {
+          details['layoutValid'] = false;
+        }
         return 'B 0x12 H59 sleep detail dayOffset=$dayOffset '
-            'bytes=$bodyBytes';
+            'steps=${detail?.steps ?? 'invalid'} '
+            'distance=${detail?.distanceMeters ?? 'invalid'}m bytes=$bodyBytes';
       case OpB.sleepNew:
         final summary = _parseSleep(
           payload,
