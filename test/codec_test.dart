@@ -122,6 +122,17 @@ void main() {
     });
   });
 
+  test('H59MA v14 rejects legacy Channel-A 0x13/0x14 history builders', () {
+    expect(
+      () => Commands.readBandSport(DateTime(2026, 1, 1)),
+      throwsUnsupportedError,
+    );
+    expect(
+      () => Commands.readPressureHistory(DateTime(2026, 1, 1)),
+      throwsUnsupportedError,
+    );
+  });
+
   group('helpers', () {
     test('BCD round-trips', () {
       for (final v in [0, 9, 10, 23, 59, 99]) {

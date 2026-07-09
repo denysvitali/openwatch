@@ -50,6 +50,9 @@ class OpA {
   static const int realTimeHeartRate = 0x1e;
   static const int startMeasure = 0x69;
   static const int stopMeasure = 0x6a;
+
+  /// H59MA v14 Channel-A slot is an explicit no-op; retained for legacy
+  /// protocol inventories only.
   static const int readPressure = 0x14;
   static const int bloodOxygenSetting = 0x2c;
   static const int bpSetting = 0x0c;
@@ -101,6 +104,8 @@ class OpA {
   static const int menstruation = 0x2b;
 
   // Activity / sport / sleep / alarm / target
+  /// H59MA v14 Channel-A slot is an explicit no-op; retained for legacy
+  /// protocol inventories only.
   static const int readBandSport = 0x13;
   static const int readDetailSport = 0x43;
 

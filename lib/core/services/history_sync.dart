@@ -10,6 +10,7 @@ import '../protocol/channel_b.dart';
 import '../protocol/codec.dart';
 import '../protocol/commands.dart';
 import '../protocol/fragment_reassembler.dart';
+import '../protocol/h59_history_parser.dart';
 import '../protocol/opcodes.dart';
 import '../protocol/sleep_parser.dart';
 import 'app_log.dart';
@@ -900,6 +901,12 @@ class HistorySync extends ChangeNotifier {
           final maxSleepOffset = requestedMaxSleepOffset > sleepMaxDayOffset
               ? sleepMaxDayOffset
               : requestedMaxSleepOffset;
+          for (final d in sleepOffsets) {
+            await transport.sendB(Commands.readH59SleepSummary(dayOffset: d));
+            await Future<void>.delayed(drainDuration);
+            await transport.sendB(Commands.readH59SleepDetail(dayOffset: d));
+            await Future<void>.delayed(drainDuration);
+          }
           AppLog.instance.debug(
             'history',
             'sleep: 0x27 recordType=1 maxOffset=$maxSleepOffset '
@@ -1580,6 +1587,8 @@ class HistorySync extends ChangeNotifier {
 
   void _onChannelBCommand(ChannelBCommand cmd) {
     final added = switch (cmd.cmd) {
+      OpB.h59SleepSummary => _decodeH59SleepSummary(cmd.payload),
+      OpB.h59SleepDetail => _decodeH59SleepDetail(cmd.payload),
       OpB.sleepNew => _decodeSleepNew(cmd.payload),
       OpB.sleepLunchNew => _decodeSleepLunch(cmd.payload),
       OpB.activitySummary => _decodeActivitySummary(cmd.payload),
@@ -1593,6 +1602,74 @@ class HistorySync extends ChangeNotifier {
       );
       notifyListeners();
     }
+  }
+
+  int _decodeH59SleepSummary(Uint8List payload) {
+    final parsed = H59HistoryParser.parseSummary(payload);
+    if (parsed == null) return 0;
+    final wakeDay = DateOnly.fromDateTime(_clock()).addDays(-parsed.dayOffset);
+    final anchored = H59HistoryParser.anchorSummary(parsed, wakeDay.midnight);
+    final byDay = <DateOnly, List<SleepSegment>>{};
+    for (final segment in anchored.segments.expand(
+      SleepParser.splitAtMidnight,
+    )) {
+      final day = DateOnly.fromDateTime(segment.start);
+      byDay.putIfAbsent(day, () => []).add(segment);
+    }
+    for (final entry in byDay.entries) {
+      final previous = _days[entry.key] ?? DailyHistory(day: entry.key);
+      final merged = _mergeSleep(previous.sleep, entry.value);
+      final updated = previous.copyWith(
+        sleep: merged,
+        lastUpdated: DateTime.now(),
+        syncedMetrics: {...previous.syncedMetrics, 'sleep'},
+      );
+      _days[entry.key] = updated;
+      unawaited(_store?.mergeSleep(entry.key, merged));
+    }
+    _sleep
+      ..clear()
+      ..addAll(_days.values.expand((day) => day.sleep))
+      ..sort((a, b) => a.start.compareTo(b.start));
+    return anchored.segments.length;
+  }
+
+  int _decodeH59SleepDetail(Uint8List payload) {
+    final parsed = H59HistoryParser.parseDetail(payload);
+    if (parsed == null) return 0;
+    final day = DateOnly.fromDateTime(_clock()).addDays(-parsed.dayOffset);
+    final previous = _days[day] ?? DailyHistory(day: day);
+    _upsertTotals(
+      day,
+      DailyTotals(
+        steps: parsed.steps,
+        calories: parsed.calories,
+        distanceMeters: parsed.distanceMeters,
+      ),
+    );
+    // Keep the per-day row's metric marker even when every hourly slot was
+    // empty; the response itself is the confirmation that the day was read.
+    final updated = (_days[day] ?? previous).copyWith(
+      syncedMetrics: {...previous.syncedMetrics, 'activity'},
+      lastUpdated: DateTime.now(),
+    );
+    _days[day] = updated;
+    unawaited(_store?.writeDay(updated));
+    return 1;
+  }
+
+  List<SleepSegment> _mergeSleep(
+    Iterable<SleepSegment> existing,
+    Iterable<SleepSegment> incoming,
+  ) {
+    final byStart = <int, SleepSegment>{
+      for (final segment in existing)
+        segment.start.millisecondsSinceEpoch: segment,
+    };
+    for (final segment in incoming) {
+      byStart[segment.start.millisecondsSinceEpoch] = segment;
+    }
+    return byStart.values.toList()..sort((a, b) => a.start.compareTo(b.start));
   }
 
   /// Decode Channel-B `0x2a` as H59MA SpO2 hourly max/min pairs.

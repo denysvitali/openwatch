@@ -165,7 +165,7 @@ class DailyHistory {
   /// Metrics that have been fetched for this day, including fetches that
   /// returned an empty sample list. Used by [HistorySync] to avoid
   /// re-polling confirmed-empty days. The set contains lowercase metric
-  /// names: `'hr'`, `'stress'`, `'hrv'`, `'sleep'`, `'bp'`.
+  /// names: `'hr'`, `'stress'`, `'hrv'`, `'sleep'`, `'bp'`, `'activity'`.
   final Set<String> syncedMetrics;
 
   DailyHistory copyWith({

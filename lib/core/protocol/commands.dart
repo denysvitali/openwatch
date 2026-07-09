@@ -242,8 +242,8 @@ class Commands {
 
   /// H59MA v14 sleep summary (Channel-B `0x11`) for a given day offset.
   ///
-  /// The firmware-confirmed response shape is `[dayOffset][100B summary]`.
-  /// The body remains opaque; this builder only exposes the stable request.
+  /// The firmware-confirmed response shape is `[dayOffset][100B summary]`;
+  /// [H59HistoryParser] decodes the type/duration arrays.
   /// No day-offset clamp has been found for this path.
   static Uint8List readH59SleepSummary({int dayOffset = 0}) =>
       Codec.buildChannelB(OpB.h59SleepSummary, [dayOffset & 0xFF]);
@@ -251,8 +251,8 @@ class Commands {
   /// H59MA v14 sleep detail (Channel-B `0x12`) for a given day offset.
   ///
   /// The firmware-confirmed response shape is `[dayOffset][288B detail]`;
-  /// compact NAKs may be returned for no-data/error cases. The body remains
-  /// opaque until captures map the detail bytes.
+  /// [H59HistoryParser] sums its 24 hourly 12-byte sport-delta slots and
+  /// converts distance from the firmware's decameter units to meters.
   static Uint8List readH59SleepDetail({int dayOffset = 0}) =>
       Codec.buildChannelB(OpB.h59SleepDetail, [dayOffset & 0xFF]);
 
@@ -576,22 +576,23 @@ class Commands {
   // Daily history (Channel A read only — 0x13 / 0x14 / 0x15 / 0x37 / 0x39).
   // ---------------------------------------------------------------------------
 
-  /// `ReadBandSportReq` (0x13): one stored exercise session,
-  /// identified by 32-bit LE start timestamp.
-  static Uint8List readBandSport(DateTime startUtc) => Codec.buildChannelA(
-    OpA.readBandSport,
-    Codec.u32le(startUtc.toUtc().millisecondsSinceEpoch ~/ 1000),
+  /// H59MA v14 does not implement Channel-A `0x13`; its dispatcher slot is
+  /// an explicit no-op. Keep this legacy builder visible for capture tooling,
+  /// but prevent production callers from sending a command that cannot yield
+  /// a response.
+  @Deprecated('H59MA v14 Channel-A 0x13 is an explicit no-op')
+  static Uint8List readBandSport(DateTime startUtc) => throw UnsupportedError(
+    'H59MA v14 Channel-A 0x13 stored-sport history is not implemented',
   );
 
-  /// `ReadPressureReq` (0x14): historical BLE-pressure measured
-  /// values. `[ts u32 LE, 0x00, 0x32]` — the last byte is the
-  /// protocol-defined page-size hint (50 records max).
+  /// H59MA v14 does not implement Channel-A `0x14`; its dispatcher slot is
+  /// an explicit no-op. The APK-era BLE-pressure request is retained only in
+  /// the protocol notes, not as a production operation.
+  @Deprecated('H59MA v14 Channel-A 0x14 is an explicit no-op')
   static Uint8List readPressureHistory(DateTime startUtc) =>
-      Codec.buildChannelA(OpA.readPressure, [
-        ...Codec.u32le(startUtc.toUtc().millisecondsSinceEpoch ~/ 1000),
-        0x00,
-        0x32,
-      ]);
+      throw UnsupportedError(
+        'H59MA v14 Channel-A 0x14 BLE-pressure history is not implemented',
+      );
 
   /// `UltraVioletReq` (0x7d): unsupported/no-response on H59MA v14.
   ///
