@@ -10,6 +10,8 @@ import '../../core/providers/app_providers.dart';
 import '../../core/services/history_sync.dart';
 import '../../core/ui/app_colors.dart';
 import '../../core/ui/ui_constants.dart';
+import '../history/widgets/sleep_trend_chart.dart';
+import '../history/widgets/steps_chart.dart';
 import '../widgets/health_widgets.dart';
 
 /// Summary overview: connection, live metrics, recent activity, quick actions.
@@ -391,6 +393,8 @@ class _RecentActivityCard extends StatelessWidget {
       (total, session) => total + session.duration,
     );
     final heartRate = avgBpm(today.hr);
+    final recent = _recentWeek(sync.days);
+    final hasSleepTrend = recent.any((day) => day.sleep.isNotEmpty);
 
     return HealthCard(
       icon: CupertinoIcons.sparkles,
@@ -435,6 +439,33 @@ class _RecentActivityCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: kSpacingSmall),
+          const Divider(),
+          const SizedBox(height: kSpacingSmall),
+          _DashboardTrendPreview(
+            icon: CupertinoIcons.arrow_up_right,
+            title: 'Steps this week',
+            detail: 'Last 7 days',
+            tint: colors.activity,
+            child: StepsBarChart(
+              days: recent,
+              height: 74,
+              barColor: colors.activity,
+            ),
+          ),
+          if (hasSleepTrend) ...[
+            const SizedBox(height: kCardInternalSpacing),
+            _DashboardTrendPreview(
+              icon: CupertinoIcons.moon_fill,
+              title: 'Sleep this week',
+              detail: 'Last 7 nights',
+              tint: colors.sleep,
+              child: SleepTrendChart(
+                days: recent,
+                height: 74,
+                sleepColor: colors.sleep,
+              ),
+            ),
+          ],
           TextButton.icon(
             onPressed: () => context.go('/history'),
             icon: const Icon(CupertinoIcons.chart_bar_alt_fill),
@@ -443,6 +474,15 @@ class _RecentActivityCard extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  List<DailyHistory> _recentWeek(List<DailyHistory> days) {
+    final byDay = {for (final day in days) day.day: day};
+    final end = days.last.day;
+    return [
+      for (var offset = -6; offset <= 0; offset++)
+        byDay[end.addDays(offset)] ?? DailyHistory(day: end.addDays(offset)),
+    ];
   }
 
   String _subtitle(DailyHistory today) {
@@ -462,6 +502,48 @@ class _RecentActivityCard extends StatelessWidget {
     return parts.isEmpty
         ? DateFormat.yMMMd().format(today.day.midnight)
         : parts.join(' · ');
+  }
+}
+
+class _DashboardTrendPreview extends StatelessWidget {
+  const _DashboardTrendPreview({
+    required this.icon,
+    required this.title,
+    required this.detail,
+    required this.tint,
+    required this.child,
+  });
+
+  final IconData icon;
+  final String title;
+  final String detail;
+  final Color tint;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(icon, size: kIconSizeTiny, color: tint),
+            const SizedBox(width: kSpacingSmall),
+            Expanded(
+              child: Text(title, style: AppTextStyles.titleSmall(context)),
+            ),
+            Text(
+              detail,
+              style: AppTextStyles.labelMedium(context)?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: kSpacingTiny),
+        child,
+      ],
+    );
   }
 }
 
