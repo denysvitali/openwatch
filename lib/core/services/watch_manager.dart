@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutterrific_opentelemetry/flutterrific_opentelemetry.dart'
     show SpanKind;
 
+import '../ble/ble_constants.dart';
 import '../ble/ble_transport.dart';
 import '../protocol/capabilities.dart';
 import '../protocol/channel_a.dart';
@@ -33,6 +34,9 @@ class WatchManager extends ChangeNotifier {
   }) {
     _transport.state.addListener(_onLinkState);
     _inboundSub = _transport.inboundA.listen(_onFrame);
+    _standardHeartRateSub = _transport.standardHeartRate.listen(
+      _onStandardHeartRate,
+    );
     _hub = ProtocolHub(_transport);
     _hub.ancs.events.listen(_onAncsEvent);
     // Optional 0xFEE7 notify frames seen in watch logs can mirror battery-like
@@ -79,6 +83,7 @@ class WatchManager extends ChangeNotifier {
   /// Phone-side stress auto-measure toggle applied on connect.
   bool stressAutoMeasureEnabled;
   StreamSubscription<Uint8List>? _inboundSub;
+  StreamSubscription<int>? _standardHeartRateSub;
   StreamSubscription<Fee7BatteryResponse>? _fee7BatterySub;
   StreamSubscription<StatusResponse>? _fee7StatusSub;
   StreamSubscription<HandshakeResponse>? _fee7HandshakeSub;
@@ -158,6 +163,8 @@ class WatchManager extends ChangeNotifier {
   String get hardwareRevision => _transport.hardwareRevision;
   String get firmwareRevision => _transport.firmwareRevision;
   bool get isReady => _transport.isReady;
+  bool get supportsActiveHeartRateMeasurement =>
+      _transport.profile == WatchProfile.oudmon;
   bool get measuringHeartRate =>
       _measuringTypes.contains(MeasureType.heartRate.id);
   bool get measuringBloodPressure =>
@@ -170,7 +177,13 @@ class WatchManager extends ChangeNotifier {
   void _onLinkState() {
     final s = _transport.state.value;
     if (s == LinkState.ready && _last != LinkState.ready) {
-      unawaited(_runHandshake());
+      if (_transport.profile == WatchProfile.fitbitAir) {
+        capabilities = const DeviceCapabilities(heart: true, realTimeHr: true);
+        initialized = true;
+        AppLog.instance.info('watch', 'Fitbit Air connected (live HR only)');
+      } else {
+        unawaited(_runHandshake());
+      }
     }
     if (s == LinkState.disconnected) {
       initialized = false;
@@ -184,6 +197,11 @@ class WatchManager extends ChangeNotifier {
       _batteryTimer = null;
     }
     _last = s;
+    notifyListeners();
+  }
+
+  void _onStandardHeartRate(int bpm) {
+    lastHeartRate = bpm;
     notifyListeners();
   }
 
@@ -1047,6 +1065,7 @@ class WatchManager extends ChangeNotifier {
     _batteryTimer?.cancel();
     _transport.state.removeListener(_onLinkState);
     unawaited(_inboundSub?.cancel());
+    unawaited(_standardHeartRateSub?.cancel());
     unawaited(_fee7BatterySub?.cancel());
     unawaited(_fee7StatusSub?.cancel());
     unawaited(_fee7HandshakeSub?.cancel());

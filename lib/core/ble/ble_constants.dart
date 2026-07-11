@@ -1,5 +1,12 @@
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
+/// The GATT protocol selected from the discovered service layout.
+///
+/// Fitbit Air's private characteristics are deliberately not modelled here:
+/// the supplied capture establishes only its service layout and standard Heart
+/// Rate service, not an authenticated command protocol.
+enum WatchProfile { oudmon, fitbitAir }
+
 /// BLE GATT identifiers for the Oudmon smartwatch protocol.
 ///
 /// The watch exposes **two independent logical channels** on one connection
@@ -47,6 +54,21 @@ class BleUuids {
   static final Guid fee7Read = Guid('0000fec9-0000-1000-8000-00805f9b34fb');
   static final Guid fee7Notify = Guid('0000fea2-0000-1000-8000-00805f9b34fb');
   static final Guid deviceName = Guid('00002a00-0000-1000-8000-00805f9b34fb');
+
+  // --- Bluetooth SIG Heart Rate service (Fitbit Air read-only support) ---
+  static final Guid heartRateService = Guid(
+    '0000180d-0000-1000-8000-00805f9b34fb',
+  );
+  static final Guid heartRateMeasurement = Guid(
+    '00002a37-0000-1000-8000-00805f9b34fb',
+  );
+
+  // Fitbit Air's private command service observed in the supplied capture.
+  // This UUID plus the standard Heart Rate service identifies the supported
+  // read-only profile without relying on the mutable advertised device name.
+  static final Guid fitbitAirCommandService = Guid(
+    'abbaff00-e56a-484c-b832-8b17cf6cbfe8',
+  );
 
   /// Default Channel-B chunk size before PackageLength (`0x2f`) negotiation.
   static const int defaultPackageLength = 20;

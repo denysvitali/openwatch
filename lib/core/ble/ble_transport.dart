@@ -8,6 +8,7 @@ import 'package:flutterrific_opentelemetry/flutterrific_opentelemetry.dart'
 
 import '../protocol/codec.dart';
 import '../protocol/opcodes.dart';
+import '../protocol/standard_heart_rate.dart';
 import '../services/app_log.dart';
 import '../services/opentelemetry_service.dart';
 import 'ble_constants.dart';
@@ -39,12 +40,15 @@ abstract interface class WatchLink implements Fee7Host {
   String get firmwareRevision;
   Stream<Uint8List> get inboundA;
   Stream<Uint8List> get inboundB;
+  WatchProfile get profile;
+  Stream<int> get standardHeartRate;
   Future<void> sendA(Uint8List frame);
   Future<Uint8List> requestA(Uint8List frame, {Duration timeout});
   Future<void> sendB(Uint8List framed);
 }
 
-/// GATT transport for the Oudmon two-channel protocol.
+/// GATT transport for Oudmon watches and the Fitbit Air's read-only standard
+/// Heart Rate profile.
 ///
 /// * Channel A — 16-byte commands, write-with-response, opcode-correlated
 ///   responses, gated behind [isReady].
@@ -68,12 +72,15 @@ class BleTransport implements WatchLink {
   BluetoothCharacteristic? _fee7Read;
   BluetoothCharacteristic? _fee7Notify;
   BluetoothCharacteristic? _deviceName;
+  BluetoothCharacteristic? _heartRateMeasurement;
 
   final _subs = <StreamSubscription<dynamic>>[];
   final _state = ValueNotifier<LinkState>(LinkState.disconnected);
   final _inboundA = StreamController<Uint8List>.broadcast();
   final _inboundB = StreamController<Uint8List>.broadcast();
   final _inboundFee7 = StreamController<Uint8List>.broadcast();
+  final _standardHeartRate = StreamController<int>.broadcast();
+  WatchProfile _profile = WatchProfile.oudmon;
 
   // Serialized write queue.
   final Queue<_WriteOp> _queue = Queue<_WriteOp>();
@@ -95,6 +102,10 @@ class BleTransport implements WatchLink {
   Stream<Uint8List> get inboundA => _inboundA.stream;
   @override
   Stream<Uint8List> get inboundB => _inboundB.stream;
+  @override
+  WatchProfile get profile => _profile;
+  @override
+  Stream<int> get standardHeartRate => _standardHeartRate.stream;
 
   /// Inbound 16-byte frames received on the vendor `0xFEE7` notify
   /// characteristic. Emits only after the characteristic has been discovered
@@ -180,8 +191,21 @@ class BleTransport implements WatchLink {
           for (final c in svc.characteristics) {
             if (c.uuid == BleUuids.deviceName) _deviceName = c;
           }
+        } else if (svc.uuid == BleUuids.heartRateService) {
+          for (final c in svc.characteristics) {
+            if (c.uuid == BleUuids.heartRateMeasurement) {
+              _heartRateMeasurement = c;
+            }
+          }
         }
       }
+      _profile =
+          services.any(
+                (service) => service.uuid == BleUuids.fitbitAirCommandService,
+              ) &&
+              _heartRateMeasurement != null
+          ? WatchProfile.fitbitAir
+          : WatchProfile.oudmon;
       _log.info(
         'ble',
         'Chars: writeA=${_writeA != null} notifyA=${_notifyA != null} '
@@ -189,6 +213,11 @@ class BleTransport implements WatchLink {
             'fee7=${_fee7Write != null || _fee7Read != null || _fee7Notify != null} '
             'devName=${_deviceName != null}',
       );
+      if (_profile == WatchProfile.fitbitAir) {
+        await _connectFitbitAir(services);
+        ok = true;
+        return;
+      }
       if (_writeA == null || _notifyA == null) {
         throw const BleTransportException(
           'Channel-A command characteristics not found',
@@ -225,6 +254,23 @@ class BleTransport implements WatchLink {
     } finally {
       span?.end(ok: ok);
     }
+  }
+
+  /// Enables only the Bluetooth SIG Heart Rate Measurement characteristic.
+  /// The Fitbit private protocol is intentionally untouched until a capture
+  /// establishes its pairing and command contract.
+  Future<void> _connectFitbitAir(List<BluetoothService> services) async {
+    final heartRate = _heartRateMeasurement!;
+    await heartRate.setNotifyValue(true);
+    _subs.add(heartRate.onValueReceived.listen(_onStandardHeartRate));
+    _state.value = LinkState.readingDeviceInfo;
+    await _readDeviceInfo(services);
+    _state.value = LinkState.ready;
+    _log.info(
+      'ble',
+      'Fitbit Air READY (standard Heart Rate notifications enabled; '
+          'private protocol disabled)',
+    );
   }
 
   Future<void> _readDeviceInfo(List<BluetoothService> services) async {
@@ -323,6 +369,13 @@ class BleTransport implements WatchLink {
     _inboundB.add(frame);
   });
 
+  void _onStandardHeartRate(List<int> data) {
+    final bpm = StandardHeartRate.parse(data);
+    if (bpm == null) return;
+    _log.debug('hr', 'RX standard Heart Rate bpm=$bpm');
+    _standardHeartRate.add(bpm);
+  }
+
   void _onFee7(List<int> data) => _withRxSpan('fee7', data, (frame) {
     if (!Codec.isValidChannelA(frame)) {
       _log.frame(
@@ -347,6 +400,7 @@ class BleTransport implements WatchLink {
   /// Sends a Channel-A command frame (fire-and-forget). Rejected before ready.
   @override
   Future<void> sendA(Uint8List frame) {
+    _requireOudmonCommands();
     _requireReady();
     _log.frame('tx', 'TX-A op=0x${frame[0].toRadixString(16)}', frame);
     return _enqueue(_WriteOp(_writeA!, frame, withoutResponse: false));
@@ -373,6 +427,7 @@ class BleTransport implements WatchLink {
     );
     var ok = false;
     try {
+      _requireOudmonCommands();
       _requireReady();
       final completer = Completer<Uint8List>();
       (_pending[opcode] ??= []).add(completer);
@@ -421,6 +476,7 @@ class BleTransport implements WatchLink {
     );
     var ok = false;
     try {
+      _requireOudmonCommands();
       final char = _writeB;
       if (char == null) {
         throw const BleTransportException(
@@ -462,6 +518,7 @@ class BleTransport implements WatchLink {
   /// Throws if the device did not advertise the `0xFEE7` write characteristic.
   @override
   Future<void> sendFee7(Uint8List frame) {
+    _requireOudmonCommands();
     final char = _fee7Write;
     if (char == null) {
       throw const BleTransportException(
@@ -534,6 +591,14 @@ class BleTransport implements WatchLink {
     }
   }
 
+  void _requireOudmonCommands() {
+    if (_profile != WatchProfile.oudmon) {
+      throw const BleTransportException(
+        'Commands are not available for the Fitbit Air read-only profile',
+      );
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Teardown
   // ---------------------------------------------------------------------------
@@ -570,6 +635,8 @@ class BleTransport implements WatchLink {
       _device = null;
       _writeA = _notifyA = _writeB = _notifyB = null;
       _fee7Write = _fee7Read = _fee7Notify = _deviceName = null;
+      _heartRateMeasurement = null;
+      _profile = WatchProfile.oudmon;
       if (d != null) {
         try {
           await d.disconnect();
@@ -591,6 +658,7 @@ class BleTransport implements WatchLink {
     unawaited(_inboundA.close());
     unawaited(_inboundB.close());
     unawaited(_inboundFee7.close());
+    unawaited(_standardHeartRate.close());
   }
 }
 

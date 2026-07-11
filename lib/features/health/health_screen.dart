@@ -110,6 +110,7 @@ class HealthScreen extends ConsumerWidget {
               supported: hrSupported,
               ready: ready,
               measuring: manager.measuringHeartRate,
+              readOnly: !manager.supportsActiveHeartRateMeasurement,
               start: manager.startHeartRate,
               stop: manager.stopHeartRate,
               metricColor: colors.heart,
@@ -130,6 +131,7 @@ class _HeartRateHero extends StatelessWidget {
     required this.supported,
     required this.ready,
     required this.measuring,
+    required this.readOnly,
     required this.start,
     required this.stop,
     required this.metricColor,
@@ -140,6 +142,7 @@ class _HeartRateHero extends StatelessWidget {
   final bool supported;
   final bool ready;
   final bool measuring;
+  final bool readOnly;
   final VoidCallback start;
   final VoidCallback stop;
   final Color metricColor;
@@ -154,6 +157,8 @@ class _HeartRateHero extends StatelessWidget {
       statusText = 'Connect your watch to measure';
     } else if (measuring) {
       statusText = 'Keep still while measuring';
+    } else if (readOnly) {
+      statusText = 'Live readings from the watch';
     } else {
       statusText = 'Ready to measure';
     }
@@ -176,27 +181,30 @@ class _HeartRateHero extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: PrimaryHealthButton(
-                    label: measuring ? 'Measuring…' : 'Start',
-                    icon: CupertinoIcons.play_fill,
-                    onPressed: ready && supported && !measuring ? start : null,
+            if (!readOnly)
+              Row(
+                children: [
+                  Expanded(
+                    child: PrimaryHealthButton(
+                      label: measuring ? 'Measuring…' : 'Start',
+                      icon: CupertinoIcons.play_fill,
+                      onPressed: ready && supported && !measuring
+                          ? start
+                          : null,
+                    ),
                   ),
-                ),
-                const SizedBox(width: kGridSpacing),
-                Expanded(
-                  child: PrimaryHealthButton(
-                    label: 'Stop',
-                    icon: CupertinoIcons.stop_fill,
-                    onPressed: ready && supported && measuring ? stop : null,
-                    elevated: false,
+                  const SizedBox(width: kGridSpacing),
+                  Expanded(
+                    child: PrimaryHealthButton(
+                      label: 'Stop',
+                      icon: CupertinoIcons.stop_fill,
+                      onPressed: ready && supported && measuring ? stop : null,
+                      elevated: false,
+                    ),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: kSpacingSmall),
+                ],
+              ),
+            if (!readOnly) const SizedBox(height: kSpacingSmall),
             TextButton(
               onPressed: onViewHistory,
               child: const Text('See history charts'),

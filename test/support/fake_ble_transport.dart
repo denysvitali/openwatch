@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:openwatch/core/ble/ble_transport.dart';
+import 'package:openwatch/core/ble/ble_constants.dart';
 import 'package:openwatch/core/protocol/codec.dart';
 
 /// Shared [WatchLink] test double used across the protocol-layer test
@@ -17,6 +18,9 @@ class FakeBleTransport implements WatchLink {
   final inA = StreamController<Uint8List>.broadcast();
   final inB = StreamController<Uint8List>.broadcast();
   final fee7In = StreamController<Uint8List>.broadcast();
+  final standardHeartRateIn = StreamController<int>.broadcast();
+  @override
+  WatchProfile profile = WatchProfile.oudmon;
 
   /// Link state; starts (and normally stays) `ready` so code under test
   /// can send immediately. Flip to simulate disconnects.
@@ -54,6 +58,9 @@ class FakeBleTransport implements WatchLink {
 
   @override
   Stream<Uint8List> get inboundB => inB.stream;
+
+  @override
+  Stream<int> get standardHeartRate => standardHeartRateIn.stream;
 
   @override
   Stream<Uint8List> get fee7Inbound => fee7In.stream;
