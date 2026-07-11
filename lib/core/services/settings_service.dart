@@ -1,4 +1,12 @@
+import 'dart:convert';
+
 import 'package:shared_preferences/shared_preferences.dart';
+
+class SavedDevice {
+  const SavedDevice(this.id, this.name);
+  final String id;
+  final String name;
+}
 
 /// Cloud region for the optional QC Wireless backend.
 enum CloudRegion {
@@ -103,6 +111,7 @@ class SettingsService {
   static const _kAutoHistory = 'auto_sync_history';
   static const _kLastDeviceId = 'last_device_id';
   static const _kLastDeviceName = 'last_device_name';
+  static const _kSavedDevices = 'saved_devices';
   static const _kHrEnabled = 'hr_auto_measure_enabled';
   static const _kHrInterval = 'hr_interval_minutes';
   static const _kHrLow = 'hr_low_alarm';
@@ -120,6 +129,29 @@ class SettingsService {
   Future<void> saveLastDevice(String id, String name) async {
     await _prefs.setString(_kLastDeviceId, id);
     await _prefs.setString(_kLastDeviceName, name);
+    final devices = savedDevices.where((d) => d.id != id).toList()
+      ..insert(0, SavedDevice(id, name));
+    await _prefs.setString(
+      _kSavedDevices,
+      jsonEncode(devices.map((d) => {'id': d.id, 'name': d.name}).toList()),
+    );
+  }
+
+  List<SavedDevice> get savedDevices {
+    final raw = _prefs.getString(_kSavedDevices);
+    if (raw == null) {
+      final id = lastDeviceId;
+      return id == null ? const [] : [SavedDevice(id, lastDeviceName ?? id)];
+    }
+    try {
+      return (jsonDecode(raw) as List)
+          .whereType<Map>()
+          .map((m) => SavedDevice('${m['id']}', '${m['name']}'))
+          .where((d) => d.id.isNotEmpty)
+          .toList(growable: false);
+    } catch (_) {
+      return const [];
+    }
   }
 
   Future<void> clearLastDevice() async {

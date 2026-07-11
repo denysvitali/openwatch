@@ -283,7 +283,7 @@ class SettingsScreen extends ConsumerWidget {
                   subtitle: 'Keeps the watch paired for auto-reconnect',
                   leadingIcon: Icons.link_off,
                   onTap: () async {
-                    await ref.read(bleTransportProvider).disconnect();
+                    await ref.read(bleConnectionPoolProvider).disconnect();
                     if (context.mounted) context.go('/scan');
                   },
                 ),
@@ -363,7 +363,7 @@ class SettingsScreen extends ConsumerWidget {
       destructive: true,
     );
     if (!ok) return;
-    await ref.read(bleTransportProvider).disconnect();
+    await ref.read(bleConnectionPoolProvider).disconnect();
     final svc = await ref.read(settingsServiceProvider.future);
     await svc.clearLastDevice();
     if (context.mounted) context.go('/scan');

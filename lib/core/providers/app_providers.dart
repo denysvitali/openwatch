@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 
 import '../ble/ble_transport.dart';
+import '../ble/ble_connection_pool.dart';
 import '../services/bp_raw_store.dart';
 import '../services/cloud_api.dart';
 import '../services/firmware_service.dart';
@@ -75,10 +76,31 @@ class SettingsNotifier extends Notifier<AppSettings> {
 
 // --- BLE transport + watch manager ------------------------------------------
 
+final bleConnectionPoolProvider = ChangeNotifierProvider<BleConnectionPool>((
+  ref,
+) {
+  final pool = BleConnectionPool();
+  ref.onDispose(() => unawaited(pool.dispose()));
+  return pool;
+});
+
+/// The selected watch's transport. Selecting another watch recreates the
+/// consumers that are intentionally scoped to the active device.
 final bleTransportProvider = Provider<BleTransport>((ref) {
-  final t = BleTransport();
-  ref.onDispose(t.dispose);
-  return t;
+  final pool = ref.watch(bleConnectionPoolProvider);
+  final id = ref.watch(activeDeviceIdProvider);
+  final transport = id == null ? pool.active : pool[id];
+  if (transport == null) {
+    // Keep the manager constructible before the first connection; the idle
+    // transport is adopted by the first device that is connected.
+    return pool.idle;
+  }
+  return transport;
+});
+
+final activeDeviceIdProvider = Provider<String?>((ref) {
+  final pool = ref.watch(bleConnectionPoolProvider);
+  return pool.activeId;
 });
 
 final watchManagerProvider = ChangeNotifierProvider<WatchManager>((ref) {

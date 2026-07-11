@@ -35,19 +35,28 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
 
   Future<void> _maybeAutoReconnect() async {
     final svc = await ref.read(settingsServiceProvider.future);
-    final id = svc.lastDeviceId;
-    if (id == null || !mounted) return;
+    final devices = svc.savedDevices;
+    if (devices.isEmpty || !mounted) return;
     if (!await _ensurePermissions()) return;
     if (!mounted) return;
     setState(() {
       _reconnecting = true;
-      _reconnectName = svc.lastDeviceName ?? id;
+      _reconnectName = devices.map((d) => d.name).join(', ');
     });
-    AppLog.instance.info('ble', 'Auto-reconnecting to saved device $id');
+    AppLog.instance.info(
+      'ble',
+      'Auto-reconnecting to ${devices.length} saved device(s)',
+    );
     try {
-      final device = BluetoothDevice.fromId(id);
-      await ref.read(bleTransportProvider).connect(device);
-      await _rememberDevice(device);
+      for (final saved in devices) {
+        try {
+          final device = BluetoothDevice.fromId(saved.id);
+          await ref.read(bleConnectionPoolProvider).connect(device);
+          await _rememberDevice(device);
+        } catch (e) {
+          AppLog.instance.warn('ble', 'Could not reconnect ${saved.name}: $e');
+        }
+      }
       if (mounted) context.go('/dashboard');
     } catch (e) {
       AppLog.instance.warn('ble', 'Auto-reconnect failed: $e');
@@ -118,7 +127,7 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
     });
     try {
       await FlutterBluePlus.stopScan();
-      await ref.read(bleTransportProvider).connect(device);
+      await ref.read(bleConnectionPoolProvider).connect(device);
       await _rememberDevice(device);
       if (mounted) context.go('/dashboard');
     } catch (e) {

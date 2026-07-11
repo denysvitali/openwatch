@@ -78,7 +78,7 @@ class DashboardScreen extends ConsumerWidget {
                     destructive: true,
                   );
                   if (!ok || !context.mounted) return;
-                  await ref.read(bleTransportProvider).disconnect();
+                  await ref.read(bleConnectionPoolProvider).disconnect();
                   if (context.mounted) context.go('/scan');
               }
             },
