@@ -263,12 +263,29 @@ class BleTransport implements WatchLink {
     final heartRate = _heartRateMeasurement!;
     await heartRate.setNotifyValue(true);
     _subs.add(heartRate.onValueReceived.listen(_onStandardHeartRate));
+    var privateNotifications = 0;
+    for (final service in services) {
+      if (!BleUuids.isFitbitAirPrivateService(service.uuid)) continue;
+      for (final characteristic in service.characteristics) {
+        final properties = characteristic.properties;
+        if (!properties.notify && !properties.indicate) continue;
+        await characteristic.setNotifyValue(true);
+        _subs.add(
+          characteristic.onValueReceived.listen(
+            (data) =>
+                _onFitbitAirPrivateNotification(characteristic.uuid.str, data),
+          ),
+        );
+        privateNotifications++;
+      }
+    }
     _state.value = LinkState.readingDeviceInfo;
     await _readDeviceInfo(services);
     _state.value = LinkState.ready;
     _log.info(
       'ble',
       'Fitbit Air READY (standard Heart Rate notifications enabled; '
+          '$privateNotifications private notification surfaces captured; '
           'private protocol disabled)',
     );
   }
@@ -374,6 +391,15 @@ class BleTransport implements WatchLink {
     if (bpm == null) return;
     _log.debug('hr', 'RX standard Heart Rate bpm=$bpm');
     _standardHeartRate.add(bpm);
+  }
+
+  /// Records proprietary Fitbit Air notifications losslessly for offline
+  /// protocol capture. Their framing/authentication semantics are unknown, so
+  /// the app neither decodes nor acknowledges them.
+  void _onFitbitAirPrivateNotification(String characteristic, List<int> data) {
+    _withRxSpan('fitbit-private', data, (frame) {
+      _log.frame('rx', 'RX-Fitbit $characteristic', frame);
+    });
   }
 
   void _onFee7(List<int> data) => _withRxSpan('fee7', data, (frame) {

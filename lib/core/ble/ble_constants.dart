@@ -69,6 +69,17 @@ class BleUuids {
   static final Guid fitbitAirCommandService = Guid(
     'abbaff00-e56a-484c-b832-8b17cf6cbfe8',
   );
+  static final Guid fitbitAirDataService = Guid(
+    'abbafd00-e56a-484c-b832-8b17cf6cbfe8',
+  );
+  static final Guid fitbitAirTelemetryService = Guid(
+    '4eee1c00-4133-479b-8663-02c84bdc14be',
+  );
+
+  static bool isFitbitAirPrivateService(Guid uuid) =>
+      uuid == fitbitAirCommandService ||
+      uuid == fitbitAirDataService ||
+      uuid == fitbitAirTelemetryService;
 
   /// Default Channel-B chunk size before PackageLength (`0x2f`) negotiation.
   static const int defaultPackageLength = 20;
