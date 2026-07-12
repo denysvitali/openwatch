@@ -48,10 +48,29 @@ records private values losslessly, and decodes standard heart-rate values.
 
 The capture contains no phone-to-watch characteristic writes, pairing or
 authentication exchange, descriptor-write results, or known user actions
-correlated with notifications. The values received on `abbaff02` are therefore
-opaque; the interleaved one-byte values are not treated as acknowledgements or
-sequence markers without a bidirectional capture. OpenWatch must not send
-Oudmon frames or inferred replies on this profile.
+correlated with notifications. Static analysis of Google Health 5.03 and its
+open-source Golden Gate dependency identifies the private services as follows:
+
+- `abbaff00`: legacy Gattlink stream transport. `abbaff01` receives
+  write-without-response packets from the phone; `abbaff02` transmits packets
+  to the phone via notifications.
+- `abbafd00`: link status. `abbafd01` reports the current connection
+  configuration; `abbafd02` reports the current connection mode.
+- `ac2f0045`: GATT cache validation. `ac2f0145` points to an ephemeral writable
+  characteristic, which explains why the captured write UUID may vary.
+- `4eee1c00`: not referenced by the app or public Golden Gate source examined;
+  its semantics remain unknown.
+
+`abbaff02` packets use Gattlink. Data packets carry a 5-bit packet sequence;
+bit 6 introduces a cumulative 5-bit acknowledgement, and bit 7 identifies
+control packets. The captured one-byte values `40`, `41`, ... are therefore
+acknowledgement-only packets. The remaining payload is IPv4 (`169.254.0.3`
+watch to `169.254.0.2` phone), UDP port 5684, and DTLS 1.2. The DTLS records in
+this capture are epoch-1 application data and are encrypted/authenticated with
+a per-device PSK. Decoding their CoAP/protobuf plaintext requires the pairing
+exchange or the DTLS key plus the complete handshake; the APK alone and this
+post-handshake capture are insufficient. OpenWatch must not send Oudmon frames
+or inferred application commands on this profile.
 
 ### 2.1 GATT services & characteristics
 

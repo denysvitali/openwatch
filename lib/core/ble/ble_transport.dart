@@ -7,6 +7,7 @@ import 'package:flutterrific_opentelemetry/flutterrific_opentelemetry.dart'
     show SpanKind;
 
 import '../protocol/codec.dart';
+import '../protocol/fitbit_gattlink.dart';
 import '../protocol/opcodes.dart';
 import '../protocol/standard_heart_rate.dart';
 import '../services/app_log.dart';
@@ -399,6 +400,28 @@ class BleTransport implements WatchLink {
   void _onFitbitAirPrivateNotification(String characteristic, List<int> data) {
     _withRxSpan('fitbit-private', data, (frame) {
       _log.frame('rx', 'RX-Fitbit $characteristic', frame);
+      if (characteristic != BleUuids.fitbitAirCommandNotify.str) return;
+      final packet = FitbitGattlinkPacket.parse(frame);
+      if (packet == null) return;
+      if (packet.isAcknowledgementOnly) {
+        _log.debug(
+          'ble',
+          'Fitbit Gattlink ACK psn=${packet.acknowledgedSequence}',
+        );
+        return;
+      }
+      final network = packet.network;
+      final dtls = network?.dtls;
+      if (network != null && dtls != null) {
+        _log.debug(
+          'ble',
+          'Fitbit Gattlink psn=${packet.packetSequence} '
+              '${network.sourceAddress}:${network.sourcePort} -> '
+              '${network.destinationAddress}:${network.destinationPort} '
+              'DTLS type=${dtls.contentType} epoch=${dtls.epoch} '
+              'seq=${dtls.sequence} encrypted=${dtls.fragmentLength}B',
+        );
+      }
     });
   }
 
