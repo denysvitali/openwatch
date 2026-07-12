@@ -63,22 +63,69 @@ class BleUuids {
     '00002a37-0000-1000-8000-00805f9b34fb',
   );
 
-  // Fitbit Air's private command service observed in the supplied capture.
-  // This UUID plus the standard Heart Rate service identifies the supported
-  // read-only profile without relying on the mutable advertised device name.
+  // Fitbit Air private GATT surface observed in the supplied capture. This
+  // identifies the supported read-only profile without relying on the mutable
+  // advertised device name. The characteristic roles below describe only
+  // their GATT properties; framing and payload semantics remain unknown.
   static final Guid fitbitAirCommandService = Guid(
     'abbaff00-e56a-484c-b832-8b17cf6cbfe8',
+  );
+  static final Guid fitbitAirCommandWrite = Guid(
+    'abbaff01-e56a-484c-b832-8b17cf6cbfe8',
+  );
+  static final Guid fitbitAirCommandNotify = Guid(
+    'abbaff02-e56a-484c-b832-8b17cf6cbfe8',
   );
   static final Guid fitbitAirDataService = Guid(
     'abbafd00-e56a-484c-b832-8b17cf6cbfe8',
   );
+  static final Guid fitbitAirDataNotify1 = Guid(
+    'abbafd01-e56a-484c-b832-8b17cf6cbfe8',
+  );
+  static final Guid fitbitAirDataNotify2 = Guid(
+    'abbafd02-e56a-484c-b832-8b17cf6cbfe8',
+  );
+  static final Guid fitbitAirDataRead = Guid(
+    'abbafd03-e56a-484c-b832-8b17cf6cbfe8',
+  );
+  static final Guid fitbitAirControlService = Guid(
+    'ac2f0045-8182-4be5-91e0-2992e6b40ebb',
+  );
+  static final Guid fitbitAirControlRead = Guid(
+    'ac2f0145-8182-4be5-91e0-2992e6b40ebb',
+  );
+  static final Guid fitbitAirControlWrite = Guid(
+    'ac2f2845-8182-4be5-91e0-2992e6b40ebb',
+  );
   static final Guid fitbitAirTelemetryService = Guid(
     '4eee1c00-4133-479b-8663-02c84bdc14be',
+  );
+  static final Guid fitbitAirTelemetryNotify1 = Guid(
+    '4eee1c01-4133-479b-8663-02c84bdc14be',
+  );
+  static final Guid fitbitAirTelemetryWrite = Guid(
+    '4eee1c02-4133-479b-8663-02c84bdc14be',
+  );
+  static final Guid fitbitAirTelemetryRead = Guid(
+    '4eee1c03-4133-479b-8663-02c84bdc14be',
+  );
+  static final Guid fitbitAirTelemetryIndicate = Guid(
+    '4eee1c04-4133-479b-8663-02c84bdc14be',
+  );
+  static final Guid fitbitAirTelemetryNotify2 = Guid(
+    '4eee1c05-4133-479b-8663-02c84bdc14be',
+  );
+  static final Guid fitbitAirTelemetryReadWriteNotify = Guid(
+    '4eee1c06-4133-479b-8663-02c84bdc14be',
+  );
+  static final Guid fitbitAirTelemetryReadWriteIndicate = Guid(
+    '4eee1c07-4133-479b-8663-02c84bdc14be',
   );
 
   static bool isFitbitAirPrivateService(Guid uuid) =>
       uuid == fitbitAirCommandService ||
       uuid == fitbitAirDataService ||
+      uuid == fitbitAirControlService ||
       uuid == fitbitAirTelemetryService;
 
   /// Default Channel-B chunk size before PackageLength (`0x2f`) negotiation.

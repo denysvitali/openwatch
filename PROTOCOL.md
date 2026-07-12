@@ -38,6 +38,21 @@ the same connection (see §2). The cloud layer is a separate HTTPS/JSON + WebSoc
 
 ## 2. BLE Transport
 
+### 2.0 Fitbit Air capture status
+
+Fitbit Air is a separate, read-only profile and does not use the Oudmon
+channels documented below. The 2026-07-12 nRF Connect capture establishes its
+private GATT UUIDs and the standard Heart Rate Measurement characteristic
+(`0x2A37`). OpenWatch enables the captured notify/indicate characteristics,
+records private values losslessly, and decodes standard heart-rate values.
+
+The capture contains no phone-to-watch characteristic writes, pairing or
+authentication exchange, descriptor-write results, or known user actions
+correlated with notifications. The values received on `abbaff02` are therefore
+opaque; the interleaved one-byte values are not treated as acknowledgements or
+sequence markers without a bidirectional capture. OpenWatch must not send
+Oudmon frames or inferred replies on this profile.
+
 ### 2.1 GATT services & characteristics
 
 | UUID | Role | Channel | Notes |
