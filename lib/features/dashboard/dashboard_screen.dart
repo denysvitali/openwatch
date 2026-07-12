@@ -1,5 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -49,6 +50,26 @@ class DashboardScreen extends ConsumerWidget {
                     manager.refreshBattery();
                   }
                 : null,
+          ),
+          Consumer(
+            builder: (context, ref, _) {
+              final pool = ref.watch(bleConnectionPoolProvider);
+              final ids = pool.deviceIds.toList();
+              if (ids.length < 2) return const SizedBox.shrink();
+              return PopupMenuButton<String>(
+                tooltip: 'Switch watch',
+                icon: const Icon(CupertinoIcons.device_laptop),
+                initialValue: pool.activeId,
+                onSelected: (id) => pool.select(id),
+                itemBuilder: (context) => [
+                  for (final id in ids)
+                    PopupMenuItem(
+                      value: id,
+                      child: Text(_deviceLabel(pool.device(id), id)),
+                    ),
+                ],
+              );
+            },
           ),
           PopupMenuButton<_SummaryMenu>(
             tooltip: 'More',
@@ -204,6 +225,11 @@ class DashboardScreen extends ConsumerWidget {
     LinkState.discovering => 'Discovering…',
     LinkState.readingDeviceInfo => 'Reading device…',
   };
+}
+
+String _deviceLabel(BluetoothDevice? device, String id) {
+  final name = device?.platformName ?? '';
+  return name.isEmpty ? id : name;
 }
 
 enum _SummaryMenu { find, syncTime, disconnect }

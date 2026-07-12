@@ -10,6 +10,7 @@ import 'ble_transport.dart';
 /// device-specific.
 class BleConnectionPool extends ChangeNotifier {
   final Map<String, BleTransport> _transports = {};
+  final Map<String, BluetoothDevice> _devices = {};
   BleTransport? _idle;
   String? _activeId;
 
@@ -18,6 +19,7 @@ class BleConnectionPool extends ChangeNotifier {
   BleTransport? get active =>
       _activeId == null ? null : _transports[_activeId!];
   BleTransport? operator [](String id) => _transports[id];
+  BluetoothDevice? device(String id) => _devices[id];
   BleTransport get idle => _idle ??= BleTransport();
 
   Future<BleTransport> connect(BluetoothDevice device) async {
@@ -27,6 +29,7 @@ class BleConnectionPool extends ChangeNotifier {
       _idle = null;
       return value;
     });
+    _devices[id] = device;
     await transport.connect(device);
     _activeId = id;
     notifyListeners();
@@ -45,6 +48,7 @@ class BleConnectionPool extends ChangeNotifier {
     final target = id ?? _activeId;
     if (target == null) return;
     final transport = _transports.remove(target);
+    _devices.remove(target);
     if (transport == null) return;
     await transport.disconnect();
     transport.dispose();
@@ -64,6 +68,7 @@ class BleConnectionPool extends ChangeNotifier {
     _idle?.dispose();
     _idle = null;
     _transports.clear();
+    _devices.clear();
     _activeId = null;
     notifyListeners();
     super.dispose();
