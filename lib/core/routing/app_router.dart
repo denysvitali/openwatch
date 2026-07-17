@@ -8,6 +8,7 @@ import '../../features/debug/bp_debug_screen.dart';
 import '../../features/firmware/firmware_screen.dart';
 import '../../features/health/health_screen.dart';
 import '../../features/history/history_screen.dart';
+import '../../features/history/monthly_trends_screen.dart';
 import '../../features/home/home_shell.dart';
 import '../../features/logs/logs_screen.dart';
 import '../../features/notifications/notifications_screen.dart';
@@ -48,6 +49,12 @@ final appRouterProvider = Provider<GoRouter>(
         name: 'logs',
         parentNavigatorKey: _rootNavigatorKey,
         builder: (context, state) => const LogsScreen(),
+      ),
+      GoRoute(
+        path: '/monthly-trends',
+        name: 'monthly-trends',
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) => const MonthlyTrendsScreen(),
       ),
       GoRoute(
         path: '/bp-debug',

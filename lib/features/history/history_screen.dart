@@ -2,6 +2,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:openwatch/core/ui/ui_constants.dart';
 
@@ -118,7 +119,11 @@ class HistoryScreen extends ConsumerWidget {
                     _SyncErrorBanner(message: sync.lastSyncError!),
                   ],
                   if (days.isNotEmpty) ...[
-                    const HealthSectionHeader(title: '7-day trends'),
+                    HealthSectionHeader(
+                      title: '7-day trends',
+                      actionLabel: 'Monthly',
+                      onShowAll: () => context.push('/monthly-trends'),
+                    ),
                     _HistoryTrendCard(days: _recentDays(days)),
                     const HealthSectionHeader(title: 'Daily detail'),
                     _DailyDetailSelector(
