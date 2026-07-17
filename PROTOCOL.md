@@ -1029,6 +1029,15 @@ Feedback, Customer-support chat.
   values as `bp_raw`. Remaining capture work: cuff correlation for live
   `0x69` sys/dia display values only — not for history reconstruction.
   Evidence: `firmwares/_re/bp-slot-encoding/evidence.md`.
+- **OTA container 32-byte `image_digest`** — algorithm **unresolved**; an
+  exhaustive brute-force (17 windows × 14 hashes × salts/HMAC/keyed-BLAKE2, plus
+  CRC-16/32 and additive sums) reproduces neither shipped build's digest. Most
+  consistent with a vendor-keyed MAC or truncated signature. The H59MA v14
+  runtime body stages but never checks it (complete-check compares staged length
+  only); any enforcement is in the absent bootloader. OpenWatch does not compute
+  or verify it (`FirmwareContainer.verify` skips the slot). Forward paths:
+  bootloader/lower-flash dump, or a live digest-zeroed-flash experiment.
+  Evidence: `firmwares/_re/ota-container/evidence.md`.
 - **`@RequiresSignature` method set** — confirm which cloud endpoints sign at runtime.
 - **Legacy `bind` (`0x10` CMD_BIND_SUCCESS)** request layout — **not on H59MA Channel-A.**
   The §10.2 inventory (22 Channel-A handlers) does not list `0x10`; on Channel-B

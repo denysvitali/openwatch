@@ -21,7 +21,7 @@ behavior (cloud `@RequiresSignature`, host meaning of opaque host blobs).
 
 | Layer | Static coverage | Notes |
 |---|---:|---|
-| Container / header | ~100% | Digest algorithm unknown; staged not validated by app body |
+| Container / header | ~100% | Digest algorithm unresolved (exhaustive brute-force negative — likely vendor-keyed MAC/signature, see `ota-container/evidence.md`); staged not validated by app body |
 | BLE GATT tables | ~100% | Channel A/B + FEE7 + DIS |
 | Channel-A framing + deferred dispatch | ~100% tree | All cmp arms inventoried |
 | Vendor/high 16-byte dispatch | ~95% wire | `0xa0` flag human labels open |

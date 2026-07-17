@@ -145,3 +145,52 @@ container word, packet order, packet length, erase/write boundaries, and final
 staged length. It stages the digest-containing region but does not compute or
 compare the 32-byte `image_digest`. If that digest is enforced, it must happen
 in the bootloader/apply path outside this runtime body.
+
+## Resolution: 32-byte `image_digest` Algorithm (Brute-Force Negative)
+
+Date: 2026-07-17. Re-verified on both shipped containers.
+
+The 32-byte `image_digest` at container offset `0x1c4` is **per-build** with
+near-maximal entropy and no internal structure or second copy:
+
+```text
+v13  8d50aa22 ... 42178bb1
+v14  47d3b81a ... 0d354648
+```
+
+An exhaustive brute-force against both `firmwares/H59MA_1.00.13_251230.bin`
+and `firmwares/H59MA_1.00.14_260508.bin` produced **zero hits**:
+
+- 17 candidate windows (header-sans-digest, body, header+body, digest-zeroed
+  combos, staged region ± `0x50`, with/without the `0x450` container prefix).
+- 14 hash algorithms: MD5, SHA-1, SHA-224/256, SHA-384/512, SHA3-256,
+  BLAKE2b/2s, SM3, RIPEMD-160, double-SHA256, and truncations to 32 B.
+- 18 salt constants (from `header-constants/`) applied as prefix / suffix /
+  HMAC key; ~50 keyed-BLAKE2 keys.
+- CRC-32 (IEEE / MPEG-2 / Castagnoli / BZIP2 / JAMCRC) and CRC-16 (MODBUS —
+  the Channel-B variant — CCITT, X25, USB, ...) padded to 32 B.
+- 8/16/32-bit additive sums.
+
+The value is most consistent with a **vendor-keyed MAC or a truncated
+signature** produced by the offline packaging tool — not reproducible from the
+container bytes alone.
+
+### Verifier reachability
+
+The runtime app body stages the digest region but never reads it (the
+complete-check only compares staged length against `expected_size - 0x50`, see
+above). The bootloader region `0x00826000..0x00826400` is **absent** from the
+OTA slice, so any digest enforcement lives outside this image.
+
+### Producer side
+
+Neither the APK nor OpenWatch computes this digest. DFU init carries only
+`[0x01][size32][crc16][sum16]` (`lib/core/protocol/dfu.dart`) and
+`FirmwareContainer.verify` deliberately skips the 32-byte slot. The digest is
+baked by the vendor's packaging tool.
+
+### Forward paths (only two)
+
+1. A bootloader / lower-flash dump exposing the verifier.
+2. A live-capture experiment: flash a digest-zeroed container and observe
+   whether the bootloader rejects it.
