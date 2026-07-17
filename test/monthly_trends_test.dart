@@ -134,6 +134,26 @@ void main() {
       expect(trends.latest!.spo2Avg, 95);
     });
 
+    test('spo2 falls back to a single bound when only one is present', () {
+      final trends = MonthlyTrends.fromDays([
+        _day(DateOnly(2026, 6, 1), spo2Min: 90),
+        _day(DateOnly(2026, 6, 2), spo2Max: 98),
+      ]);
+      // Both days contribute their sole bound -> mean(90, 98) = 94.
+      expect(trends.latest!.spo2Avg, 94);
+    });
+
+    test('a day with only distance/energy still counts as data', () {
+      final trends = MonthlyTrends.fromDays([
+        _day(DateOnly(2026, 6, 1), distance: 5000, kcal: 300),
+      ]);
+      expect(trends.isEmpty, isFalse);
+      final june = trends.latest!;
+      expect(june.daysWithData, 1);
+      expect(june.distanceMeters, 5000);
+      expect(june.energyKcal, 300);
+    });
+
     test('null metrics stay null rather than zero', () {
       final trends = MonthlyTrends.fromDays([
         _day(DateOnly(2026, 6, 1), steps: 500),

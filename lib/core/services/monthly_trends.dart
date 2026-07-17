@@ -249,10 +249,16 @@ class MonthlyTrends {
       stress.addAll(day.stress.map(_value));
       hrv.addAll(day.hrv.map(_value));
 
-      if (day.spo2Max != null && day.spo2Min != null) {
-        spo2Mids.add(((day.spo2Max! + day.spo2Min!) / 2).round());
-      } else if (day.spo2Max != null) {
-        spo2Mids.add(day.spo2Max!);
+      // Prefer the (min+max)/2 mid-point, but fall back to whichever bound
+      // is present so a day that only stored one side still counts.
+      final spo2Max = day.spo2Max;
+      final spo2Min = day.spo2Min;
+      if (spo2Max != null && spo2Min != null) {
+        spo2Mids.add(((spo2Max + spo2Min) / 2).round());
+      } else if (spo2Max != null) {
+        spo2Mids.add(spo2Max);
+      } else if (spo2Min != null) {
+        spo2Mids.add(spo2Min);
       }
     }
 
@@ -282,7 +288,10 @@ class MonthlyTrends {
       day.hrv.isNotEmpty ||
       day.bloodPressure.isNotEmpty ||
       day.spo2Max != null ||
-      day.steps != null;
+      day.spo2Min != null ||
+      day.steps != null ||
+      day.distanceMeters != null ||
+      day.energyKcal != null;
 
   static int _bpm(HrSample s) => s.bpm;
   static int _value(HealthMetricSample s) => s.value;
