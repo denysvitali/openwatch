@@ -24,6 +24,7 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
   String? _error;
   bool _connecting = false;
   bool _reconnecting = false;
+  bool _reconnectCancelled = false;
   String? _reconnectName;
   String? _connectingId;
 
@@ -41,32 +42,39 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
     if (!mounted) return;
     setState(() {
       _reconnecting = true;
+      _reconnectCancelled = false;
       _reconnectName = devices.map((d) => d.name).join(', ');
     });
     AppLog.instance.info(
       'ble',
       'Auto-reconnecting to ${devices.length} saved device(s)',
     );
+    var connectedAny = false;
     try {
       for (final saved in devices) {
+        if (_reconnectCancelled) break;
         try {
           final device = BluetoothDevice.fromId(saved.id);
           await ref.read(bleConnectionPoolProvider).connect(device);
           await _rememberDevice(device);
+          connectedAny = true;
         } catch (e) {
           AppLog.instance.warn('ble', 'Could not reconnect ${saved.name}: $e');
         }
       }
-      if (mounted) context.go('/dashboard');
-    } catch (e) {
-      AppLog.instance.warn('ble', 'Auto-reconnect failed: $e');
-      if (mounted) {
-        setState(
-          () => _error = 'Could not reconnect automatically. Scan to retry.',
-        );
-      }
     } finally {
       if (mounted) setState(() => _reconnecting = false);
+    }
+    if (!mounted || _reconnectCancelled) return;
+    if (connectedAny) {
+      context.go('/dashboard');
+    } else {
+      // Every saved device failed — stay on the scan screen with the
+      // designed error state instead of dumping the user on an empty
+      // dashboard with no watch connected.
+      setState(
+        () => _error = 'Could not reconnect automatically. Scan to retry.',
+      );
     }
   }
 
@@ -103,7 +111,11 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
     try {
       await FlutterBluePlus.startScan(timeout: const Duration(seconds: 12));
     } catch (e) {
-      setState(() => _error = '$e');
+      AppLog.instance.warn('ble', 'startScan failed: $e');
+      setState(
+        () => _error =
+            'Could not start scanning. Make sure Bluetooth is on and try again.',
+      );
     }
   }
 
@@ -184,39 +196,42 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
         : 'Turn on Bluetooth before scanning.';
 
     return Scaffold(
-      body: Column(
-        children: [
-          if (_reconnecting)
-            MaterialBanner(
-              content: Text(
-                'Reconnecting to ${_reconnectName ?? "your watch"}…',
-              ),
-              leading: const AppLoadingIndicator(
-                size: AppLoadingIndicatorSize.small,
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => setState(() => _reconnecting = false),
-                  child: const Text('Scan instead'),
+      body: SafeArea(
+        child: Column(
+          children: [
+            if (_reconnecting)
+              MaterialBanner(
+                content: Text(
+                  'Reconnecting to ${_reconnectName ?? "your watch"}…',
                 ),
-              ],
-            ),
-          if (adapter != null && adapter != BluetoothAdapterState.on)
-            MaterialBanner(
-              content: const Text(
-                'Bluetooth is off. Turn it on to scan for your watch.',
-              ),
-              leading: const Icon(Icons.bluetooth_disabled),
-              actions: [
-                TextButton(
-                  onPressed: () =>
-                      FlutterBluePlus.turnOn().catchError((_) => false),
-                  child: const Text('Enable'),
+                leading: const AppLoadingIndicator(
+                  size: AppLoadingIndicatorSize.small,
                 ),
-              ],
-            ),
-          Expanded(
-            child: SafeArea(
+                actions: [
+                  TextButton(
+                    onPressed: () => setState(() {
+                      _reconnecting = false;
+                      _reconnectCancelled = true;
+                    }),
+                    child: const Text('Scan instead'),
+                  ),
+                ],
+              ),
+            if (adapter != null && adapter != BluetoothAdapterState.on)
+              MaterialBanner(
+                content: const Text(
+                  'Bluetooth is off. Turn it on to scan for your watch.',
+                ),
+                leading: const Icon(Icons.bluetooth_disabled),
+                actions: [
+                  TextButton(
+                    onPressed: () =>
+                        FlutterBluePlus.turnOn().catchError((_) => false),
+                    child: const Text('Enable'),
+                  ),
+                ],
+              ),
+            Expanded(
               child: MaxWidthContainer(
                 maxWidth: kMaxWidthContainerScan,
                 child: ListView(
@@ -259,7 +274,7 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
                       icon: scanning
                           ? CupertinoIcons.stop_fill
                           : CupertinoIcons.search,
-                      onPressed: _connecting
+                      onPressed: _connecting || !bluetoothReady
                           ? null
                           : scanning
                           ? FlutterBluePlus.stopScan
@@ -302,9 +317,9 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
                 ),
               ),
             ),
-          ),
-          if (_connecting) const LinearProgressIndicator(minHeight: 2),
-        ],
+            if (_connecting) const LinearProgressIndicator(minHeight: 2),
+          ],
+        ),
       ),
     );
   }

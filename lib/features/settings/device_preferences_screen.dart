@@ -71,7 +71,11 @@ class DevicePreferencesScreen extends ConsumerWidget {
                       title: 'Display clock',
                       subtitle: 'Always-on face when idle',
                       enabled: ready,
-                      onTap: () => _toggleDisplayClock(context, manager),
+                      onTap: () => _toggleAutoMeasure(
+                        context,
+                        'Display clock',
+                        manager.setDisplayClock,
+                      ),
                     ),
                     _PreferenceTile(
                       icon: Icons.palette,
@@ -229,9 +233,12 @@ class DevicePreferencesScreen extends ConsumerWidget {
         ),
       ),
     );
-    if (pick == null) return;
-    await manager.setTimeFormat(is24: pick, metric: pick);
-    if (context.mounted) _toast(context, 'Time format updated');
+    if (pick == null || !context.mounted) return;
+    await _apply(
+      context,
+      () => manager.setTimeFormat(is24: pick, metric: pick),
+      'Time format updated',
+    );
   }
 
   Future<void> _pickTemperatureUnit(
@@ -262,42 +269,12 @@ class DevicePreferencesScreen extends ConsumerWidget {
         ),
       ),
     );
-    if (pick == null) return;
-    await manager.setDegreeSwitch(enabled: true, isCelsius: pick);
-    if (context.mounted) _toast(context, 'Temperature unit updated');
-  }
-
-  Future<void> _toggleDisplayClock(
-    BuildContext context,
-    WatchManager manager,
-  ) async {
-    final pick = await showModalBottomSheet<bool>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            HealthListTile(
-              title: 'Enable',
-              leadingIcon: Icons.toggle_on,
-              leadingColor: Theme.of(context).colorScheme.onSurfaceVariant,
-              showDivider: false,
-              onTap: () => Navigator.pop(ctx, true),
-            ),
-            HealthListTile(
-              title: 'Disable',
-              leadingIcon: Icons.toggle_off,
-              leadingColor: Theme.of(context).colorScheme.onSurfaceVariant,
-              showDivider: false,
-              onTap: () => Navigator.pop(ctx, false),
-            ),
-          ],
-        ),
-      ),
+    if (pick == null || !context.mounted) return;
+    await _apply(
+      context,
+      () => manager.setDegreeSwitch(enabled: true, isCelsius: pick),
+      'Temperature unit updated',
     );
-    if (pick == null) return;
-    await manager.setDisplayClock(enabled: pick);
-    if (context.mounted) _toast(context, 'Display clock updated');
   }
 
   Future<void> _pickId(
@@ -331,9 +308,8 @@ class DevicePreferencesScreen extends ConsumerWidget {
       ),
     );
     ctl.dispose();
-    if (picked == null) return;
-    await onPick(picked.clamp(0, 255));
-    if (context.mounted) _toast(context, 'Sent');
+    if (picked == null || !context.mounted) return;
+    await _apply(context, () => onPick(picked.clamp(0, 255)), 'Sent');
   }
 
   Future<void> _toggleAutoMeasure(
@@ -365,11 +341,12 @@ class DevicePreferencesScreen extends ConsumerWidget {
         ),
       ),
     );
-    if (pick == null) return;
-    await onPick(enabled: pick);
-    if (context.mounted) {
-      _toast(context, '$title ${pick ? 'enabled' : 'disabled'}');
-    }
+    if (pick == null || !context.mounted) return;
+    await _apply(
+      context,
+      () => onPick(enabled: pick),
+      '$title ${pick ? 'enabled' : 'disabled'}',
+    );
   }
 
   Future<void> _pickDndWindow(
@@ -390,14 +367,17 @@ class DevicePreferencesScreen extends ConsumerWidget {
     );
     if (end == null) return;
     if (!context.mounted) return;
-    await manager.setDnd(
-      enabled: true,
-      startHour: start.hour,
-      startMinute: start.minute,
-      endHour: end.hour,
-      endMinute: end.minute,
+    await _apply(
+      context,
+      () => manager.setDnd(
+        enabled: true,
+        startHour: start.hour,
+        startMinute: start.minute,
+        endHour: end.hour,
+        endMinute: end.minute,
+      ),
+      'Do-not-disturb set',
     );
-    if (context.mounted) _toast(context, 'Do-not-disturb set');
   }
 
   Future<void> _pickSitReminder(
@@ -436,20 +416,23 @@ class DevicePreferencesScreen extends ConsumerWidget {
         ),
       ),
     );
-    if (cycle == null) {
+    if (cycle == null || !context.mounted) {
       return;
     }
-    await manager.setSitLong(
-      enabled: true,
-      startHour: start.hour,
-      startMinute: start.minute,
-      endHour: end.hour,
-      endMinute: end.minute,
-      weekMask: 0x1F, // weekdays only — sensible default
-      cycleSeconds:
-          cycle ~/ 2, // 30/60/90 → 15/30/45 (firmware clamps to 30/60/90)
+    await _apply(
+      context,
+      () => manager.setSitLong(
+        enabled: true,
+        startHour: start.hour,
+        startMinute: start.minute,
+        endHour: end.hour,
+        endMinute: end.minute,
+        weekMask: 0x1F, // weekdays only — sensible default
+        cycleSeconds:
+            cycle ~/ 2, // 30/60/90 → 15/30/45 (firmware clamps to 30/60/90)
+      ),
+      'Sit reminder set',
     );
-    if (context.mounted) _toast(context, 'Sit reminder set');
   }
 
   Future<void> _pickDrinkAlarm(
@@ -461,15 +444,18 @@ class DevicePreferencesScreen extends ConsumerWidget {
       'Drink alarm time',
       initial: const TimeOfDay(hour: 14, minute: 0),
     );
-    if (hour == null) return;
-    await manager.setDrinkAlarm(
-      index: 0,
-      enabled: true,
-      hour: hour.hour,
-      minute: hour.minute,
-      weekdays: const [true, true, true, true, true, true, true],
+    if (hour == null || !context.mounted) return;
+    await _apply(
+      context,
+      () => manager.setDrinkAlarm(
+        index: 0,
+        enabled: true,
+        hour: hour.hour,
+        minute: hour.minute,
+        weekdays: const [true, true, true, true, true, true, true],
+      ),
+      'Drink alarm set',
     );
-    if (context.mounted) _toast(context, 'Drink alarm set');
   }
 
   Future<void> _pickBpWindow(BuildContext context, WatchManager manager) async {
@@ -485,15 +471,18 @@ class DevicePreferencesScreen extends ConsumerWidget {
       'End time',
       initial: const TimeOfDay(hour: 20, minute: 0),
     );
-    if (end == null) return;
-    await manager.setBpSetting(
-      enabled: true,
-      startHour: start.hour,
-      startMinute: start.minute,
-      endHour: end.hour,
-      endMinute: end.minute,
+    if (end == null || !context.mounted) return;
+    await _apply(
+      context,
+      () => manager.setBpSetting(
+        enabled: true,
+        startHour: start.hour,
+        startMinute: start.minute,
+        endHour: end.hour,
+        endMinute: end.minute,
+      ),
+      'BP window set',
     );
-    if (context.mounted) _toast(context, 'BP window set');
   }
 
   Future<void> _pickTarget(BuildContext context, WatchManager manager) async {
@@ -548,8 +537,13 @@ class DevicePreferencesScreen extends ConsumerWidget {
     stepsCtl.dispose();
     calCtl.dispose();
     distCtl.dispose();
-    await manager.setTarget(steps: steps, calories: cal, distanceMeters: dist);
-    if (context.mounted) _toast(context, 'Goals updated');
+    if (!context.mounted) return;
+    await _apply(
+      context,
+      () =>
+          manager.setTarget(steps: steps, calories: cal, distanceMeters: dist),
+      'Goals updated',
+    );
   }
 
   Future<TimeOfDay?> _pickTimeOfDay(
@@ -565,10 +559,26 @@ class DevicePreferencesScreen extends ConsumerWidget {
     return picked;
   }
 
-  void _toast(BuildContext context, String message) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+  /// Runs a watch-side mutation and reports the outcome. A BLE write can
+  /// fail (dropped link mid-write); without this the failure surfaced as an
+  /// unhandled async error and the user was left believing the change
+  /// applied.
+  Future<void> _apply(
+    BuildContext context,
+    Future<void> Function() action,
+    String success,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await action();
+      messenger.showSnackBar(SnackBar(content: Text(success)));
+    } catch (_) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Could not apply — check the watch connection'),
+        ),
+      );
+    }
   }
 }
 

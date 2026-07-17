@@ -323,7 +323,7 @@ class _DeviceHeroCard extends StatelessWidget {
     if (percent == null) return CupertinoIcons.battery_empty;
     if (percent <= 15) return CupertinoIcons.battery_empty;
     if (percent <= 40) return CupertinoIcons.battery_25;
-    if (percent <= 70) return CupertinoIcons.battery_25;
+    if (percent <= 70) return CupertinoIcons.battery_75_percent;
     return CupertinoIcons.battery_full;
   }
 }
@@ -402,14 +402,20 @@ class _RecentActivityCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = AppColors.of(context);
     if (sync.days.isEmpty) {
+      final failed = !sync.syncing && sync.lastSyncError != null;
       return HealthCard(
-        icon: CupertinoIcons.chart_bar,
+        icon: failed
+            ? CupertinoIcons.exclamationmark_triangle
+            : CupertinoIcons.chart_bar,
         title: 'Activity',
+        metricColor: failed ? Theme.of(context).colorScheme.error : null,
         caption: sync.syncing
             ? 'Syncing history from your watch…'
+            : failed
+            ? 'Last sync failed. Open History to retry.'
             : 'No history on this phone yet. Open History to sync.',
         onTap: () => context.go('/history'),
-        trailing: const ChevronIcon(),
+        trailing: failed ? SyncStatusPill(sync: sync) : const ChevronIcon(),
       );
     }
 

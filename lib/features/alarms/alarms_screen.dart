@@ -34,9 +34,13 @@ class AlarmsScreen extends ConsumerWidget {
         title: const Text('Alarms'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: manager.alarmsLoading
+                ? const AppLoadingIndicator(size: AppLoadingIndicatorSize.small)
+                : const Icon(Icons.refresh),
             tooltip: 'Refresh from watch',
-            onPressed: ready ? () => manager.refreshAlarms() : null,
+            onPressed: (ready && !manager.alarmsLoading)
+                ? () => manager.refreshAlarms()
+                : null,
           ),
         ],
       ),
@@ -128,8 +132,17 @@ class AlarmsScreen extends ConsumerWidget {
       confirmLabel: 'Clear',
       destructive: true,
     );
-    if (!ok) return;
-    await ref.read(watchManagerProvider).deleteAlarm(slot: alarm.slot);
+    if (!ok || !context.mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await ref.read(watchManagerProvider).deleteAlarm(slot: alarm.slot);
+    } catch (_) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Could not clear alarm — check the watch connection'),
+        ),
+      );
+    }
   }
 
   Future<void> _showEditor(
@@ -153,8 +166,17 @@ class AlarmsScreen extends ConsumerWidget {
       isScrollControlled: true,
       builder: (ctx) => _AlarmEditor(initial: initial),
     );
-    if (edited == null) return;
-    await manager.setAlarm(edited);
+    if (edited == null || !context.mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await manager.setAlarm(edited);
+    } catch (_) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Could not save alarm — check the watch connection'),
+        ),
+      );
+    }
   }
 }
 
@@ -173,6 +195,7 @@ class _AlarmList extends StatelessWidget {
   Widget build(BuildContext context) {
     final bySlot = {for (final alarm in alarms) alarm.slot: alarm};
     return InsetCard(
+      padding: EdgeInsets.zero,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -302,17 +325,6 @@ class _AlarmEditorState extends State<_AlarmEditor> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Center(
-                child: Container(
-                  width: 36,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.outlineVariant,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              const SizedBox(height: kGridSpacing),
               Text(
                 widget.initial.enabled
                     ? 'Edit alarm ${widget.initial.slot + 1}'

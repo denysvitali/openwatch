@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -168,9 +169,11 @@ class LogsScreen extends ConsumerWidget {
 /// OpenTelemetry tracer state. Renders in green when active, red on
 /// failure (with the error message), and grey while init is pending.
 ///
-/// Uses a post-frame polling loop because the [OpenTelemetryService]
-/// singleton is a plain class (no ChangeNotifier); the polling cost is
-/// one setState per frame which the framework already coalesces.
+/// Polls the [OpenTelemetryService] singleton (a plain class, no
+/// ChangeNotifier) once a second and rebuilds only when the observed
+/// (status, error) tuple actually changes — the tracer state only moves
+/// pending → active/failed once, so a per-frame rebuild would burn CPU on
+/// a screen testers leave open during long BLE captures.
 class _OtelStatusCard extends StatefulWidget {
   const _OtelStatusCard();
 
@@ -179,18 +182,29 @@ class _OtelStatusCard extends StatefulWidget {
 }
 
 class _OtelStatusCardState extends State<_OtelStatusCard> {
+  Timer? _timer;
+  (String, String?)? _last;
+
   @override
   void initState() {
     super.initState();
-    _scheduleRefresh();
+    _last = _snapshot();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      final now = _snapshot();
+      if (now != _last) setState(() => _last = now);
+    });
   }
 
-  void _scheduleRefresh() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      setState(() {});
-      _scheduleRefresh();
-    });
+  (String, String?) _snapshot() {
+    final otel = OpenTelemetryService();
+    return (otel.statusLabel, otel.initErrorMessage);
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
   }
 
   @override

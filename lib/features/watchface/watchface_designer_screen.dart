@@ -102,7 +102,6 @@ class _WatchFaceDesignerScreenState
                               elements: _elements,
                               canvasWidth: w.toDouble(),
                               canvasHeight: h.toDouble(),
-                              colorOf: _colorOfType,
                             ),
                           ),
                         );
@@ -175,8 +174,6 @@ class _WatchFaceDesignerScreenState
     }
   }
 
-  Color _colorOfType(int type) => _color;
-
   void _toast(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
@@ -204,13 +201,11 @@ class _CanvasPainter extends CustomPainter {
     required this.elements,
     required this.canvasWidth,
     required this.canvasHeight,
-    required this.colorOf,
   });
 
   final List<_Element> elements;
   final double canvasWidth;
   final double canvasHeight;
-  final Color Function(int type) colorOf;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -321,25 +316,38 @@ class _Toolbar extends StatelessWidget {
           ),
           const SizedBox(height: kSpacingSmall),
           SizedBox(
-            height: kIconCircleSizeSmall,
+            height: kMinTouchTarget,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               itemCount: palette.length,
-              separatorBuilder: (_, _) => const SizedBox(width: kSpacingSmall),
+              separatorBuilder: (_, _) => const SizedBox(width: kSpacingTiny),
               itemBuilder: (ctx, i) {
                 final c = palette[i];
                 final selected = c.toARGB32() == color.toARGB32();
-                return GestureDetector(
-                  onTap: () => onColorChanged(c),
-                  child: Container(
-                    width: kIconCircleSizeSmall,
-                    height: kIconCircleSizeSmall,
-                    decoration: BoxDecoration(
-                      color: c,
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: selected ? Colors.white : Colors.black26,
-                        width: selected ? 3 : 1,
+                return Semantics(
+                  button: true,
+                  selected: selected,
+                  label:
+                      'Color #${c.toARGB32().toRadixString(16).padLeft(8, '0')}',
+                  child: InkResponse(
+                    onTap: () => onColorChanged(c),
+                    radius: kMinTouchTarget / 2,
+                    child: SizedBox(
+                      width: kMinTouchTarget,
+                      height: kMinTouchTarget,
+                      child: Center(
+                        child: Container(
+                          width: kIconCircleSizeSmall,
+                          height: kIconCircleSizeSmall,
+                          decoration: BoxDecoration(
+                            color: c,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: selected ? Colors.white : Colors.black26,
+                              width: selected ? 3 : 1,
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                   ),

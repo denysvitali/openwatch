@@ -44,6 +44,9 @@ const double kIconCircleSizeLarge = 48;
 const double kIconCircleSizeSmall = 36;
 const double kIconCircleSizeListTile = 28;
 
+/// Minimum interactive hit area (Material/HIG accessibility guideline).
+const double kMinTouchTarget = 44;
+
 const double kIconSizeLarge = 28;
 const double kIconSizeSmall = 20;
 const double kIconSizeTiny = 16;

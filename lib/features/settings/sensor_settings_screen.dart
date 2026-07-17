@@ -70,20 +70,26 @@ class SensorSettingsScreen extends ConsumerWidget {
                       title: 'Measurement interval',
                       subtitle: '${settings.hrIntervalMinutes} minutes',
                       leadingIcon: Icons.timer,
-                      trailing: SizedBox(
-                        width: 180,
-                        child: Slider(
-                          value: settings.hrIntervalMinutes.toDouble(),
-                          min: 1,
-                          max: 60,
-                          divisions: 59,
-                          label: '${settings.hrIntervalMinutes} min',
-                          onChanged: settings.hrAutoMeasureEnabled
-                              ? (v) => settingsNotifier.setHrInterval(v.round())
-                              : null,
-                        ),
-                      ),
+                      showDivider: false,
                       onTap: null,
+                    ),
+                    // Full-width slider below the label so neither the title
+                    // nor the control gets squeezed on narrow screens / at
+                    // large text scale.
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: kListTilePaddingH,
+                      ),
+                      child: Slider(
+                        value: settings.hrIntervalMinutes.toDouble(),
+                        min: 1,
+                        max: 60,
+                        divisions: 59,
+                        label: '${settings.hrIntervalMinutes} min',
+                        onChanged: settings.hrAutoMeasureEnabled
+                            ? (v) => settingsNotifier.setHrInterval(v.round())
+                            : null,
+                      ),
                     ),
                   ],
                 ),
@@ -192,7 +198,7 @@ class SensorSettingsScreen extends ConsumerWidget {
   }
 }
 
-class _AlarmFieldTile extends StatelessWidget {
+class _AlarmFieldTile extends StatefulWidget {
   const _AlarmFieldTile({
     required this.title,
     required this.subtitle,
@@ -210,28 +216,73 @@ class _AlarmFieldTile extends StatelessWidget {
   final bool showDivider;
 
   @override
+  State<_AlarmFieldTile> createState() => _AlarmFieldTileState();
+}
+
+class _AlarmFieldTileState extends State<_AlarmFieldTile> {
+  late final TextEditingController _controller;
+  final FocusNode _focus = FocusNode();
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.value.toString());
+  }
+
+  @override
+  void didUpdateWidget(_AlarmFieldTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // The backing settings hydrate asynchronously; reflect the incoming
+    // value only when the user is not mid-edit, so `initialValue`'s
+    // first-build-only limitation no longer strands stale defaults.
+    if (widget.value != oldWidget.value &&
+        !_focus.hasFocus &&
+        _controller.text != widget.value.toString()) {
+      _controller.text = widget.value.toString();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _focus.dispose();
+    super.dispose();
+  }
+
+  void _submit(String v) {
+    final parsed = int.tryParse(v);
+    if (parsed != null && parsed >= 0 && parsed <= 255) {
+      setState(() => _error = null);
+      widget.onSubmitted(parsed);
+    } else {
+      setState(() => _error = '0–255');
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     return HealthListTile(
-      title: title,
-      subtitle: subtitle,
-      leadingIcon: icon,
+      title: widget.title,
+      subtitle: widget.subtitle,
+      leadingIcon: widget.icon,
       control: SizedBox(
-        width: 80,
-        child: TextFormField(
-          initialValue: value.toString(),
+        width: 96,
+        child: TextField(
+          controller: _controller,
+          focusNode: _focus,
           keyboardType: TextInputType.number,
           textAlign: TextAlign.center,
-          decoration: const InputDecoration(suffixText: 'bpm', isDense: true),
-          onFieldSubmitted: (v) {
-            final parsed = int.tryParse(v);
-            if (parsed != null && parsed >= 0 && parsed <= 255) {
-              onSubmitted(parsed);
-            }
-          },
+          decoration: InputDecoration(
+            suffixText: 'bpm',
+            isDense: true,
+            errorText: _error,
+          ),
+          onSubmitted: _submit,
         ),
       ),
       onTap: null,
-      showDivider: showDivider,
+      showDivider: widget.showDivider,
     );
   }
 }
