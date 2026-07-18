@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../../../core/services/history_sync.dart';
 import '../../../core/ui/ui_constants.dart';
+import 'chart_zoom_controls.dart';
 
 /// Full-width heart-rate line chart for one day.
 ///
@@ -81,33 +82,37 @@ class _HrLineChartState extends State<HrLineChart> {
         return Stack(
           children: [
             Positioned.fill(
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTapDown: (details) =>
-                    _selectNearest(details.localPosition, size),
-                onScaleStart: (details) {
-                  _scaleStartStart = _viewStart;
-                  _scaleStartEnd = _viewEnd;
-                  if (details.pointerCount <= 1) {
-                    _selectNearest(details.localFocalPoint, size);
-                  }
-                },
-                onScaleUpdate: (details) => _handleScaleUpdate(details, size),
-                child: ClipRect(
-                  child: CustomPaint(
-                    painter: _HrPainter(
-                      samples: visible,
-                      color: color,
-                      axisColor: theme.colorScheme.outlineVariant,
-                      textColor: theme.colorScheme.onSurfaceVariant,
-                      minBpm: widget.minBpm.toDouble(),
-                      maxBpm: widget.maxBpm.toDouble(),
-                      showAxes: widget.showAxes,
-                      viewStart: viewStart,
-                      viewEnd: viewEnd,
-                      selected: selected,
+              child: Semantics(
+                label: 'Heart rate chart',
+                excludeSemantics: true,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTapDown: (details) =>
+                      _selectNearest(details.localPosition, size),
+                  onScaleStart: (details) {
+                    _scaleStartStart = _viewStart;
+                    _scaleStartEnd = _viewEnd;
+                    if (details.pointerCount <= 1) {
+                      _selectNearest(details.localFocalPoint, size);
+                    }
+                  },
+                  onScaleUpdate: (details) => _handleScaleUpdate(details, size),
+                  child: ClipRect(
+                    child: CustomPaint(
+                      painter: _HrPainter(
+                        samples: visible,
+                        color: color,
+                        axisColor: theme.colorScheme.outlineVariant,
+                        textColor: theme.colorScheme.onSurfaceVariant,
+                        minBpm: widget.minBpm.toDouble(),
+                        maxBpm: widget.maxBpm.toDouble(),
+                        showAxes: widget.showAxes,
+                        viewStart: viewStart,
+                        viewEnd: viewEnd,
+                        selected: selected,
+                      ),
+                      size: Size.infinite,
                     ),
-                    size: Size.infinite,
                   ),
                 ),
               ),
@@ -122,9 +127,9 @@ class _HrLineChartState extends State<HrLineChart> {
               Positioned(
                 right: 6,
                 bottom: 22,
-                child: _ChartControls(
-                  onZoomOut: () => _zoom(1.8),
+                child: ChartZoomControls(
                   onReset: _resetView,
+                  onZoomOut: () => _zoom(1.8),
                   onZoomIn: () => _zoom(0.55),
                 ),
               ),
@@ -342,20 +347,24 @@ class MiniHrSpark extends StatelessWidget {
     );
     return SizedBox(
       height: height,
-      child: CustomPaint(
-        painter: _HrPainter(
-          samples: visible,
-          color: color ?? theme.colorScheme.primary,
-          axisColor: Colors.transparent,
-          textColor: Colors.transparent,
-          minBpm: 40,
-          maxBpm: 200,
-          showAxes: false,
-          viewStart: 0,
-          viewEnd: 1,
-          selected: null,
+      child: Semantics(
+        label: 'Heart rate chart',
+        excludeSemantics: true,
+        child: CustomPaint(
+          painter: _HrPainter(
+            samples: visible,
+            color: color ?? theme.colorScheme.primary,
+            axisColor: Colors.transparent,
+            textColor: Colors.transparent,
+            minBpm: 40,
+            maxBpm: 200,
+            showAxes: false,
+            viewStart: 0,
+            viewEnd: 1,
+            selected: null,
+          ),
+          size: Size.infinite,
         ),
-        size: Size.infinite,
       ),
     );
   }
@@ -643,75 +652,4 @@ class _PointBadge extends StatelessWidget {
 
   static String _clock(DateTime t) =>
       '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
-}
-
-class _ChartControls extends StatelessWidget {
-  const _ChartControls({
-    required this.onZoomOut,
-    required this.onReset,
-    required this.onZoomIn,
-  });
-
-  final VoidCallback onZoomOut;
-  final VoidCallback onReset;
-  final VoidCallback onZoomIn;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface.withValues(alpha: 0.8),
-        borderRadius: BorderRadius.circular(kChipRadius),
-        border: Border.all(color: theme.colorScheme.outlineVariant),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _ChartIconButton(
-            icon: Icons.remove_rounded,
-            tooltip: 'Zoom out',
-            onPressed: onZoomOut,
-          ),
-          _ChartIconButton(
-            icon: Icons.center_focus_strong_rounded,
-            tooltip: 'Reset view',
-            onPressed: onReset,
-          ),
-          _ChartIconButton(
-            icon: Icons.add_rounded,
-            tooltip: 'Zoom in',
-            onPressed: onZoomIn,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ChartIconButton extends StatelessWidget {
-  const _ChartIconButton({
-    required this.icon,
-    required this.tooltip,
-    required this.onPressed,
-  });
-
-  final IconData icon;
-  final String tooltip;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 34,
-      height: 32,
-      child: IconButton(
-        padding: EdgeInsets.zero,
-        iconSize: 18,
-        tooltip: tooltip,
-        icon: Icon(icon),
-        onPressed: onPressed,
-      ),
-    );
-  }
 }

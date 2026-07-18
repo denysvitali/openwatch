@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../../../core/protocol/sleep_parser.dart';
 import '../../../core/ui/ui_constants.dart';
+import 'chart_zoom_controls.dart';
 
 /// Horizontal sleep timeline — one row per [SleepStage] showing the
 /// cumulative minutes spent in each stage, with hour-of-day ticks along
@@ -54,32 +55,36 @@ class _SleepTimelineState extends State<SleepTimeline> {
           return Stack(
             children: [
               Positioned.fill(
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTapDown: (details) =>
-                      _selectSegment(details.localPosition, size, range),
-                  onScaleStart: (details) {
-                    _scaleStartStart = _viewStart;
-                    _scaleStartEnd = _viewEnd;
-                    if (details.pointerCount <= 1) {
-                      _selectSegment(details.localFocalPoint, size, range);
-                    }
-                  },
-                  onScaleUpdate: (details) =>
-                      _handleScaleUpdate(details, size, range),
-                  child: ClipRect(
-                    child: CustomPaint(
-                      painter: _SleepPainter(
-                        segments: widget.segments,
-                        colors: _stageColors,
-                        axisColor: theme.colorScheme.outlineVariant,
-                        textColor: theme.colorScheme.onSurfaceVariant,
-                        range: range,
-                        viewStart: _viewStart,
-                        viewEnd: _viewEnd,
-                        selected: _selected,
+                child: Semantics(
+                  label: 'Sleep timeline chart',
+                  excludeSemantics: true,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTapDown: (details) =>
+                        _selectSegment(details.localPosition, size, range),
+                    onScaleStart: (details) {
+                      _scaleStartStart = _viewStart;
+                      _scaleStartEnd = _viewEnd;
+                      if (details.pointerCount <= 1) {
+                        _selectSegment(details.localFocalPoint, size, range);
+                      }
+                    },
+                    onScaleUpdate: (details) =>
+                        _handleScaleUpdate(details, size, range),
+                    child: ClipRect(
+                      child: CustomPaint(
+                        painter: _SleepPainter(
+                          segments: widget.segments,
+                          colors: _stageColors,
+                          axisColor: theme.colorScheme.outlineVariant,
+                          textColor: theme.colorScheme.onSurfaceVariant,
+                          range: range,
+                          viewStart: _viewStart,
+                          viewEnd: _viewEnd,
+                          selected: _selected,
+                        ),
+                        size: Size.infinite,
                       ),
-                      size: Size.infinite,
                     ),
                   ),
                 ),
@@ -94,9 +99,9 @@ class _SleepTimelineState extends State<SleepTimeline> {
                 Positioned(
                   right: 6,
                   bottom: 18,
-                  child: _SleepControls(
-                    onZoomOut: () => _zoom(1.8, range),
+                  child: ChartZoomControls(
                     onReset: _resetView,
+                    onZoomOut: () => _zoom(1.8, range),
                     onZoomIn: () => _zoom(0.55, range),
                   ),
                 ),
@@ -539,75 +544,4 @@ class _SleepBadge extends StatelessWidget {
 
   static String _clock(DateTime t) =>
       '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
-}
-
-class _SleepControls extends StatelessWidget {
-  const _SleepControls({
-    required this.onZoomOut,
-    required this.onReset,
-    required this.onZoomIn,
-  });
-
-  final VoidCallback onZoomOut;
-  final VoidCallback onReset;
-  final VoidCallback onZoomIn;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface.withValues(alpha: 0.88),
-        borderRadius: BorderRadius.circular(kChipRadius),
-        border: Border.all(color: theme.colorScheme.outlineVariant),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _SleepIconButton(
-            icon: Icons.remove_rounded,
-            tooltip: 'Zoom out',
-            onPressed: onZoomOut,
-          ),
-          _SleepIconButton(
-            icon: Icons.center_focus_strong_rounded,
-            tooltip: 'Reset view',
-            onPressed: onReset,
-          ),
-          _SleepIconButton(
-            icon: Icons.add_rounded,
-            tooltip: 'Zoom in',
-            onPressed: onZoomIn,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SleepIconButton extends StatelessWidget {
-  const _SleepIconButton({
-    required this.icon,
-    required this.tooltip,
-    required this.onPressed,
-  });
-
-  final IconData icon;
-  final String tooltip;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 34,
-      height: 32,
-      child: IconButton(
-        padding: EdgeInsets.zero,
-        iconSize: 18,
-        tooltip: tooltip,
-        icon: Icon(icon),
-        onPressed: onPressed,
-      ),
-    );
-  }
 }

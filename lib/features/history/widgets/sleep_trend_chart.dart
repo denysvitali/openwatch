@@ -41,16 +41,20 @@ class SleepTrendChart extends StatelessWidget {
     }
     return SizedBox(
       height: height,
-      child: CustomPaint(
-        painter: _SleepTrendPainter(
-          days: days,
-          sleepColor: effectiveSleepColor,
-          todayColor: theme.colorScheme.tertiary,
-          averageColor: theme.colorScheme.secondary,
-          axisColor: theme.colorScheme.outlineVariant,
-          textColor: theme.colorScheme.onSurfaceVariant,
+      child: Semantics(
+        label: 'Sleep trend chart',
+        excludeSemantics: true,
+        child: CustomPaint(
+          painter: _SleepTrendPainter(
+            days: days,
+            sleepColor: effectiveSleepColor,
+            todayColor: theme.colorScheme.tertiary,
+            averageColor: theme.colorScheme.secondary,
+            axisColor: theme.colorScheme.outlineVariant,
+            textColor: theme.colorScheme.onSurfaceVariant,
+          ),
+          size: Size.infinite,
         ),
-        size: Size.infinite,
       ),
     );
   }

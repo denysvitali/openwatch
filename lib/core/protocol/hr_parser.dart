@@ -1,3 +1,5 @@
+export '../services/history_sync.dart' show HrSample;
+
 import 'package:flutter/foundation.dart';
 
 /// Pure parsers for the HR-bearing Channel-A opcodes (see PROTOCOL.md §4.3

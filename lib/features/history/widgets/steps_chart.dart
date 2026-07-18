@@ -47,15 +47,19 @@ class StepsBarChart extends StatelessWidget {
     }
     return SizedBox(
       height: height,
-      child: CustomPaint(
-        painter: _StepsPainter(
-          days: days,
-          barColor: effectiveBarColor,
-          todayColor: effectiveTodayColor,
-          axisColor: theme.colorScheme.outlineVariant,
-          textColor: theme.colorScheme.onSurfaceVariant,
+      child: Semantics(
+        label: 'Steps bar chart',
+        excludeSemantics: true,
+        child: CustomPaint(
+          painter: _StepsPainter(
+            days: days,
+            barColor: effectiveBarColor,
+            todayColor: effectiveTodayColor,
+            axisColor: theme.colorScheme.outlineVariant,
+            textColor: theme.colorScheme.onSurfaceVariant,
+          ),
+          size: Size.infinite,
         ),
-        size: Size.infinite,
       ),
     );
   }
