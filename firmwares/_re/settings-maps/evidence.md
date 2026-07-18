@@ -379,3 +379,26 @@ r2 -2 -q -a arm -b 16 -e asm.cpu=cortex -e scr.color=0 \
 # blob0 load @ body 0x30e0, blob1 commit @ 0x3056, user_cfg @ 0x312a
 # alarm init @ 0x4850, Ch-B alarm @ 0x94ec, cfg_find @ 0x1a7e0
 ```
+
+## Resolution: `blob1 + 0x2d` Feature Bitfield (2026-07-18)
+
+Cross-reference of `settings-maps`, `vendor-high-audit`, `health-measure`, and
+`GHIDRA_DECOMPILATION.md` §3.12/§10.2 yields the following two-evidence-line labels
+for the shared feature byte at `DAT_008277f0 + 0x2d`, read/written by handlers
+`0x2c` (SpO2), `0x36` (HR), `0x38` (pressure), `0x3a` subcmds (sugar/lipids):
+
+| Bit | Mask | Name | Gates | Evidence |
+|---|---|---|---|---|
+| 0 | `0x01` | unknown | reserved/unclaimed | `settings-maps:126`, GHIDRA §3406 |
+| 1 | `0x02` | `spo2_enabled` | `0x2c` SpO2 enable/disable path | `settings-maps:127`, GHIDRA §3409 |
+| 2 | `0x04` | `hr_auto_enabled` | HR auto-measure path tied to `0x36` | `settings-maps:128`, GHIDRA §3411 |
+| 3 | `0x08` | `pressure_enabled` | `0x38` pressure setting path | `settings-maps:129`, GHIDRA §3413 |
+| 4 | `0x10` | unknown | unused — no named owner | `settings-maps:130`, GHIDRA §3412 |
+| 5 | `0x20` | `sugar` | `0x3a` subcmd `0x03` blood-sugar feature | `settings-maps:131`, GHIDRA §2050 |
+| 6 | `0x40` | unknown | set in default `0x6f` bitset; no named owner | `settings-maps:132`, GHIDRA §3414 |
+| 7 | `0x80` | `lipids` | `0x3a` subcmd `0x04` / legacy `0x3e` | `settings-maps:133`, GHIDRA §2051 |
+
+Default factory value: `0x6f` = bits 0,1,2,3,5,6 set (spo2+hr+pressure+sugar+lipids plus the two unknowns).
+
+Note: the vendor/high `0xa0` status frame is a *response* frame (status payload
+with battery, mode markers, blob0 fields) — separate from this feature bitfield.

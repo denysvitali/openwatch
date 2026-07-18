@@ -54,12 +54,35 @@ open-source Golden Gate dependency identifies the private services as follows:
 - `abbaff00`: legacy Gattlink stream transport. `abbaff01` receives
   write-without-response packets from the phone; `abbaff02` transmits packets
   to the phone via notifications.
-- `abbafd00`: link status. `abbafd01` reports the current connection
-  configuration; `abbafd02` reports the current connection mode.
+- `abbafd00`: **link status service** (Golden Gate `LinkStatusService`).
+  Decoded from Golden Gate open-source Android + Apple implementations
+  (google-health-api/golden-gate platform/ tree):
+  - `abbafd01` = `currentConnectionConfiguration` — 9-byte little-endian value:
+
+    | Offset | Size | Field | Units |
+    |---|---|---|---|
+    | 0–1 | u16 LE | Connection interval | ×1.25 ms |
+    | 2–3 | u16 LE | Slave latency | connection events |
+    | 4–5 | u16 LE | Supervision timeout | ×10 ms |
+    | 6–7 | u16 LE | MTU | bytes |
+    | 8 | u8 | `ConnectionMode` enum | 0=DEFAULT, 1=FAST, 2=SLOW |
+
+  - `abbafd02` = `currentConnectionStatus` — flags byte + DLE fields:
+    flags bits: bonded (0x01), encrypted (0x02), DLE-enabled (0x04),
+    DLE-reboot-required (0x08), half-bonded (0x10); followed by tx/rx
+    payload and time elements (little-endian). Not a connection-mode enum
+    (OpenWatch's local constant name "connection mode" is inconsistent with
+    upstream naming).
+
+  Evidence: `LinkStatusService.kt`, `CurrentConnectionConfiguration.kt`,
+  `ConnectionMode.kt`, Apple-side `LinkStatusService+ConnectionConfiguration.swift`
+  (all in google-health-api/golden-gate, platform/android and platform/apple).
+
 - `ac2f0045`: GATT cache validation. `ac2f0145` points to an ephemeral writable
   characteristic, which explains why the captured write UUID may vary.
-- `4eee1c00`: not referenced by the app or public Golden Gate source examined;
-  its semantics remain unknown.
+- `4eee1c00`: not found in the examined Golden Gate open-source tree (searched
+  full recursive tree + `4eee1c` / `GG_STACK_SERVICE` patterns); semantics
+  remain unknown. Needs live-capture correlation or proprietary SDK source.
 
 `abbaff02` packets use Gattlink. Data packets carry a 5-bit packet sequence;
 bit 6 introduces a cumulative 5-bit acknowledgement, and bit 7 identifies
