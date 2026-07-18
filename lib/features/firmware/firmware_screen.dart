@@ -270,13 +270,20 @@ class _FirmwareScreenState extends ConsumerState<FirmwareScreen> {
             if (_local.isEmpty)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: kCardPadding),
-                child: HealthCard(
-                  icon: Icons.sd_card_alert_outlined,
-                  metricColor: mutedColor,
-                  title: 'No firmware downloaded',
-                  caption:
-                      'Tap Fetch to download the newest image for offline flashing.',
-                ),
+                child: manager.isReady
+                    ? HealthCard(
+                        icon: Icons.sd_card_alert_outlined,
+                        metricColor: mutedColor,
+                        title: 'No firmware downloaded',
+                        caption:
+                            'Tap Fetch to download the newest image for offline flashing.',
+                      )
+                    : const EmptyState(
+                        icon: Icons.bluetooth_disabled,
+                        title: 'Connect your watch',
+                        caption:
+                            'Connect to flash a stored image, or fetch one below.',
+                      ),
               )
             else
               Padding(
@@ -290,6 +297,7 @@ class _FirmwareScreenState extends ConsumerState<FirmwareScreen> {
                         child: _FirmwareImageCard(
                           fw: fw,
                           busy: _busy,
+                          ready: manager.isReady,
                           onFlash: () => _flash(fw),
                           onDelete: () async {
                             final ok = await showConfirmDialog(
@@ -326,12 +334,14 @@ class _FirmwareImageCard extends StatelessWidget {
   const _FirmwareImageCard({
     required this.fw,
     required this.busy,
+    required this.ready,
     required this.onFlash,
     required this.onDelete,
   });
 
   final LocalFirmware fw;
   final bool busy;
+  final bool ready;
   final VoidCallback onFlash;
   final VoidCallback onDelete;
 
@@ -361,7 +371,7 @@ class _FirmwareImageCard extends StatelessWidget {
           PrimaryHealthButton(
             icon: Icons.flash_on,
             label: 'Flash',
-            onPressed: busy ? null : onFlash,
+            onPressed: busy || !ready ? null : onFlash,
           ),
         ],
       ),

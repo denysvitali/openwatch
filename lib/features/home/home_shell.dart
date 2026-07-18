@@ -34,11 +34,13 @@ class HomeShell extends StatelessWidget {
                     bottom: kSpacingSmall * 2 + kSpacingMini,
                   ),
                   child: Container(
-                    width: 48,
-                    height: 48,
+                    width: kIconCircleSizeLarge,
+                    height: kIconCircleSizeLarge,
                     decoration: BoxDecoration(
-                      color: theme.colorScheme.primary.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(16),
+                      color: theme.colorScheme.primary.withValues(
+                        alpha: kMetricTintOpacity,
+                      ),
+                      borderRadius: BorderRadius.circular(kNavRailLogoRadius),
                     ),
                     child: Icon(
                       Icons.watch_rounded,

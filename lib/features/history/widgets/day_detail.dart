@@ -71,7 +71,6 @@ class _DailyDetailSelectorState extends State<_DailyDetailSelector> {
                   CupertinoIcons.chevron_left,
                   size: kIconSizeSmall,
                 ),
-                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                 padding: EdgeInsets.zero,
                 onPressed: _index > 0 ? () => setState(() => _index--) : null,
               ),
@@ -101,7 +100,6 @@ class _DailyDetailSelectorState extends State<_DailyDetailSelector> {
                   CupertinoIcons.chevron_right,
                   size: kIconSizeSmall,
                 ),
-                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                 padding: EdgeInsets.zero,
                 onPressed: _index < widget.days.length - 1
                     ? () => setState(() => _index++)
@@ -151,41 +149,47 @@ class _DayChip extends StatelessWidget {
     final fgColor = selected
         ? theme.colorScheme.onPrimary
         : theme.colorScheme.onSurface;
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(
-          horizontal: kGridSpacing,
-          vertical: kSpacingTiny,
-        ),
-        decoration: BoxDecoration(
-          color: bgColor,
-          borderRadius: BorderRadius.circular(kChipRadius),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              label,
-              style: AppTextStyles.labelMedium(context)?.copyWith(
-                color: fgColor,
-                fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-              ),
-            ),
-            if (hasNewData) ...[
-              const SizedBox(width: kSpacingTiny),
-              Container(
-                width: 6,
-                height: 6,
-                decoration: BoxDecoration(
-                  color: selected
-                      ? theme.colorScheme.onPrimary
-                      : theme.colorScheme.primary,
-                  shape: BoxShape.circle,
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(kChipRadius),
+        child: Container(
+          padding: EdgeInsets.symmetric(
+            horizontal: kChipPaddingH,
+            vertical: kChipPaddingV + 8,
+          ),
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: BorderRadius.circular(kChipRadius),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                label,
+                style: AppTextStyles.labelMedium(context)?.copyWith(
+                  color: fgColor,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                 ),
               ),
+              if (hasNewData) ...[
+                const SizedBox(width: kSpacingTiny),
+                Container(
+                  width: 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? theme.colorScheme.onPrimary
+                        : theme.colorScheme.primary,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -235,7 +239,6 @@ class _DayDetailPage extends StatelessWidget {
                   Icons.bug_report_outlined,
                   size: kIconSizeSmall,
                 ),
-                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                 padding: EdgeInsets.zero,
                 onPressed: () {
                   final ctx = debugContext;

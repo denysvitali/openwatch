@@ -44,7 +44,7 @@ class BpDebugScreen extends ConsumerWidget {
         ],
       ),
       body: storeAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () => const Center(child: AppLoadingIndicator()),
         error: (e, st) => _ErrorView(message: e.toString()),
         data: (store) => _DayList(store: store),
       ),
@@ -63,7 +63,7 @@ class _DayList extends StatelessWidget {
       future: store.persistedDays(),
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
-          return const Center(child: CircularProgressIndicator());
+          return const Center(child: AppLoadingIndicator());
         }
         final days = snapshot.data ?? const <DateOnly>[];
         if (days.isEmpty) {
@@ -107,8 +107,8 @@ class _DayCard extends StatelessWidget {
               return const Padding(
                 padding: EdgeInsets.only(top: kGridSpacing),
                 child: SizedBox(
-                  height: 48,
-                  child: Center(child: CircularProgressIndicator()),
+                  height: kIconCircleSizeLarge,
+                  child: Center(child: AppLoadingIndicator()),
                 ),
               );
             }
@@ -231,7 +231,7 @@ class _ErrorView extends StatelessWidget {
   Widget build(BuildContext context) {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(kEmptyStatePadding),
         child: HealthCard(
           icon: Icons.error_outline,
           metricColor: Theme.of(context).colorScheme.error,

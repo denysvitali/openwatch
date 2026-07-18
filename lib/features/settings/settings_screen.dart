@@ -24,6 +24,24 @@ class SettingsScreen extends ConsumerWidget {
     final isReady = manager.isReady;
     final contextRouter = context;
 
+    if (settingsAsync.isLoading) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Settings')),
+        body: const Center(child: AppLoadingIndicator()),
+      );
+    }
+
+    if (settingsAsync.hasError) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Settings')),
+        body: EmptyState(
+          icon: Icons.error_outline,
+          title: 'Could not load settings',
+          caption: settingsAsync.error?.toString() ?? 'Unknown error',
+        ),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: MaxWidthContainer(
@@ -108,11 +126,6 @@ class SettingsScreen extends ConsumerWidget {
               },
               onForget: () => _confirmForget(context, ref),
             ),
-            if (settingsAsync.isLoading)
-              const Padding(
-                padding: EdgeInsets.all(kCardPadding),
-                child: Center(child: AppLoadingIndicator()),
-              ),
           ],
         ),
       ),

@@ -24,6 +24,7 @@ const double kLabelSmall = 11;
 
 const double kCardPadding = 16;
 const double kCardRadius = 20;
+const double kNavRailLogoRadius = 16;
 const double kCardInternalSpacing = 16;
 
 const double kSectionHeaderPaddingH = 4;
